@@ -247,7 +247,7 @@ def test_compute_returns_record_outputs_in_input_order(tmp_path):
     compute = moa_compute(
         pools,
         trials,
-        'be precise',
+        dict.fromkeys(texts, 'be precise'),
         str(tmp_path / 'state.json'),
         tmp_path / 'scratch',
         client=_client(batches),

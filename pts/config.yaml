@@ -1007,6 +1007,7 @@ steps:
         snapshot: '{{snapshot}}'
         import_experiment_cache: gs://clinical_staging/store/moa/seed/extract_cache-2026-11-05.jsonl
         import_for_tag: claude-opus-5-5-p6527d57b
+        adopt_from_tag: claude-opus-5-5-p4e6708cf
         min_seeded_share: 0.5
   ##################################################################################################
 

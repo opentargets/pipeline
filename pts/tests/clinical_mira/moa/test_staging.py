@@ -6,8 +6,9 @@ from typing import Any, cast
 import polars as pl
 import pytest
 
-from pts.transformers.clinical_mira.moa import llm, pooling, schemas
+from pts.transformers.clinical_mira.moa import llm, pooling, schemas, staging
 from pts.transformers.clinical_mira.moa.staging import (
+    adopt_records,
     carry_forward,
     import_experiment_cache,
     parse_output,
@@ -251,3 +252,55 @@ def test_records_at_another_tag_are_ignored() -> None:
     records = _record_for('drugx', {'nct1': LOUD}, 'k-prev', EXTRACTION, 1, tag='other-tag')
 
     assert carry_forward(current, texts, records, MOA.tag(), 'run1').is_empty()
+
+
+def test_moa_compute_batches_each_prompt_separately(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    trials, texts = _inputs()
+    pools = pooling.build_pools(trials, texts)
+    listed = pool_trials(pools, texts, trials)
+    keys = pools['content_key'].to_list()
+    prompts = {keys[0]: 'prompt a', keys[1]: 'prompt b'}
+    calls: list[dict[str, Any]] = []
+
+    def fake_batch(requests, *, system_prompt, cache_path, state_uri, **kwargs):
+        calls.append({
+            'ids': [r[0] for r in requests],
+            'prompt': system_prompt,
+            'cache': cache_path,
+            'state': state_uri,
+        })
+        extraction = schemas.MoaExtraction.model_validate({'drugName': 'x', 'notStated': True, 'mechanisms': []})
+        return {r[0]: extraction for r in requests}, {}
+
+    monkeypatch.setattr(staging, 'run_batch_cached', fake_batch)
+
+    compute = staging.moa_compute(pools, listed, prompts, str(tmp_path / 'batches' / 's.json'), tmp_path)
+    out = compute([keys[1], keys[0]])
+
+    assert [c['prompt'] for c in calls] == ['prompt b', 'prompt a']
+    assert [c['ids'] for c in calls] == [[keys[1]], [keys[0]]]
+    assert len({c['cache'] for c in calls}) == 2
+    assert len({c['state'] for c in calls}) == 2
+    assert all(c['state'].endswith('.json') and c['cache'].parent == tmp_path for c in calls)
+    assert [parse_output(o)['drug_name'] for o, _ in out] == [
+        pools.filter(pl.col('content_key') == k)['drug_name'][0] for k in [keys[1], keys[0]]
+    ]
+    assert all(error is None for _, error in out)
+
+
+def test_adopt_records_copies_only_listed_keys_and_skips_done() -> None:
+    old = pl.concat([
+        _record_for('drugx', {'nct1': LOUD}, 'k-a', {'mechanisms': ['a']}, 1, tag='old'),
+        _record_for('drugx', {'nct1': LOUD}, 'k-b', {'mechanisms': ['b']}, 2, tag='old'),
+        _record_for('drugx', {'nct1': LOUD}, 'k-c', {'mechanisms': ['c']}, 3, tag='old'),
+        _record_for('drugx', {'nct1': LOUD}, 'k-d', {'mechanisms': ['d']}, 4, tag='other'),
+    ])
+    done = _record_for('drugx', {'nct1': LOUD}, 'k-b', {'mechanisms': ['b']}, 5, tag='new')
+
+    out = adopt_records(pl.concat([old, done]), ['k-a', 'k-b', 'k-d'], 'old', 'new', 'run9')
+
+    assert out.schema == record_schema(pl.String())
+    assert out['text'].to_list() == ['k-a']
+    row = out.row(0, named=True)
+    assert (row['model_revision'], row['run_id'], row['status']) == ('new', 'run9', 'ok')
+    assert parse_output(row['output'])['extraction'] == {'mechanisms': ['a']}

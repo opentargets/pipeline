@@ -1,7 +1,10 @@
 import json
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import polars as pl
 import pytest
@@ -10,7 +13,8 @@ from otter.config.model import Config
 
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, SeedTooSmall, aact_moa, stage_moa
-from pts.transformers.clinical_mira.record_store import ComputeAborted
+from pts.transformers.clinical_mira.moa import papers, schemas
+from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, write_run
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA, schema_digest
 
@@ -39,7 +43,10 @@ COLUMNS = [
     'effect_wording',
     'evidence',
     'isHumanTarget',
+    'papers',
 ]
+PAPER = f'{KRAS_QUOTE} in the publication.'
+QUIET_PAPER = 'Adults were enrolled and followed.'
 
 
 def _mechanism(target: str, nct_id: str, quote: str) -> dict:
@@ -67,8 +74,9 @@ ANSWERS = {
 class FakeBatches:
     """Message Batches stand-in answering each pool from ``ANSWERS``, and failing the drugs in ``failing``."""
 
-    def __init__(self, failing: frozenset[str] = frozenset()) -> None:
+    def __init__(self, failing: frozenset[str] = frozenset(), answers: dict[str, list[dict]] | None = None) -> None:
         self.failing = failing
+        self.answers = answers or ANSWERS
         self.created: list[list[dict]] = []
 
     def create(self, *, requests: list[dict]) -> SimpleNamespace:
@@ -88,7 +96,7 @@ class FakeBatches:
                     custom_id=request['custom_id'], result=SimpleNamespace(type='errored', error=error)
                 )
                 continue
-            body = {'drugName': drug, 'notStated': False, 'mechanisms': ANSWERS[drug]}
+            body = {'drugName': drug, 'notStated': False, 'mechanisms': self.answers[drug]}
             message = SimpleNamespace(
                 stop_reason='end_turn',
                 content=[SimpleNamespace(type='text', text=json.dumps(body))],
@@ -101,6 +109,17 @@ class FakeBatches:
             )
 
     @property
+    def prompts(self) -> dict[str, str]:
+        """The system prompt of the request submitted for each drug."""
+        return {
+            r['params']['messages'][0]['content'].split('\n', 1)[0].removeprefix('Drug: '): r['params']['system'][0][
+                'text'
+            ]
+            for requests in self.created
+            for r in requests
+        }
+
+    @property
     def drugs(self) -> list[str]:
         """The drug of every request submitted, in order."""
         return [
@@ -108,6 +127,21 @@ class FakeBatches:
             for requests in self.created
             for r in requests
         ]
+
+
+def _europepmc(abstracts: dict[str, tuple[str, str]]) -> Any:
+    """A Europe PMC stand-in returning the abstracts it knows among the PMIDs asked for."""
+
+    def get(url: str) -> dict:
+        query = parse_qs(urlparse(url).query)['query'][0]
+        found = [i for i in re.findall(r'EXT_ID:(\d+)', query) if i in abstracts]
+        return {
+            'resultList': {
+                'result': [{'pmid': i, 'title': abstracts[i][0], 'abstractText': abstracts[i][1]} for i in found]
+            }
+        }
+
+    return get
 
 
 def _client(batches: FakeBatches) -> Any:
@@ -125,6 +159,9 @@ def _stage(
     world: dict[str, tuple[str, str, str]] = WORLD,
     snapshot: str = 'v1',
     work: str = 'work',
+    links: Sequence[tuple[str, str]] = (),
+    abstracts: dict[str, tuple[str, str]] | None = None,
+    get: Any = None,
     **settings: Any,
 ) -> dict[str, Any]:
     """Stage the mechanisms of ``world``, a trial id to its drug, description and detailed description."""
@@ -136,6 +173,11 @@ def _stage(
         'trialDetailedDescription': [world[i][2] for i in ids],
     })
     monkeypatch.setattr(extraction, 'trial_report', lambda *args: report)
+    linked = pl.DataFrame(
+        {'nct_id': [n for n, _ in links], 'pmid': [p for _, p in links]},
+        schema={'nct_id': pl.String, 'pmid': pl.String},
+    )
+    monkeypatch.setattr(papers, 'trial_papers', lambda *args: linked)
     prompts = extraction.prompts_for(report)
     drug = pl.Struct({'drug': pl.String})
     table = prompts.select('id', 'prompt_sha256').with_columns(
@@ -153,7 +195,14 @@ def _stage(
         AactMoaSettings(store_uri=str(tmp_path / 'store'), snapshot=snapshot, **settings),
         _config(tmp_path, work),
         client=None if batches is None else _client(batches),
+        get=get or _europepmc(abstracts or {}),
     )
+
+
+def _cache(root: Path, work: str) -> Path:
+    """The result cache of the extraction prompt in a work directory."""
+    (cache,) = (root / work).glob('moa_cache-*.jsonl')
+    return cache
 
 
 def _snapshot(tmp_path: Path, snapshot: str = 'v1') -> Path:
@@ -171,6 +220,10 @@ def test_first_run_computes_every_pool_and_publishes(monkeypatch: pytest.MonkeyP
     stats = _stage(monkeypatch, tmp_path, batches)
 
     assert stats == {
+        'papers': 0,
+        'abstracts_fetched': 0,
+        'adopted': 0,
+        'pools_with_papers': 0,
         'pools': 2,
         'seeded': 0,
         'carried': 0,
@@ -186,7 +239,8 @@ def test_first_run_computes_every_pool_and_publishes(monkeypatch: pytest.MonkeyP
     assert _rows(tmp_path) == [('aspirinx', 'COX'), ('sotorasib', 'KRAS'), ('sotorasib', 'MEK')]
     kras = published.filter(pl.col('targetFromSource') == 'KRAS').row(0, named=True)
     assert kras['nctIds'] == ['nct1', 'nct2']
-    assert kras['evidence'] == [{'nctId': 'nct1', 'quote': KRAS_QUOTE}]
+    assert kras['evidence'] == [{'nctId': 'nct1', 'pmid': None, 'quote': KRAS_QUOTE}]
+    assert kras['papers'] == []
     pools = pl.read_parquet(_snapshot(tmp_path) / 'pools.parquet').sort('drug_name')
     assert pools.columns == ['drug_name', 'n_trials', 'n_trials_used', 'extracted', 'status', 'carried']
     assert pools['extracted'].to_list() == [True, True]
@@ -277,7 +331,7 @@ def test_failed_pool_is_retried_next_run_until_max_attempts(monkeypatch: pytest.
 
 def test_cache_of_an_earlier_run_seeds_the_store_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _stage(monkeypatch, tmp_path, FakeBatches())
-    cache = tmp_path / 'work' / 'moa_cache.jsonl'
+    cache = _cache(tmp_path, 'work')
     batches = FakeBatches()
 
     stats = _stage(
@@ -330,12 +384,13 @@ def test_config_imports_the_seed_for_the_current_tag_only() -> None:
 
     assert settings.import_for_tag == MOA.tag()
     assert settings.min_seeded_share == 0.5
+    assert settings.adopt_from_tag == 'claude-opus-5-5-p4e6708cf'
 
 
 def _seed_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, world: dict[str, tuple[str, str, str]]) -> Path:
     """Compute ``world`` in a separate store and return the result cache it leaves."""
     _stage(monkeypatch, tmp_path / 'seed', FakeBatches(), world=world, work='seed_work')
-    return tmp_path / 'seed' / 'seed_work' / 'moa_cache.jsonl'
+    return _cache(tmp_path / 'seed', 'seed_work')
 
 
 def test_a_seed_covering_too_few_pools_aborts_before_any_compute(
@@ -398,7 +453,7 @@ def test_a_seed_for_another_tag_is_not_imported(monkeypatch: pytest.MonkeyPatch,
 def test_batch_state_is_named_by_snapshot_and_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _stage(monkeypatch, tmp_path, FakeBatches())
 
-    assert (tmp_path / 'store' / MOA.name / 'batches' / f'v1-{MOA.tag()}.json').exists()
+    assert list((tmp_path / 'store' / MOA.name / 'batches').glob(f'v1-{MOA.tag()}-*.json'))
 
 
 def test_a_missing_pool_table_is_written_again(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -409,3 +464,115 @@ def test_a_missing_pool_table_is_written_again(monkeypatch: pytest.MonkeyPatch, 
 
     assert stats['published'] is False
     assert pl.read_parquet(_snapshot(tmp_path) / 'pools.parquet').height == 2
+
+
+def _with_paper_answers(nct_or_pmid: str) -> dict[str, list[dict]]:
+    return {**ANSWERS, 'sotorasib': [_mechanism('KRAS', nct_or_pmid, PAPER), _mechanism('MEK', 'nct2', MEK_QUOTE)]}
+
+
+PAPER_WORLD = {'links': [('nct1', '111')], 'abstracts': {'111': ('A report', PAPER)}}
+
+
+def test_snapshot_evidence_splits_trial_and_paper_ids(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+
+    _stage(monkeypatch, tmp_path, batches, **PAPER_WORLD)
+
+    published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
+    kras = published.filter(pl.col('targetFromSource') == 'KRAS').row(0, named=True)
+    mek = published.filter(pl.col('targetFromSource') == 'MEK').row(0, named=True)
+    assert kras['evidence'] == [{'nctId': None, 'pmid': '111', 'quote': PAPER.removesuffix('.')}]
+    assert mek['evidence'] == [{'nctId': 'nct2', 'pmid': None, 'quote': MEK_QUOTE}]
+    assert kras['nctIds'] == ['nct1', 'nct2']
+    assert batches.prompts['sotorasib'] == schemas.papers_prompt()
+    assert batches.prompts['aspirinx'] == schemas.load_prompt('extract')
+
+
+def test_snapshot_papers_column_lists_pool_papers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    world = {
+        'links': [('nct1', '111'), ('nct2', '222'), ('nct2', '333')],
+        'abstracts': {'111': ('A', PAPER), '222': ('B', QUIET_PAPER)},
+    }
+
+    stats = _stage(monkeypatch, tmp_path, FakeBatches(), **world)
+
+    published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
+    for row in published.filter(pl.col('drugName') == 'sotorasib').iter_rows(named=True):
+        assert row['papers'] == [{'pmid': '222', 'nctId': 'nct2'}, {'pmid': '111', 'nctId': 'nct1'}]
+        assert row['nctIds'] == ['nct1', 'nct2']
+    assert published.filter(pl.col('drugName') == 'aspirinx')['papers'].to_list() == [[]]
+    assert (stats['papers'], stats['abstracts_fetched'], stats['pools_with_papers']) == (2, 2, 1)
+
+
+def test_quote_citing_foreign_pmid_is_dropped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches(answers=_with_paper_answers('pmid999'))
+
+    stats = _stage(monkeypatch, tmp_path, batches, **PAPER_WORLD)
+
+    assert stats['dropped_by_quote_check'] == 1
+    assert _rows(tmp_path) == [('aspirinx', 'COX'), ('sotorasib', 'MEK')]
+
+
+def test_stage_moa_publishes_when_europepmc_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr('pts.transformers.clinical_mira.moa.papers.time.sleep', lambda seconds: None)
+
+    def down(url: str) -> dict:
+        raise OSError('Europe PMC is down')
+
+    stats = _stage(monkeypatch, tmp_path, FakeBatches(), get=down, links=[('nct1', '111')])
+
+    assert stats['published'] is True
+    assert (stats['papers'], stats['abstracts_fetched'], stats['pools_with_papers']) == (0, 0, 0)
+    published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
+    assert published['papers'].to_list() == [[]] * 3
+    assert _rows(tmp_path) == [('aspirinx', 'COX'), ('sotorasib', 'KRAS'), ('sotorasib', 'MEK')]
+
+
+def test_abstracts_are_cached_between_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, FakeBatches(), **PAPER_WORLD)
+
+    def down(url: str) -> dict:
+        raise OSError('Europe PMC is down')
+
+    batches = FakeBatches()
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', get=down, links=[('nct1', '111')])
+
+    assert batches.created == []
+    assert (stats['papers'], stats['abstracts_fetched'], stats['pools_with_papers']) == (1, 0, 1)
+    assert len(list((tmp_path / 'store' / 'moa' / 'papers').glob('*.parquet'))) == 1
+
+
+def test_stage_moa_adopts_pools_without_papers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path / 'seed', FakeBatches(), work='seed_work')
+    seed_store = str(tmp_path / 'seed' / 'store' / MOA.name)
+    old = read_records(seed_store, _config(tmp_path), pl.String()).with_columns(model_revision=pl.lit('old-tag'))
+    write_run(old, str(tmp_path / 'other' / 'store' / MOA.name), 'old-run', _config(tmp_path), pl.String())
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path / 'other', batches, work='other_work', adopt_from_tag='old-tag', **PAPER_WORLD)
+
+    assert batches.drugs == ['sotorasib']
+    assert (stats['adopted'], stats['computed'], stats['pools_with_papers']) == (1, 1, 1)
+    assert _rows(tmp_path / 'other') == [('aspirinx', 'COX'), ('sotorasib', 'KRAS'), ('sotorasib', 'MEK')]
+
+
+def test_carry_forward_covers_a_new_paper_without_vocab(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, FakeBatches())
+    batches = FakeBatches()
+
+    stats = _stage(
+        monkeypatch,
+        tmp_path,
+        batches,
+        snapshot='v2',
+        links=[('nct1', '222')],
+        abstracts={'222': ('A report', QUIET_PAPER)},
+    )
+
+    assert batches.created == []
+    assert (stats['carried'], stats['computed'], stats['pools_with_papers']) == (1, 0, 1)
+    assert stats['mechanisms'] == 3
+    published = pl.read_parquet(_snapshot(tmp_path, 'v2') / 'data.parquet')
+    assert published.filter(pl.col('drugName') == 'sotorasib')['papers'].to_list()[0] == [
+        {'pmid': '222', 'nctId': 'nct1'}
+    ]

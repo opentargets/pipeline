@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -204,10 +205,56 @@ def import_experiment_cache(
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())
 
 
+def _sha8(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:8]
+
+
+def _state_for(state_uri: str, prompt: str) -> str:
+    stem, dot, suffix = state_uri.rpartition('.')
+    return f'{stem}-{_sha8(prompt)}{dot}{suffix}' if dot else f'{state_uri}-{_sha8(prompt)}'
+
+
+def adopt_records(records: pl.DataFrame, keys: list[str], from_tag: str, tag: str, run_id: str) -> pl.DataFrame:
+    """Copy the ``ok`` records at ``from_tag`` of the given content keys to ``tag``.
+
+    Keys that already have an ``ok`` record at ``tag`` are skipped. When a key has several records at
+    ``from_tag`` the latest is copied.
+
+    Args:
+        records: The record store's records.
+        keys: The content keys to adopt.
+        from_tag: The tag to copy from.
+        tag: The tag to copy to.
+        run_id: The run the copies are written under.
+
+    Returns:
+        pl.DataFrame: Records ready for ``write_run``.
+    """
+    done = records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag))['text'].to_list()
+    adopted = (
+        records
+        .filter(
+            (pl.col('status') == 'ok')
+            & (pl.col('model_revision') == from_tag)
+            & pl.col('text').is_in(keys)
+            & ~pl.col('text').is_in(done)
+        )
+        .sort('computed_at', maintain_order=True)
+        .unique('text', keep='last', maintain_order=True)
+        .with_columns(
+            model_revision=pl.lit(tag),
+            computed_at=pl.lit(datetime.now(UTC), dtype=record_schema(pl.String())['computed_at']),
+            run_id=pl.lit(run_id),
+        )
+    )
+    logger.info(f'{adopted.height} of {len(keys)} pools adopted from {from_tag}')
+    return adopted.select(record_schema(pl.String()).names())
+
+
 def moa_compute(
     pools: pl.DataFrame,
     trials: pl.DataFrame,
-    system_prompt: str,
+    system_prompts: dict[str, str],
     state_uri: str,
     scratch: Path,
     client: Any = None,
@@ -218,9 +265,9 @@ def moa_compute(
     Args:
         pools: Output of :py:func:`pooling.build_pools`.
         trials: Output of :py:func:`pool_trials`.
-        system_prompt: The extraction prompt.
-        state_uri: Where the submitted batch ids are recorded, a path or URI.
-        scratch: Local directory for the result cache.
+        system_prompts: The extraction prompt of each content key.
+        state_uri: Where the submitted batch ids are recorded, a path or URI. Each prompt has its own file.
+        scratch: Local directory for the result caches, one per prompt.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
         **batch_kwargs: Passed to :py:func:`run_batch_cached`.
 
@@ -232,37 +279,41 @@ def moa_compute(
         for row in pools.select('content_key', 'drug_name', 'text').iter_rows(named=True)
     }
     listed = {row['content_key']: row for row in trials.to_dicts()}
-    cache_path = scratch / 'moa_cache.jsonl'
 
     def compute(keys: list[str]) -> list[tuple[str | None, str | None]]:
-        results, errors = run_batch_cached(
-            [(key, texts[key]) for key in keys],
-            system_prompt=system_prompt,
-            response_model=schemas.MoaExtraction,
-            model=MOA.model,
-            effort=MOA.params['effort'],
-            cache_path=cache_path,
-            state_uri=state_uri,
-            client=client,
-            **batch_kwargs,
-        )
-        usage = read_usage(cache_path)
-        out: list[tuple[str | None, str | None]] = []
+        by_prompt: dict[str, list[str]] = {}
         for key in keys:
-            if key not in results:
-                out.append((None, errors.get(key, 'missing')))
-                continue
-            result_key = llm.result_key(texts[key], system_prompt, schemas.MoaExtraction, MOA.model)
-            out.append((
-                record_output(
-                    listed[key]['drug_name'],
-                    listed[key]['trials'],
-                    results[key].model_dump(mode='json', by_alias=True),
-                    usage.get(result_key),
+            by_prompt.setdefault(system_prompts[key], []).append(key)
+        out: dict[str, tuple[str | None, str | None]] = {}
+        for prompt, group in by_prompt.items():
+            cache_path = scratch / f'moa_cache-{_sha8(prompt)}.jsonl'
+            results, errors = run_batch_cached(
+                [(key, texts[key]) for key in group],
+                system_prompt=prompt,
+                response_model=schemas.MoaExtraction,
+                model=MOA.model,
+                effort=MOA.params['effort'],
+                cache_path=cache_path,
+                state_uri=_state_for(state_uri, prompt),
+                client=client,
+                **batch_kwargs,
+            )
+            usage = read_usage(cache_path)
+            for key in group:
+                if key not in results:
+                    out[key] = (None, errors.get(key, 'missing'))
+                    continue
+                result_key = llm.result_key(texts[key], prompt, schemas.MoaExtraction, MOA.model)
+                out[key] = (
+                    record_output(
+                        listed[key]['drug_name'],
+                        listed[key]['trials'],
+                        results[key].model_dump(mode='json', by_alias=True),
+                        usage.get(result_key),
+                        None,
+                    ),
                     None,
-                ),
-                None,
-            ))
-        return out
+                )
+        return [out[key] for key in keys]
 
     return compute
