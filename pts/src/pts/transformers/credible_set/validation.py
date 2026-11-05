@@ -460,16 +460,18 @@ def validate(
         2_KI270846v1_alt_10_A_T ['CREDIBLE_SET_EXCLUDED', 'INVALID_VARIANT_ID']
         6_30000000_A_T ['CREDIBLE_SET_EXCLUDED']
     """
-    credible_set = add_cross_set_flags(credible_set, cross_set_flag)
+    # Variant rows: 1. pairing flags, 2. row exclusion.
     credible_set_variant = flag_orphan_variants(credible_set_variant, credible_set).pipe(
         flag_variant_chromosome_mismatch, credible_set
     )
     row_split = valid_rows(credible_set_variant, settings.csv_row_invalid_qc_reasons)
+    # Whole sets: 3. cross-set flags, 4. invalid variant in set, 5. missing lead, 6. exclusion.
+    flagged_set = add_cross_set_flags(credible_set, cross_set_flag)
     sets_with_invalid_variant = credible_set_variant.filter(
         has_excluded_flag(settings.csv_set_invalid_qc_reasons)
     ).select(pl.col('credibleSetId').alias('id'))
     flagged_set = flag_matching_ids(
-        credible_set, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET
+        flagged_set, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET
     )
     flagged_set = flag_lead_variant_missing(flagged_set, row_split.valid)
     set_split = valid_rows(flagged_set, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
