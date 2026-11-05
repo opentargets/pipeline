@@ -9,10 +9,11 @@ environments:
       # synced from gs://eqtl_catalogue_processed_otar_internal_data/otar2077/microglia, with
       # dataset_metadata.tsv: the datasets are not in the eQTL Catalogue tables
       microglia: gs://eqtl_catalogue_data/otar2065_microglia/source
-    output: gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322
+    output: gs://eqtl_catalogue_data/otar2065_microglia/prod/20261105T204507
     scratchpad:
-      # a gentropy git ref: the commit of opentargets/gentropy#1343 until it is released
-      gentropy_ref: b8d49acab42b8357ce999e3ab9995dca235f9e7a
+      # with datasets whose summary statistics are not on the eQTL Catalogue FTP
+      # (opentargets/gentropy#1343) and a negative region start parsed as a locus start of 1 (#1344)
+      gentropy_ref: v4.0.0-rc.2
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
