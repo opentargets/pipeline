@@ -31,6 +31,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
+    MOA,
     STOP_REASONS,
     StagedOutput,
     schema_digest,
@@ -381,3 +382,44 @@ def test_staged_outputs_loads_no_heavy_library() -> None:
     )
 
     assert subprocess.run([sys.executable, '-c', code], check=False, capture_output=True).returncode == 0
+
+
+def moa_snapshot(tmp_path: Path, name: str, **overrides: object) -> str:
+    metadata = {**MOA.metadata('abc'), **overrides}
+    return snapshot(tmp_path, name, pl.DataFrame({'id': ['NCT1']}), metadata)
+
+
+def test_moa_tag_is_model_then_digest() -> None:
+    assert re.fullmatch(r'claude-opus-5-5-p[0-9a-f]{8}', MOA.tag())
+
+
+def test_moa_digest_changes_with_params() -> None:
+    assert dataclasses.replace(MOA, params={**MOA.params, 'char_budget': 1}).tag() != MOA.tag()
+
+
+def test_moa_digest_changes_with_logic_version() -> None:
+    assert dataclasses.replace(MOA, logic_version=2).tag() != MOA.tag()
+
+
+def test_moa_metadata_names_the_extraction_tag() -> None:
+    assert MOA.metadata('abc') == {
+        'kind': 'moa',
+        'model': MOA.model,
+        'tag': MOA.tag(),
+        'model_revisions': {MOA.model: MOA.tag()},
+        'extraction_tag': 'abc',
+    }
+
+
+def test_moa_read_accepts_its_own_metadata(tmp_path: Path) -> None:
+    assert MOA.read(moa_snapshot(tmp_path, 'moa')).to_dict(as_series=False) == {'id': ['NCT1']}
+
+
+def test_moa_read_rejects_another_kind(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="'extraction'"):
+        MOA.read(moa_snapshot(tmp_path, 'moa', kind='extraction'))
+
+
+def test_moa_read_rejects_another_tag(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=re.escape(MOA.tag())):
+        MOA.read(moa_snapshot(tmp_path, 'moa', tag='x'))

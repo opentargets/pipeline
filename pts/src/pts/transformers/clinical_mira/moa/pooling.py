@@ -12,7 +12,6 @@ import re
 
 import polars as pl
 
-from pts.transformers.clinical_mira.aact_trial_extraction import prompts_for, trial_report
 from pts.transformers.utils.aact_synonyms import EXACT_MATCH_BLOCKLIST, _normalize_name
 
 MOA_VOCAB = (
@@ -62,6 +61,8 @@ def trial_texts(archive: str, scratch_root: str) -> pl.DataFrame:
     Returns:
         pl.DataFrame: ``id``, ``prompt``, ``prompt_sha256``.
     """
+    from pts.transformers.clinical_mira.aact_trial_extraction import prompts_for, trial_report
+
     return prompts_for(trial_report(archive, scratch_root, None))
 
 
