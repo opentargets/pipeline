@@ -807,7 +807,7 @@ wheels = [
 
 [[package]]
 name = "pis"
-version = "26.12.0rc26.dev1"
+version = "26.12.0rc26.dev2"
 source = { editable = "." }
 dependencies = [
     { name = "jq" },
