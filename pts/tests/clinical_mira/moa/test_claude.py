@@ -42,7 +42,11 @@ class FakeBatches:
             text = request['params']['messages'][0]['content']
             stop = 'refusal' if cid in self.refuse else 'end_turn'
             message = SimpleNamespace(
-                stop_reason=stop, content=[SimpleNamespace(type='text', text=json.dumps({'value': text}))]
+                stop_reason=stop,
+                content=[SimpleNamespace(type='text', text=json.dumps({'value': text}))],
+                usage=SimpleNamespace(
+                    input_tokens=10, output_tokens=5, cache_read_input_tokens=100, cache_creation_input_tokens=0
+                ),
             )
             yield SimpleNamespace(custom_id=cid, result=SimpleNamespace(type='succeeded', message=message))
 
@@ -125,3 +129,16 @@ def test_a_submitted_batch_is_resumed_not_resubmitted(tmp_path):
     assert len(batches.created) == 1
     assert results['a'] == Echo(value='x')
     assert json.loads((tmp_path / 'batches.json').read_text())['pending'] == []
+
+
+def test_token_usage_is_recorded_per_request(tmp_path):
+    _run(FakeBatches(), tmp_path)
+
+    rows = [json.loads(line) for line in (tmp_path / 'c.jsonl').read_text().splitlines()]
+
+    assert rows[0]['usage'] == {
+        'input_tokens': 10,
+        'output_tokens': 5,
+        'cache_read_input_tokens': 100,
+        'cache_creation_input_tokens': 0,
+    }

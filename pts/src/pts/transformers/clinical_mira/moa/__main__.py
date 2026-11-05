@@ -184,7 +184,8 @@ def _scored(run: Path) -> pl.DataFrame:
 
 def cmd_judge(run: Path, args: argparse.Namespace) -> None:
     scored = _scored(run)
-    selected = judge.select_for_judging(scored, seed=args.seed, n_matches=args.n_matches)
+    strata = pl.read_parquet(run / 'links.parquet').select('pool_id', 'maximumClinicalStage')
+    selected = judge.select_for_judging(scored, seed=args.seed, n_matches=args.n_matches, strata=strata)
     rows = scored.join(selected, on=['pool_id', 'mechanism_idx'], how='semi')
     pool_text = dict(pl.read_parquet(run / 'pools.parquet').select('pool_id', 'text').iter_rows())
     drug_of = dict(pl.read_parquet(run / 'links.parquet').select('pool_id', 'drugId').iter_rows())
@@ -260,9 +261,31 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
     labelled = adjusted.with_columns(action_other=pl.col('actionType') == 'OTHER')
     for label in LABELS:
         benchmark.precision_by(labelled, label).write_parquet(run / f'precision_by_label_{label}.parquet')
-    judge.handcheck(adjusted, pl.read_parquet(run / 'pools.parquet'), seed=args.seed).write_csv(run / 'handcheck.csv')
+    benchmark.precision_by_threshold(adjusted, links).write_parquet(run / 'precision_by_threshold.parquet')
+    judge.handcheck(adjusted, pl.read_parquet(run / 'pools.parquet'), links, seed=args.seed).write_csv(
+        run / 'handcheck.csv'
+    )
+    _write_json(run / 'usage.json', {stage: _usage(run / f'{stage}_cache.jsonl') for stage in ('extract', 'judge')})
     (run / 'report.md').write_text(report.render_report(run), encoding='utf-8')
     logger.info(f'evaluate: report at {run / "report.md"}')
+
+
+def _usage(cache_path: Path) -> dict[str, int]:
+    """Sum the token counts recorded in a cache (Claude batches record them; other providers do not)."""
+    totals = {'requests': 0, 'with_usage': 0}
+    if not cache_path.exists():
+        return totals
+    for line in cache_path.read_text(encoding='utf-8').splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        totals['requests'] += 1
+        if usage := row.get('usage'):
+            totals['with_usage'] += 1
+            for field, value in usage.items():
+                totals[field] = totals.get(field, 0) + int(value)
+    return totals
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -301,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     judge_cmd = command('judge', cmd_judge)
     judge_cmd.add_argument('--concurrency', type=int, default=20)
-    judge_cmd.add_argument('--n-matches', type=int, default=100)
+    judge_cmd.add_argument('--n-matches', type=int, default=300)
     judge_cmd.add_argument('--seed', type=int, default=0)
     judge_cmd.add_argument('--show-chembl', action='store_true', help='show the judge ChEMBL mechanisms')
 

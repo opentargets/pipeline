@@ -111,3 +111,18 @@ def test_class_names_are_not_pools():
     )
 
     assert single_drug_trials(extraction)['drug_name'].to_list() == ['pembrolizumab']
+
+
+def test_content_key_ignores_formatting_but_not_content():
+    trials = pl.DataFrame({'nct_id': ['n1', 'n2'], 'drug_name': ['d1', 'd1']})
+    base = {
+        'n1': 'Trial ID: n1\nOfficial Title: T1\nDescription: a KRAS inhibitor\nInterventions: a; b',
+        'n2': 'Trial ID: n2\nOfficial Title: T2\nDescription: something',
+    }
+    reordered = base | {'n1': 'Trial ID: n1\nOfficial Title: T1\nDescription: a KRAS inhibitor\nInterventions: b; a'}
+    edited = base | {'n2': 'Trial ID: n2\nOfficial Title: T2\nDescription: something else'}
+
+    key = build_pools(trials, _texts(base))['content_key'][0]
+
+    assert build_pools(trials, _texts(reordered))['content_key'][0] == key
+    assert build_pools(trials, _texts(edited))['content_key'][0] != key

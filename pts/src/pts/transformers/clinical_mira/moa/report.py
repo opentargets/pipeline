@@ -126,6 +126,18 @@ def render_report(run_dir: Path) -> str:
             if frame is not None:
                 sections += [f'## By {by}, {kind}\n', markdown_table(frame, [by, *SUMMARY_COLUMNS])]
 
+    by_threshold = _read(run_dir, 'precision_by_threshold.parquet')
+    if by_threshold is not None:
+        sections += ['## Precision by confidence threshold\n', markdown_table(by_threshold)]
+
+    usage_path = run_dir / 'usage.json'
+    if usage_path.exists():
+        usage = json.loads(usage_path.read_text())
+        table = pl.DataFrame([
+            {'stage': stage, **{k: str(v) for k, v in counts.items()}} for stage, counts in usage.items()
+        ])
+        sections += ['## Token usage\n', markdown_table(table)]
+
     by_grounding = _read(run_dir, 'precision_by_grounding.parquet')
     if by_grounding is not None:
         sections += ['## Headline precision by how the target was grounded\n', markdown_table(by_grounding)]

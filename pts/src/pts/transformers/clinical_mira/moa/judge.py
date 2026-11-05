@@ -21,8 +21,14 @@ def request_id(pool_id: str, mechanism_idx: int) -> str:
     return f'{pool_id}:{mechanism_idx}'
 
 
-def select_for_judging(scored: pl.DataFrame, seed: int = 0, n_matches: int = 100) -> pl.DataFrame:
+def select_for_judging(
+    scored: pl.DataFrame, seed: int = 0, n_matches: int = 100, strata: pl.DataFrame | None = None
+) -> pl.DataFrame:
     """Return the keys of the mechanisms to judge.
+
+    The sample of benchmark hits used for calibration is ``n_matches`` in all; with
+    ``strata`` (``pool_id`` and one stratum column) it is split evenly across the strata, so
+    the judge's agreement can be read per phase.
 
     Returns:
         pl.DataFrame: ``pool_id``, ``mechanism_idx``.
@@ -39,7 +45,21 @@ def select_for_judging(scored: pl.DataFrame, seed: int = 0, n_matches: int = 100
     )
     misses = scored.filter(pl.col('in_headline') & (pl.col('correct') == False))  # noqa: E712
     matches = scored.filter(pl.col('in_headline') & pl.col('correct')).sort(keys)
-    sampled = matches.sample(n=min(n_matches, matches.height), seed=seed, shuffle=True)
+    if strata is None:
+        sampled = matches.sample(n=min(n_matches, matches.height), seed=seed, shuffle=True)
+    else:
+        column = next(c for c in strata.columns if c != 'pool_id')
+        with_stratum = matches.join(strata, on='pool_id', how='left')
+        groups = sorted(with_stratum[column].drop_nulls().unique().to_list())
+        per_group = max(1, n_matches // max(1, len(groups)))
+        sampled = pl.concat(
+            [
+                part.sample(n=min(per_group, part.height), seed=seed, shuffle=True)
+                for g in groups
+                if (part := with_stratum.filter(pl.col(column) == g)).height
+            ]
+            or [with_stratum.head(0)]
+        ).select(matches.columns)
     return pl.concat([unbenchmarked.select(keys), misses.select(keys), sampled.select(keys)]).unique().sort(keys)
 
 
@@ -117,12 +137,41 @@ def calibration(adjusted: pl.DataFrame) -> pl.DataFrame:
     return table.with_columns(agreement=pl.lit(agreeing / total if total else None, dtype=pl.Float64))
 
 
-def handcheck(adjusted: pl.DataFrame, pools: pl.DataFrame, n: int = 50, seed: int = 0) -> pl.DataFrame:
-    """Return a seeded sample of judged mechanisms for reading by hand."""
+def handcheck(
+    adjusted: pl.DataFrame,
+    pools: pl.DataFrame,
+    links: pl.DataFrame | None = None,
+    n: int = 50,
+    seed: int = 0,
+    per_stratum: int = 15,
+) -> pl.DataFrame:
+    """Return a seeded sample of judged mechanisms for reading by hand.
+
+    With ``links``, the sample is of new mechanisms only (drugs the benchmark cannot score),
+    ``per_stratum`` per maximum clinical stage: the judge's verdict on them is the only
+    evidence for publication, so these are the ones a human should check.
+    """
     judged = adjusted.filter(pl.col('judge_correct').is_not_null()).sort('pool_id', 'mechanism_idx')
-    sample = judged.sample(n=min(n, judged.height), seed=seed, shuffle=True)
+    if links is None:
+        sample = judged.sample(n=min(n, judged.height), seed=seed, shuffle=True).with_columns(
+            maximumClinicalStage=pl.lit(None, dtype=pl.String)
+        )
+    else:
+        new = judged.filter(~pl.col('benchmarked')).join(
+            links.select('pool_id', 'maximumClinicalStage'), on='pool_id', how='left'
+        )
+        stages = sorted(new['maximumClinicalStage'].drop_nulls().unique().to_list())
+        sample = pl.concat(
+            [
+                part.sample(n=min(per_stratum, part.height), seed=seed, shuffle=True)
+                for stage in stages
+                if (part := new.filter(pl.col('maximumClinicalStage') == stage)).height
+            ]
+            or [new.head(0)]
+        )
     return sample.join(pools.select('pool_id', 'drug_name'), on='pool_id', how='left').select(
         'drug_name',
+        'maximumClinicalStage',
         'pool_id',
         'mechanism_idx',
         'targetFromSource',

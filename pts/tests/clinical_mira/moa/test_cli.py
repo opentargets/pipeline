@@ -150,6 +150,8 @@ def test_cli_end_to_end_with_fake_client(tmp_path, inputs, monkeypatch):
     report = (run / 'report.md').read_text()
     assert report.startswith('# AACT MoA extraction')
     assert '## Headline precision by how the target was grounded' in report
+    assert '## Precision by confidence threshold' in report
+    assert (run / 'precision_by_threshold.parquet').exists()
     for label in ('relation', 'statementType', 'effect_wording', 'action_other'):
         assert f'## Precision of every scorable mechanism by {label}' in report
     assert JUDGE_INPUTS

@@ -323,6 +323,41 @@ def precision_by(scored: pl.DataFrame, column: str, within: str = 'scorable') ->
     ).sort(column)
 
 
+CONFIDENCE_THRESHOLDS = (0.0, 0.7, 0.8, 0.85, 0.9, 0.95)
+
+
+def precision_by_threshold(
+    scored: pl.DataFrame, links: pl.DataFrame, thresholds: tuple[float, ...] = CONFIDENCE_THRESHOLDS
+) -> pl.DataFrame:
+    """Return headline precision when keeping only mechanisms at or above each confidence threshold.
+
+    One row per phase group (and ``all``) and threshold, with how many are kept and the share
+    of that group's correct mechanisms that survive the cut.
+    """
+    headline = scored.filter(pl.col('in_headline')).join(
+        links.select('pool_id', 'phase_group'), on='pool_id', how='left'
+    )
+    groups = [(g, headline.filter(pl.col('phase_group') == g)) for g in sorted(headline['phase_group'].unique())]
+    rows = []
+    for group, frame in [*groups, ('all', headline)]:
+        total_correct = int(frame['correct'].sum())
+        for threshold in thresholds:
+            kept = frame.filter(pl.col('confidence') >= threshold)
+            correct = int(kept['correct'].sum())
+            low, high = wilson(correct, kept.height)
+            rows.append({
+                'phase_group': group,
+                'threshold': threshold,
+                'kept': kept.height,
+                'correct': correct,
+                'precision': correct / kept.height if kept.height else None,
+                'precision_lo': low,
+                'precision_hi': high,
+                'correct_kept_share': correct / total_correct if total_correct else None,
+            })
+    return pl.DataFrame(rows)
+
+
 def precision_by_grounding(scored: pl.DataFrame) -> pl.DataFrame:
     """Return headline precision separately for targets named by the text and by the model's suggestion."""
     table = (

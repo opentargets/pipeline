@@ -38,6 +38,9 @@ MAX_BATCH_BYTES = 200_000_000
 
 POLL_SECONDS = 60
 
+USAGE_FIELDS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
+"""Token counts recorded with every cached result, so a run's real cost can be summed."""
+
 
 def custom_id(request_id: str) -> str:
     """Return an API-safe, unique ``custom_id`` (``[A-Za-z0-9_-]``, at most 64 characters)."""
@@ -141,9 +144,11 @@ def run_batch_cached(
                 results[request_id] = parsed
                 errors.pop(request_id, None)
                 response = parsed.model_dump(mode='json', by_alias=True)
-                cache.write(
-                    json.dumps({'key': keys[request_id], 'request_id': request_id, 'response': response}) + '\n'
-                )
+                row = {'key': keys[request_id], 'request_id': request_id, 'response': response}
+                usage = getattr(message, 'usage', None)
+                if usage is not None:
+                    row['usage'] = {field: getattr(usage, field, None) or 0 for field in USAGE_FIELDS}
+                cache.write(json.dumps(row) + '\n')
 
     state = _read_state(state_path)
     for batch_id in list(state['pending']):

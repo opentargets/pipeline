@@ -8,6 +8,7 @@ trials first, cut at a character budget.
 from __future__ import annotations
 
 import hashlib
+import re
 
 import polars as pl
 
@@ -36,6 +37,23 @@ CLASS_NAME = (
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+CONTENT_FIELDS = ('Official Title:', 'Description:', 'Detailed Description:')
+"""Prompt fields a trial's content key covers; the rest (interventions, conditions, phase) is left out."""
+
+
+def trial_content_sha256(prompt: str) -> str:
+    """Hash a trial's title and descriptions, whitespace-normalised, ignoring how the prompt is rendered."""
+    lines, keep = [], False
+    for line in prompt.splitlines():
+        if line.startswith(CONTENT_FIELDS):
+            keep = True
+        elif re.match(r'^[A-Z][A-Za-z ]+:', line):
+            keep = False
+        if keep:
+            lines.append(line)
+    return _sha256(re.sub(r'\s+', ' ', '\n'.join(lines)).strip())
 
 
 def trial_texts(archive: str, scratch_root: str) -> pl.DataFrame:
@@ -102,7 +120,9 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
 
     Returns:
         pl.DataFrame: ``pool_id``, ``drug_name``, ``nct_ids``, ``n_trials``, ``n_trials_used``,
-        ``text``, ``pool_sha256``.
+        ``text``, ``pool_sha256``, ``content_key``. ``content_key`` hashes the drug name and
+        every trial's id and content (not only the trials within the budget), so it changes
+        exactly when a trial is added, removed or edited.
     """
     ordered = (
         trials
@@ -110,12 +130,24 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
         .with_columns(
             has_vocab=pl.col('prompt').str.contains(MOA_VOCAB),
             length=pl.col('prompt').str.len_chars(),
+            content=pl.col('prompt').map_elements(trial_content_sha256, return_dtype=pl.String),
         )
         .sort(['drug_name', 'has_vocab', 'length', 'nct_id'], descending=[False, True, True, False])
         .with_columns(
             n_trials=pl.len().over('drug_name'),
             rank=pl.int_range(pl.len()).over('drug_name'),
             running=pl.col('length').cum_sum().over('drug_name'),
+        )
+    )
+    keys = (
+        ordered
+        .sort('drug_name', 'nct_id')
+        .group_by('drug_name', maintain_order=True)
+        .agg(content_key=pl.concat_str(pl.col('nct_id'), pl.col('content'), separator=':').str.join('|'))
+        .with_columns(
+            content_key=pl.concat_str(pl.col('drug_name'), pl.col('content_key'), separator='\x1f').map_elements(
+                _sha256, return_dtype=pl.String
+            )
         )
     )
     used = ordered.filter((pl.col('rank') == 0) | (pl.col('running') <= char_budget))
@@ -125,7 +157,12 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
         n_trials_used=pl.len().cast(pl.UInt32),
         text=pl.col('prompt').str.join(TRIAL_SEPARATOR),
     )
-    return pools.with_columns(
-        pool_id=pl.col('drug_name').map_elements(lambda n: _sha256(n)[:16], return_dtype=pl.String),
-        pool_sha256=pl.col('text').map_elements(_sha256, return_dtype=pl.String),
-    ).select('pool_id', 'drug_name', 'nct_ids', 'n_trials', 'n_trials_used', 'text', 'pool_sha256')
+    return (
+        pools
+        .join(keys, on='drug_name', how='left')
+        .with_columns(
+            pool_id=pl.col('drug_name').map_elements(lambda n: _sha256(n)[:16], return_dtype=pl.String),
+            pool_sha256=pl.col('text').map_elements(_sha256, return_dtype=pl.String),
+        )
+        .select('pool_id', 'drug_name', 'nct_ids', 'n_trials', 'n_trials_used', 'text', 'pool_sha256', 'content_key')
+    )
