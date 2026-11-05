@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import polars as pl
 import pytest
 from otter.config.model import Config
+from polars.io.plugins import register_io_source
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set import validation as validation_module
@@ -176,3 +177,22 @@ def test_validation_scans_each_source_dataset_once(tmp_path: Path, monkeypatch) 
     sets, variants = _write_source(tmp_path)
     _validation(tmp_path, sets, variants)
     assert sorted(scanned) == sorted([str(sets), str(variants)])
+
+
+def test_validation_reads_each_source_dataset_once(tmp_path: Path, monkeypatch) -> None:
+    """Every branch of the plan shares one read of each dataset, instead of reading it again from storage."""
+    read: list[str] = []
+
+    def counting_scan(path: str, **options) -> pl.LazyFrame:
+        frame = scan_dataset(path, **options).collect()
+
+        def source(with_columns, predicate, n_rows, batch_size):
+            read.append(path)
+            yield frame
+
+        return register_io_source(source, schema=frame.schema, is_pure=True)
+
+    monkeypatch.setattr(validation_module, 'scan_dataset', counting_scan)
+    sets, variants = _write_source(tmp_path)
+    _validation(tmp_path, sets, variants)
+    assert sorted(read) == sorted([str(sets), str(variants)])

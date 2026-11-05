@@ -627,8 +627,9 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flag.height)
+    # cached, so every branch of the plan shares one read of each dataset instead of reading it again
     validated = [
-        validate(scan_dataset(set_path), scan_dataset(variant_path), cross_set_flag.lazy(), options)
+        validate(scan_dataset(set_path).cache(), scan_dataset(variant_path).cache(), cross_set_flag.lazy(), options)
         for _, set_path, variant_path in source_pair
     ]
     valid_set, valid_variant, excluded_set, excluded_variant = (
