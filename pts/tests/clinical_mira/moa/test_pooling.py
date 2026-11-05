@@ -1,6 +1,14 @@
 import polars as pl
 
-from pts.transformers.clinical_mira.moa.pooling import build_pools, match_texts, single_drug_trials
+from pts.transformers.clinical_mira.moa.pooling import (
+    TRIAL_SEPARATOR,
+    add_papers,
+    build_pools,
+    content_key,
+    match_texts,
+    single_drug_trials,
+    trial_content_sha256,
+)
 
 DRUG = pl.Struct({'drug': pl.String, 'synonyms': pl.List(pl.String)})
 
@@ -126,3 +134,110 @@ def test_content_key_ignores_formatting_but_not_content():
 
     assert build_pools(trials, _texts(reordered))['content_key'][0] == key
     assert build_pools(trials, _texts(edited))['content_key'][0] != key
+
+
+def _trial_prompt(nct: str, body: str) -> str:
+    return f'Trial ID: {nct}\nOfficial Title: title {nct}\nDescription: {body}'
+
+
+def _fixture() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    prompts = {
+        'NCT1': _trial_prompt('NCT1', 'a KRAS inhibitor'),
+        'NCT2': _trial_prompt('NCT2', 'second ' + 'x' * 80),
+        'NCT3': _trial_prompt('NCT3', 'other drug trial'),
+    }
+    texts = pl.DataFrame({
+        'id': list(prompts),
+        'prompt': list(prompts.values()),
+        'prompt_sha256': [str(i) for i in range(3)],
+    })
+    trials = pl.DataFrame({'nct_id': list(prompts), 'drug_name': ['drugx', 'drugx', 'drugy']})
+    return trials, texts, build_pools(trials, texts, char_budget=60)
+
+
+def _selected(*rows: tuple[str, str, str]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema={'drug_name': pl.String, 'pmid': pl.String, 'nct_id': pl.String}, orient='row')
+
+
+def _abstracts(*rows: tuple[str, str | None]) -> pl.DataFrame:
+    return pl.DataFrame(
+        [(pmid, f'T{pmid}', abstract) for pmid, abstract in rows],
+        schema={'pmid': pl.String, 'title': pl.String, 'abstract': pl.String},
+        orient='row',
+    )
+
+
+def test_content_key_matches_build_pools():
+    _, texts, pools = _fixture()
+    entries = [(row['id'], trial_content_sha256(row['prompt'])) for row in texts.iter_rows(named=True)]
+
+    assert content_key('drugx', entries[:2][::-1]) == pools.filter(pl.col('drug_name') == 'drugx')['content_key'][0]
+    assert content_key('drugy', entries[2:]) == pools.filter(pl.col('drug_name') == 'drugy')['content_key'][0]
+
+
+def test_add_papers_leaves_pools_without_papers_unchanged():
+    trials, texts, pools = _fixture()
+
+    out, out_trials, out_texts = add_papers(
+        pools, trials, texts, _selected(('drugx', '5', 'NCT1')), _abstracts(('5', 'an abstract')), 4000
+    )
+
+    drugy = pl.col('drug_name') == 'drugy'
+    assert out.filter(drugy).to_dicts() == pools.filter(drugy).to_dicts()
+    assert out.columns == pools.columns
+    assert out['drug_name'].to_list() == pools['drug_name'].to_list()
+    assert out_trials.height == trials.height + 1
+    assert out_texts.height == texts.height + 1
+
+
+def test_add_papers_leaves_pools_unchanged_when_nothing_is_selected():
+    trials, texts, pools = _fixture()
+
+    out, out_trials, out_texts = add_papers(pools, trials, texts, _selected(), _abstracts(), 4000)
+
+    assert out.equals(pools)
+    assert out_trials.equals(trials)
+    assert out_texts.equals(texts)
+
+
+def test_add_papers_appends_after_trials_and_changes_key():
+    trials, texts, pools = _fixture()
+    selected = _selected(('drugx', '9', 'NCT2'), ('drugx', '100', 'NCT1'), ('drugx', '20', 'NCT1'))
+    abstracts = _abstracts(('9', 'nine'), ('100', 'hundred'), ('20', 'twenty'))
+
+    out, out_trials, out_texts = add_papers(pools, trials, texts, selected, abstracts, 4000)
+
+    old = pools.filter(pl.col('drug_name') == 'drugx').row(0, named=True)
+    new = out.filter(pl.col('drug_name') == 'drugx').row(0, named=True)
+    assert new['nct_ids'] == [*old['nct_ids'], 'pmid100', 'pmid20', 'pmid9']
+    assert new['text'].startswith(old['text'] + TRIAL_SEPARATOR + 'Trial ID: pmid100\n')
+    assert new['text'].endswith('Description: nine')
+    assert new['pool_sha256'] != old['pool_sha256']
+    assert new['n_trials'] == old['n_trials']
+    assert new['n_trials_used'] == old['n_trials_used']
+
+    entries = [(r['id'], trial_content_sha256(r['prompt'])) for r in texts.iter_rows(named=True) if r['id'] != 'NCT3']
+    entries += [
+        (r['id'], trial_content_sha256(r['prompt']))
+        for r in out_texts.filter(pl.col('id').str.starts_with('pmid')).iter_rows(named=True)
+    ]
+    assert new['content_key'] == content_key('drugx', entries)
+    assert new['content_key'] != old['content_key']
+
+    added = out_trials.filter(pl.col('nct_id').str.starts_with('pmid'))
+    assert sorted(added['nct_id'].to_list()) == ['pmid100', 'pmid20', 'pmid9']
+    assert added['drug_name'].unique().to_list() == ['drugx']
+    row = out_texts.filter(pl.col('id') == 'pmid9').row(0, named=True)
+    assert row['prompt'] == 'Trial ID: pmid9\nOfficial Title: T9\nDescription: nine'
+
+
+def test_add_papers_skips_papers_without_abstract():
+    trials, texts, pools = _fixture()
+    selected = _selected(('drugx', '1', 'NCT1'), ('drugx', '2', 'NCT1'), ('drugx', '3', 'NCT1'))
+    abstracts = _abstracts(('1', None), ('2', ''))
+
+    out, out_trials, out_texts = add_papers(pools, trials, texts, selected, abstracts, 4000)
+
+    assert out.equals(pools)
+    assert out_trials.equals(trials)
+    assert out_texts.equals(texts)

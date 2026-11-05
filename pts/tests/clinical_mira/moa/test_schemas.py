@@ -104,3 +104,11 @@ def test_extract_prompt_states_the_full_run_lessons():
     assert 'releasing agent' in prompt
     assert 'list every member' in prompt
     assert 'class of drugs' in prompt
+
+
+def test_papers_prompt_is_extract_plus_addendum():
+    addendum = load_prompt('extract_papers')
+
+    assert addendum.startswith('\nPUBLICATIONS:\n')
+    assert schemas.papers_prompt() == load_prompt('extract') + addendum
+    assert schemas.RESPONSE_MODELS['extract_papers'] is MoaExtraction

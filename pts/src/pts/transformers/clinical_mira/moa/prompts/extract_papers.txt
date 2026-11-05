@@ -1,0 +1,5 @@
+
+PUBLICATIONS:
+- Some entries are PubMed abstracts of publications that report these trials. Their "Trial ID" is "pmid" followed by the PubMed id (e.g. "pmid39167366").
+- Treat them exactly like trials: the TEXT ONLY rule and every quote rule apply. Cite the publication's id, as written after "Trial ID:", as the nctId of its quotes.
+- Only what a publication says about the drug in the input counts. Statements about comparators, background therapy or other drugs do not.

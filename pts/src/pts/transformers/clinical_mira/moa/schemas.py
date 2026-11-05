@@ -108,15 +108,24 @@ class JudgeVerdict(_Strict):
     rationale: str
 
 
-RESPONSE_MODELS: dict[str, type[BaseModel]] = {'extract': MoaExtraction, 'judge': JudgeVerdict}
+RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    'extract': MoaExtraction,
+    'extract_papers': MoaExtraction,
+    'judge': JudgeVerdict,
+}
 
 
-def load_prompt(name: Literal['extract', 'judge']) -> str:
+def load_prompt(name: Literal['extract', 'extract_papers', 'judge']) -> str:
     """Return the packaged system prompt of the extractor or the judge."""
     return (resources.files(PROMPTS_PACKAGE) / f'{name}.txt').read_text(encoding='utf-8')
 
 
-def ruleset_sha256(name: Literal['extract', 'judge']) -> str:
+def papers_prompt() -> str:
+    """Return the extractor's system prompt followed by the publications addendum."""
+    return load_prompt('extract') + load_prompt('extract_papers')
+
+
+def ruleset_sha256(name: Literal['extract', 'extract_papers', 'judge']) -> str:
     """Return the sha256 of a stage's system prompt and response schema."""
     schema = json.dumps(RESPONSE_MODELS[name].model_json_schema(by_alias=True), sort_keys=True)
     return hashlib.sha256(f'{load_prompt(name)}\x1f{schema}'.encode()).hexdigest()

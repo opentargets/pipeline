@@ -396,7 +396,11 @@ MOA = MoaOutput(
         'content_fields': list(pooling.CONTENT_FIELDS),
         'effort': 'medium',
         'extract_prompt_sha256': schemas.ruleset_sha256('extract'),
+        'papers_per_pool': 5,
+        'abstract_chars': 4000,
+        'reference_types': ['DERIVED', 'RESULT'],
+        'papers_prompt_sha256': schemas.ruleset_sha256('extract_papers'),
         'schema_sha256': schema_digest(schemas.MoaExtraction),
     },
-    logic_version=1,
+    logic_version=2,
 )
