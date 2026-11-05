@@ -75,6 +75,8 @@ class AactMoaSettings(BaseModel):
     """Attempts per pool, within a run and across runs, before it is left out."""
     import_experiment_cache: str | None = None
     """The experiment's jsonl result cache to import into the store, once, before computing."""
+    import_papers_cache: str | None = None
+    """A jsonl result cache computed with the publications prompt, imported for pools with publications."""
     import_for_tag: str | None = None
     """The MOA tag the cache was computed for. The cache is imported only while it is the current tag."""
     min_seeded_share: float = 0.5
@@ -284,18 +286,31 @@ def stage_moa(
             settings.import_experiment_cache, pools, listed, system_prompt, store_uri, config
         )
         logger.info(f'imported {seeded} cached pools into {store_uri}')
+        if settings.import_papers_cache is not None:
+            paper_seeded = staging.import_experiment_cache(
+                settings.import_papers_cache,
+                pools.filter(pl.col('content_key').is_in(sorted(with_papers))),
+                listed,
+                schemas.papers_prompt(),
+                store_uri,
+                config,
+                run_id=staging.import_papers_run_id(),
+            )
+            seeded += paper_seeded
+            logger.info(f'imported {paper_seeded} cached pools with publications into {store_uri}')
 
     records = read_records(store_uri, config, pl.String())
     if importing:
+        import_runs = [staging.import_run_id(), staging.import_papers_run_id()]
         covered = (
             records
-            .filter(pl.col('run_id') == staging.import_run_id())
+            .filter(pl.col('run_id').is_in(import_runs))
             .filter(pl.col('text').is_in(pools['content_key'].implode()))['text']
             .n_unique()
         )
         if covered < settings.min_seeded_share * pools.height:
             msg = (
-                f'{staging.import_run_id()} covers {covered} of {pools.height} pools, '
+                f'{" and ".join(import_runs)} cover {covered} of {pools.height} pools, '
                 f'below the minimum share {settings.min_seeded_share}'
             )
             raise SeedTooSmall(msg)

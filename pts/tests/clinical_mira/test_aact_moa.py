@@ -384,6 +384,7 @@ def test_config_imports_the_seed_for_the_current_tag_only() -> None:
     settings = AactMoaSettings.model_validate(config['steps']['aact_moa'][0]['settings'])
 
     assert settings.import_for_tag == MOA.tag()
+    assert settings.import_papers_cache == 'gs://clinical_staging/store/moa/seed/extract_papers_cache-2026-11-05.jsonl'
     assert settings.min_seeded_share == 0.5
     assert settings.adopt_from_tag == 'claude-opus-5-5-p4e6708cf'
 
@@ -697,3 +698,91 @@ def test_a_pool_is_computed_when_a_cited_paper_is_pushed_out(monkeypatch: pytest
 
     assert batches.drugs == ['sotorasib']
     assert (stats['carried'], stats['computed']) == (0, 1)
+
+
+def _prompt_cache(root: Path, work: str, prompt: str) -> Path:
+    """The result cache of one prompt in a work directory."""
+    return root / work / f'moa_cache-{staging.prompt_sha256(prompt)[:8]}.jsonl'
+
+
+def _paper_seeds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+    """Compute the paper world in a separate store and return its plain and publications caches."""
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+    _stage(monkeypatch, tmp_path / 'seed', batches, work='seed_work', **PAPER_WORLD)
+    return (
+        _prompt_cache(tmp_path / 'seed', 'seed_work', schemas.load_prompt('extract')),
+        _prompt_cache(tmp_path / 'seed', 'seed_work', schemas.papers_prompt()),
+    )
+
+
+def test_papers_cache_seeds_pools_with_papers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    plain, with_papers = _paper_seeds(monkeypatch, tmp_path)
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+
+    stats = _stage(
+        monkeypatch,
+        tmp_path,
+        batches,
+        import_experiment_cache=str(plain),
+        import_papers_cache=str(with_papers),
+        import_for_tag=MOA.tag(),
+        **PAPER_WORLD,
+    )
+
+    assert batches.created == []
+    assert (stats['seeded'], stats['computed']) == (2, 0)
+    records = _store_records(tmp_path)
+    prompts = {json.loads(o)['drug_name']: json.loads(o)['prompt_sha256'] for o in records['output']}
+    assert prompts['sotorasib'] == _sha256(schemas.papers_prompt())
+    assert prompts['aspirinx'] == _sha256(schemas.load_prompt('extract'))
+    assert set(records['run_id']) == {staging.import_run_id(), staging.import_papers_run_id()}
+
+
+def test_plain_cache_does_not_seed_pools_with_papers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    plain = _seed_cache(monkeypatch, tmp_path, WORLD)
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+
+    stats = _stage(
+        monkeypatch,
+        tmp_path,
+        batches,
+        import_experiment_cache=str(plain),
+        import_for_tag=MOA.tag(),
+        min_seeded_share=0.4,
+        **PAPER_WORLD,
+    )
+
+    assert stats['seeded'] == 1
+    assert batches.drugs == ['sotorasib']
+    assert batches.prompts == {'sotorasib': schemas.papers_prompt()}
+
+
+def test_seed_guard_counts_both_imports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    plain, with_papers = _paper_seeds(monkeypatch, tmp_path)
+    seed = {'import_experiment_cache': str(plain), 'import_for_tag': MOA.tag(), 'min_seeded_share': 0.9}
+
+    with pytest.raises(SeedTooSmall, match='1 of 2'):
+        _stage(monkeypatch, tmp_path / 'without', FakeBatches(), **seed, **PAPER_WORLD)
+
+    stats = _stage(
+        monkeypatch, tmp_path / 'with', FakeBatches(), import_papers_cache=str(with_papers), **seed, **PAPER_WORLD
+    )
+
+    assert stats['seeded'] == 2
+
+
+def test_papers_import_runs_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    plain, with_papers = _paper_seeds(monkeypatch, tmp_path)
+    seed = {
+        'import_experiment_cache': str(plain),
+        'import_papers_cache': str(with_papers),
+        'import_for_tag': MOA.tag(),
+    }
+    first = _stage(monkeypatch, tmp_path, FakeBatches(), **seed, **PAPER_WORLD)
+    batches = FakeBatches()
+
+    second = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **seed, **PAPER_WORLD)
+
+    assert first['seeded'] == 2
+    assert (second['seeded'], second['computed']) == (0, 0)
+    assert batches.created == []

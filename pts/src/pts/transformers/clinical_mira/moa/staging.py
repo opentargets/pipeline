@@ -180,6 +180,11 @@ def import_run_id() -> str:
     return f'import-moa-experiment-{MOA.digest}'
 
 
+def import_papers_run_id() -> str:
+    """The id of the run the cache computed with the publications prompt is imported as."""
+    return f'{import_run_id()}-papers'
+
+
 def import_experiment_cache(
     cache_uri: str,
     pools: pl.DataFrame,
@@ -187,6 +192,7 @@ def import_experiment_cache(
     system_prompt: str,
     store_uri: str,
     config: Config,
+    run_id: str | None = None,
 ) -> int:
     """Import the experiment's result cache into the record store, once.
 
@@ -201,11 +207,12 @@ def import_experiment_cache(
         system_prompt: The prompt the cache was computed with.
         store_uri: Root of the store, an absolute URI.
         config: The otter config, used to resolve storage.
+        run_id: The id of the import run, :py:func:`import_run_id` when ``None``.
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
     """
-    run_id = import_run_id()
+    run_id = run_id or import_run_id()
 
     def records() -> pl.DataFrame:
         cached = _read_cache_rows(cache_uri, config)
