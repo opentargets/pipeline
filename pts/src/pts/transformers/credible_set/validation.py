@@ -556,9 +556,8 @@ def integrity_checks(
 ) -> pl.LazyFrame:
     """The row counts of one source's validation, as one row: input, valid and excluded, for sets and variants.
 
-    `integrity_errors` checks that every input row is either valid or excluded. The counts are
-    aggregates, so the checks of every source are computed together, in one pass, before anything
-    is written.
+    `integrity_errors` checks that every input row is either valid or excluded. `validation_check`
+    counts the written datasets, so the counts of parquet come from the file footers.
 
     Examples:
         >>> credible_set = pl.LazyFrame({'id': ['a', 'b']})
@@ -672,9 +671,6 @@ def validation(
         settings: Flag names under `cs_invalid_qc_reasons`, `csv_set_invalid_qc_reasons` and
             `csv_row_invalid_qc_reasons`.
         config: Pipeline configuration.
-
-    Raises:
-        ValueError: if a source fails an integrity check; nothing is written then.
     """
     sources = ValidationSource.model_validate(source)
     destinations = ValidationDestination.model_validate(destination)
@@ -684,26 +680,46 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flag.height)
-    source_input: dict[str, tuple[pl.LazyFrame, pl.LazyFrame]] = {}
-    validated = []
-    for source_name, set_path, variant_path in source_pair:
-        # one scan per dataset, shared by the integrity counts and the validation plan
-        source_input[source_name] = (scan_dataset(set_path), scan_dataset(variant_path))
-        validated.append(validate(*source_input[source_name], cross_set_flag.lazy(), options))
-    source_split = {
-        source_name: (*source_input[source_name], *split)
-        for source_name, split in zip(source_input, flag_duplicated_ids(validated, options), strict=True)
-    }
-    integrity_count = pl.concat([integrity_checks(source, *split) for source, split in source_split.items()]).collect()
-    if error_message := integrity_errors(integrity_count):
-        raise ValueError('credible set validation failed its integrity checks:\n' + '\n'.join(error_message))
+    validated = [
+        validate(scan_dataset(set_path), scan_dataset(variant_path), cross_set_flag.lazy(), options)
+        for _, set_path, variant_path in source_pair
+    ]
     valid_set, valid_variant, excluded_set, excluded_variant = (
-        pl.concat(part) for part in zip(*(split[2:] for split in source_split.values()), strict=True)
+        pl.concat(part) for part in zip(*flag_duplicated_ids(validated, options), strict=True)
     )
-    logger.info('Validated the credible sets of {}', ', '.join(source_split))
+    logger.info('Validated the credible sets of {}', ', '.join(source_name for source_name, _, _ in source_pair))
     pl.collect_all([
         sink_dataset(sort_sets(type_valid_sets(valid_set)), destinations.valid_set),
         sink_dataset(sort_variants(valid_variant), destinations.valid_variant),
         sink_dataset(sort_sets(excluded_set), destinations.excluded_set),
         sink_dataset(sort_variants(excluded_variant), destinations.excluded_variant),
     ])
+
+
+def validation_check(
+    source: dict[str, str | list[str]],
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Check that every input row of `validation` was written, either valid or excluded.
+
+    Runs after `validation` has written its datasets, on the same arguments. The written datasets
+    hold every source together, so the rows of every source are counted together.
+
+    Raises:
+        ValueError: if the written sets or variants are not exactly the input ones.
+    """
+    sources = ValidationSource.model_validate(source)
+    destinations = ValidationDestination.model_validate(destination)
+    integrity_count = integrity_checks(
+        'every source',
+        scan_datasets(sources.credible_set),
+        scan_datasets(sources.credible_set_variant),
+        scan_dataset(destinations.valid_set),
+        scan_dataset(destinations.valid_variant),
+        scan_dataset(destinations.excluded_set),
+        scan_dataset(destinations.excluded_variant),
+    ).collect()
+    if error_message := integrity_errors(integrity_count):
+        raise ValueError('credible set validation failed its integrity checks:\n' + '\n'.join(error_message))

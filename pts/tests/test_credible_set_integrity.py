@@ -1,4 +1,4 @@
-"""Validation: integrity checks before writing, the exclusion log, and the output sort order."""
+"""Validation: integrity checks of the written datasets, and the output sort order."""
 
 from pathlib import Path
 from unittest.mock import Mock
@@ -15,8 +15,8 @@ from pts.transformers.credible_set.validation import (
     integrity_errors,
     sort_sets,
     sort_variants,
-    validate,
     validation,
+    validation_check,
 )
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -116,15 +116,29 @@ def _validation(root: Path, sets: Path, variants: Path) -> None:
 DESTINATIONS = ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant')
 
 
-def test_validation_raises_before_writing_when_a_row_is_lost(tmp_path: Path, monkeypatch) -> None:
-    def losing_a_variant(*args, **kwargs):
-        valid_set, valid_variant, excluded_set, excluded_variant = validate(*args, **kwargs)
-        return valid_set, valid_variant.head(0), excluded_set, excluded_variant
+def _check(root: Path, sets: Path, variants: Path) -> None:
+    validation_check(
+        source={'credible_set': [str(sets)], 'credible_set_variant': [str(variants)]},
+        destination={name: str(root / 'out' / name) for name in DESTINATIONS},
+        settings={},
+        config=Mock(spec=Config, work_path=str(root), release_uri=None),
+    )
 
-    monkeypatch.setattr(validation_module, 'validate', losing_a_variant)
-    with pytest.raises(ValueError, match='input variants'):
-        _validation(tmp_path, *_write_source(tmp_path))
-    assert not (tmp_path / 'out').exists()
+
+def test_the_written_datasets_pass_the_check(tmp_path: Path) -> None:
+    source = _write_source(tmp_path)
+    _validation(tmp_path, *source)
+    _check(tmp_path, *source)
+
+
+def test_the_check_fails_when_a_written_row_is_lost(tmp_path: Path) -> None:
+    source = _write_source(tmp_path)
+    _validation(tmp_path, *source)
+    for part in (tmp_path / 'out/valid_variant').iterdir():
+        part.unlink()
+    _variants().collect().write_parquet(tmp_path / 'out/valid_variant/part-0.parquet')
+    with pytest.raises(ValueError, match='2 input variants != 0 valid \\+ 1 excluded variants'):
+        _check(tmp_path, *source)
 
 
 def test_valid_variants_are_written_in_genome_order(tmp_path: Path) -> None:
