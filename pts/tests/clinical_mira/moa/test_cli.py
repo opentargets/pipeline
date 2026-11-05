@@ -229,3 +229,28 @@ def test_vertex_provider_uses_chat_api_and_gpt_oss(tmp_path, inputs, monkeypatch
     assert seen['model'] == 'openai/gpt-oss-120b-maas'
     assert callable(seen['client_factory'])
     assert seen['n'] == 3
+
+
+def test_anthropic_provider_uses_batches_with_opus_by_default(tmp_path, inputs, monkeypatch):
+    seen = {}
+
+    def fake_batch(requests, **kwargs):
+        seen.update(kwargs, n=len(requests))
+        return {}, {}
+
+    monkeypatch.setattr(cli, 'run_batch_cached', fake_batch)
+    run = tmp_path / 'run'
+    run.mkdir()
+    pl.DataFrame({
+        'id': list(TRIALS),
+        'prompt': [t[1] for t in TRIALS.values()],
+        'prompt_sha256': ['h'] * 3,
+    }).write_parquet(run / 'texts.parquet')
+    cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
+
+    cli.main(['extract', '--run-dir', str(run), '--all', '--provider', 'anthropic', '--effort', 'low'])
+
+    assert seen['model'] == 'claude-opus-5-5'
+    assert seen['effort'] == 'low'
+    assert seen['state_path'] == run / 'extract_batches.json'
+    assert seen['n'] == 3

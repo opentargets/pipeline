@@ -11,13 +11,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 from loguru import logger
 
 from pts.transformers.clinical_mira.moa import benchmark, grounding, judge, pilot, pooling, quotes, report, vertex
+from pts.transformers.clinical_mira.moa.claude import run_batch_cached
 from pts.transformers.clinical_mira.moa.llm import run_cached
 from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict, MoaExtraction, load_prompt
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 STRATA = ('phase_group', 'maximumClinicalStage', 'drugType')
 DEFAULT_MODELS = {
@@ -25,6 +30,8 @@ DEFAULT_MODELS = {
     ('openai', 'judge'): 'gpt-5',
     ('vertex', 'extract'): vertex.GPT_OSS_120B,
     ('vertex', 'judge'): vertex.GPT_OSS_120B,
+    ('anthropic', 'extract'): 'claude-opus-5-5',
+    ('anthropic', 'judge'): 'claude-opus-5-5',
 }
 
 
@@ -39,6 +46,45 @@ def _provider_options(args: argparse.Namespace, stage: str) -> dict:
             'client_factory': lambda: vertex.vertex_client(project, location),
         }
     return {'model': model}
+
+
+def _run_llm(
+    args: argparse.Namespace,
+    run: Path,
+    stage: Literal['extract', 'judge'],
+    requests: list[tuple[str, str]],
+    response_model: type[BaseModel],
+    cached_only: bool = False,
+) -> tuple[dict, dict[str, str]]:
+    """Run one stage's requests with the chosen provider, through the stage's cache."""
+    if args.provider == 'anthropic':
+        if cached_only:
+            return run_cached(
+                requests,
+                system_prompt=load_prompt(stage),
+                response_model=response_model,
+                model=args.model or DEFAULT_MODELS[('anthropic', stage)],
+                cache_path=run / f'{stage}_cache.jsonl',
+                cached_only=True,
+            )
+        return run_batch_cached(
+            requests,
+            system_prompt=load_prompt(stage),
+            response_model=response_model,
+            model=args.model or DEFAULT_MODELS[('anthropic', stage)],
+            cache_path=run / f'{stage}_cache.jsonl',
+            state_path=run / f'{stage}_batches.json',
+            effort=args.effort,
+        )
+    return run_cached(
+        requests,
+        system_prompt=load_prompt(stage),
+        response_model=response_model,
+        cache_path=run / f'{stage}_cache.jsonl',
+        concurrency=args.concurrency,
+        cached_only=cached_only,
+        **_provider_options(args, stage),
+    )
 
 
 LABELS = ('relation', 'statementType', 'effect_wording', 'action_other')
@@ -111,15 +157,7 @@ def cmd_extract(run: Path, args: argparse.Namespace) -> None:
         (pool_id, f'Drug: {name}\n\n{text}')
         for pool_id, name, text in pools.select('pool_id', 'drug_name', 'text').iter_rows()
     ]
-    results, errors = run_cached(
-        requests,
-        system_prompt=load_prompt('extract'),
-        response_model=MoaExtraction,
-        cache_path=run / 'extract_cache.jsonl',
-        concurrency=args.concurrency,
-        cached_only=args.cached_only,
-        **_provider_options(args, 'extract'),
-    )
+    results, errors = _run_llm(args, run, 'extract', requests, MoaExtraction, cached_only=args.cached_only)
     extractions = {k: v for k, v in results.items() if isinstance(v, MoaExtraction)}
     texts = pl.read_parquet(run / 'texts.parquet')
     mechanisms = quotes.check_mechanisms(extractions, pools, texts)
@@ -165,14 +203,7 @@ def cmd_judge(run: Path, args: argparse.Namespace) -> None:
         )
         for row in rows.iter_rows(named=True)
     ]
-    results, errors = run_cached(
-        requests,
-        system_prompt=load_prompt('judge'),
-        response_model=JudgeVerdict,
-        cache_path=run / 'judge_cache.jsonl',
-        concurrency=args.concurrency,
-        **_provider_options(args, 'judge'),
-    )
+    results, errors = _run_llm(args, run, 'judge', requests, JudgeVerdict)
     verdicts = [
         {
             'pool_id': key.rsplit(':', 1)[0],
@@ -275,7 +306,8 @@ def build_parser() -> argparse.ArgumentParser:
     judge_cmd.add_argument('--show-chembl', action='store_true', help='show the judge ChEMBL mechanisms')
 
     for sub_parser in (extract, judge_cmd):
-        sub_parser.add_argument('--provider', choices=['openai', 'vertex'], default='openai')
+        sub_parser.add_argument('--provider', choices=['openai', 'vertex', 'anthropic'], default='openai')
+        sub_parser.add_argument('--effort', default='medium', help='Claude effort (anthropic provider only)')
         sub_parser.add_argument('--model', default=None, help='default depends on the provider and the stage')
         sub_parser.add_argument('--vertex-project', default=vertex.DEFAULT_PROJECT)
         sub_parser.add_argument('--vertex-location', default=vertex.DEFAULT_LOCATION)
