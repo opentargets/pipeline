@@ -15,6 +15,7 @@ FAKE_TAGS = {
     'stop_reasons_tag': 'aaaa1111-p11111111',
     'drug_entities_tag': 'bbbb2222+cccc3333-p22222222',
     'disease_entities_tag': 'dddd4444-p33333333',
+    'moa_tag': 'claude-opus-5-5-p55555555',
 }
 
 
@@ -103,6 +104,7 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     for base in (
         f'gs://clinical_staging/aact/S/stop_reasons/{stop}',
         f'gs://clinical_staging/aact/S/extraction/{extraction}',
+        f'gs://clinical_staging/aact/S/extraction/{extraction}/moa/{FAKE_TAGS["moa_tag"]}',
         f'gs://clinical_staging/aact/S/extraction/{extraction}/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/disease_entities/{disease}',

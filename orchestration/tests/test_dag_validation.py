@@ -93,3 +93,12 @@ def test_aact_moa_runs_after_the_extraction(dag_bag: DagBag) -> None:
         dag.get_task('pts_aact_trial_models.run_pts_aact_trial_models'),
     )
     assert other.execution_timeout is None
+
+
+def test_drug_mechanism_of_action_follows_its_aact_inference(dag_bag: DagBag) -> None:
+    """drug_mechanism_of_action is downstream of drug_mechanism_of_action_aact, and the unified DAG stays acyclic."""
+    dag = dag_bag.dags['unified_pipeline']
+    aact_end = dag.get_task('pts_drug_mechanism_of_action_aact.end_pts_drug_mechanism_of_action_aact')
+    moa_run = dag.get_task('pts_drug_mechanism_of_action.run_pts_drug_mechanism_of_action')
+    assert aact_end.task_id in moa_run.get_flat_relative_ids(upstream=True)
+    dag.topological_sort()
