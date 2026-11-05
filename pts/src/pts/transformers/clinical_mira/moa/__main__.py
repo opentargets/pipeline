@@ -5,7 +5,7 @@ the inputs its own flags name, and writes its results back to ``--run-dir``::
 
     texts -> pools -> link -> pilot -> extract -> ground -> judge -> evaluate
 
-``qc`` is separate: it checks a finished release.
+``qc`` is separate: it checks a finished release. ``diff-snapshots`` compares two staged snapshots.
 """
 
 from __future__ import annotations
@@ -288,6 +288,24 @@ def cmd_qc(_run: Path, args: argparse.Namespace) -> None:
     logger.info(f'qc: {go}')
 
 
+def _snapshot(path: str) -> pl.DataFrame:
+    """Read the ``data.parquet`` of a snapshot directory or URI, whatever its tag."""
+    return pl.read_parquet(f'{path.rstrip("/")}/data.parquet')
+
+
+def cmd_diff_snapshots(_run: Path, args: argparse.Namespace) -> None:
+    diff = qc.diff_snapshots(_snapshot(args.old), _snapshot(args.new))
+    args.out.mkdir(parents=True, exist_ok=True)
+    diff.with_columns(
+        gained=pl.col('gained').list.join(';'),
+        lost=pl.col('lost').list.join(';'),
+    ).write_csv(args.out / 'snapshot_diff.csv')
+    only_gained = diff.filter((pl.col('gained').list.len() > 0) & (pl.col('lost').list.len() == 0)).height
+    only_lost = diff.filter((pl.col('lost').list.len() > 0) & (pl.col('gained').list.len() == 0)).height
+    changed = diff.height - only_gained - only_lost
+    logger.info(f'diff-snapshots: drugs gained: {only_gained}, lost: {only_lost}, changed: {changed}')
+
+
 def _usage(cache_path: Path) -> dict[str, int]:
     """Sum the token counts recorded in a cache (Claude batches record them; other providers do not)."""
     totals = {'requests': 0, 'with_usage': 0}
@@ -361,6 +379,12 @@ def build_parser() -> argparse.ArgumentParser:
     qc_cmd.add_argument('--exclude-stages', nargs='*', default=['APPROVAL'])
     qc_cmd.add_argument('--min-scorable', type=int, default=30, help='early-phase scorable candidates for a verdict')
     qc_cmd.set_defaults(handler=cmd_qc, run_dir=None)
+
+    diff_cmd = commands.add_parser('diff-snapshots')
+    diff_cmd.add_argument('--old', required=True, help='snapshot directory or URI holding data.parquet')
+    diff_cmd.add_argument('--new', required=True, help='snapshot directory or URI holding data.parquet')
+    diff_cmd.add_argument('--out', required=True, type=Path)
+    diff_cmd.set_defaults(handler=cmd_diff_snapshots, run_dir=None)
 
     command('evaluate', cmd_evaluate).add_argument('--seed', type=int, default=0)
     return parser

@@ -153,8 +153,9 @@ def run_qc(
             f'scorable against a manual mechanism: {scored.height}\n'
         ),
     ]
-    for by in ('phase_group', 'drugType'):
-        sections.append(f'## Strict precision by {by}\n')
+    for by in ('phase_group', 'drugType', 'evidenceSource'):
+        title = 'Precision by evidence source' if by == 'evidenceSource' else f'Strict precision by {by}'
+        sections.append(f'## {title}\n')
         sections.append(markdown_table(precision_table(scored, by)) if scored.height else 'no scorable rows\n')
     sections += [
         '## Evidence with and without the source\n',
@@ -163,3 +164,43 @@ def run_qc(
     ]
     (out / 'qc.md').write_text('\n'.join(sections), encoding='utf-8')
     return go
+
+
+def _pair_sets(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """Return the sorted set of ``"<symbols>|<actionType>"`` pairs of each drug."""
+    return (
+        snapshot
+        .select(
+            'drugName',
+            pair=pl.concat_str(
+                pl.col('targetSymbolSuggestion').list.sort().list.join(','), pl.col('actionType'), separator='|'
+            ),
+        )
+        .group_by('drugName')
+        .agg(pairs=pl.col('pair').unique().sort())
+    )
+
+
+def diff_snapshots(old: pl.DataFrame, new: pl.DataFrame) -> pl.DataFrame:
+    """Return one row per drug whose (targets, action type) pairs differ between two snapshots.
+
+    Returns:
+        pl.DataFrame: ``drugName``, ``gained`` and ``lost`` pair lists, and ``papers``, the largest number
+        of papers a row of the drug has in ``new`` (0 when none).
+    """
+    papers = new.group_by('drugName').agg(papers=pl.col('papers').list.len().max())
+    return (
+        _pair_sets(old)
+        .rename({'pairs': 'old'})
+        .join(_pair_sets(new).rename({'pairs': 'new'}), on='drugName', how='full', coalesce=True)
+        .join(papers, on='drugName', how='left')
+        .with_columns(pl.col('old', 'new').fill_null([]))
+        .select(
+            'drugName',
+            gained=pl.col('new').list.set_difference(pl.col('old')).list.sort(),
+            lost=pl.col('old').list.set_difference(pl.col('new')).list.sort(),
+            papers=pl.col('papers').fill_null(0).cast(pl.Int64),
+        )
+        .filter((pl.col('gained').list.len() > 0) | (pl.col('lost').list.len() > 0))
+        .sort('drugName')
+    )
