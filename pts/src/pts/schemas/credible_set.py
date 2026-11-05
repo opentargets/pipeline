@@ -5,6 +5,7 @@ They match gentropy `credible_set.json` and `credible_set_variant.json`.
 
 import polars as pl
 
+from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod
 
 credible_set_schema = pl.Schema({
@@ -26,6 +27,7 @@ credible_set_schema = pl.Schema({
 validated_credible_set_schema = pl.Schema({
     **credible_set_schema,
     'chromosome': pl.Enum(Chromosome),
+    'studyType': pl.Enum(StudyType),
     'fineMappingMethod': pl.Enum(FinemappingMethod),
 })
 """The CredibleSet schema of the validated and published sets, with the columns of a fixed vocabulary as enums.

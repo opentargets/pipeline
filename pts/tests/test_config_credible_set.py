@@ -6,7 +6,9 @@ from typing import Any
 import polars as pl
 from otter.config.yaml import parse_yaml
 
+from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.set_qc import SetQcSettings
 from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
 
@@ -69,7 +71,7 @@ def test_each_source_is_checked_against_its_own_input_and_mirrors_it() -> None:
         set_qc = tasks[f'transform qc credible sets {folder}']
         variant_qc = tasks[f'transform qc credible set variants {folder}']
         assert set_qc['transformer'] == 'credible_set.set_qc'
-        assert set_qc['source'] == {'credible_set': f'input/{folder}/credible_set'}
+        assert set_qc['source'] == {'credible_set': f'input/{folder}/credible_set', 'study': 'output/study'}
         assert set_qc['destination'] == f'intermediate/qc/{folder}/credible_set'
         assert variant_qc['transformer'] == 'credible_set.variant_qc'
         assert variant_qc['source'] == {'credible_set_variant': f'input/{folder}/credible_set_variant'}
@@ -130,6 +132,7 @@ def test_validation_excludes_the_agreed_flags() -> None:
         CredibleSetFlag.SUBSIGNIFICANT_FLAG,
         CredibleSetFlag.LD_CLUMPED,
         CredibleSetFlag.WINDOW_CLUMPED,
+        CredibleSetFlag.STUDY_TYPE_MISMATCH,
     }
     assert set(settings.csv_set_invalid_qc_reasons) == {
         CredibleSetVariantFlag.INVALID_CS_ID,
@@ -166,3 +169,10 @@ def test_variant_qc_of_every_source_cuts_at_95_percent_coverage() -> None:
             tasks[f'transform qc credible set variants {kind}/{source}']['settings']
         )
         assert (settings.coverage, settings.pip_tolerance) == (0.95, 1e-4), source
+
+
+def test_set_qc_of_every_source_allows_every_finemapping_method() -> None:
+    tasks = _tasks()
+    for source, kind in SOURCES.items():
+        settings = SetQcSettings.model_validate(tasks[f'transform qc credible sets {kind}/{source}']['settings'])
+        assert settings.allowed_fm_methods == list(FinemappingMethod), source

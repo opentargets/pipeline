@@ -1,6 +1,23 @@
-"""Schema for the Study dataset."""
+"""Schema and study types of the Study dataset."""
+
+from enum import StrEnum
 
 import polars as pl
+
+
+class StudyType(StrEnum):
+    """Study types, as gentropy `StudyType`."""
+
+    GWAS = 'gwas'
+    EQTL = 'eqtl'
+    PQTL = 'pqtl'
+    SQTL = 'sqtl'
+    TUQTL = 'tuqtl'
+    SCEQTL = 'sceqtl'
+    SCPQTL = 'scpqtl'
+    SCSQTL = 'scsqtl'
+    SCTUQTL = 'sctuqtl'
+
 
 study_schema = pl.Schema({
     'studyId': pl.String(),

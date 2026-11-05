@@ -135,7 +135,11 @@ def type_valid_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
     so it raises instead of being published.
 
     Examples:
-        >>> sets = pl.LazyFrame({'chromosome': ['10', '2', 'X'], 'fineMappingMethod': ['PICS', 'SuSiE', 'SuSiE-inf']})
+        >>> sets = pl.LazyFrame({
+        ...     'chromosome': ['10', '2', 'X'],
+        ...     'studyType': ['gwas', 'eqtl', 'pqtl'],
+        ...     'fineMappingMethod': ['PICS', 'SuSiE', 'SuSiE-inf'],
+        ... })
         >>> typed = type_valid_sets(sets).collect()
         >>> typed.schema['chromosome'] == validated_credible_set_schema['chromosome']
         True
@@ -144,7 +148,8 @@ def type_valid_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
 
         >>> typed.sort('chromosome')['chromosome'].to_list()
         ['2', '10', 'X']
-        >>> type_valid_sets(pl.LazyFrame({'chromosome': ['23'], 'fineMappingMethod': ['PICS']})).collect()
+        >>> outside = pl.LazyFrame({'chromosome': ['23'], 'studyType': ['gwas'], 'fineMappingMethod': ['PICS']})
+        >>> type_valid_sets(outside).collect()
         Traceback (most recent call last):
         ...
         polars.exceptions.InvalidOperationError: ...
