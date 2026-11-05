@@ -31,7 +31,7 @@
   },
   {
     "id": "numberColocalisingVariants",
-    "description": "Number of variants intersecting between two overlapping study-loci"
+    "description": "Number of variants shared by the two colocalising credible sets"
   },
   {
     "id": "rightLocusId",
