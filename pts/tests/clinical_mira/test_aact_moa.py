@@ -1,6 +1,7 @@
+import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,7 +14,7 @@ from otter.config.model import Config
 
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, SeedTooSmall, aact_moa, stage_moa
-from pts.transformers.clinical_mira.moa import papers, schemas
+from pts.transformers.clinical_mira.moa import papers, schemas, staging
 from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, write_run
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA, schema_digest
@@ -592,3 +593,107 @@ def test_a_pool_with_papers_is_never_adopted_even_under_its_current_key(
     assert batches.drugs == ['sotorasib']
     assert batches.prompts['sotorasib'] == schemas.papers_prompt()
     assert (stats['adopted'], stats['computed']) == (1, 1)
+
+
+def _store_records(root: Path) -> pl.DataFrame:
+    return read_records(str(root / 'store' / MOA.name), _config(root), pl.String())
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def test_each_compute_call_sees_keys_of_one_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    real = staging.moa_compute
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        compute = real(*args, **kwargs)
+
+        def recorded(keys: list[str]) -> list[tuple[str | None, str | None]]:
+            out = compute(keys)
+            calls.append([json.loads(o)['drug_name'] for o, _ in out if o is not None])
+            return out
+
+        return recorded
+
+    monkeypatch.setattr(staging, 'moa_compute', spy)
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+
+    _stage(monkeypatch, tmp_path, batches, **PAPER_WORLD)
+
+    assert calls == [['sotorasib'], ['aspirinx']]
+    assert batches.prompts == {'sotorasib': schemas.papers_prompt(), 'aspirinx': schemas.load_prompt('extract')}
+    prompts = {json.loads(o)['drug_name']: json.loads(o)['prompt_sha256'] for o in _store_records(tmp_path)['output']}
+    assert prompts == {
+        'sotorasib': _sha256(schemas.papers_prompt()),
+        'aspirinx': _sha256(schemas.load_prompt('extract')),
+    }
+
+
+def test_both_prompt_groups_are_written_and_their_stats_summed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches(failing=frozenset({'aspirinx'}), answers=_with_paper_answers('pmid111'))
+
+    stats = _stage(monkeypatch, tmp_path, batches, max_attempts=1, **PAPER_WORLD)
+
+    assert (stats['computed'], stats['failed']) == (2, 1)
+    records = _store_records(tmp_path)
+    runs = sorted(
+        (status, re.sub(r'\d{8}T\d{6}Z', '<time>', run_id))
+        for status, run_id in records.select('status', 'run_id').iter_rows()
+    )
+    assert runs == [('failed', 'v1-<time>-0000'), ('ok', 'v1-<time>-papers-0000')]
+    assert _rows(tmp_path) == [('sotorasib', 'KRAS'), ('sotorasib', 'MEK')]
+
+
+class CrashingBatches(FakeBatches):
+    """Fails the first collection of a batch holding ``crash_on``, as if the run died while it was pending."""
+
+    def __init__(self, crash_on: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.crash_on = crash_on
+        self.crashed = False
+
+    def results(self, batch_id: str) -> Iterator[SimpleNamespace]:
+        requests = self.created[int(batch_id.split('_')[1]) - 1]
+        texts = [r['params']['messages'][0]['content'] for r in requests]
+        if not self.crashed and any(t.startswith(f'Drug: {self.crash_on}\n') for t in texts):
+            self.crashed = True
+            msg = 'the run died'
+            raise ConnectionError(msg)
+        yield from super().results(batch_id)
+
+
+def test_a_crash_in_the_second_group_keeps_the_first_and_the_retry_resumes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    batches = CrashingBatches('aspirinx', answers=_with_paper_answers('pmid111'))
+
+    with pytest.raises(ComputeAborted):
+        _stage(monkeypatch, tmp_path, batches, **PAPER_WORLD)
+    kept = [json.loads(o)['drug_name'] for o in _store_records(tmp_path)['output']]
+    stats = _stage(monkeypatch, tmp_path, batches, work='work_retry', **PAPER_WORLD)
+
+    assert kept == ['sotorasib']
+    assert batches.drugs == ['sotorasib', 'aspirinx']
+    assert (stats['computed'], stats['failed'], stats['published']) == (1, 0, True)
+    assert _rows(tmp_path) == [('aspirinx', 'COX'), ('sotorasib', 'KRAS'), ('sotorasib', 'MEK')]
+
+
+def test_a_pool_is_computed_when_a_cited_paper_is_pushed_out(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    older = {str(p): ('A report', QUIET_PAPER) for p in range(102, 106)}
+    abstracts = {'101': ('The first report', PAPER), **older, '106': ('A new report', QUIET_PAPER)}
+    links = [('nct1', str(p)) for p in range(101, 106)]
+    _stage(
+        monkeypatch,
+        tmp_path,
+        FakeBatches(answers=_with_paper_answers('pmid101')),
+        links=links,
+        abstracts=abstracts,
+    )
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', links=[*links, ('nct1', '106')], abstracts=abstracts)
+
+    assert batches.drugs == ['sotorasib']
+    assert (stats['carried'], stats['computed']) == (0, 1)

@@ -57,22 +57,43 @@ def request_text(drug_name: str, pool_text: str) -> str:
     return f'Drug: {drug_name}\n\n{pool_text}'
 
 
+def prompt_sha256(prompt: str) -> str:
+    """The sha256 hex of a system prompt."""
+    return hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+
+
 def record_output(
-    drug_name: str, trials: list[dict], extraction: dict, usage: dict | None, carried_from: str | None
+    drug_name: str,
+    trials: list[dict],
+    extraction: dict,
+    usage: dict | None,
+    carried_from: str | None,
+    prompt_sha: str | None,
 ) -> str:
-    """The JSON a record stores as its ``output``."""
+    """The JSON a record stores as its ``output``, ``prompt_sha256`` the sha256 of the system prompt it came from."""
     return json.dumps({
         'drug_name': drug_name,
         'trials': trials,
         'extraction': extraction,
         'usage': usage,
         'carried_from': carried_from,
+        'prompt_sha256': prompt_sha,
     })
 
 
 def parse_output(output: str) -> dict[str, Any]:
-    """The fields of a record's ``output``."""
-    return json.loads(output)
+    """The fields of a record's ``output``, ``prompt_sha256`` null when the output predates it."""
+    return {'prompt_sha256': None, **json.loads(output)}
+
+
+def _cited(extraction: dict) -> set[str]:
+    """The entry ids an extraction's evidence cites."""
+    return {
+        evidence['nctId']
+        for mechanism in extraction.get('mechanisms') or []
+        for evidence in mechanism.get('evidence') or []
+        if evidence.get('nctId')
+    }
 
 
 def carry_forward(
@@ -81,8 +102,9 @@ def carry_forward(
     """Carry a drug's latest output to its changed pool when the change has no mechanism wording.
 
     A pool is carried when it has no ``ok`` record at ``tag``, an ``ok`` record at ``tag`` exists
-    for its drug name, and every trial added or edited since the latest such record has text
-    without :py:data:`pooling.MOA_VOCAB` terms.
+    for its drug name, every trial added or edited since the latest such record has text
+    without :py:data:`pooling.MOA_VOCAB` terms, and every entry of that record that its
+    evidence cites, trial or publication, is still one of the pool's entries.
 
     Args:
         trials: Output of :py:func:`pool_trials`.
@@ -93,7 +115,8 @@ def carry_forward(
 
     Returns:
         pl.DataFrame: Records ready for ``write_run``, with the pool's current ``trials``,
-        the previous ``extraction``, no ``usage`` and ``carried_from`` the previous content key.
+        the previous ``extraction`` and ``prompt_sha256``, no ``usage`` and ``carried_from`` the
+        previous content key.
     """
     ok = records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag)).sort(
         'computed_at', maintain_order=True
@@ -117,13 +140,21 @@ def carry_forward(
         changed = [t['nct_id'] for t in pool['trials'] if known.get(t['nct_id']) != t['content_sha256']]
         if any(mentions.get(nct_id, True) for nct_id in changed):
             continue
+        dropped = known.keys() - {t['nct_id'] for t in pool['trials']}
+        if dropped & _cited(previous['extraction']):
+            continue
         rows.append({
             'text_sha256': text_sha256(pool['content_key']),
             'text': pool['content_key'],
             'model': MOA.name,
             'model_revision': tag,
             'output': record_output(
-                pool['drug_name'], pool['trials'], previous['extraction'], None, previous['content_key']
+                pool['drug_name'],
+                pool['trials'],
+                previous['extraction'],
+                None,
+                previous['content_key'],
+                previous['prompt_sha256'],
             ),
             'status': 'ok',
             'error': None,
@@ -186,7 +217,12 @@ def import_experiment_cache(
             if row is None:
                 continue
             output = record_output(
-                pool['drug_name'], listed[pool['content_key']], row['response'], row.get('usage'), None
+                pool['drug_name'],
+                listed[pool['content_key']],
+                row['response'],
+                row.get('usage'),
+                None,
+                prompt_sha256(system_prompt),
             )
             rows.append({
                 'text_sha256': text_sha256(pool['content_key']),
@@ -206,7 +242,7 @@ def import_experiment_cache(
 
 
 def _sha8(text: str) -> str:
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:8]
+    return prompt_sha256(text)[:8]
 
 
 def _state_for(state_uri: str, prompt: str) -> str:
@@ -254,20 +290,21 @@ def adopt_records(records: pl.DataFrame, keys: list[str], from_tag: str, tag: st
 def moa_compute(
     pools: pl.DataFrame,
     trials: pl.DataFrame,
-    system_prompts: dict[str, str],
+    system_prompt: str,
     state_uri: str,
     scratch: Path,
     client: Any = None,
     **batch_kwargs: Any,
 ) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
-    """Build the ``compute`` of :py:func:`map_texts` that extracts mechanisms with Claude.
+    """Build the ``compute`` of :py:func:`map_texts` that extracts mechanisms with Claude under one prompt.
 
     Args:
         pools: Output of :py:func:`pooling.build_pools`.
         trials: Output of :py:func:`pool_trials`.
-        system_prompts: The extraction prompt of each content key.
-        state_uri: Where the submitted batch ids are recorded, a path or URI. Each prompt has its own file.
-        scratch: Local directory for the result caches, one per prompt.
+        system_prompt: The extraction prompt.
+        state_uri: Where the submitted batch ids are recorded, a path or URI. The file is named by the
+            prompt's sha8.
+        scratch: Local directory for the result cache, named by the prompt's sha8.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
         **batch_kwargs: Passed to :py:func:`run_batch_cached`.
 
@@ -279,41 +316,37 @@ def moa_compute(
         for row in pools.select('content_key', 'drug_name', 'text').iter_rows(named=True)
     }
     listed = {row['content_key']: row for row in trials.to_dicts()}
+    cache_path = scratch / f'moa_cache-{_sha8(system_prompt)}.jsonl'
+    prompt_sha = prompt_sha256(system_prompt)
 
     def compute(keys: list[str]) -> list[tuple[str | None, str | None]]:
-        by_prompt: dict[str, list[str]] = {}
+        results, errors = run_batch_cached(
+            [(key, texts[key]) for key in keys],
+            system_prompt=system_prompt,
+            response_model=schemas.MoaExtraction,
+            model=MOA.model,
+            effort=MOA.params['effort'],
+            cache_path=cache_path,
+            state_uri=_state_for(state_uri, system_prompt),
+            client=client,
+            **batch_kwargs,
+        )
+        usage = read_usage(cache_path)
+        out: list[tuple[str | None, str | None]] = []
         for key in keys:
-            by_prompt.setdefault(system_prompts[key], []).append(key)
-        out: dict[str, tuple[str | None, str | None]] = {}
-        for prompt, group in by_prompt.items():
-            cache_path = scratch / f'moa_cache-{_sha8(prompt)}.jsonl'
-            results, errors = run_batch_cached(
-                [(key, texts[key]) for key in group],
-                system_prompt=prompt,
-                response_model=schemas.MoaExtraction,
-                model=MOA.model,
-                effort=MOA.params['effort'],
-                cache_path=cache_path,
-                state_uri=_state_for(state_uri, prompt),
-                client=client,
-                **batch_kwargs,
+            if key not in results:
+                out.append((None, errors.get(key, 'missing')))
+                continue
+            result_key = llm.result_key(texts[key], system_prompt, schemas.MoaExtraction, MOA.model)
+            output = record_output(
+                listed[key]['drug_name'],
+                listed[key]['trials'],
+                results[key].model_dump(mode='json', by_alias=True),
+                usage.get(result_key),
+                None,
+                prompt_sha,
             )
-            usage = read_usage(cache_path)
-            for key in group:
-                if key not in results:
-                    out[key] = (None, errors.get(key, 'missing'))
-                    continue
-                result_key = llm.result_key(texts[key], prompt, schemas.MoaExtraction, MOA.model)
-                out[key] = (
-                    record_output(
-                        listed[key]['drug_name'],
-                        listed[key]['trials'],
-                        results[key].model_dump(mode='json', by_alias=True),
-                        usage.get(result_key),
-                        None,
-                    ),
-                    None,
-                )
-        return [out[key] for key in keys]
+            out.append((output, None))
+        return out
 
     return compute

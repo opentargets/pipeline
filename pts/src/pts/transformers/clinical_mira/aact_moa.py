@@ -271,9 +271,6 @@ def stage_moa(
         for row in listed.select('content_key', 'trials').iter_rows(named=True)
         if any(t['nct_id'].startswith(PAPER_PREFIX) for t in row['trials'] or [])
     }
-    prompts = {
-        key: schemas.papers_prompt() if key in with_papers else system_prompt for key in pools['content_key'].to_list()
-    }
     logger.info(f'{added.height} publications ({fetched} fetched) in {len(with_papers)} pools')
 
     seeded = 0
@@ -324,29 +321,41 @@ def stage_moa(
             write_run(carried_records, store_uri, f'{run_id}-carry', config, pl.String())
         carried = carried_records.height
 
-    compute = staging.moa_compute(
-        pools,
-        listed,
-        prompts,
-        f'{store_uri}/batches/{settings.snapshot}-{tag}.json',
-        config.work_path,
-        client=client,
-    )
-    mapped = map_texts(
-        pools['content_key'],
-        compute if client is not None else _guarded(compute, settings.workspace_id_env),
-        store_uri,
-        MOA.name,
-        tag,
-        run_id,
-        config,
-        max_attempts=settings.max_attempts,
-        output_dtype=pl.String(),
-        allow_failures=True,
-        shard_size=settings.shard_size,
-    )
+    keys = pools['content_key']
+    groups = [
+        (keys.filter(keys.is_in(sorted(with_papers))), schemas.papers_prompt(), f'{run_id}-papers'),
+        (keys.filter(~keys.is_in(sorted(with_papers))), system_prompt, run_id),
+    ]
+    frames, computed, failed = [], 0, 0
+    for group_keys, prompt, group_run_id in groups:
+        compute = staging.moa_compute(
+            pools,
+            listed,
+            prompt,
+            f'{store_uri}/batches/{settings.snapshot}-{tag}.json',
+            config.work_path,
+            client=client,
+        )
+        mapped = map_texts(
+            group_keys,
+            compute if client is not None else _guarded(compute, settings.workspace_id_env),
+            store_uri,
+            MOA.name,
+            tag,
+            group_run_id,
+            config,
+            max_attempts=settings.max_attempts,
+            output_dtype=pl.String(),
+            allow_failures=True,
+            shard_size=settings.shard_size,
+        )
+        frames.append(mapped.frame)
+        computed += mapped.computed
+        failed += mapped.failed
 
-    outputs = {key: staging.parse_output(output) for key, output in mapped.frame.select('text', 'output').iter_rows()}
+    outputs = {
+        key: staging.parse_output(output) for key, output in pl.concat(frames).select('text', 'output').iter_rows()
+    }
     extractions = {}
     carried_pools = set()
     for pool_id, key in pools.select('pool_id', 'content_key').iter_rows():
@@ -372,8 +381,8 @@ def stage_moa(
         'pools': pools.height,
         'seeded': seeded,
         'carried': carried,
-        'computed': mapped.computed,
-        'failed': mapped.failed,
+        'computed': computed,
+        'failed': failed,
         'mechanisms': rows.height,
         'dropped_by_quote_check': mechanisms.filter(~pl.col('kept')).height,
         'published': published,
