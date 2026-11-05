@@ -7,10 +7,11 @@ environments:
     input:
       # the SuSiE results of eQTL Catalogue r8, copied from the EBI FTP
       eqtl_catalogue: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/eQTL_Catalogue_r8_260626
-    output: gs://eqtl_catalogue_data/r8/prod/20261030T153207
+    output: gs://eqtl_catalogue_data/r8/prod/20261105T130431
     scratchpad:
-      # the gentropy dev commit with the pubmedId fix (opentargets/gentropy#1334), not yet in a tag
-      gentropy_ref: 1ef3310751443ffcc1bfa52a9f2a07b3b72dd849
+      # with the pubmedId fix (opentargets/gentropy#1334), one full SuSiE row per variant, region and
+      # trait (#1338), and a negative region start parsed as a locus start of 1 (#1344)
+      gentropy_ref: v4.0.0-rc.2
       metadata_uri: https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/fd99d45d3e433dcdf3c3d0acb4db0b7d5e8a7bd3/data_tables/dataset_metadata_r8.tsv
 
 setup:
