@@ -10,6 +10,10 @@
     "isPrimaryKey": true
   },
   {
+    "id": "curation",
+    "description": "How the mechanism was curated: manual (ChEMBL) or electronic (inferred from ClinicalTrials.gov trial text by a language model)"
+  },
+  {
     "id": "mechanismOfAction",
     "description": "Drug pharmacological action",
     "isPrimaryKey": true
