@@ -470,7 +470,7 @@ steps:
       destination: input/evidence/cancerbiomarkers/associations.tsv
 
     - name: copy cancer biomarkers sources
-      source: gs://otar000-evidence_input/CancerBiomarkers/data_files/cancer_biomarker_source.jsonl
+      source: gs://otar000-evidence_input/CancerBiomarkers/data_files/cancer_biomarker_source-2026-11-05.jsonl
       destination: input/evidence/cancerbiomarkers/sources.jsonl
 
     - name: copy cancer biomarkers diseases

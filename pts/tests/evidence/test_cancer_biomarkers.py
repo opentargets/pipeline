@@ -401,6 +401,21 @@ def test_generate_gives_no_urls_for_pmid_and_ncit_sources(tmp_path: Path) -> Non
     assert raw['urls'].to_list() == [[{'niceName': 'AACR Meeting 2012', 'url': 'http://aacr/2012'}]]
 
 
+def test_generate_links_a_cited_abstract_and_falls_back_to_its_meeting(tmp_path: Path) -> None:
+    sources = _sources(tmp_path, [{**BASE, 'Source': 'AACR 2012 (abstr LB-122);AACR 2012 (abstr 1)'}])
+    abstract = {'source': 'AACR 2012 (abstr LB-122)', 'url': 'http://doi/LB-122', 'label': 'AACR Meeting 2012, LB-122'}
+    _jsonl(Path(sources['source']), [*SOURCES, abstract])
+
+    raw = generate(**sources).collect()
+
+    assert raw['urls'].to_list() == [
+        [
+            {'niceName': 'AACR Meeting 2012', 'url': 'http://aacr/2012'},
+            {'niceName': 'AACR Meeting 2012, LB-122', 'url': 'http://doi/LB-122'},
+        ]
+    ]
+
+
 def _zip_alterations_with_type(alterations: list[str], alteration_type: list[str]) -> list[tuple[str, str]]:
     """The former `zip_alterations_with_type` UDF."""
     alteration_types = alteration_type * len(alterations)
