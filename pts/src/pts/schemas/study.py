@@ -6,7 +6,7 @@ import polars as pl
 
 
 class StudyType(StrEnum):
-    """Study types, as gentropy `StudyType`."""
+    """Study types."""
 
     GWAS = 'gwas'
     EQTL = 'eqtl'

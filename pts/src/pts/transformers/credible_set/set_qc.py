@@ -1,5 +1,7 @@
 """Quality checks of credible sets; the second credible set stage, which only adds flags."""
 
+from __future__ import annotations
+
 from typing import Any
 
 import polars as pl
@@ -7,10 +9,12 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.credible_set import credible_set_schema
+from pts.schemas.credible_set import credible_set_required, credible_set_schema
 from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.credible_set.source_dataset import read_source_dataset
+from pts.transformers.credible_set.variant_id import variant_chromosome, variant_position
 from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -39,8 +43,8 @@ def flag_invalid_cs_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible set identifiers that are not a 32-character lowercase hexadecimal md5.
 
     Examples:
-        >>> sets = pl.LazyFrame({'id': ['0' * 32, 'A' * 32, '0' * 31], 'qualityControls': [[]] * 3})
-        >>> flag_invalid_cs_id(sets).collect()['qualityControls'].list.len().to_list()
+        >>> credible_set = pl.LazyFrame({'id': ['0' * 32, 'A' * 32, '0' * 31], 'qualityControls': [[]] * 3})
+        >>> flag_invalid_cs_id(credible_set).collect()['qualityControls'].list.len().to_list()
         [0, 1, 1]
     """
     invalid = ~pl.col('id').str.contains(CREDIBLE_SET_ID_PATTERN)
@@ -51,8 +55,8 @@ def flag_invalid_chromosome(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible sets whose `chromosome` is not one of `Chromosome` (1 to 22, X, Y, XY, MT).
 
     Examples:
-        >>> sets = pl.LazyFrame({'chromosome': ['1', 'XY', '23', 'chr1'], 'qualityControls': [[]] * 4})
-        >>> flag_invalid_chromosome(sets).collect()['qualityControls'].list.len().to_list()
+        >>> credible_set = pl.LazyFrame({'chromosome': ['1', 'XY', '23', 'chr1'], 'qualityControls': [[]] * 4})
+        >>> flag_invalid_chromosome(credible_set).collect()['qualityControls'].list.len().to_list()
         [0, 0, 1, 1]
     """
     invalid = ~pl.col('chromosome').is_in([chromosome.value for chromosome in Chromosome])
@@ -65,15 +69,15 @@ def flag_lead_chromosome_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
     The chromosome of the lead is the first field of `leadVariantId`.
 
     Examples:
-        >>> sets = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({
         ...     'chromosome': ['1', '1', 'X'],
         ...     'leadVariantId': ['2_100_A_T', '1_100_A_T', '23_100_A_T'],
         ...     'qualityControls': [[]] * 3,
         ... })
-        >>> flag_lead_chromosome_mismatch(sets).collect()['qualityControls'].list.len().to_list()
+        >>> flag_lead_chromosome_mismatch(credible_set).collect()['qualityControls'].list.len().to_list()
         [1, 0, 1]
     """
-    mismatch = pl.col('leadVariantId').str.split('_').list.first() != pl.col('chromosome')
+    mismatch = variant_chromosome(pl.col('leadVariantId')) != pl.col('chromosome')
     return flag_rows(frame, mismatch, CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH)
 
 
@@ -81,18 +85,13 @@ def flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[Finemappi
     """Flag credible sets whose `fineMappingMethod` is not one of `allowed`; the comparison is exact.
 
     Examples:
-        >>> sets = pl.LazyFrame({'fineMappingMethod': ['SuSiE', 'SuSie', 'PICS'], 'qualityControls': [[]] * 3})
-        >>> flagged = flag_invalid_finemapping_method(sets, [FinemappingMethod.SUSIE])
+        >>> credible_set = pl.LazyFrame({'fineMappingMethod': ['SuSiE', 'SuSie', 'PICS'], 'qualityControls': [[]] * 3})
+        >>> flagged = flag_invalid_finemapping_method(credible_set, [FinemappingMethod.SUSIE])
         >>> flagged.collect()['qualityControls'].list.len().to_list()
         [0, 1, 1]
     """
     invalid = ~pl.col('fineMappingMethod').is_in([method.value for method in allowed])
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
-
-
-def lead_position() -> pl.Expr:
-    """The position of the lead variant, the second field of `leadVariantId`."""
-    return pl.col('leadVariantId').str.split('_').list.get(1).cast(pl.Int64, strict=False)
 
 
 def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -102,56 +101,61 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
     `KnownGenomicRegion.MHC` are inclusive.
 
     Examples:
-        >>> sets = pl.LazyFrame({
+        >>> credible_set = pl.LazyFrame({
         ...     'chromosome': ['6', '6', '6', '7'],
         ...     'leadVariantId': ['6_25726063_A_T', '6_33400556_A_T', '6_33400557_A_T', '7_30000000_A_T'],
         ...     'qualityControls': [[]] * 4,
         ... })
-        >>> flag_in_mhc(sets).collect()['qualityControls'].list.len().to_list()
+        >>> flag_in_mhc(credible_set).collect()['qualityControls'].list.len().to_list()
         [1, 1, 0, 0]
     """
     mhc = KnownGenomicRegion.MHC.value
-    in_mhc = (pl.col('chromosome') == mhc.chromosome.value) & lead_position().is_between(mhc.start, mhc.end)
+    lead_position = variant_position(pl.col('leadVariantId'))
+    in_mhc = (pl.col('chromosome') == mhc.chromosome.value) & lead_position.is_between(mhc.start, mhc.end)
     return flag_rows(frame, in_mhc, CredibleSetFlag.IN_MHC)
 
 
-def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets against the study index; the credible set keeps its own `studyType`.
+def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
+    """Flag credible sets against the study index, and fill a missing `studyType` from it.
+
+    A set without a `studyType` takes its study's from the index, with no flag; a set that has one
+    keeps it, so a mismatch stays visible.
 
     - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
-    - STUDY_TYPE_MISMATCH: the study is in the index, and the `studyType` of the set is missing or
-      differs from the study's.
+    - STUDY_TYPE_MISMATCH: the study is in the index, and the source `studyType` differs from the
+      study's.
     - FLAGGED_STUDY: the study carries at least one quality control flag.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
       SUMSTATS_NOT_AVAILABLE, so its summary statistics should give the set instead.
     - MISSING_STUDY: the study is not in the study index.
 
     Examples:
-        >>> sets = pl.LazyFrame({
-        ...     'studyId': ['s', 't', 'unknown'],
-        ...     'studyType': ['eQTL', 'gwas', 'gwas'],
+        >>> credible_set = pl.LazyFrame({
+        ...     'studyId': ['s', 't', 'u', 'unknown'],
+        ...     'studyType': ['eQTL', 'gwas', None, 'gwas'],
+        ...     'qualityControls': [[], [], [], []],
+        ... })
+        >>> study = pl.LazyFrame({
+        ...     'studyId': ['s', 't', 'u'],
+        ...     'studyType': ['eqtl', 'gwas', 'pqtl'],
         ...     'qualityControls': [[], [], []],
         ... })
-        >>> studies = pl.LazyFrame({
-        ...     'studyId': ['s', 't'],
-        ...     'studyType': ['eqtl', 'gwas'],
-        ...     'qualityControls': [[], []],
-        ... })
-        >>> for row in flag_study(sets, studies).sort('studyId').collect().iter_rows(named=True):
-        ...     flags = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
-        ...     print(row['studyId'], row['studyType'], flags)
+        >>> for row in flag_study(credible_set, study).sort('studyId').collect().iter_rows(named=True):
+        ...     flag_name = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
+        ...     print(row['studyId'], row['studyType'], flag_name)
         s eQTL ['INVALID_STUDY_TYPE', 'STUDY_TYPE_MISMATCH']
         t gwas []
+        u pqtl []
         unknown gwas ['MISSING_STUDY']
     """
-    lookup = studies.select(
+    lookup = study.select(
         'studyId',
         pl.col('studyType').alias('_study_type'),
         pl.col('qualityControls').alias('_study_qc'),
         pl.lit(True).alias('_study_found'),
     )
     found = pl.col('_study_found').is_not_null()
-    mismatch = found & (pl.col('studyType').is_null() | (pl.col('studyType') != pl.col('_study_type')))
+    mismatch = found & (pl.col('studyType') != pl.col('_study_type'))
     top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
     no_sumstats = pl.col('_study_qc').list.contains(StudyQualityFlag.SUMSTATS_NOT_AVAILABLE.value)
     return (
@@ -162,6 +166,7 @@ def flag_study(frame: pl.LazyFrame, studies: pl.LazyFrame) -> pl.LazyFrame:
         .pipe(flag_rows, pl.col('_study_qc').list.len() > 0, CredibleSetFlag.FLAGGED_STUDY)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
         .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)
+        .with_columns(pl.coalesce('studyType', '_study_type').alias('studyType'))
         .drop('_study_type', '_study_qc', '_study_found')
     )
 
@@ -184,8 +189,7 @@ def set_qc(
     sources = SetQcSource.model_validate(source)
     options = SetQcSettings.model_validate(settings)
     flagged = (
-        scan_dataset(sources.credible_set)
-        .match_to_schema(credible_set_schema)
+        read_source_dataset(sources.credible_set, credible_set_schema, credible_set_required)
         .pipe(flag_invalid_cs_id)
         .pipe(flag_invalid_chromosome)
         .pipe(flag_lead_chromosome_mismatch)

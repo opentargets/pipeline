@@ -29,6 +29,9 @@ def _set(**values: str | list[str] | None) -> pl.LazyFrame:
     row = {
         'id': CS_ID,
         'chromosome': '1',
+        'locusStart': 1,
+        'locusEnd': 1_000_000,
+        'studyId': 's',
         'leadVariantId': '1_100_A_T',
         'fineMappingMethod': 'SuSiE',
         'qualityControls': [],
@@ -107,8 +110,6 @@ def test_set_qc_writes_every_set_flag(tmp_path: Path) -> None:
     )
     studies = _studies(('s', 'gwas', [STUDY_FLAGGED]))
     sets.collect().write_parquet(tmp_path / 'sets.parquet')
-    variants = pl.DataFrame({'credibleSetId': ['X'], 'variantId': ['7_1_A_T']})
-    variants.write_parquet(tmp_path / 'variants.parquet')
     studies.collect().write_parquet(tmp_path / 'study.parquet')
     set_qc(
         source={
@@ -162,7 +163,6 @@ def test_a_set_of_an_unknown_study_is_missing_and_keeps_its_study_type() -> None
         ('eqtl', 'eqtl', False),
         ('eqtl', 'gwas', True),
         ('eQTL', 'eqtl', True),
-        (None, 'gwas', True),
     ],
 )
 def test_a_study_type_different_from_the_study_index_is_a_mismatch_and_is_kept(
@@ -171,6 +171,18 @@ def test_a_study_type_different_from_the_study_index_is_a_mismatch_and_is_kept(
     result = _with_study(_set(studyId='s', studyType=source_type), _studies(('s', index_type, [])))
     assert (CredibleSetFlag.STUDY_TYPE_MISMATCH in result['qualityControls'].item()) is mismatch
     assert result['studyType'].item() == source_type
+
+
+def test_a_missing_study_type_is_taken_from_the_study_index_without_a_flag() -> None:
+    result = _with_study(_set(studyId='s', studyType=None), _studies(('s', 'pqtl', [])))
+    assert result['studyType'].item() == 'pqtl'
+    assert result['qualityControls'].item().to_list() == []
+
+
+def test_a_missing_study_type_of_an_unknown_study_stays_missing() -> None:
+    result = _with_study(_set(studyId='unknown', studyType=None), _studies(('s', 'pqtl', [])))
+    assert result['studyType'].item() is None
+    assert set(result['qualityControls'].item()) == {CredibleSetFlag.MISSING_STUDY}
 
 
 @pytest.mark.parametrize(
