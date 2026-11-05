@@ -41,6 +41,12 @@ def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
     return pl.when(statistic.is_finite()).then(statistic).alias('chi2')
 
 
+def _finite(value: pl.Expr) -> pl.Expr:
+    """`value` as a float, null when it is missing, NaN or infinite."""
+    value = value.cast(pl.Float64)
+    return pl.when(value.is_finite()).then(value)
+
+
 def rescaled_effect_size(
     credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame
 ) -> pl.LazyFrame:
@@ -54,10 +60,11 @@ def rescaled_effect_size(
       `SE = sqrt(1 / (varG * N * prev * (1 - prev)))`.
 
     `rescaledAbsBeta = |z| * SE`, `rescaledStandardError = SE`, and `rescaledDirection` is the sign
-    of `conditionalBeta`, otherwise of `reportedBeta`, relative to the effect allele. A rescaled row
-    gets RESCALED_FROM_CONDITIONAL or RESCALED_FROM_MARGINAL after the origin of its direction. The
-    rescaled columns are null, and no flag is set, without a p-value, a beta, a frequency in (0, 1),
-    a supported design or a sample size. The rows and their order are unchanged.
+    of `conditionalBeta`, otherwise of `reportedBeta`, relative to the effect allele; a NaN or
+    infinite beta counts as missing. A rescaled row gets RESCALED_FROM_CONDITIONAL or
+    RESCALED_FROM_MARGINAL after the origin of its direction. The rescaled columns are null, and no
+    flag is set, without a p-value, a finite beta, a frequency in (0, 1), a supported design or a
+    sample size. The rows and their order are unchanged.
 
     Examples:
         >>> credible_set_variant = pl.LazyFrame({
@@ -96,12 +103,13 @@ def rescaled_effect_size(
         .when(pl.col('_binary'))
         .then((1 / (var_g * n * prevalence * (1 - prevalence))).sqrt())
     )
-    beta = pl.coalesce(pl.col('conditionalBeta').cast(pl.Float64), pl.col('reportedBeta').cast(pl.Float64))
+    conditional_beta, reported_beta = _finite(pl.col('conditionalBeta')), _finite(pl.col('reportedBeta'))
+    beta = pl.coalesce(conditional_beta, reported_beta)
     z = chi2_from_pvalue(pl.col('pValueMantissa'), pl.col('pValueExponent')).sqrt()
     rescalable = (
         af.is_between(0, 1, closed='none') & (n > 0) & beta.is_not_null() & z.is_not_null() & standard_error.is_finite()
     ).fill_null(False)
-    conditional = pl.col('conditionalBeta').is_not_null()
+    conditional = conditional_beta.is_not_null()
     return (
         credible_set_variant
         .join(
