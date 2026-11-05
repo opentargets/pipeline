@@ -32,7 +32,7 @@ def _credible_set_step(ppp: bool, monkeypatch) -> list[dict[str, Any]]:
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
 def test_credible_set_sources_follow_the_run(monkeypatch, ppp):
     """PPP adds its sources to the explode and to validation; the platform reads only its own."""
-    explode, validation, _ = _credible_set_step(ppp, monkeypatch)
+    explode, validation = _credible_set_step(ppp, monkeypatch)
     for name in PPP_ONLY:
         assert (f'molqtl/{name}' in explode['foreach']) is ppp
     for name in BOTH:
@@ -47,12 +47,8 @@ def test_ppp_credible_sets_are_processed_like_the_platform_ones(monkeypatch):
     """The PPP step differs from the platform step only in its sources."""
 
     def without_sources(step: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        explode, validation, annotation = step
-        return [
-            {**explode, 'foreach': None},
-            {**validation, 'source': None},
-            annotation,
-        ]
+        explode, validation = step
+        return [{**explode, 'foreach': None}, {**validation, 'source': None}]
 
     platform = _credible_set_step(False, monkeypatch)
     ppp = _credible_set_step(True, monkeypatch)
@@ -137,3 +133,16 @@ def test_validation_steps_run_in_pts():
         assert f'gentropy_{step}' not in config.steps()
     # pts_study already depends on pts_target and pts_disease, which credible set validation also reads.
     assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study']
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_credible_set_annotation_runs_after_the_variant_index(monkeypatch, ppp):
+    """The published credible sets need the gnomAD frequencies of the variant index, which reads the validated sets."""
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    config = UnifiedPipelineConfig()
+    assert 'pts_credible_set_annotation' in config.steps('pts_')
+    assert config.step_definition('pts_credible_set_annotation')['depends_on'] == ['pts_credible_set', 'pts_variant']
+    assert 'pts_credible_set' in config.step_definition('pts_variant')['depends_on']
+    assert config.step_definition('gentropy_colocalisation')['depends_on'] == ['pts_credible_set_annotation']
+    [annotation] = config.pts.config['steps']['credible_set_annotation']
+    assert annotation['source']['variant'] == 'output/variant'
