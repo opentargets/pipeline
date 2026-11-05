@@ -64,7 +64,7 @@ scratchpad:
   staging_gcss_susie_ts: '20261101T152321'
   staging_finngen_gwas_ts: '20261029T152531'
   staging_finngen_meta_ts: '20261102T181409'
-  staging_eqtl_catalogue_ts: '20261030T164426'
+  staging_eqtl_catalogue_ts: '20261105T130431'
   staging_ukb_ppp_eur_ts: '20261026T161010'
   staging_finngen_multiome_ts: '20261029T125742'
   staging_otar2065_microglia_ts: '20261103T163322'
