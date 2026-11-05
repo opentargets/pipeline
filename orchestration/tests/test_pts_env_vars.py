@@ -51,3 +51,16 @@ def test_polars_disk_budget_fits_the_work_disk(dag_bag, config: UnifiedPipelineC
     for task in _gce_tasks(dag_bag, config):
         budget_bytes = int(task.container_env['POLARS_OOC_DISK_BUDGET_MB']) * 1024**2
         assert budget_bytes < task.work_disk_size_gb * 1000**3, f'{task.task_id}: budget exceeds the work disk'
+
+
+def test_polars_disk_budget_is_half_the_work_disk(dag_bag, config: UnifiedPipelineConfig) -> None:
+    """A step given a larger work disk can spill into it; the other half holds the step's own data."""
+    for task in _gce_tasks(dag_bag, config):
+        assert int(task.container_env['POLARS_OOC_DISK_BUDGET_MB']) == task.work_disk_size_gb * 1000 // 2, task.task_id
+
+
+def test_credible_set_validation_runs_on_a_large_vm(dag_bag) -> None:
+    """Validation sorts every credible set variant in genome order, which spills past the default vm."""
+    task = dag_bag.dags['unified_pipeline'].get_task('pts_credible_set.run_pts_credible_set')
+    assert task.machine_type == 'n2d-standard-64'
+    assert task.work_disk_size_gb == 1000
