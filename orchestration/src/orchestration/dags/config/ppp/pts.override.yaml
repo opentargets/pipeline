@@ -124,6 +124,9 @@ steps:
           source:
             credible_set_variant: input/${each}/credible_set_variant
           destination: intermediate/qc/${each}/credible_set_variant
+          settings:
+            coverage: 0.95
+            pip_tolerance: 0.0001
 
     - name: transform validate credible sets
       requires:
