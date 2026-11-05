@@ -256,11 +256,14 @@ def stage_moa(
     abstracts, fetched = _load_abstracts(selected, settings, run_id, config, get)
     pools, trials, texts = pooling.add_papers(pools, trials, texts, selected, abstracts, MOA.params['abstract_chars'])
     listed = staging.pool_trials(pools, texts, trials)
+    paper_ids = pl.col('nct_ids').list.eval(pl.element().filter(pl.element().str.starts_with(PAPER_PREFIX)))
     added = (
-        selected
-        .join(abstracts.select('pmid', 'abstract'), on='pmid', how='inner', maintain_order='left')
-        .filter(pl.col('abstract').str.strip_chars().str.len_chars() > 0)
-        .join(pools.select('drug_name'), on='drug_name', how='semi', maintain_order='left')
+        pools
+        .select('drug_name', pmid=paper_ids)
+        .explode('pmid')
+        .drop_nulls('pmid')
+        .with_columns(pl.col('pmid').str.slice(len(PAPER_PREFIX)))
+        .join(selected, on=['drug_name', 'pmid'], how='left', maintain_order='left')
         .select('drug_name', 'pmid', 'nct_id')
     )
     with_papers = {

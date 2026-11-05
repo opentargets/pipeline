@@ -576,3 +576,19 @@ def test_carry_forward_covers_a_new_paper_without_vocab(monkeypatch: pytest.Monk
     assert published.filter(pl.col('drugName') == 'sotorasib')['papers'].to_list()[0] == [
         {'pmid': '222', 'nctId': 'nct1'}
     ]
+
+
+def test_a_pool_with_papers_is_never_adopted_even_under_its_current_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stage(monkeypatch, tmp_path / 'seed', FakeBatches(), work='seed_work', **PAPER_WORLD)
+    seed_store = str(tmp_path / 'seed' / 'store' / MOA.name)
+    old = read_records(seed_store, _config(tmp_path), pl.String()).with_columns(model_revision=pl.lit('old-tag'))
+    write_run(old, str(tmp_path / 'other' / 'store' / MOA.name), 'old-run', _config(tmp_path), pl.String())
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path / 'other', batches, work='other_work', adopt_from_tag='old-tag', **PAPER_WORLD)
+
+    assert batches.drugs == ['sotorasib']
+    assert batches.prompts['sotorasib'] == schemas.papers_prompt()
+    assert (stats['adopted'], stats['computed']) == (1, 1)
