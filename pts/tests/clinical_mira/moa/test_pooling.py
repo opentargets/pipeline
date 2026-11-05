@@ -175,6 +175,24 @@ def test_content_key_matches_build_pools():
     assert content_key('drugy', entries[2:]) == pools.filter(pl.col('drug_name') == 'drugy')['content_key'][0]
 
 
+def test_content_key_is_pinned_to_a_literal():
+    entries = [('pmid123', 'ccc'), ('NCT00000002', 'bbb'), ('NCT00000001', 'aaa')]
+
+    assert content_key('drugx', entries) == '93fbb5ff43abebfbed78541a4bd79d0e6b497a868d68f07b4a9e64df7aa60b6d'
+
+
+def test_build_pools_content_key_is_pinned_to_a_literal():
+    texts = pl.DataFrame({
+        'id': ['nct2', 'nct1'],
+        'prompt': ['Official Title: two\nPhase: 2', 'Official Title: one\nPhase: 1'],
+    })
+    trials = pl.DataFrame({'nct_id': ['nct2', 'nct1'], 'drug_name': ['drugx', 'drugx']})
+
+    pools = build_pools(trials, texts)
+
+    assert pools['content_key'].to_list() == ['71aa2445ee9ed8aca372f0b186938d7c4ce08fc9e78ccf5238525cf9ab1ae78e']
+
+
 def test_add_papers_leaves_pools_without_papers_unchanged():
     trials, texts, pools = _fixture()
 

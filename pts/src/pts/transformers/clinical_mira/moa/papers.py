@@ -29,6 +29,7 @@ ATTEMPTS = 3
 PAUSE_SECONDS = 5
 TIMEOUT_SECONDS = 60
 USER_AGENT = 'opentargets-pts'
+MAX_CONSECUTIVE_FAILED_CHUNKS = 3
 
 ABSTRACT_SCHEMA = pl.Schema({'pmid': pl.String, 'title': pl.String, 'abstract': pl.String})
 STORE_SCHEMA = pl.Schema({
@@ -40,11 +41,11 @@ STORE_SCHEMA = pl.Schema({
 
 
 def trial_papers(archive: str, scratch_root: str, reference_types: list[str]) -> pl.DataFrame:
-    """Return the ``(nct_id, pmid)`` links of the given reference types whose PMID is all digits."""
+    """Return the ``(nct_id, pmid)`` links of the given reference types whose PMID is 1 to 10 digits."""
     references = read_aact_tables(archive, ['study_references'], scratch_root)['study_references']
     return (
         references
-        .filter(pl.col('reference_type').is_in(reference_types) & pl.col('pmid').str.contains(r'^\d+$'))
+        .filter(pl.col('reference_type').is_in(reference_types) & pl.col('pmid').str.contains(r'^\d{1,10}$'))
         .select('nct_id', 'pmid')
         .unique(maintain_order=True)
     )
@@ -108,7 +109,9 @@ def fetch_abstracts(
 ) -> pl.DataFrame:
     """Fetch the title and abstract of each PMID that Europe PMC returns with an abstract.
 
-    A chunk of PMIDs that fails every attempt is logged and left out of the result.
+    A chunk of PMIDs that fails every attempt is logged and left out of the result. After
+    :py:data:`MAX_CONSECUTIVE_FAILED_CHUNKS` such chunks in a row the remaining PMIDs are not
+    requested, and what was fetched is returned.
 
     Args:
         pmids: The PubMed ids to look up.
@@ -120,11 +123,20 @@ def fetch_abstracts(
     """
     fetch = get or _get_json
     rows: list[dict[str, str | None]] = []
+    failed_in_a_row = 0
     for start in range(0, len(pmids), CHUNK_SIZE):
+        if failed_in_a_row >= MAX_CONSECUTIVE_FAILED_CHUNKS:
+            logger.error(
+                f'Europe PMC failed {failed_in_a_row} chunks in a row: '
+                f'skipping the remaining {len(pmids) - start} of {len(pmids)} PMIDs'
+            )
+            break
         results = _fetch_chunk(pmids[start : start + CHUNK_SIZE], url, fetch)
         if results is None:
+            failed_in_a_row += 1
             logger.error(f'no abstracts for {len(pmids[start : start + CHUNK_SIZE])} PMIDs starting at {pmids[start]}')
             continue
+        failed_in_a_row = 0
         rows.extend(
             {'pmid': r.get('pmid'), 'title': r.get('title'), 'abstract': r.get('abstractText')}
             for r in results

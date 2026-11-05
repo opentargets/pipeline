@@ -133,6 +133,53 @@ def test_fetch_abstracts_without_pmids_makes_no_call() -> None:
     assert out.height == 0
 
 
+def test_trial_papers_drops_out_of_range_pmids(monkeypatch: pytest.MonkeyPatch) -> None:
+    table = pl.DataFrame({
+        'nct_id': ['NCT1', 'NCT2', 'NCT3'],
+        'pmid': ['1' * 20, '1234567890', '7'],
+        'reference_type': ['RESULT', 'RESULT', 'DERIVED'],
+    })
+    monkeypatch.setattr(papers, 'read_aact_tables', lambda *args: {'study_references': table})
+
+    out = papers.trial_papers('a.zip', '/s', ['DERIVED', 'RESULT'])
+
+    assert sorted(out.rows()) == [('NCT2', '1234567890'), ('NCT3', '7')]
+    assert out['pmid'].cast(pl.Int64, strict=True).to_list() == [1234567890, 7]
+
+
+def test_fetch_abstracts_stops_after_consecutive_failed_chunks() -> None:
+    calls: list[str] = []
+
+    def down(url: str) -> dict[str, Any]:
+        calls.append(url)
+        msg = 'down'
+        raise OSError(msg)
+
+    out = papers.fetch_abstracts([str(i) for i in range(1, 401)], URL, down)
+
+    assert len(calls) == 3 * 3
+    assert papers.MAX_CONSECUTIVE_FAILED_CHUNKS == 3
+    assert out.columns == ['pmid', 'title', 'abstract']
+    assert out.height == 0
+
+
+def test_fetch_abstracts_success_resets_the_failure_count() -> None:
+    calls: list[str] = []
+
+    def flaky(url: str) -> dict[str, Any]:
+        calls.append(url)
+        ids = _pmids(url)
+        if (int(ids[0]) - 1) // papers.CHUNK_SIZE % 3 != 2:
+            msg = 'down'
+            raise OSError(msg)
+        return {'resultList': {'result': [{'pmid': p, 'title': 't', 'abstractText': 'a'} for p in ids]}}
+
+    out = papers.fetch_abstracts([str(i) for i in range(1, 9 * papers.CHUNK_SIZE + 1)], URL, flaky)
+
+    assert len(calls) == 6 * 3 + 3
+    assert out.height == 3 * papers.CHUNK_SIZE
+
+
 def test_abstract_store_round_trip_latest_wins(tmp_path: Path) -> None:
     config = _config(tmp_path)
     store = str(tmp_path / 'store')
