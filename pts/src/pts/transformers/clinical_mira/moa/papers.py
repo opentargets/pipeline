@@ -46,7 +46,7 @@ def trial_papers(archive: str, scratch_root: str, reference_types: list[str]) ->
     return (
         references
         .filter(pl.col('reference_type').is_in(reference_types) & pl.col('pmid').str.contains(r'^\d{1,10}$'))
-        .select('nct_id', 'pmid')
+        .select(pl.col('nct_id').str.to_lowercase(), 'pmid')
         .unique(maintain_order=True)
     )
 

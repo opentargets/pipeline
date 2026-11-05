@@ -163,6 +163,7 @@ def _stage(
     links: Sequence[tuple[str, str]] = (),
     abstracts: dict[str, tuple[str, str]] | None = None,
     get: Any = None,
+    references: pl.DataFrame | None = None,
     **settings: Any,
 ) -> dict[str, Any]:
     """Stage the mechanisms of ``world``, a trial id to its drug, description and detailed description."""
@@ -178,7 +179,10 @@ def _stage(
         {'nct_id': [n for n, _ in links], 'pmid': [p for _, p in links]},
         schema={'nct_id': pl.String, 'pmid': pl.String},
     )
-    monkeypatch.setattr(papers, 'trial_papers', lambda *args: linked)
+    if references is None:
+        monkeypatch.setattr(papers, 'trial_papers', lambda *args: linked)
+    else:
+        monkeypatch.setattr(papers, 'read_aact_tables', lambda *args: {'study_references': references})
     prompts = extraction.prompts_for(report)
     drug = pl.Struct({'drug': pl.String})
     table = prompts.select('id', 'prompt_sha256').with_columns(
@@ -698,6 +702,21 @@ def test_a_pool_is_computed_when_a_cited_paper_is_pushed_out(monkeypatch: pytest
 
     assert batches.drugs == ['sotorasib']
     assert (stats['carried'], stats['computed']) == (0, 1)
+
+
+def test_upper_case_aact_references_reach_lower_case_pools(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    references = pl.DataFrame({'nct_id': ['NCT1'], 'pmid': ['111'], 'reference_type': ['RESULT']})
+    batches = FakeBatches(answers=_with_paper_answers('pmid111'))
+
+    stats = _stage(
+        monkeypatch,
+        tmp_path,
+        batches,
+        references=references,
+        abstracts={'111': ('A report', PAPER)},
+    )
+
+    assert stats['pools_with_papers'] == 1
 
 
 def _prompt_cache(root: Path, work: str, prompt: str) -> Path:

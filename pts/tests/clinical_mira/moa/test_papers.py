@@ -41,7 +41,18 @@ def test_trial_papers_keeps_result_and_derived(monkeypatch: pytest.MonkeyPatch) 
     out = papers.trial_papers('a.zip', '/s', ['DERIVED', 'RESULT'])
     assert seen['args'] == ('a.zip', ['study_references'], '/s')
     assert out.columns == ['nct_id', 'pmid']
-    assert sorted(out.rows()) == [('NCT1', '11'), ('NCT2', '22')]
+    assert sorted(out.rows()) == [('nct1', '11'), ('nct2', '22')]
+
+
+def test_trial_papers_lowercases_nct_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    table = pl.DataFrame({
+        'nct_id': ['NCT01234567', 'nct01234567'],
+        'pmid': ['11', '11'],
+        'reference_type': ['RESULT', 'RESULT'],
+    })
+    monkeypatch.setattr(papers, 'read_aact_tables', lambda *args: {'study_references': table})
+    out = papers.trial_papers('a.zip', '/s', ['RESULT'])
+    assert out.rows() == [('nct01234567', '11')]
 
 
 def test_select_papers_newest_first_capped() -> None:
@@ -143,7 +154,7 @@ def test_trial_papers_drops_out_of_range_pmids(monkeypatch: pytest.MonkeyPatch) 
 
     out = papers.trial_papers('a.zip', '/s', ['DERIVED', 'RESULT'])
 
-    assert sorted(out.rows()) == [('NCT2', '1234567890'), ('NCT3', '7')]
+    assert sorted(out.rows()) == [('nct2', '1234567890'), ('nct3', '7')]
     assert out['pmid'].cast(pl.Int64, strict=True).to_list() == [1234567890, 7]
 
 
