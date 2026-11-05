@@ -53,3 +53,9 @@ credible_set_variant_schema = pl.Schema({
     'rescaledDirection': pl.Int8(),
     'qualityControls': pl.List(pl.String()),
 })
+
+credible_set_required = ('id', 'studyId', 'chromosome', 'locusStart', 'locusEnd', 'leadVariantId', 'fineMappingMethod')
+"""The CredibleSet columns that must not be null: the id and the columns it is hashed from."""
+
+credible_set_variant_required = ('credibleSetId', 'variantId', 'posteriorProbability')
+"""The CredibleSetVariant columns that must not be null: the keys of a row and its posterior probability."""

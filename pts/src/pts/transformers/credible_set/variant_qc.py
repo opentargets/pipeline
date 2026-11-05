@@ -9,11 +9,12 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.credible_set import credible_set_variant_schema
+from pts.schemas.credible_set import credible_set_variant_required, credible_set_variant_schema
 from pts.transformers.credible_set.enums import Chromosome
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
+from pts.transformers.credible_set.source_dataset import read_source_dataset
 from pts.transformers.credible_set.variant_id import variant_alternate_allele, variant_reference_allele
-from pts.transformers.utils.dataset import scan_dataset, sink_dataset
+from pts.transformers.utils.dataset import sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
 
 #: A credible set identifier: a 32-character lowercase md5 hex digest.
@@ -225,10 +226,8 @@ def variant_qc(
     """
     sources = VariantQcSource.model_validate(source)
     options = VariantQcSettings.model_validate(settings)
-    flagged = (
-        scan_dataset(sources.credible_set_variant)
-        .match_to_schema(credible_set_variant_schema)
-        .pipe(flag_variants, options.coverage, options.pip_tolerance)
-    )
+    flagged = read_source_dataset(
+        sources.credible_set_variant, credible_set_variant_schema, credible_set_variant_required
+    ).pipe(flag_variants, options.coverage, options.pip_tolerance)
     logger.info('Writing flagged credible set variants to {}', destination)
     sink_dataset(flagged, destination).collect()

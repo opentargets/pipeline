@@ -9,10 +9,11 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.credible_set import credible_set_schema
+from pts.schemas.credible_set import credible_set_required, credible_set_schema
 from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.credible_set.source_dataset import read_source_dataset
 from pts.transformers.credible_set.variant_id import variant_chromosome, variant_position
 from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
 from pts.transformers.study import QualityFlag as StudyQualityFlag
@@ -183,8 +184,7 @@ def set_qc(
     sources = SetQcSource.model_validate(source)
     options = SetQcSettings.model_validate(settings)
     flagged = (
-        scan_dataset(sources.credible_set)
-        .match_to_schema(credible_set_schema)
+        read_source_dataset(sources.credible_set, credible_set_schema, credible_set_required)
         .pipe(flag_invalid_cs_id)
         .pipe(flag_invalid_chromosome)
         .pipe(flag_lead_chromosome_mismatch)

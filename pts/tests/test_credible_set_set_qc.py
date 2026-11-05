@@ -29,6 +29,9 @@ def _set(**values: str | list[str] | None) -> pl.LazyFrame:
     row = {
         'id': CS_ID,
         'chromosome': '1',
+        'locusStart': 1,
+        'locusEnd': 1_000_000,
+        'studyId': 's',
         'leadVariantId': '1_100_A_T',
         'fineMappingMethod': 'SuSiE',
         'qualityControls': [],
