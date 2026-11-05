@@ -381,8 +381,8 @@ def validate(
 
     3. Add the cross-set flags (REDUNDANT_PICS_TOP_HIT, EXPLAINED_BY_SUSIE). Duplicated ids are
        decided after every source is validated (`flag_duplicated_ids`).
-    4. Flag `INVALID_VARIANT_IN_SET` on a set with any variant flagged in
-       `csv_set_invalid_qc_reasons`.
+    4. Flag `INVALID_VARIANT_IN_SET` on a set with any remaining variant flagged in
+       `csv_set_invalid_qc_reasons`; a flagged variant removed by step 2 does not count.
     5. Flag `LEAD_VARIANT_MISSING` on a set whose lead variant is not among its remaining
        variants, either because it was never staged or because step 2 removed it.
     6. Exclude the sets with a flag of `cs_invalid_qc_reasons`, or `INVALID_VARIANT_IN_SET`,
@@ -453,7 +453,7 @@ def validate(
     row_split = valid_rows(credible_set_variant, settings.csv_row_invalid_qc_reasons)
     # Whole sets: 3. cross-set flags, 4. invalid variant in set, 5. missing lead, 6. exclusion.
     flagged_set = add_cross_set_flags(credible_set, cross_set_flag)
-    sets_with_invalid_variant = credible_set_variant.filter(
+    sets_with_invalid_variant = row_split.valid.filter(
         has_excluded_flag(settings.csv_set_invalid_qc_reasons)
     ).select(pl.col('credibleSetId').alias('id'))
     flagged_set = flag_matching_ids(
