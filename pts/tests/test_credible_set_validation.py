@@ -9,9 +9,10 @@ from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVari
 from pts.transformers.credible_set.validation import (
     ValidationSettings,
     cross_set_flags_schema,
-    flag_lead_variant_missing,
-    flag_orphan_variants,
-    flag_variant_chromosome_mismatch,
+    decide_sets,
+    flag_variants,
+    set_facts,
+    set_keys,
     validate,
 )
 
@@ -70,30 +71,32 @@ def _validate(sets: pl.LazyFrame, variants: pl.LazyFrame) -> tuple[dict, dict, d
 # The checks that pair the sets of one source with its variants: orphans, chromosome mismatch, missing lead.
 
 
+def _flag_variants(sets: pl.LazyFrame, variants: pl.LazyFrame) -> pl.LazyFrame:
+    return flag_variants(variants, set_keys(sets), SETTINGS)
+
+
 def test_a_variant_of_a_set_absent_from_its_source_is_an_orphan() -> None:
     sets = _sets(('a', '1', '1_1_A_T', []))
-    variants = flag_orphan_variants(_variants(('a', '1_1_A_T', []), ('missing', '1_2_A_T', [])), sets)
+    variants = _flag_variants(sets, _variants(('a', '1_1_A_T', []), ('missing', '1_2_A_T', [])))
     assert _flags(variants, 'variantId') == {'1_1_A_T': set(), '1_2_A_T': {CredibleSetVariantFlag.ORPHAN_VARIANT}}
 
 
 def test_a_variant_on_another_chromosome_than_its_set_is_flagged() -> None:
     sets = _sets(('a', '1', '1_1_A_T', []))
-    variants = flag_variant_chromosome_mismatch(
-        _variants(('a', '1_1_A_T', []), ('a', '2_5_A_T', []), ('orphan', '3_5_A_T', [])), sets
-    )
+    variants = _flag_variants(sets, _variants(('a', '1_1_A_T', []), ('a', '2_5_A_T', []), ('orphan', '3_5_A_T', [])))
     assert _flags(variants, 'variantId') == {
         '1_1_A_T': set(),
         '2_5_A_T': {CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH},
-        '3_5_A_T': set(),
+        '3_5_A_T': {CredibleSetVariantFlag.ORPHAN_VARIANT},
     }
 
 
 def test_a_set_without_its_lead_row_among_its_variants_is_flagged() -> None:
-    sets = flag_lead_variant_missing(
-        _sets(('with_lead', '1', '1_1_A_T', []), ('no_lead', '1', '1_9_A_T', [])),
-        _variants(('with_lead', '1_1_A_T', []), ('no_lead', '1_2_A_T', [])),
-    )
-    assert _flags(sets, 'id') == {'with_lead': set(), 'no_lead': {CredibleSetFlag.LEAD_VARIANT_MISSING}}
+    sets = _sets(('with_lead', '1', '1_1_A_T', []), ('no_lead', '1', '1_9_A_T', []))
+    variants = _flag_variants(sets, _variants(('with_lead', '1_1_A_T', []), ('no_lead', '1_2_A_T', [])))
+    set_split = decide_sets(sets, set_facts(variants, SETTINGS), pl.LazyFrame(schema=cross_set_flags_schema), SETTINGS)
+    flagged = pl.concat([set_split.valid, set_split.invalid])
+    assert _flags(flagged, 'id') == {'with_lead': set(), 'no_lead': {CredibleSetFlag.LEAD_VARIANT_MISSING}}
 
 
 # Validation.

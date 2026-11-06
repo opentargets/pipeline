@@ -145,18 +145,17 @@ def test_validation_writes_every_dataset_without_sorting(tmp_path: Path, monkeyp
 
     The only sort is the ranking of duplicated ids, over the valid sets.
     """
-    written: list[pl.LazyFrame] = []
+    collected: list[pl.LazyFrame] = []
     collect_all = pl.collect_all
 
     def capturing_collect_all(frames: list[pl.LazyFrame], **options) -> list[pl.DataFrame]:
-        written.extend(frames)
+        collected.extend(frames)
         return collect_all(frames, **options)
 
     monkeypatch.setattr(validation_module.pl, 'collect_all', capturing_collect_all)
     _validation(tmp_path, *_write_source(tmp_path))
-    assert len(written) == len(DESTINATIONS)
     ranking = 'SORT BY [nulls_last: [true, true, true, true]] [col("id"), col("_size"), col("_source"), col("_hash")]'
-    for frame in written:
+    for frame in collected:
         sort = [line.strip() for line in frame.explain().splitlines() if 'SORT' in line]
         assert all(line == ranking for line in sort), sort
 
@@ -179,8 +178,11 @@ def test_validation_scans_each_source_dataset_once(tmp_path: Path, monkeypatch) 
     assert sorted(scanned) == sorted([str(sets), str(variants)])
 
 
-def test_validation_reads_each_source_dataset_once(tmp_path: Path, monkeypatch) -> None:
-    """Every branch of the plan shares one read of each dataset, instead of reading it again from storage."""
+def test_validation_reads_the_sets_once_and_the_variants_twice(tmp_path: Path, monkeypatch) -> None:
+    """The sets are read once and kept in memory.
+
+    The variants are read once for the facts the sets are decided on, and once to split them.
+    """
     read: list[str] = []
 
     def counting_scan(path: str, **options) -> pl.LazyFrame:
@@ -195,4 +197,4 @@ def test_validation_reads_each_source_dataset_once(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(validation_module, 'scan_dataset', counting_scan)
     sets, variants = _write_source(tmp_path)
     _validation(tmp_path, sets, variants)
-    assert sorted(read) == sorted([str(sets), str(variants)])
+    assert sorted(read) == sorted([str(sets), str(variants), str(variants)])

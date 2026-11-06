@@ -25,7 +25,7 @@ from pts.transformers.credible_set.variant_id import (
 )
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import (
-    flag_matching_ids,
+    ValidationResult,
     flag_rows,
     has_excluded_flag,
     resolve_flag_names,
@@ -288,76 +288,136 @@ def type_valid_sets(frame: pl.LazyFrame) -> pl.LazyFrame:
     return frame.cast(enums, strict=True)
 
 
-def flag_orphan_variants(frame: pl.LazyFrame, credible_set: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants whose credible set is not among the credible sets of their source.
+def set_keys(credible_set: pl.LazyFrame, excluded_id: pl.LazyFrame | None = None) -> pl.LazyFrame:
+    """One row per set id of a source, with what its variants are checked against.
 
-    Examples:
-        >>> credible_set_variant = pl.LazyFrame({'credibleSetId': ['a', 'gone'], 'qualityControls': [[], []]})
-        >>> credible_set = pl.LazyFrame({'id': ['a']})
-        >>> flagged = flag_orphan_variants(credible_set_variant, credible_set).sort('credibleSetId').collect()
-        >>> flagged['qualityControls'].list.len().to_list()
-        [0, 1]
-    """
-    known = credible_set.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_known')).unique()
-    return (
-        frame
-        .join(known, on='credibleSetId', how='left')
-        .pipe(flag_rows, pl.col('_known').is_null(), CredibleSetVariantFlag.ORPHAN_VARIANT)
-        .drop('_known')
-    )
-
-
-def flag_variant_chromosome_mismatch(frame: pl.LazyFrame, credible_set: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants whose chromosome, the first field of `variantId`, differs from their set's.
-
-    An orphan variant has no set to compare with, and is not flagged.
-
-    Examples:
-        >>> credible_set_variant = pl.LazyFrame({
-        ...     'credibleSetId': ['a', 'a'],
-        ...     'variantId': ['1_1_A_T', '2_5_A_T'],
-        ...     'qualityControls': [[], []],
-        ... })
-        >>> credible_set = pl.LazyFrame({'id': ['a'], 'chromosome': ['1']})
-        >>> flagged = flag_variant_chromosome_mismatch(credible_set_variant, credible_set).sort('variantId').collect()
-        >>> flagged['qualityControls'].list.len().to_list()
-        [0, 1]
-    """
-    set_chromosome = credible_set.select(
-        pl.col('id').alias('credibleSetId'), pl.col('chromosome').alias('_set_chromosome')
-    ).unique()
-    mismatch = variant_chromosome(pl.col('variantId')) != pl.col('_set_chromosome')
-    return (
-        frame
-        .join(set_chromosome, on='credibleSetId', how='left')
-        .pipe(flag_rows, mismatch, CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH)
-        .drop('_set_chromosome')
-    )
-
-
-def flag_lead_variant_missing(frame: pl.LazyFrame, credible_set_variant: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets whose lead variant has no row among the variants of their source.
+    The chromosome and the lead of the set, and whether the set is excluded: a set whose id is
+    among `excluded_id`, which is unknown until the sets are decided.
 
     Examples:
         >>> credible_set = pl.LazyFrame({
-        ...     'id': ['a', 'b'],
-        ...     'leadVariantId': ['1_1_A_T', '1_9_A_T'],
-        ...     'qualityControls': [[], []],
+        ...     'id': ['a', 'b'], 'chromosome': ['1', '2'], 'leadVariantId': ['1_1_A_T', '2_5_A_T']
         ... })
-        >>> credible_set_variant = pl.LazyFrame({'credibleSetId': ['a', 'b'], 'variantId': ['1_1_A_T', '1_2_A_T']})
-        >>> flagged = flag_lead_variant_missing(credible_set, credible_set_variant).sort('id').collect()
-        >>> flagged['qualityControls'].list.len().to_list()
-        [0, 1]
+        >>> set_keys(credible_set, pl.LazyFrame({'id': ['b']})).sort('credibleSetId').collect().rows()
+        [('a', '1', '1_1_A_T', True, False), ('b', '2', '2_5_A_T', True, True)]
     """
-    lead = credible_set_variant.select(
-        pl.col('credibleSetId').alias('id'), pl.col('variantId').alias('leadVariantId'), pl.lit(True).alias('_lead')
+    key = credible_set.select(
+        pl.col('id').alias('credibleSetId'),
+        pl.col('chromosome').alias('_set_chromosome'),
+        pl.col('leadVariantId').alias('_set_lead'),
+        pl.lit(True).alias('_known'),
     ).unique()
+    if excluded_id is None:
+        return key.with_columns(pl.lit(False).alias('_set_excluded'))
+    excluded = excluded_id.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_set_excluded')).unique()
+    return key.join(excluded, on='credibleSetId', how='left').with_columns(pl.col('_set_excluded').fill_null(False))
+
+
+def flag_variants(
+    credible_set_variant: pl.LazyFrame, set_key: pl.LazyFrame, settings: ValidationSettings
+) -> pl.LazyFrame:
+    """Join each variant to its set once and flag what the pairing shows.
+
+    - ORPHAN_VARIANT: the variant's set is not among the sets of its source.
+    - VARIANT_CHROMOSOME_MISMATCH: the variant is on another chromosome than its set; an orphan
+      has no set to compare with, and is not flagged.
+
+    It adds `_kept`, whether the row survives `csv_row_invalid_qc_reasons`, `_lead`, whether the
+    row is its set's lead, and `_set_excluded`, whether its set is excluded. The joined rows are
+    cached: the outputs that branch off them share one read and one join, which polars does not
+    share across the column changes that follow.
+
+    Examples:
+        >>> credible_set = pl.LazyFrame({'id': ['a'], 'chromosome': ['1'], 'leadVariantId': ['1_1_A_T']})
+        >>> credible_set_variant = pl.LazyFrame({
+        ...     'credibleSetId': ['a', 'a', 'gone'],
+        ...     'variantId': ['1_1_A_T', '2_5_A_T', '1_9_A_T'],
+        ...     'qualityControls': [[], [], []],
+        ... })
+        >>> settings = ValidationSettings(csv_row_invalid_qc_reasons=['ORPHAN_VARIANT'])
+        >>> flagged = flag_variants(credible_set_variant, set_keys(credible_set), settings).sort('variantId').collect()
+        >>> for row in flagged.iter_rows(named=True):
+        ...     flag_name = sorted(CredibleSetVariantFlag(flag).name for flag in row['qualityControls'])
+        ...     print(row['variantId'], flag_name, row['_kept'], row['_lead'])
+        1_1_A_T [] True True
+        1_9_A_T ['ORPHAN_VARIANT'] False False
+        2_5_A_T ['VARIANT_CHROMOSOME_MISMATCH'] True False
+    """
+    mismatch = variant_chromosome(pl.col('variantId')) != pl.col('_set_chromosome')
     return (
-        frame
-        .join(lead, on=['id', 'leadVariantId'], how='left')
-        .pipe(flag_rows, pl.col('_lead').is_null(), CredibleSetFlag.LEAD_VARIANT_MISSING)
-        .drop('_lead')
+        credible_set_variant
+        .join(set_key, on='credibleSetId', how='left')
+        .cache()
+        .pipe(flag_rows, pl.col('_known').is_null(), CredibleSetVariantFlag.ORPHAN_VARIANT)
+        .pipe(flag_rows, mismatch, CredibleSetVariantFlag.VARIANT_CHROMOSOME_MISMATCH)
+        .with_columns(
+            (~has_excluded_flag(settings.csv_row_invalid_qc_reasons)).alias('_kept'),
+            (pl.col('variantId') == pl.col('_set_lead')).fill_null(False).alias('_lead'),
+            pl.col('_set_excluded').fill_null(False),
+        )
+        .drop('_known', '_set_chromosome', '_set_lead')
     )
+
+
+def set_facts(flagged_variant: pl.LazyFrame, settings: ValidationSettings) -> pl.LazyFrame:
+    """What the sets of a source need from their kept variants, one row per set id.
+
+    `_size`, the number of kept variants; `_invalid_variant`, whether one of them carries a flag
+    of `csv_set_invalid_qc_reasons`; `_lead`, whether one of them is the set's lead.
+
+    Examples:
+        >>> flagged_variant = pl.LazyFrame({
+        ...     'credibleSetId': ['a', 'a', 'b', 'b'],
+        ...     'qualityControls': [[], [CredibleSetVariantFlag.INVALID_VARIANT_ID.value], [], []],
+        ...     '_kept': [True, True, True, False],
+        ...     '_lead': [True, False, False, True],
+        ... })
+        >>> settings = ValidationSettings(csv_set_invalid_qc_reasons=['INVALID_VARIANT_ID'])
+        >>> set_facts(flagged_variant, settings).sort('id').collect().rows()
+        [('a', 2, True, True), ('b', 1, False, False)]
+    """
+    return (
+        flagged_variant
+        .filter('_kept')
+        .group_by(pl.col('credibleSetId').alias('id'))
+        .agg(
+            pl.len().alias('_size'),
+            has_excluded_flag(settings.csv_set_invalid_qc_reasons).any().alias('_invalid_variant'),
+            pl.col('_lead').any(),
+        )
+    )
+
+
+def decide_sets(
+    credible_set: pl.LazyFrame, set_fact: pl.LazyFrame, cross_set_flag: pl.LazyFrame, settings: ValidationSettings
+) -> ValidationResult:
+    """Flag the sets of a source from the cross-set flags and their variants' facts, and split them.
+
+    INVALID_VARIANT_IN_SET on a set with a kept variant flagged in `csv_set_invalid_qc_reasons`,
+    LEAD_VARIANT_MISSING on a set without its lead among its kept variants. The sets with a flag of
+    `cs_invalid_qc_reasons`, or INVALID_VARIANT_IN_SET, are excluded.
+    """
+    fact = set_fact.select('id', '_invalid_variant', pl.col('_lead').alias('_has_lead'))
+    flagged = (
+        add_cross_set_flags(credible_set, cross_set_flag)
+        .join(fact, on='id', how='left')
+        .pipe(flag_rows, pl.col('_invalid_variant').fill_null(False), CredibleSetFlag.INVALID_VARIANT_IN_SET)
+        .pipe(flag_rows, ~pl.col('_has_lead').fill_null(False), CredibleSetFlag.LEAD_VARIANT_MISSING)
+        .drop('_invalid_variant', '_has_lead')
+    )
+    return valid_rows(flagged, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
+
+
+def split_variants(flagged_variant: pl.LazyFrame) -> ValidationResult:
+    """Split variants into valid and excluded; the kept rows of excluded sets get CREDIBLE_SET_EXCLUDED.
+
+    Valid variants are the kept rows of sets that are not excluded.
+    """
+    set_excluded = pl.col('_kept') & pl.col('_set_excluded')
+    flagged = flagged_variant.pipe(flag_rows, set_excluded, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED)
+    valid = pl.col('_kept') & ~pl.col('_set_excluded')
+    helper = ['_kept', '_lead', '_set_excluded']
+    return ValidationResult(valid=flagged.filter(valid).drop(helper), invalid=flagged.filter(~valid).drop(helper))
 
 
 def validate(
@@ -389,7 +449,9 @@ def validate(
     Every excluded row carries the flag that explains why it left. `INVALID_VARIANT_IN_SET` and
     `CREDIBLE_SET_EXCLUDED` are structural, so they are not configurable.
 
-    Flags are appended to `qualityControls`; a set with several invalid variants is flagged once.
+    The variants are joined to their sets twice: once for the facts the sets are decided on
+    (`set_facts`), and once, with the decision, to split them (`split_variants`). Every join is
+    built on the sets, never on the variants.
 
     Args:
         credible_set: The source's credible sets after set QC.
@@ -444,73 +506,55 @@ def validate(
         2_KI270846v1_alt_10_A_T ['CREDIBLE_SET_EXCLUDED', 'INVALID_VARIANT_ID']
         6_30000000_A_T ['CREDIBLE_SET_EXCLUDED']
     """
-    # Variant rows: 1. pairing flags, 2. row exclusion.
-    credible_set_variant = flag_orphan_variants(credible_set_variant, credible_set).pipe(
-        flag_variant_chromosome_mismatch, credible_set
-    )
-    row_split = valid_rows(credible_set_variant, settings.csv_row_invalid_qc_reasons)
-    # Whole sets: 3. cross-set flags, 4. invalid variant in set, 5. missing lead, 6. exclusion.
-    flagged_set = add_cross_set_flags(credible_set, cross_set_flag)
-    sets_with_invalid_variant = row_split.valid.filter(has_excluded_flag(settings.csv_set_invalid_qc_reasons)).select(
-        pl.col('credibleSetId').alias('id')
-    )
-    flagged_set = flag_matching_ids(
-        flagged_set, 'id', sets_with_invalid_variant, CredibleSetFlag.INVALID_VARIANT_IN_SET
-    )
-    flagged_set = flag_lead_variant_missing(flagged_set, row_split.valid)
-    set_split = valid_rows(flagged_set, [*settings.cs_invalid_qc_reasons, CredibleSetFlag.INVALID_VARIANT_IN_SET])
-    kept_variant = flag_matching_ids(
-        row_split.valid, 'credibleSetId', set_split.invalid, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
-    )
-    variant_split = valid_rows(kept_variant, [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED])
-    excluded_credible_set_variant = pl.concat([row_split.invalid, variant_split.invalid])
-    return set_split.valid, variant_split.valid, set_split.invalid, excluded_credible_set_variant
+    set_fact = set_facts(flag_variants(credible_set_variant, set_keys(credible_set), settings), settings)
+    set_split = decide_sets(credible_set, set_fact, cross_set_flag, settings)
+    excluded_id = set_split.invalid.select('id')
+    variant_split = split_variants(flag_variants(credible_set_variant, set_keys(credible_set, excluded_id), settings))
+    return set_split.valid, variant_split.valid, set_split.invalid, variant_split.invalid
 
 
 def flag_duplicated_ids(
-    split: list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]], settings: ValidationSettings
-) -> list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]]:
+    decided: list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]], settings: ValidationSettings
+) -> list[tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]]:
     """Flag DUPLICATED_STUDYLOCUS_ID on all but one copy of an id among the valid sets of every source.
 
     As gentropy's credible set validation does, only the sets that pass the other checks are
     compared, and the copy with the fewest valid variants is kept. Ties go to the copy of the
     earlier source, then to the smaller hash of its row, so the kept copy does not depend on row
     order. When the flag is in `cs_invalid_qc_reasons`, the flagged copies leave the valid sets of
-    their source, with their variants flagged `CREDIBLE_SET_EXCLUDED` unless the source keeps
-    another copy of the id.
+    their source, and their variants are excluded unless the source keeps another copy of the id.
 
     Args:
-        split: The (valid sets, valid variants, excluded sets, excluded variants) of each source.
+        decided: The valid sets, excluded sets and set facts (`set_facts`) of each source.
         settings: The flags that exclude a set.
 
     Returns:
-        The same four datasets of each source, in the same order.
+        The valid sets, excluded sets, and the ids whose variants are excluded, of each source, in
+        the same order.
 
     Examples:
         >>> def source(size):
         ...     quality_control = pl.Series([[]], dtype=pl.List(pl.String))
-        ...     credible_set = pl.LazyFrame({'id': ['dup'], 'qualityControls': quality_control})
-        ...     variant_id = [f'1_{position}_A_T' for position in range(size)]
-        ...     variant = pl.LazyFrame({'credibleSetId': ['dup'] * size, 'variantId': variant_id})
-        ...     return credible_set, variant, credible_set.clear(), variant.clear()
+        ...     valid = pl.LazyFrame({'id': ['dup'], 'qualityControls': quality_control})
+        ...     return valid, valid.clear(), pl.LazyFrame({'id': ['dup'], '_size': [size]})
         >>> settings = ValidationSettings(cs_invalid_qc_reasons=['DUPLICATED_STUDYLOCUS_ID'])
         >>> larger, smaller = flag_duplicated_ids([source(3), source(2)], settings)
-        >>> (a_set, _, a_excluded, _), (b_set, _, _, _) = larger, smaller
-        >>> a_set.collect().height, a_excluded.collect().height, b_set.collect().height
-        (0, 1, 1)
+        >>> (a_set, a_excluded, a_id), (b_set, _, b_id) = larger, smaller
+        >>> a_set.collect().height, a_excluded.collect().height, a_id.collect()['id'].to_list(), b_set.collect().height
+        (0, 1, ['dup'], 1)
     """
     duplicated = CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID
     source = pl.col('_source')
     valid_set = pl.concat([
-        credible_set.with_columns(pl.lit(index, pl.UInt32).alias('_source'))
-        for index, (credible_set, _, _, _) in enumerate(split)
+        valid.with_columns(pl.lit(index, pl.UInt32).alias('_source')) for index, (valid, _, _) in enumerate(decided)
     ])
+    # the number of valid variants: none for an id the source excludes, whose variants all leave
     size = pl.concat([
-        credible_set_variant
-        .group_by(pl.col('credibleSetId').alias('id'))
-        .len('_size')
+        set_fact
+        .select('id', pl.col('_size').cast(pl.UInt32))
+        .join(excluded.select('id').unique(), on='id', how='anti')
         .with_columns(pl.lit(index, pl.UInt32).alias('_source'))
-        for index, (_, credible_set_variant, _, _) in enumerate(split)
+        for index, (_, excluded, set_fact) in enumerate(decided)
     ])
     ranked = (
         valid_set
@@ -521,24 +565,17 @@ def flag_duplicated_ids(
         .drop('_size', '_hash')
     )
     flagged_split = []
-    for index, (_, credible_set_variant, excluded_set, excluded_variant) in enumerate(split):
+    for index, (_, excluded, _) in enumerate(decided):
         flagged_set = ranked.filter(source == index).drop('_source')
         if duplicated not in settings.cs_invalid_qc_reasons:
-            flagged_split.append((flagged_set, credible_set_variant, excluded_set, excluded_variant))
+            flagged_split.append((flagged_set, excluded, excluded.select('id')))
             continue
         set_split = valid_rows(flagged_set, [duplicated])
         removed_id = set_split.invalid.select('id').join(set_split.valid.select('id'), on='id', how='anti')
-        variant_split = valid_rows(
-            flag_matching_ids(
-                credible_set_variant, 'credibleSetId', removed_id, CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED
-            ),
-            [CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED],
-        )
         flagged_split.append((
             set_split.valid,
-            variant_split.valid,
-            pl.concat([excluded_set, set_split.invalid]),
-            pl.concat([excluded_variant, variant_split.invalid]),
+            pl.concat([excluded, set_split.invalid]),
+            pl.concat([excluded.select('id'), removed_id]),
         ))
     return flagged_split
 
@@ -627,14 +664,30 @@ def validation(
         scan_datasets(sources.credible_set), scan_datasets(sources.credible_set_variant)
     ).collect()
     logger.info('Cross-set QC flagged {} credible sets', cross_set_flag.height)
-    # cached, so every branch of the plan shares one read of each dataset instead of reading it again
-    validated = [
-        validate(scan_dataset(set_path).cache(), scan_dataset(variant_path).cache(), cross_set_flag.lazy(), options)
-        for _, set_path, variant_path in source_pair
+    source_input = [(scan_dataset(set_path), scan_dataset(variant_path)) for _, set_path, variant_path in source_pair]
+    # 1. the facts every set is decided on, from one pass over each source's variants
+    set_frames = pl.collect_all([credible_set for credible_set, _ in source_input])
+    set_fact = pl.collect_all([
+        set_facts(flag_variants(credible_set_variant, set_keys(credible_set.lazy()), options), options)
+        for credible_set, (_, credible_set_variant) in zip(set_frames, source_input, strict=True)
+    ])
+    # 2. the sets of every source, decided in memory
+    decided = []
+    for credible_set, fact in zip(set_frames, set_fact, strict=True):
+        set_split = decide_sets(credible_set.lazy(), fact.lazy(), cross_set_flag.lazy(), options)
+        decided.append((set_split.valid, set_split.invalid, fact.lazy()))
+    deduplicated = [pl.collect_all(frames) for frames in flag_duplicated_ids(decided, options)]
+    # 3. the variants of every source, split by the decision on their set in one more pass
+    variant_split = [
+        split_variants(flag_variants(credible_set_variant, set_keys(credible_set.lazy(), excluded_id.lazy()), options))
+        for credible_set, (_, credible_set_variant), (_, _, excluded_id) in zip(
+            set_frames, source_input, deduplicated, strict=True
+        )
     ]
-    valid_set, valid_variant, excluded_set, excluded_variant = (
-        pl.concat(part) for part in zip(*flag_duplicated_ids(validated, options), strict=True)
-    )
+    valid_set = pl.concat([valid.lazy() for valid, _, _ in deduplicated])
+    excluded_set = pl.concat([excluded.lazy() for _, excluded, _ in deduplicated])
+    valid_variant = pl.concat([split.valid for split in variant_split])
+    excluded_variant = pl.concat([split.invalid for split in variant_split])
     logger.info('Validated the credible sets of {}', ', '.join(source_name for source_name, _, _ in source_pair))
     pl.collect_all([
         sink_dataset(type_valid_sets(valid_set), destinations.valid_set),
