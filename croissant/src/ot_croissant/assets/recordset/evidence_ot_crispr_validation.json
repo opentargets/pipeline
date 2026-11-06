@@ -1,7 +1,7 @@
 [
   {
     "id": "assays",
-    "description": "Assays used in the study"
+    "description": "Assays used to validate the target in the cell line"
   },
   {
     "id": "assays/description",
@@ -9,7 +9,7 @@
   },
   {
     "id": "assays/isHit",
-    "description": "Indicating if the assay was positive or negative for the target"
+    "description": "Whether the target was a hit in the assay"
   },
   {
     "id": "assays/shortName",
@@ -17,15 +17,15 @@
   },
   {
     "id": "assessments",
-    "description": "Short name of the assay"
+    "description": "Overall assessments of the validation outcome (e.g. 'No evidence of dependency')"
   },
   {
     "id": "biomarkerList",
-    "description": "List of biomarkers associated with the biological model"
+    "description": "Biomarkers characterising the validation cell line (e.g. MSI status, PAM50 subtype)"
   },
   {
     "id": "biomarkerList/description",
-    "description": "One biomarker for the model"
+    "description": "Description of the biomarker in the cell line"
   },
   {
     "id": "biomarkerList/name",
@@ -41,11 +41,11 @@
   },
   {
     "id": "diseaseCellLines",
-    "description": "Cancer cell lines used to generate evidence"
+    "description": "Cancer cell lines in which the target was validated"
   },
   {
     "id": "diseaseCellLines/id",
-    "description": "Cell type identifier in cell ontology or in cell model database"
+    "description": "Cell Model Passports identifier of the cell line (e.g. SIDM00616)"
   },
   {
     "id": "diseaseCellLines/name",
@@ -62,7 +62,7 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Cancer type of the validation cell lines"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -84,15 +84,15 @@
   },
   {
     "id": "primaryProjectHit",
-    "description": "If a given target was found to be a hit in the primary project"
+    "description": "Whether the target was a hit in the primary Open Targets screening project"
   },
   {
     "id": "primaryProjectId",
-    "description": "Open Targets project identifier of the primary project"
+    "description": "Open Targets (OTAR) project code of the primary screening project the validated targets come from"
   },
   {
     "id": "projectId",
-    "description": "The identifer of the project that generated the data"
+    "description": "Open Targets (OTAR) project code of the validation project"
   },
   {
     "id": "qualityControls",
@@ -100,27 +100,27 @@
   },
   {
     "id": "releaseDate",
-    "description": "Date of the release of the data in a 'YYYY-MM-DD' format"
+    "description": "Date of the validation data release in a 'YYYY-MM-DD' format"
   },
   {
     "id": "releaseVersion",
-    "description": "Open Targets data release version"
+    "description": "Version of the validation data release"
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "Validation score provided by the Open Targets validation lab (0-1)"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; equal to the validation score"
   },
   {
     "id": "studyOverview",
-    "description": "Description of the study"
+    "description": "Description of the validation experiment"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the validated target"
   },
   {
     "id": "targetId",

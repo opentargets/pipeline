@@ -1,15 +1,15 @@
 [
   {
     "id": "biologicalModelAllelicComposition",
-    "description": "Allelic composition of the model organism"
+    "description": "Allelic composition of the mouse model"
   },
   {
     "id": "biologicalModelGeneticBackground",
-    "description": "Genetic background of the model organism"
+    "description": "Genetic background (strain) of the mouse model"
   },
   {
     "id": "biologicalModelId",
-    "description": "Identifier of the biological model (eg. in MGI)"
+    "description": "MGI identifier of the mouse model"
   },
   {
     "id": "datasourceId",
@@ -29,11 +29,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Name of the human disease whose phenotypes the mouse model resembles"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "OMIM or Orphanet identifier of the human disease whose phenotypes the mouse model resembles"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -46,7 +46,7 @@
   },
   {
     "id": "diseaseModelAssociatedHumanPhenotypes",
-    "description": "Human phenotypes equivalent to those observed in animal models"
+    "description": "Phenotypes of the human disease matched to the mouse model phenotypes by PhenoDigm"
   },
   {
     "id": "diseaseModelAssociatedHumanPhenotypes/id",
@@ -59,7 +59,7 @@
   },
   {
     "id": "diseaseModelAssociatedModelPhenotypes",
-    "description": "Phenotypes observed in genetically modified animal models"
+    "description": "Phenotypes observed in the mouse model matched to the human disease phenotypes by PhenoDigm"
   },
   {
     "id": "diseaseModelAssociatedModelPhenotypes/id",
@@ -93,15 +93,15 @@
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "PhenoDigm score of the phenotypic similarity between the mouse model and the human disease (0-100)"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; the PhenoDigm score divided by 100"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier of the human ortholog of the mouse gene"
   },
   {
     "id": "targetId",
@@ -110,14 +110,14 @@
   },
   {
     "id": "targetInModel",
-    "description": "Target name/synonym in animal model"
+    "description": "Symbol of the modified gene in the mouse model"
   },
   {
     "id": "targetInModelEnsemblId",
-    "description": "Target Ensembl ID in animal model [bioregistry:ensembl]"
+    "description": "Ensembl gene identifier of the modified gene in the mouse model"
   },
   {
     "id": "targetInModelMgiId",
-    "description": "Target MGI ID in animal model [bioregistry:mgi]"
+    "description": "MGI identifier of the modified gene in the mouse model"
   }
 ]
