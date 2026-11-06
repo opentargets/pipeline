@@ -1,13 +1,22 @@
 """Tests for the polars vep_view transformer."""
 
-import polars as pl
-import pytest
+from pathlib import Path
 
+import polars as pl
+import pysam
+import pytest
+from otter.config.model import Config
+
+from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.vep_view import (
+    COMMON_COLUMNS,
+    GWAS_COLUMNS,
+    QTL_COLUMNS,
     process_biosample,
     process_credible_set,
     process_l2g,
     process_study,
+    vep_view,
 )
 
 
@@ -205,3 +214,112 @@ class TestProcessL2G:
         assert 'gwasLocusToGeneScore' in result.columns
         assert 'geneId' not in result.columns
         assert 'score' not in result.columns
+
+
+def _tag(variant_id: str, posterior: float) -> dict:
+    return {
+        'variantId': variant_id,
+        'pValueMantissa': 1.0,
+        'pValueExponent': -10,
+        'beta': 0.1,
+        'is95CredibleSet': True,
+        'is99CredibleSet': True,
+        'posteriorProbability': posterior,
+    }
+
+
+class TestVepView:
+    """End-to-end tests for vep_view: bgzipped, tabix-indexed output files."""
+
+    @pytest.fixture
+    def outputs(self, tmp_path: Path) -> dict[str, str]:
+        """Run vep_view on one GWAS locus (chr 2 and 10) and one QTL locus (chr 1)."""
+        credible_set = pl.from_dicts([
+            {
+                'studyLocusId': 'gwasLocus',
+                'studyId': 'gwasStudy',
+                'variantId': '2_500_A_G',
+                'finemappingMethod': 'SuSiE',
+                'locus': [_tag('2_500_A_G', 0.7), _tag('10_50_C_T', 0.3)],
+            },
+            {
+                'studyLocusId': 'qtlLocus',
+                'studyId': 'qtlStudy',
+                'variantId': '1_100_A_T',
+                'finemappingMethod': 'SuSiE',
+                'locus': [_tag('1_100_A_T', 0.9), _tag('1_200_C_G', 0.1)],
+            },
+        ])
+        study = pl.DataFrame(
+            {
+                'studyId': ['gwasStudy', 'qtlStudy'],
+                'studyType': ['gwas', 'eqtl'],
+                'diseaseIds': [['EFO_1'], []],
+                'geneId': [None, 'ENSG_QTL'],
+                'biosampleId': [None, 'UBERON_1'],
+            },
+            schema_overrides={'diseaseIds': pl.List(pl.String)},
+        )
+        l2g = pl.DataFrame({'studyLocusId': ['gwasLocus'], 'geneId': ['ENSG_L2G'], 'score': [0.8]})
+        biosample = pl.DataFrame({'biosampleId': ['UBERON_1'], 'biosampleName': ['liver']})
+
+        source = {}
+        for name, frame in {
+            'credible_set': credible_set,
+            'study_table': study,
+            'l2g_table': l2g,
+            'biosample': biosample,
+        }.items():
+            source[name] = str(tmp_path / 'input' / name)
+            write_dataset(frame, source[name])
+
+        export = tmp_path / 'etc' / 'export' / 'vep_data'
+        export.mkdir(parents=True)
+        names = {'all': 'open_targets_vep', 'gwas': 'open_targets_vep_gwas', 'qtl': 'open_targets_vep_qtl'}
+        destination = {f'vep_data_{key}': str(export / f'{name}.tsv.bgz') for key, name in names.items()}
+
+        vep_view(source, destination, {}, Config(step='vep_view', steps=['vep_view'], work_path=tmp_path))
+        return destination
+
+    @pytest.mark.parametrize(
+        ('key', 'columns'),
+        [
+            ('vep_data_all', COMMON_COLUMNS + GWAS_COLUMNS + QTL_COLUMNS),
+            ('vep_data_gwas', COMMON_COLUMNS + GWAS_COLUMNS),
+            ('vep_data_qtl', COMMON_COLUMNS + QTL_COLUMNS),
+        ],
+    )
+    def test_header_is_tabix_meta_line(self, outputs: dict[str, str], key: str, columns: list[str]) -> None:
+        """The `#` header must be kept by the index (what `tabix -H` prints) with the file's columns."""
+        assert Path(f'{outputs[key]}.tbi').exists()
+        with pysam.TabixFile(outputs[key]) as tbx:
+            assert list(tbx.header) == ['\t'.join(columns)]
+
+    def test_all_file_indexes_every_chromosome(self, outputs: dict[str, str]) -> None:
+        """The combined file must contain every chromosome and be fetchable by region."""
+        with pysam.TabixFile(outputs['vep_data_all']) as tbx:
+            assert sorted(tbx.contigs) == ['1', '10', '2']
+            rows = [row.split('\t') for row in tbx.fetch('1', 150, 250)]
+        assert [row[4] for row in rows] == ['1_200_C_G']
+
+    def test_gwas_file_has_only_gwas_rows(self, outputs: dict[str, str]) -> None:
+        """The GWAS file must hold the GWAS tags, with the L2G gene."""
+        with pysam.TabixFile(outputs['vep_data_gwas']) as tbx:
+            assert sorted(tbx.contigs) == ['10', '2']
+            rows = [row.split('\t') for contig in tbx.contigs for row in tbx.fetch(contig)]
+        gene = len(COMMON_COLUMNS) + GWAS_COLUMNS.index('gwasGeneId')
+        assert {row[6] for row in rows} == {'gwas'}
+        assert {row[gene] for row in rows} == {'ENSG_L2G'}
+
+    def test_qtl_file_has_only_qtl_rows(self, outputs: dict[str, str]) -> None:
+        """The QTL file must hold the QTL tags, with the measured gene and biosample name."""
+        with pysam.TabixFile(outputs['vep_data_qtl']) as tbx:
+            assert list(tbx.contigs) == ['1']
+            rows = [row.split('\t') for row in tbx.fetch('1')]
+        assert [row[4] for row in rows] == ['1_100_A_T', '1_200_C_G']
+        assert {tuple(row[len(COMMON_COLUMNS) :]) for row in rows} == {('ENSG_QTL', 'liver')}
+
+    def test_no_temporary_files_are_left(self, outputs: dict[str, str], tmp_path: Path) -> None:
+        """The local TSV/bgzip scratch directory must be removed after upload."""
+        assert not list(tmp_path.glob('vep_view_*'))
+
