@@ -1,15 +1,15 @@
 [
   {
     "id": "allelicRequirements",
-    "description": "Inheritance patterns"
+    "description": "Mode of inheritance of the gene as curated in the Genomics England PanelApp panel"
   },
   {
     "id": "cohortPhenotypes",
-    "description": "Clinical features/phenotypes observed in studied individuals"
+    "description": "Phenotypes associated with the gene in the Genomics England PanelApp panel"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "Genomics England PanelApp gene rating ('green': high evidence, 'amber': moderate evidence)"
   },
   {
     "id": "datasourceId",
@@ -21,11 +21,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Phenotype label as curated in the Genomics England PanelApp panel"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "OMIM or MONDO identifier extracted from the Genomics England PanelApp phenotype"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -47,7 +47,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers listed for the gene in the Genomics England PanelApp panel"
   },
   {
     "id": "publicationDate",
@@ -59,19 +59,19 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the PanelApp gene rating"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "Genomics England PanelApp panel identifier"
   },
   {
     "id": "studyOverview",
-    "description": "Description of the study"
+    "description": "Name of the Genomics England PanelApp panel"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as reported in Genomics England PanelApp"
   },
   {
     "id": "targetId",

@@ -1,15 +1,15 @@
 [
   {
     "id": "cellType",
-    "description": "The studied cell type. Preferably the cell line ontology label"
+    "description": "Cell type in which the CRISPRbrain screen was performed"
   },
   {
     "id": "contrast",
-    "description": "Experiment contrast"
+    "description": "Phenotype read out in the CRISPRbrain screen (e.g. 'Phagocytosis (pHrodo-labeled synaptosomes)')"
   },
   {
     "id": "crisprScreenLibrary",
-    "description": "Applied screening library in the CRISPR/Cas9 project"
+    "description": "CRISPR library screened in the CRISPRbrain screen (e.g. Genome-wide CRISPRi-v2)"
   },
   {
     "id": "datasourceId",
@@ -21,7 +21,7 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Disease area associated with the CRISPRbrain screen, as curated by Open Targets"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -38,7 +38,7 @@
   },
   {
     "id": "geneticBackground",
-    "description": "Additional genetic background of the applied cell line in the CRISPR screen"
+    "description": "Genetic background of the screened cells (e.g. 'PSAP KO')"
   },
   {
     "id": "id",
@@ -47,15 +47,15 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifier of the publication describing the CRISPRbrain screen"
   },
   {
     "id": "log2FoldChangeValue",
-    "description": "Log 2 fold expression change in contrast experiment"
+    "description": "Phenotype score of the target in the CRISPRbrain screen"
   },
   {
     "id": "projectId",
-    "description": "The identifer of the project that generated the data"
+    "description": "Identifier of the project that generated the data ('crispr_brain' for CRISPRbrain)"
   },
   {
     "id": "publicationDate",
@@ -67,27 +67,27 @@
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "P-value of the target in the CRISPRbrain screen"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the log10 of the CRISPRbrain p-value"
   },
   {
     "id": "statisticalTestTail",
-    "description": "End of the distribution the target was picked from"
+    "description": "'upper tail' for positive hits and 'lower tail' for negative hits of the CRISPRbrain screen"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "Name of the CRISPRbrain screen"
   },
   {
     "id": "studyOverview",
-    "description": "Description of the study"
+    "description": "Description of the CRISPRbrain screen"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as reported by CRISPRbrain"
   },
   {
     "id": "targetId",
