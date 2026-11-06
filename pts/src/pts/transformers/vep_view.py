@@ -158,6 +158,10 @@ def _upload(local_path: Path, destination: str) -> None:
 
     A plain `open()` on a `gs://` path would write to the container's disk instead, so the copy
     goes through `StorageHandle`.
+
+    `StorageHandle.copy_to` is not used on purpose: from local to `gs://` it falls back to
+    `read()` + `write()`, which holds the whole file in memory (about 3.7 GB for the combined
+    file) on top of the collected table. Streaming through `open('wb')` uploads it in chunks.
     """
     with local_path.open('rb') as src, StorageHandle(destination).open('wb') as dst:
         shutil.copyfileobj(src, dst)
