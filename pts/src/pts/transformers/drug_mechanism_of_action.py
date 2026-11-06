@@ -14,6 +14,7 @@ from otter.config.model import Config
 from pts.postgres import read_dump_tables
 from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.target import chembl_accession_lookup
 
 SCHEMA_NAME = 'public'
 
@@ -36,9 +37,6 @@ ORDER_BY = {
     'component_sequences': ['component_id', 'accession'],
 }
 """Reads collected into published arrays, which must not come back in plan order."""
-
-#: The `proteinIds` sources ChEMBL accessions are resolved through.
-UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
 
 
 def drug_mechanism_of_action(
@@ -242,18 +240,7 @@ def _chembl_target(
         .with_row_index('component_order')
     )
 
-    # ChEMBL spells a target as a uniprot accession or an Ensembl gene id, so resolution
-    # needs both lookups. `genes_by_id` covers the whole of `gene_df`, not just the rows
-    # surviving the explode, which drops genes with no accession.
-    genes_by_uniprot = (
-        gene_df
-        .select(pl.col('id').alias('geneId'), pl.col('proteinIds').alias('protein'))
-        .explode('protein', empty_as_null=False, keep_nulls=False)
-        .filter(pl.col('protein').struct.field('source').is_in(UNIPROT_SOURCES))
-        .select('geneId', pl.col('protein').struct.field('id').alias('uniprot_id'))
-    )
-    genes_by_id = gene_df.select(pl.col('id').alias('geneId'), pl.col('id').alias('uniprot_id'))
-    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique()
+    gene_lookup = chembl_accession_lookup(gene_df)
 
     # genes sharing an accession come in id order
     joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left').sort('component_order', 'geneId')

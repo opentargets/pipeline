@@ -71,6 +71,15 @@
     "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies"
   },
   {
+    "id": "chembl_bioactivity",
+    "nice_name": "Drug - ChEMBL bioactivity",
+    "tags": [
+      "Drug",
+      "Target"
+    ],
+    "description": "Bioactivity measurements from ChEMBL 37 with a pChEMBL value: affinity, inhibition and functional potency of molecules against human protein targets, mapped to Ensembl gene identifiers, one row per measurement and target. Measurements from homologue assays are included, flagged by confidenceScore. Targeted protein degradation measurements are not included"
+  },
+  {
     "id": "clinical_indication",
     "nice_name": "Clinical indication",
     "tags": [
