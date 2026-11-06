@@ -1,28 +1,136 @@
 """Study and credible-set validation run in PTS with PPP-specific inputs."""
 
+from typing import Any
+
 import pytest
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
-PPP_ONLY = ['sle_map', 'otar2077/microglia', 'eQTLGen/coeqtl', 'deCODE_proteomics']
-BOTH = ['eqtl_catalogue/r8', 'ukb_ppp_eur']
+PPP_ONLY = [
+    'gwas/finngen_meta',
+    'molqtl/sle_map',
+    'molqtl/otar2077/microglia',
+    'molqtl/eQTLGen/single_cell_eqtl',
+    'molqtl/eQTLGen/coeqtl',
+    'molqtl/deCODE_proteomics',
+]
+BOTH = ['molqtl/eqtl_catalogue', 'molqtl/ukb_ppp_eur', 'molqtl/finngen_multiome']
 
 
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
-@pytest.mark.parametrize(('step', 'kind'), [('study', 'study'), ('credible_set', 'credible_set')])
-def test_validation_inputs_follow_the_run(monkeypatch, ppp, step, kind):
-    """PPP replaces the platform molQTL sources; both read released targets."""
+def test_study_inputs_follow_the_run(monkeypatch, ppp):
+    """PPP adds its molQTL sources to the platform ones; both read released targets."""
     monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
     config = UnifiedPipelineConfig()
-    [task] = config.pts.config['steps'][step]
-    sources = task['source'][kind]
+    [task] = config.pts.config['steps']['study']
+    sources = task['source']['study']
     for name in PPP_ONLY:
-        assert (f'input/molqtl/{kind}/{name}' in sources) is ppp
+        assert (f'input/{name}/study' in sources) is ppp
     for name in BOTH:
-        assert f'input/molqtl/{kind}/{name}' in sources
+        assert f'input/{name}/study' in sources
     assert task['source']['target'] == 'output/target'
-    if step == 'credible_set':
-        assert task['source']['disease'] == 'output/disease'
+
+
+def _credible_set_step(ppp: bool, monkeypatch) -> list[dict[str, Any]]:
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    return UnifiedPipelineConfig().pts.config['steps']['credible_set']
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_credible_set_sources_follow_the_run(monkeypatch, ppp):
+    """PPP adds its sources to the explode and to validation; the platform reads only its own."""
+    explode, validation = _credible_set_step(ppp, monkeypatch)
+    for name in PPP_ONLY:
+        assert (name in explode['foreach']) is ppp
+    for name in BOTH:
+        assert name in explode['foreach']
+    assert validation['source']['credible_set'] == [f'intermediate/qc/{f}/credible_set' for f in explode['foreach']]
+    assert validation['source']['credible_set_variant'] == [
+        f'intermediate/qc/{f}/credible_set_variant' for f in explode['foreach']
+    ]
+
+
+def test_ppp_credible_sets_are_processed_like_the_platform_ones(monkeypatch):
+    """The PPP step differs from the platform step only in its sources."""
+
+    def without_sources(step: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        explode, validation = step
+        return [{**explode, 'foreach': None}, {**validation, 'source': None}]
+
+    platform = _credible_set_step(False, monkeypatch)
+    ppp = _credible_set_step(True, monkeypatch)
+    assert set(platform[0]['foreach']) < set(ppp[0]['foreach'])
+    assert without_sources(ppp) == without_sources(platform)
+
+
+PIS_PPP_STEPS = ('gwas_ppp', 'molqtl_ppp')
+"""The PIS steps that stage inputs only for PPP runs."""
+
+
+def _destinations(tasks: list[dict[str, Any]]) -> set[str]:
+    """The destinations of PIS tasks, with `foreach` tasks expanded for every `${each}` value."""
+    destinations = set()
+    for task in tasks:
+        if 'foreach' in task:
+            for each in task['foreach']:
+                destinations |= {path.replace('${each}', each) for path in _destinations(task['do'])}
+        elif 'destination' in task:
+            destinations.add(task['destination'])
+    return destinations
+
+
+def _expanded(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The tasks of a step, with every explode replaced by the tasks it generates for each value."""
+    expanded = []
+    for task in tasks:
+        if 'foreach' in task:
+            for each in task['foreach']:
+                expanded += _expanded([_substitute(spec, each) for spec in task['do']])
+        else:
+            expanded.append(task)
+    return expanded
+
+
+def _substitute(value: Any, each: str) -> Any:
+    if isinstance(value, str):
+        return value.replace('${each}', each)
+    if isinstance(value, list):
+        return [_substitute(item, each) for item in value]
+    if isinstance(value, dict):
+        return {key: _substitute(item, each) for key, item in value.items()}
+    return value
+
+
+def _source_paths(source: Any) -> list[str]:
+    if isinstance(source, str):
+        return [source]
+    if isinstance(source, list):
+        return [path for item in source for path in _source_paths(item)]
+    if isinstance(source, dict):
+        return [path for value in source.values() for path in _source_paths(value)]
+    return []
+
+
+def test_platform_pts_reads_no_ppp_input(monkeypatch):
+    """No platform PTS task reads a dataset that only the PPP PIS steps stage."""
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: False))
+    config = UnifiedPipelineConfig()
+    pis_steps = config.pis.config['steps']
+    ppp_only = set().union(*(_destinations(pis_steps[step]) for step in PIS_PPP_STEPS)) - set().union(
+        *(_destinations(tasks) for step, tasks in pis_steps.items() if step not in PIS_PPP_STEPS)
+    )
+    assert ppp_only, 'expected the PPP PIS steps to stage some inputs'
+    read = {
+        (step, task['name'], path)
+        for step, tasks in config.pts.config['steps'].items()
+        for task in _expanded(tasks)
+        for path in _source_paths(task.get('source'))
+    }
+    assert {
+        (step, name, path)
+        for step, name, path in read
+        if any(path == ppp or path.startswith(f'{ppp}/') for ppp in ppp_only)
+    } == set()
 
 
 def test_validation_steps_run_in_pts():
@@ -32,3 +140,16 @@ def test_validation_steps_run_in_pts():
         assert f'gentropy_{step}' not in config.steps()
     # pts_study already depends on pts_target and pts_disease, which credible set validation also reads.
     assert config.step_definition('pts_credible_set')['depends_on'] == ['pts_study']
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_credible_set_annotation_runs_after_the_variant_index(monkeypatch, ppp):
+    """The published credible sets need the gnomAD frequencies of the variant index, which reads the validated sets."""
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    config = UnifiedPipelineConfig()
+    assert 'pts_credible_set_annotation' in config.steps('pts_')
+    assert config.step_definition('pts_credible_set_annotation')['depends_on'] == ['pts_credible_set', 'pts_variant']
+    assert 'pts_credible_set' in config.step_definition('pts_variant')['depends_on']
+    assert config.step_definition('gentropy_colocalisation')['depends_on'] == ['pts_credible_set_annotation']
+    [annotation] = config.pts.config['steps']['credible_set_annotation']
+    assert annotation['source']['variant'] == 'output/variant'

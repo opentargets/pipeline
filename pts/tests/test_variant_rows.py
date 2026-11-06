@@ -61,7 +61,7 @@ def _inputs(tmp_path: Path) -> dict[str, str]:
             for variant in variants:
                 stream.write(json.dumps({'variantId': variant}) + '\n')
         source[name] = str(path)
-    for name in ['pharmacogenomics', 'credible_set']:
+    for name in ['pharmacogenomics', 'credible_set_variant']:
         path = tmp_path / name
         path.mkdir()
         pl.DataFrame({'variantId': ['1_2_G_C']}).write_parquet(path / 'part.parquet')
@@ -112,10 +112,29 @@ def test_collect_variants_empty_inputs(tmp_path):
     for name in ['uniprot_variants', 'eva']:
         with gzip.open(source[name], 'wt') as stream:
             stream.write(json.dumps({'variantId': None}) + '\n')
-    for name in ['pharmacogenomics', 'credible_set']:
+    for name in ['pharmacogenomics', 'credible_set_variant']:
         pl.DataFrame({'variantId': [None]}, schema={'variantId': pl.String}).write_parquet(
             Path(source[name]) / 'part.parquet'
         )
     result = _collect(source)
     assert result.is_empty()
     assert result.columns == ['chromosome', 'position', 'rsId', 'referenceAllele', 'alternateAllele']
+
+
+def test_a_variant_shared_by_two_credible_sets_is_one_row_and_every_lead_is_kept(tmp_path):
+    source = _inputs(tmp_path)
+    pl.DataFrame({
+        'credibleSetId': ['a', 'a', 'b', 'b'],
+        'variantId': ['1_2_G_C', '1_5_A_T', '1_2_G_C', '1_7_C_G'],
+    }).write_parquet(Path(source['credible_set_variant']) / 'part.parquet')
+    positions = _collect(source).filter(pl.col('chromosome') == '1')['position'].to_list()
+    assert positions == [1, 2, 3, 5, 7]
+
+
+def test_a_credible_set_dataset_in_place_of_the_variants_is_an_error(tmp_path):
+    source = _inputs(tmp_path)
+    pl.DataFrame({'id': ['a'], 'leadVariantId': ['1_2_G_C']}).write_parquet(
+        Path(source['credible_set_variant']) / 'part.parquet'
+    )
+    with pytest.raises(ValueError, match='variantId'):
+        _collect(source)

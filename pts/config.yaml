@@ -32,7 +32,7 @@ steps:
         uniprot_variants: input/evidence/uniprot_variants.json.gz
         eva: input/evidence/eva.json.gz
         pharmacogenomics: output/pharmacogenomics
-        credible_set: output/credible_set
+        credible_set_variant: intermediate/validated/credible_set_variant
         fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
         gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
         gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw
@@ -93,12 +93,13 @@ steps:
     - name: transform validate study
       source:
         study:
-          - input/gwas/study/gcca
-          - input/gwas/study/gcss_pics
-          - input/gwas/study/gcss_susie
-          - input/gwas/study/finngen
-          - input/molqtl/study/eqtl_catalogue/r8
-          - input/molqtl/study/ukb_ppp_eur
+          - input/gwas/gcca/study
+          - input/gwas/gcss_pics/study
+          - input/gwas/gcss_susie/study
+          - input/gwas/finngen_gwas/study
+          - input/molqtl/eqtl_catalogue/study
+          - input/molqtl/ukb_ppp_eur/study
+          - input/molqtl/finngen_multiome/study
         target: output/target
         disease: output/disease
         biosample: output/biosample
@@ -131,43 +132,118 @@ steps:
       destination: output/go
   ##################################################################################################
 
-  #: CREDIBLE_SET MIGRATION
+  #: CREDIBLE_SET STEP :###########################################################################
+  # Set QC and variant QC run per source: the explode iterates over the source folders below
+  # input/ (<kind>/<source>), which the QC output mirrors under intermediate/qc/. Validation runs
+  # the cross-set QC over every source, then validates each source's sets against its own variants.
+  # The per-source paths are listed explicitly, in the order of the explode.
   credible_set:
-    - name: transform validate credible set
+    - name: explode qc credible sets
+      foreach:
+        - gwas/gcca
+        - gwas/gcss_pics
+        - gwas/gcss_susie
+        - gwas/finngen_gwas
+        - molqtl/eqtl_catalogue
+        - molqtl/ukb_ppp_eur
+        - molqtl/finngen_multiome
+      do:
+        - name: transform qc credible sets ${each}
+          transformer: credible_set.set_qc
+          source:
+            credible_set: input/${each}/credible_set
+            study: output/study
+          destination: intermediate/qc/${each}/credible_set
+          settings:
+            allowed_fm_methods:
+              - PICS
+              - SuSiE
+              - SuSiE-inf
+
+        - name: transform qc credible set variants ${each}
+          transformer: credible_set.variant_qc
+          source:
+            credible_set_variant: input/${each}/credible_set_variant
+          destination: intermediate/qc/${each}/credible_set_variant
+          settings:
+            coverage: 0.95
+            pip_tolerance: 0.0001
+
+    - name: transform validate credible sets
+      requires:
+        - explode qc credible sets
+      transformer: credible_set.validation
       source:
         credible_set:
-          - input/gwas/credible_set/gcca
-          - input/gwas/credible_set/gcss_pics
-          - input/gwas/credible_set/gcss_susie
-          - input/gwas/credible_set/finngen
-          - input/molqtl/credible_set/eqtl_catalogue/r8
-          - input/molqtl/credible_set/ukb_ppp_eur
-        study: output/study
-        target: output/target
-        disease: output/disease
+          - intermediate/qc/gwas/gcca/credible_set
+          - intermediate/qc/gwas/gcss_pics/credible_set
+          - intermediate/qc/gwas/gcss_susie/credible_set
+          - intermediate/qc/gwas/finngen_gwas/credible_set
+          - intermediate/qc/molqtl/eqtl_catalogue/credible_set
+          - intermediate/qc/molqtl/ukb_ppp_eur/credible_set
+          - intermediate/qc/molqtl/finngen_multiome/credible_set
+        credible_set_variant:
+          - intermediate/qc/gwas/gcca/credible_set_variant
+          - intermediate/qc/gwas/gcss_pics/credible_set_variant
+          - intermediate/qc/gwas/gcss_susie/credible_set_variant
+          - intermediate/qc/gwas/finngen_gwas/credible_set_variant
+          - intermediate/qc/molqtl/eqtl_catalogue/credible_set_variant
+          - intermediate/qc/molqtl/ukb_ppp_eur/credible_set_variant
+          - intermediate/qc/molqtl/finngen_multiome/credible_set_variant
       destination:
-        output: output/credible_set
-        excluded: excluded/credible_set
-      transformer: credible_set
+        valid_set: intermediate/validated/credible_set
+        valid_variant: intermediate/validated/credible_set_variant
+        excluded_set: excluded/credible_set
+        excluded_variant: excluded/credible_set_variant
       settings:
-        trans_qtl_threshold: 5000000
-        invalid_qc_reasons:
-          - DUPLICATED_STUDYLOCUS_ID
-          - AMBIGUOUS_STUDY
+        cs_invalid_qc_reasons:
+          - INVALID_CS_ID
+          - IN_MHC
+          - INVALID_CHROMOSOME
+          - LEAD_CHROMOSOME_MISMATCH
+          - TOP_HIT_AND_SUMMARY_STATS
           - MISSING_STUDY
-          - NO_GENOMIC_LOCATION_FLAG
+          - REDUNDANT_PICS_TOP_HIT
+          - DUPLICATED_STUDYLOCUS_ID
+          - INVALID_FINEMAPPING_METHOD
+          - EXPLAINED_BY_SUSIE
           - COMPOSITE_FLAG
           - INCONSISTENCY_FLAG
           - SUBSIGNIFICANT_FLAG
           - LD_CLUMPED
-          - IN_MHC
-          - REDUNDANT_PICS_TOP_HIT
-          - EXPLAINED_BY_SUSIE
           - WINDOW_CLUMPED
-          - NON_MAPPED_VARIANT_FLAG
-          - INVALID_VARIANT_IDENTIFIER
-          - INVALID_CHROMOSOME
-          - TOP_HIT_AND_SUMMARY_STATS
+          - STUDY_TYPE_MISMATCH
+          - LEAD_VARIANT_MISSING
+        # ABNORMAL_PIP is not listed: sets with abnormal PIP sums are flagged and kept.
+        csv_set_invalid_qc_reasons:
+          - INVALID_CS_ID
+          - INVALID_VARIANT_ID
+          - DUPLICATED_VARIANT
+        csv_row_invalid_qc_reasons:
+          - EXCEEDS_COVERAGE_95
+          - ORPHAN_VARIANT
+  ##################################################################################################
+
+  #: CREDIBLE SET ANNOTATION STEP :#################################################################
+  # Runs after the variant index: the effect allele frequency comes from its gnomAD frequencies, and
+  # the variant index reads the validated variants of the credible_set step. The target and disease
+  # indexes, for the trans-QTL and replication flags, are upstream of the study step.
+  credible_set_annotation:
+    - name: transform annotate credible sets
+      transformer: credible_set.annotation
+      source:
+        credible_set: intermediate/validated/credible_set
+        credible_set_variant: intermediate/validated/credible_set_variant
+        study: output/study
+        variant: output/variant
+        target: output/target
+        disease: output/disease
+      destination:
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+      settings:
+        trans_qtl_threshold: 5000000
+  ##################################################################################################
 
   #: OTAR STEP :####################################################################################
   otar:
@@ -435,6 +511,7 @@ steps:
         evidence_uniprot_variant: output/evidence_uniprot_variants
         evidence_gwas_credible_set: output/evidence_gwas_credible_sets
         credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
         pharmacogenetics: output/pharmacogenomics
       destination: view/coding_variant
   ##################################################################################################
@@ -1414,6 +1491,7 @@ steps:
       transformer: vep_view
       source:
         credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
         study_table: output/study
         l2g_table: output/l2g_prediction
         biosample: output/biosample

@@ -28,41 +28,43 @@ def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
     ).unique()
 
 
-def process_credible_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
-    """Flatten a credible set into one row per tag variant and compute a lead-variant flag.
+def process_credible_set(credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFrame) -> pl.LazyFrame:
+    """One row per credible set variant, with its set's study, method and a lead-variant flag.
 
-    The credible set stores per-locus finemapping results with a nested `locus` array of
-    structs, one entry per tag variant. This function explodes that array and unnests the
-    struct so each tag variant occupies its own row. The lead variant is identified by
-    comparing the top-level `variantId` (the lead) to the exploded per-row `variantId`.
+    The published variants of a credible set are its 95% members, so `is95CredibleSet` and
+    `is99CredibleSet` hold for every row; `beta` is the reported effect.
 
     Args:
-        credible_set: Credible set lazy frame. Expected columns include `studyLocusId`,
-            `studyId`, `variantId` (lead), `finemappingMethod`, and `locus` (array of
-            structs with fields `variantId`, `pValueMantissa`, `pValueExponent`, `beta`,
-            `is95CredibleSet`, `is99CredibleSet`, `posteriorProbability`).
+        credible_set: the published credible sets: `id`, `studyId`, `leadVariantId` and
+            `fineMappingMethod`.
+        credible_set_variant: their variants: `credibleSetId`, `variantId`, `pValueMantissa`,
+            `pValueExponent`, `reportedBeta` and `posteriorProbability`.
 
     Returns:
-        Lazy frame with one row per tag variant and columns: `studyLocusId`, `studyId`,
+        Lazy frame with one row per credible set variant and columns: `credibleSetId`, `studyId`,
         `pValueMantissa`, `pValueExponent`, `beta`, `is95CredibleSet`, `is99CredibleSet`,
-        `posteriorProbability`, `variantId` (tag variant), `finemappingMethod`, and
-        `isLead` (True when the tag variant is the lead variant of the locus).
+        `posteriorProbability`, `variantId`, `finemappingMethod`, and `isLead` (True when the
+        variant is the lead variant of the credible set).
     """
+    lead = credible_set.select(
+        pl.col('id').alias('credibleSetId'),
+        'studyId',
+        'leadVariantId',
+        pl.col('fineMappingMethod').cast(pl.String).alias('finemappingMethod'),
+    )
     return (
-        credible_set
-        .select('studyLocusId', 'studyId', pl.col('variantId').alias('leadVariantId'), 'locus', 'finemappingMethod')
-        .explode('locus', empty_as_null=True)
-        .unnest('locus')
+        credible_set_variant
+        .join(lead, on='credibleSetId')
         .select(
-            'studyLocusId',
+            'credibleSetId',
             'studyId',
             'pValueMantissa',
             'pValueExponent',
-            'beta',
-            'is95CredibleSet',
-            'is99CredibleSet',
+            pl.col('reportedBeta').alias('beta'),
+            pl.lit(True).alias('is95CredibleSet'),
+            pl.lit(True).alias('is99CredibleSet'),
             'posteriorProbability',
-            pl.col('variantId'),
+            'variantId',
             'finemappingMethod',
             (pl.col('leadVariantId') == pl.col('variantId')).alias('isLead'),
         )
@@ -97,28 +99,28 @@ def process_study(study: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def process_l2g(l2g: pl.LazyFrame) -> pl.LazyFrame:
-    """Select top locus-to-gene (L2G) predictions per study locus.
+    """Select top locus-to-gene (L2G) predictions per credible set.
 
-    For each `studyLocusId`, ranks candidate genes by their L2G `score` (descending)
+    For each `credibleSetId`, ranks candidate genes by their L2G `score` (descending)
     and retains rows where the gene is the top-ranked hit (rank == 1) OR has a score
     >= 0.5 (to preserve strong secondary hits). This allows one locus to map to multiple
     genes when evidence is strong, while avoiding noise from low-scoring candidates.
 
     Args:
-        l2g: L2G prediction lazy frame. Expected columns: `studyLocusId`, `geneId`,
+        l2g: L2G prediction lazy frame. Expected columns: `credibleSetId`, `geneId`,
             `score`.
 
     Returns:
-        Lazy frame with columns: `studyLocusId`, `gwasGeneId` (renamed from `geneId`),
+        Lazy frame with columns: `credibleSetId`, `gwasGeneId` (renamed from `geneId`),
         and `gwasLocusToGeneScore` (renamed from `score`).
     """
     return (
         l2g
-        .select('studyLocusId', 'geneId', 'score')
-        .with_columns(pl.col('score').rank(method='min', descending=True).over('studyLocusId').alias('rank'))
+        .select('credibleSetId', 'geneId', 'score')
+        .with_columns(pl.col('score').rank(method='min', descending=True).over('credibleSetId').alias('rank'))
         .filter((pl.col('rank') == 1) | (pl.col('score') >= 0.5))
         .select(
-            'studyLocusId',
+            'credibleSetId',
             pl.col('geneId').alias('gwasGeneId'),
             pl.col('score').alias('gwasLocusToGeneScore'),
         )
@@ -152,7 +154,7 @@ def vep_view(
 
     Args:
         source: Mapping of input dataset keys to their parquet directory paths.
-            Required keys: `credible_set`, `study_table`, `l2g_table`, `biosample`.
+            Required keys: `credible_set`, `credible_set_variant`, `study_table`, `l2g_table`, `biosample`.
         destination: Mapping of output keys to file paths.
             Required keys: `vep_data_all`, `vep_data_gwas`, `vep_data_qtl`.
         settings: Unused transformer settings dict (reserved for future use).
@@ -160,7 +162,9 @@ def vep_view(
             compatibility).
     """
     logger.info('Loading input data')
-    credible_set = process_credible_set(scan_dataset(source['credible_set']))
+    credible_set = process_credible_set(
+        scan_dataset(source['credible_set']), scan_dataset(source['credible_set_variant'])
+    )
     study = process_study(scan_dataset(source['study_table']))
     l2g = process_l2g(scan_dataset(source['l2g_table']))
     biosample = process_biosample(scan_dataset(source['biosample']))
@@ -168,7 +172,7 @@ def vep_view(
     logger.info('Joining and processing data')
     result = (
         credible_set
-        .join(l2g, on='studyLocusId', how='left')
+        .join(l2g, on='credibleSetId', how='left')
         .join(study, on='studyId', how='left')
         .join(biosample, on='qtlBiosampleId', how='left')
         .with_columns(
@@ -185,7 +189,7 @@ def vep_view(
             'variantId',
             'studyId',
             'studyType',
-            'studyLocusId',
+            'credibleSetId',
             'pValueMantissa',
             'pValueExponent',
             'beta',

@@ -58,6 +58,19 @@ scratchpad:
   l2g_gold_standard_version: '2025-06-25'
   l2g_test_split_version: '2026-09-02'
   encore_version: '2026-09-21'
+  # Credible set source runs: the prod/<timestamp> folder of each source bucket.
+  staging_gcca_ts: '20261028T234317'
+  staging_gcss_pics_ts: '20261030T072623'
+  staging_gcss_susie_ts: '20261101T152321'
+  staging_finngen_gwas_ts: '20261029T152531'
+  staging_finngen_meta_ts: '20261102T181409'
+  staging_eqtl_catalogue_ts: '20261105T130431'
+  staging_ukb_ppp_eur_ts: '20261026T161010'
+  staging_finngen_multiome_ts: '20261029T125742'
+  staging_otar2065_microglia_ts: '20261105T204507'
+  staging_eqtlgen_ts: '20261103T135048'
+  staging_decode_ts: '20261103T122701'
+  staging_sle_map_ts: '20261103T145657'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -854,59 +867,85 @@ steps:
   #: GWAS STEP :######################################################################################
   gwas:
     - name: copy_many GCCA study
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/study_index/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcca
+      destination: input/gwas/gcca/study
 
     - name: copy_many GCCA credible sets
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcca
+      destination: input/gwas/gcca/credible_set
+
+    - name: copy_many GCCA credible set variants
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcca/credible_set_variant
 
     - name: copy_many GCSS pics study
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcss_pics
+      destination: input/gwas/gcss_pics/study
 
     - name: copy_many GCSS pics credible sets
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcss_pics
+      destination: input/gwas/gcss_pics/credible_set
+
+    - name: copy_many GCSS pics credible set variants
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcss_pics/credible_set_variant
 
     - name: copy_many GCSS susie study
-      sources: gs://gwas_catalog_sumstats_susie/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcss_susie
+      destination: input/gwas/gcss_susie/study
 
     - name: copy_many GCSS susie credible sets
-      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260901/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcss_susie
+      destination: input/gwas/gcss_susie/credible_set
 
-    - name: copy_many finngen study
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/study_index/*.parquet
-      destination: input/gwas/study/finngen
+    - name: copy_many GCSS susie credible set variants
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcss_susie/credible_set_variant
 
-    - name: copy_many finngen credible sets
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/*.parquet
-      destination: input/gwas/credible_set/finngen
+    - name: copy_many finngen gwas study
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/study/*.parquet
+      destination: input/gwas/finngen_gwas/study
+
+    - name: copy_many finngen gwas credible sets
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set/*.parquet
+      destination: input/gwas/finngen_gwas/credible_set
+
+    - name: copy_many finngen gwas credible set variants
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/finngen_gwas/credible_set_variant
   ##################################################################################################
 
   #: GWAS_PPP STEP :################################################################################
   gwas_ppp:
-    - name: copy_many finngen-UKBB-MVP study
-      sources: gs://finngen_data/meta/three-way/prod/20251027T140104/output/study_index/*.parquet
-      destination: input/gwas/study/finngen_ukb_mvp
+    - name: copy_many finngen meta study
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/study/*.parquet
+      destination: input/gwas/finngen_meta/study
 
-    - name: copy_many finngen-UKBB-MVP credible sets
-      sources: gs://finngen_data/meta/three-way/prod/20251027T140104/output/credible_sets/*.parquet
-      destination: input/gwas/credible_set/finngen_ukb_mvp
+    - name: copy_many finngen meta credible sets
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set/*.parquet
+      destination: input/gwas/finngen_meta/credible_set
+
+    - name: copy_many finngen meta credible set variants
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/finngen_meta/credible_set_variant
   ##################################################################################################
 
   #: HERITABILITY STEP :############################################################################
@@ -957,67 +996,104 @@ steps:
   #: MOLQTL STEP: ##################################################################################
   molqtl:
     - name: copy_many eQTL Catalogue r8 study
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/study_index/*.parquet
-      destination: input/molqtl/study/eqtl_catalogue/r8
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/study_index/*.parquet
+      destination: input/molqtl/eqtl_catalogue/study
 
     - name: copy_many eQTL Catalogue r8 credible sets
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/credible_set/*.parquet
-      destination: input/molqtl/credible_set/eqtl_catalogue/r8
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/eqtl_catalogue/credible_set
+
+    - name: copy_many eQTL Catalogue r8 credible set variants
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/eqtl_catalogue/credible_set_variant
       max_concurrency: 4
 
     - name: copy_many UKBB PPP EUR study
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/molqtl/study/ukb_ppp_eur
+      destination: input/molqtl/ukb_ppp_eur/study
 
     - name: copy_many UKBB PPP EUR credible sets
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/molqtl/credible_set/ukb_ppp_eur
+      destination: input/molqtl/ukb_ppp_eur/credible_set
+
+    - name: copy_many UKBB PPP EUR credible set variants
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/molqtl/ukb_ppp_eur/credible_set_variant
+
+    - name: copy_many finngen multiome study
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/study/*.parquet
+      destination: input/molqtl/finngen_multiome/study
+
+    - name: copy_many finngen multiome credible sets
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/finngen_multiome/credible_set
+
+    - name: copy_many finngen multiome credible set variants
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/finngen_multiome/credible_set_variant
   ##################################################################################################
 
   #: MOLQTL_PPP STEP: ##############################################################################
   molqtl_ppp:
     # OTAR2065 neuroinflammation microglia sc-eQTLs (processed by the eQTL Catalogue, OTAR2077):
-    - name: copy_many molqtl microglia study
-      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/20250624T124201/output/study_index/*/*.parquet
-      destination: input/molqtl/study/otar2077/microglia
+    - name: copy_many microglia study
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/study_index/*.parquet
+      destination: input/molqtl/otar2077/microglia/study
 
-    - name: copy_many molqtl microglia credible sets
-      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/20250624T124201/output/study_locus/*/*.parquet
-      destination: input/molqtl/credible_set/otar2077/microglia
+    - name: copy_many microglia credible sets
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/otar2077/microglia/credible_set
+
+    - name: copy_many microglia credible set variants
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/otar2077/microglia/credible_set_variant
 
     - name: explode eQTLGen molqtl
       foreach:
         - single_cell_eqtl
         - coeqtl
       do:
-        - name: copy_many molqtl eQTLGen ${each} study
-          sources: gs://eqtlgen_data/prod/20260326T115635/output/${each}/260326/study/*.parquet
-          destination: input/molqtl/study/eQTLGen/${each}
+        - name: copy_many eQTLGen ${each} study
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/study/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/study
 
-        - name: copy_many molqtl eQTLGen ${each} credible sets
-          sources: gs://eqtlgen_data/prod/20260326T115635/output/${each}/260326/credible_set/*.parquet
-          destination: input/molqtl/credible_set/eQTLGen/${each}
+        - name: copy_many eQTLGen ${each} credible sets
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/credible_set/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/credible_set
 
-    - name: copy_many molqtl deCODE proteomics study
-      sources: gs://decode_data/prod/20260916T175627/output/smp/study/*.parquet
-      destination: input/molqtl/study/deCODE_proteomics
+        - name: copy_many eQTLGen ${each} credible set variants
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/credible_set_variant/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/credible_set_variant
 
-    - name: copy_many molqtl deCODE proteomics credible sets
-      sources: gs://decode_data/prod/20260916T175627/output/smp/credible_set/*.parquet
-      destination: input/molqtl/credible_set/deCODE_proteomics
+    - name: copy_many deCODE proteomics study
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/study/*.parquet
+      destination: input/molqtl/deCODE_proteomics/study
 
-    # SLE-map credible set and study table:
-    - name: copy_many sle_map credible sets
-      sources: gs://sle_map_data/prod/20260923T222644/output/credible_set/*.parquet
-      destination: input/molqtl/credible_set/sle_map
+    - name: copy_many deCODE proteomics credible sets
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/deCODE_proteomics/credible_set
+
+    - name: copy_many deCODE proteomics credible set variants
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/deCODE_proteomics/credible_set_variant
 
     - name: copy_many sle_map study
-      sources: gs://sle_map_data/prod/20260923T222644/output/study/*.parquet
-      destination: input/molqtl/study/sle_map
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/study/*.parquet
+      destination: input/molqtl/sle_map/study
+
+    - name: copy_many sle_map credible sets
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/sle_map/credible_set
+
+    - name: copy_many sle_map credible set variants
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/sle_map/credible_set_variant
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
