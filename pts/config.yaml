@@ -1390,7 +1390,8 @@ steps:
       source:
         feature_matrix: intermediate/l2g_feature_matrix
         credible_set: output/credible_set
-        gold_standard: input/l2g/gold_standard.json
+        # built by gentropy_l2g_training_set from the effector gene list
+        gold_standard: intermediate/l2g_training_set
         predefined_test: input/l2g/predefined_test_for_split
       destination:
         model: etc/model/locus_to_gene_model/classifier.skops

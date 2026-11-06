@@ -13,11 +13,11 @@ from pts.transformers.l2g_predict import build_output, l2g_predict
 
 
 def test_build_output_pins_the_release_schema() -> None:
-    keys = pl.DataFrame({'studyLocusId': ['sl1'], 'geneId': ['g1'], 'score': [0.5]})
+    keys = pl.DataFrame({'credibleSetId': ['sl1'], 'geneId': ['g1'], 'score': [0.5]})
     out = build_output(keys, np.array([[1.0, 2.0]], dtype=np.float32),
                        np.array([[0.1, 0.2]], dtype=np.float32), 0.25, ['a', 'b'])
-    assert out.columns == ['studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue']
-    assert out.schema['studyLocusId'] == pl.String
+    assert out.columns == ['credibleSetId', 'geneId', 'score', 'features', 'shapBaseValue']
+    assert out.schema['credibleSetId'] == pl.String
     assert out.schema['geneId'] == pl.String
     assert out.schema['score'] == pl.Float64
     assert out.schema['shapBaseValue'] == pl.Float32
@@ -27,7 +27,7 @@ def test_build_output_pins_the_release_schema() -> None:
 
 
 def test_build_output_keeps_the_features_in_fitted_order() -> None:
-    keys = pl.DataFrame({'studyLocusId': ['sl1'], 'geneId': ['g1'], 'score': [0.5]})
+    keys = pl.DataFrame({'credibleSetId': ['sl1'], 'geneId': ['g1'], 'score': [0.5]})
     out = build_output(keys, np.array([[1.0, 2.0]], dtype=np.float32),
                        np.array([[0.1, 0.2]], dtype=np.float32), 0.25, ['b', 'a'])
     assert [entry['name'] for entry in out['features'][0]] == ['b', 'a']
@@ -36,7 +36,7 @@ def test_build_output_keeps_the_features_in_fitted_order() -> None:
 
 
 def test_build_output_gives_every_row_the_same_base_value() -> None:
-    keys = pl.DataFrame({'studyLocusId': ['sl1', 'sl2'], 'geneId': ['g1', 'g2'], 'score': [0.5, 0.6]})
+    keys = pl.DataFrame({'credibleSetId': ['sl1', 'sl2'], 'geneId': ['g1', 'g2'], 'score': [0.5, 0.6]})
     out = build_output(keys, np.zeros((2, 1), dtype=np.float32),
                        np.zeros((2, 1), dtype=np.float32), 0.25, ['a'])
     assert out['shapBaseValue'].unique().to_list() == [pytest.approx(0.25)]
@@ -48,7 +48,7 @@ def workspace(tmp_path):
     n = 60
     matrix = pl.DataFrame(
         {
-            'studyLocusId': [f'sl{i}' for i in range(n)],
+            'credibleSetId': [f'sl{i}' for i in range(n)],
             'geneId': [f'ENSG{i:011d}' for i in range(n)],
             'isProteinCoding': [1] * (n - 5) + [0] * 5,
             **{name: rng.random(n) for name in FEATURES},
@@ -58,7 +58,7 @@ def workspace(tmp_path):
     matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
 
     credible = pl.DataFrame({
-        'studyLocusId': [f'sl{i}' for i in range(n)],
+        'id': [f'sl{i}' for i in range(n)],
         'studyType': ['gwas'] * (n - 10) + ['eqtl'] * 10,
     })
     (tmp_path / 'cs').mkdir()
@@ -87,7 +87,7 @@ def multi_gene_workspace(tmp_path):
 
     matrix = pl.DataFrame(
         {
-            'studyLocusId': [locus for locus, _ in pairs],
+            'credibleSetId': [locus for locus, _ in pairs],
             'geneId': [gene for _, gene in pairs],
             'isProteinCoding': [1] * n,
             **{name: rng.random(n) for name in FEATURES},
@@ -97,7 +97,7 @@ def multi_gene_workspace(tmp_path):
     matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
 
     credible = pl.DataFrame({
-        'studyLocusId': [f'sl{i:02d}' for i in reversed(range(12))],
+        'id': [f'sl{i:02d}' for i in reversed(range(12))],
         'studyType': ['gwas'] * 12,
     })
     (tmp_path / 'cs').mkdir()
@@ -135,7 +135,7 @@ def test_l2g_predict_excludes_non_gwas_and_non_protein_coding_rows(workspace) ->
     out = pl.read_parquet(f'{destination}/*.parquet')
     # 60 rows, 10 non-gwas at the tail, 5 non-protein-coding at the tail; they overlap.
     assert out.height == 50
-    assert 'sl59' not in out['studyLocusId'].to_list()
+    assert 'sl59' not in out['credibleSetId'].to_list()
 
 
 def test_l2g_predict_applies_the_threshold(workspace) -> None:
@@ -153,14 +153,14 @@ def test_l2g_predict_applies_the_threshold(workspace) -> None:
     assert [part.name for part in parts] == ['00000000.parquet']
     empty = pl.read_parquet(parts)
     assert empty.height == 0
-    assert empty.columns == ['studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue']
+    assert empty.columns == ['credibleSetId', 'geneId', 'score', 'features', 'shapBaseValue']
 
 
 def test_l2g_predict_output_is_sorted_by_key(multi_gene_workspace) -> None:
-    """The full `(studyLocusId, geneId)` key, on a fixture where the second component matters.
+    """The full `(credibleSetId, geneId)` key, on a fixture where the second component matters.
 
     With one gene per locus -- as in `workspace` -- an implementation that sorted on
-    `studyLocusId` alone would satisfy this while violating the ordering the transformer
+    `credibleSetId` alone would satisfy this while violating the ordering the transformer
     declares, so the fixture gives every locus several genes and the assertion compares the
     key TUPLES.
     """
@@ -168,10 +168,10 @@ def test_l2g_predict_output_is_sorted_by_key(multi_gene_workspace) -> None:
     l2g_predict(_source(multi_gene_workspace), destination, dict(SETTINGS), None)
     out = pl.read_parquet(f'{destination}/*.parquet')
 
-    genes_per_locus = out.group_by('studyLocusId').len()['len']
+    genes_per_locus = out.group_by('credibleSetId').len()['len']
     assert int(genes_per_locus.min()) > 1, 'fixture no longer exercises the geneId component'
 
-    keys = out.select('studyLocusId', 'geneId').rows()
+    keys = out.select('credibleSetId', 'geneId').rows()
     assert keys == sorted(keys)
 
 

@@ -28,7 +28,8 @@ pis_version: "26.12.0rc21"
 pts_version: "26.12.0rc35"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
-# 4.0.0-rc.1 reads the credible sets as CredibleSet and CredibleSetVariant.
+# 4.0.0-rc.1 reads the credible sets as CredibleSet and CredibleSetVariant, and has
+# the effector_gene_list and training_set steps.
 gentropy_version: "4.0.0-rc.1"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
@@ -366,24 +367,18 @@ steps:
     depends_on:
       - pts_evidence_impc
       - pts_evidence_europepmc
+      # Also waits for the rare-variant and clinical precedence evidence through
+      # pts_evidence_gwas_credible_sets -> pts_l2g -> gentropy_l2g_effector_gene_list.
       - pts_evidence_gwas_credible_sets
       - pts_evidence_expression_atlas
       - pts_evidence_cancer_biomarkers
-      - pts_evidence_clinical_precedence
-      - pts_evidence_clingen
       - pts_evidence_cosmic
       - pts_evidence_project_score
       - pts_evidence_crispr_screens
-      - pts_evidence_clinvar
       - pts_evidence_clinvar_somatic
       - pts_evidence_gene_burden
-      - pts_evidence_gene2phenotype
-      - pts_evidence_panel_app
-      - pts_evidence_orphanet
       - pts_evidence_intogen
       - pts_evidence_reactome
-      - pts_evidence_uniprot_literature
-      - pts_evidence_uniprot_variants
     depends_on_ppp:
       - pts_evidence_ot_crispr
       - pts_evidence_encore
@@ -487,14 +482,13 @@ steps:
   pts_l2g:
     machine_type: n2d-standard-64
     depends_on:
-      - gentropy_l2g_feature_matrix
-      - pis_l2g
+      - gentropy_l2g_training_set
       - pis_l2g_predefined_test_for_split
 
   pts_evidence_gwas_credible_sets:
     depends_on:
+      # Also brings pis_literature, through the evidence steps the effector gene list reads.
       - pts_l2g
-      - pis_literature
 
   # GENETICS STEPS (PTS and Gentropy)
   pts_enhancer_to_gene:
@@ -530,3 +524,18 @@ steps:
       - pts_variant
       - pts_enhancer_to_gene
       - pts_interaction
+  gentropy_l2g_effector_gene_list:
+    depends_on:
+      - pis_l2g
+      - pts_evidence_clinvar
+      - pts_evidence_panel_app
+      - pts_evidence_clingen
+      - pts_evidence_gene2phenotype
+      - pts_evidence_orphanet
+      - pts_evidence_uniprot_variants
+      - pts_evidence_uniprot_literature
+      - pts_evidence_clinical_precedence
+  gentropy_l2g_training_set:
+    depends_on:
+      - gentropy_l2g_effector_gene_list
+      - gentropy_l2g_feature_matrix

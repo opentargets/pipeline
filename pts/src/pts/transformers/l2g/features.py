@@ -44,11 +44,11 @@ FEATURES: tuple[str, ...] = (
 )
 """The 31 features, in the order `LocusToGeneConfig.features_list` declares them."""
 
-FIXED_COLUMNS: tuple[str, ...] = ('studyLocusId', 'geneId')
+FIXED_COLUMNS: tuple[str, ...] = ('credibleSetId', 'geneId')
 """Identity columns that are never handed to the classifier."""
 
 LOCUS_MEAN_IMPUTED: tuple[str, ...] = ('geneCount500kb', 'proteinGeneCount500kb')
-"""Gene attributes imputed with the mean over their study locus before the zero fill."""
+"""Gene attributes imputed with the mean over their credible set before the zero fill."""
 
 
 def impute_and_cast(
@@ -61,7 +61,7 @@ def impute_and_cast(
 
     Every requested feature is cast to `Float32` first, mirroring `L2GFeatureMatrix.__init__`,
     which casts before anything else touches the matrix. The two gene-count columns are then
-    filled with the mean over their `studyLocusId` partition; every remaining null in every
+    filled with the mean over their `credibleSetId` partition; every remaining null in every
     feature becomes 0.0. Features are returned in the requested order, which is the order the
     classifier expects.
 
@@ -70,7 +70,7 @@ def impute_and_cast(
     `Float32` throughout would round differently.
 
     Args:
-        frame: feature matrix, one row per (study locus, gene).
+        frame: feature matrix, one row per (credible set, gene).
         features: feature names, in the order the model was fitted on.
         keep: extra columns to carry through, placed after the fixed columns.
 
@@ -89,7 +89,7 @@ def impute_and_cast(
 
     imputed = cast.with_columns(
         pl.col(name)
-        .fill_null(pl.col(name).cast(pl.Float64).mean().over('studyLocusId').cast(pl.Float32))
+        .fill_null(pl.col(name).cast(pl.Float64).mean().over('credibleSetId').cast(pl.Float32))
         .alias(name)
         for name in LOCUS_MEAN_IMPUTED
         if name in features
