@@ -1,11 +1,11 @@
 [
   {
     "id": "allelicRequirements",
-    "description": "Inheritance patterns"
+    "description": "Mode of inheritance of the gene-disease relationship as curated by ClinGen (e.g. AD, AR, XL)"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "ClinGen gene-disease validity classification (e.g. 'Definitive', 'Moderate', 'Limited', 'Refuted')"
   },
   {
     "id": "datasourceId",
@@ -17,11 +17,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Disease label as curated by ClinGen"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "MONDO identifier of the disease as curated by ClinGen"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -47,19 +47,19 @@
   },
   {
     "id": "releaseDate",
-    "description": "Date of the release of the data in a 'YYYY-MM-DD' format"
+    "description": "Date of the ClinGen gene-disease validity classification in a 'YYYY-MM-DD' format"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the ClinGen classification"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "Name of the ClinGen Gene Curation Expert Panel (GCEP) that made the classification"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as curated by ClinGen"
   },
   {
     "id": "targetId",
@@ -68,7 +68,7 @@
   },
   {
     "id": "urls",
-    "description": "Reference to linked external resource (e.g. clinical trials, studies, package inserts, reports, etc.)"
+    "description": "Link to the ClinGen gene-disease validity curation report"
   },
   {
     "id": "urls/niceName",

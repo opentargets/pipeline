@@ -1,19 +1,19 @@
 [
   {
     "id": "cellLineBackground",
-    "description": "Background of the derived cell lines"
+    "description": "Cell line or genetic background of the screened cells (e.g. 'A375', 'iPSC KOLF2.1J')"
   },
   {
     "id": "cellType",
-    "description": "The studied cell type. Preferably the cell line ontology label"
+    "description": "Cell type screened in the Open Targets CRISPR study"
   },
   {
     "id": "contrast",
-    "description": "Experiment contrast"
+    "description": "Comparison (cell populations or conditions) of the Open Targets CRISPR screen"
   },
   {
     "id": "crisprScreenLibrary",
-    "description": "Applied screening library in the CRISPR/Cas9 project"
+    "description": "Guide RNA library used in the Open Targets CRISPR screen"
   },
   {
     "id": "datasourceId",
@@ -43,15 +43,15 @@
   },
   {
     "id": "log2FoldChangeValue",
-    "description": "Log 2 fold expression change in contrast experiment"
+    "description": "MAGeCK log 2 fold change of the target in the tail of the distribution it was selected from"
   },
   {
     "id": "projectDescription",
-    "description": "Description of the project that generated the data"
+    "description": "Description of the Open Targets project that generated the data"
   },
   {
     "id": "projectId",
-    "description": "The identifer of the project that generated the data"
+    "description": "Open Targets (OTAR) project code"
   },
   {
     "id": "qualityControls",
@@ -59,35 +59,35 @@
   },
   {
     "id": "releaseDate",
-    "description": "Date of the release of the data in a 'YYYY-MM-DD' format"
+    "description": "Date of the Open Targets project data release in a 'YYYY-MM-DD' format"
   },
   {
     "id": "releaseVersion",
-    "description": "Open Targets data release version"
+    "description": "Version of the Open Targets project data release"
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "Smallest of the significance values (e.g. MAGeCK FDR or p-value) of the target used to select hits in the study"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; 1.0 for all Open Targets CRISPR screen hits"
   },
   {
     "id": "statisticalTestTail",
-    "description": "End of the distribution the target was picked from"
+    "description": "MAGeCK distribution tail the target was selected from ('upper tail': positive selection, 'lower tail': negative selection)"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "Identifier of the CRISPR screen within the Open Targets project"
   },
   {
     "id": "studyOverview",
-    "description": "Description of the study"
+    "description": "Description of the Open Targets CRISPR screen"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol or Ensembl gene identifier of the target as reported in the MAGeCK output"
   },
   {
     "id": "targetId",
