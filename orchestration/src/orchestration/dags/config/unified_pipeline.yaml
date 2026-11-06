@@ -16,7 +16,7 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "sz/platform-2612-2"
+run_name: "sz/platform-2612-3"
 
 # Pipeline package versions
 #
