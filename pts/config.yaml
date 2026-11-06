@@ -1571,10 +1571,9 @@ steps:
         l2g_table: output/l2g_prediction
         biosample: output/biosample
       destination:
-        vep_data_header: intermediate/vep_view/vep_view_header.tsv
-        vep_data_all: intermediate/vep_view/vep_view
-        vep_data_gwas: intermediate/vep_view/vep_view_gwas
-        vep_data_qtl: intermediate/vep_view/vep_view_qtl
+        vep_data_all: etc/export/vep_data/open_targets_vep.tsv.bgz
+        vep_data_gwas: etc/export/vep_data/open_targets_vep_gwas.tsv.bgz
+        vep_data_qtl: etc/export/vep_data/open_targets_vep_qtl.tsv.bgz
   ##################################################################################################
 
   #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
