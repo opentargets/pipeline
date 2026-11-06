@@ -1,12 +1,40 @@
 """Module to generate view for Open Target's VEP plugin."""
 
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import polars as pl
+import pysam
 from loguru import logger
 from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.utils.dataset import scan_dataset
+
+# Columns shared by every VEP file. The leading `#` on the first column makes the header line a
+# tabix meta line, so it is kept in the index and `tabix -H` returns the column names.
+COMMON_COLUMNS = [
+    '#chromosome',
+    'position',
+    'referenceAllele',
+    'alternateAllele',
+    'variantId',
+    'studyId',
+    'studyType',
+    'studyLocusId',
+    'pValueMantissa',
+    'pValueExponent',
+    'beta',
+    'is95CredibleSet',
+    'is99CredibleSet',
+    'posteriorProbability',
+    'finemappingMethod',
+    'isLead',
+]
+GWAS_COLUMNS = ['gwasGeneId', 'gwasLocusToGeneScore', 'gwasDiseases']
+QTL_COLUMNS = ['qtlGeneId', 'qtlBiosampleName']
 
 
 def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
@@ -125,6 +153,47 @@ def process_l2g(l2g: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+def _upload(local_path: Path, destination: str) -> None:
+    """Copy a local file to a destination that may be local or remote.
+
+    A plain `open()` on a `gs://` path would write to the container's disk instead, so the copy
+    goes through `StorageHandle`.
+
+    `StorageHandle.copy_to` is not used on purpose: from local to `gs://` it falls back to
+    `read()` + `write()`, which holds the whole file in memory (about 3.7 GB for the combined
+    file) on top of the collected table. Streaming through `open('wb')` uploads it in chunks.
+    """
+    with local_path.open('rb') as src, StorageHandle(destination).open('wb') as dst:
+        shutil.copyfileobj(src, dst)
+
+
+def write_tabix(frame: pl.DataFrame, destination: str, work_dir: Path) -> None:
+    """Write a frame as a bgzip-compressed TSV with a tabix index.
+
+    htslib can only write to the local filesystem, so the TSV is written, compressed and indexed
+    in a temporary directory under `work_dir` and then copied to the (possibly remote)
+    destinations. The index is written next to the data file as `<destination>.tbi`, the name
+    tabix readers look for. The frame must be sorted by `#chromosome` and `position`, with each
+    chromosome in one contiguous block.
+
+    Args:
+        frame: Data to write. The first column is the chromosome and the second the 1-based
+            position, which tabix uses as both the start and the end of the interval.
+        destination: Where to write the `.tsv.bgz` file.
+        work_dir: Local directory for the temporary files.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=work_dir, prefix='vep_view_') as tmp:
+        tsv = Path(tmp) / 'data.tsv'
+        bgz = Path(tmp) / 'data.tsv.bgz'
+        frame.write_csv(tsv, separator='\t')
+        pysam.tabix_compress(str(tsv), str(bgz), force=True)
+        tsv.unlink()
+        pysam.tabix_index(str(bgz), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
+        _upload(bgz, destination)
+        _upload(Path(f'{bgz}.tbi'), f'{destination}.tbi')
+
+
 def vep_view(
     source: dict[str, str],
     destination: dict[str, str],
@@ -140,10 +209,12 @@ def vep_view(
 
     Loads four input datasets (credible sets, study index, L2G predictions, biosample
     index), processes and joins them into a flat, per-tag-variant table, and writes three
-    tab-separated output files:
-    - `vep_data_all`: all study types combined, sorted by chromosome/position.
-    - `vep_data_gwas`: GWAS-only rows (studyType == 'gwas').
-    - `vep_data_qtl`: QTL-only rows (studyType != 'gwas').
+    bgzip-compressed, tabix-indexed TSV files, sorted by chromosome/position:
+    - `vep_data_all`: all study types combined, with both GWAS and QTL columns.
+    - `vep_data_gwas`: GWAS-only rows (studyType == 'gwas'), without the QTL columns.
+    - `vep_data_qtl`: QTL-only rows (studyType != 'gwas'), without the GWAS columns.
+
+    The header line starts with `#`, so tabix keeps it as a meta line and `tabix -H` returns it.
 
     Variant IDs (format `chr_pos_ref_alt`) are parsed into separate `chromosome`,
     `position`, `referenceAllele`, and `alternateAllele` columns. Rows with a null
@@ -154,10 +225,10 @@ def vep_view(
         source: Mapping of input dataset keys to their parquet directory paths.
             Required keys: `credible_set`, `study_table`, `l2g_table`, `biosample`.
         destination: Mapping of output keys to file paths.
-            Required keys: `vep_data_all`, `vep_data_gwas`, `vep_data_qtl`.
+            Required keys: `vep_data_all`, `vep_data_gwas`, `vep_data_qtl`. Each tabix index is
+            written next to its data file, with `.tbi` appended to the path.
         settings: Unused transformer settings dict (reserved for future use).
-        config: Otter pipeline config object (unused directly, passed for interface
-            compatibility).
+        config: Otter pipeline config object; its `work_path` holds the temporary files.
     """
     logger.info('Loading input data')
     credible_set = process_credible_set(scan_dataset(source['credible_set']))
@@ -177,29 +248,7 @@ def vep_view(
             pl.col('variantId').str.split('_').list.get(2).alias('referenceAllele'),
             pl.col('variantId').str.split('_').list.get(3).alias('alternateAllele'),
         )
-        .select(
-            '#chromosome',
-            'position',
-            'referenceAllele',
-            'alternateAllele',
-            'variantId',
-            'studyId',
-            'studyType',
-            'studyLocusId',
-            'pValueMantissa',
-            'pValueExponent',
-            'beta',
-            'is95CredibleSet',
-            'is99CredibleSet',
-            'posteriorProbability',
-            'finemappingMethod',
-            'isLead',
-            'gwasGeneId',
-            'gwasLocusToGeneScore',
-            'gwasDiseases',
-            'qtlGeneId',
-            'qtlBiosampleName',
-        )
+        .select(*COMMON_COLUMNS, *GWAS_COLUMNS, *QTL_COLUMNS)
         .filter(
             pl.col('position').is_not_null(),
             pl.col('#chromosome').str.len_chars() < 3,
@@ -208,20 +257,21 @@ def vep_view(
         .collect()
     )
 
+    work_dir = Path(config.work_path)
+
     logger.info('Writing full dataset')
-    result.write_csv(
-        destination['vep_data_all'],
-        separator='\t',
-    )
+    write_tabix(result, destination['vep_data_all'], work_dir)
 
     logger.info('Writing GWAS dataset')
-    result.filter(pl.col('studyType') == 'gwas').write_csv(
+    write_tabix(
+        result.filter(pl.col('studyType') == 'gwas').select(*COMMON_COLUMNS, *GWAS_COLUMNS),
         destination['vep_data_gwas'],
-        separator='\t',
+        work_dir,
     )
 
     logger.info('Writing QTL dataset')
-    result.filter(pl.col('studyType') != 'gwas').write_csv(
+    write_tabix(
+        result.filter(pl.col('studyType') != 'gwas').select(*COMMON_COLUMNS, *QTL_COLUMNS),
         destination['vep_data_qtl'],
-        separator='\t',
+        work_dir,
     )
