@@ -67,7 +67,7 @@ scratchpad:
   staging_eqtl_catalogue_ts: '20261105T130431'
   staging_ukb_ppp_eur_ts: '20261026T161010'
   staging_finngen_multiome_ts: '20261029T125742'
-  staging_otar2065_microglia_ts: '20261103T163322'
+  staging_otar2065_microglia_ts: '20261105T204507'
   staging_eqtlgen_ts: '20261103T135048'
   staging_decode_ts: '20261103T122701'
   staging_sle_map_ts: '20261103T145657'
