@@ -71,6 +71,21 @@
     "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies"
   },
   {
+    "id": "biosample_enrichment",
+    "nice_name": "Biosample enrichment",
+    "key": [
+      "diseaseId",
+      "studyId",
+      "biosampleId",
+      "biosampleDataset"
+    ],
+    "tags": [
+      "Genetics",
+      "Disease"
+    ],
+    "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics"
+  },
+  {
     "id": "clinical_indication",
     "nice_name": "Clinical indication",
     "tags": [

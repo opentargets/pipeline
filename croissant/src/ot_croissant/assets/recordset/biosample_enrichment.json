@@ -1,0 +1,41 @@
+[
+  {
+    "id": "beta",
+    "description": "Estimated effect size of the biosample enrichment"
+  },
+  {
+    "id": "betaError",
+    "description": "Standard error of the biosample enrichment effect size"
+  },
+  {
+    "id": "biosampleDataset",
+    "description": "Source dataset containing the biosample annotations used for enrichment"
+  },
+  {
+    "id": "biosampleFromSource",
+    "description": "Biosample as reported by the source dataset"
+  },
+  {
+    "id": "biosampleId",
+    "description": "Ontology identifier of the biosample tested for enrichment",
+    "foreign_key": "biosample/biosampleId"
+  },
+  {
+    "id": "diseaseId",
+    "description": "Identifier of the disease or phenotype tested for biosample enrichment",
+    "foreign_key": "disease/id"
+  },
+  {
+    "id": "enrichmentApproach",
+    "description": "Method used to estimate biosample enrichment"
+  },
+  {
+    "id": "pValue",
+    "description": "P-value for the biosample enrichment"
+  },
+  {
+    "id": "studyId",
+    "description": "Identifier of the GWAS tested for biosample enrichment",
+    "foreign_key": "study/studyId"
+  }
+]
