@@ -12,7 +12,12 @@ from pts.transformers.drug_mechanism_of_action_aact import build_candidates, dru
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
-SETTINGS = {'link_share': 0.8, 'class_level_genes': 20, 'report_min_confidence': 0.70}
+SETTINGS = {
+    'link_share': 0.8,
+    'class_level_genes': 20,
+    'report_min_confidence': 0.70,
+    'suggestion_min_confidence': 0.80,
+}
 
 LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
 DRUGS = pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String}))
@@ -20,21 +25,43 @@ EVIDENCE = pl.List(pl.Struct({'nctId': pl.String, 'pmid': pl.String, 'quote': pl
 PAPERS = pl.List(pl.Struct({'pmid': pl.String, 'nctId': pl.String}))
 
 
+def _synonyms(symbol: str) -> list[dict]:
+    if symbol.startswith('K'):
+        return [{'label': 'KINASEFAM', 'source': 's'}]
+    if symbol == 'IL3RA':
+        return [{'label': 'CD123', 'source': 's'}]
+    return []
+
+
 def _target() -> pl.DataFrame:
-    genes = [('ENSG_EGFR', 'EGFR', 'epidermal growth factor receptor')]
-    genes += [(f'ENSG_K{i}', f'K{i}', f'kinase {i}') for i in range(21)]
+    genes = [
+        ('ENSG_EGFR', 'EGFR', 'epidermal growth factor receptor', '7'),
+        ('ENSG_DRD2', 'DRD2', 'dopamine receptor D2', '11'),
+        ('ENSG_IL3RA_X', 'IL3RA', 'interleukin 3 receptor subunit alpha', 'X'),
+        ('ENSG_IL3RA_Y', 'IL3RA', 'interleukin 3 receptor subunit alpha', 'Y'),
+    ]
+    genes += [(f'ENSG_K{i}', f'K{i}', f'kinase {i}', '1') for i in range(21)]
     return pl.DataFrame(
         {
             'id': [g[0] for g in genes],
             'approvedSymbol': [g[1] for g in genes],
+            'biotype': ['protein_coding' for _ in genes],
+            'genomicLocation': [{'chromosome': g[3], 'start': 1, 'end': 2, 'strand': 1} for g in genes],
             'approvedName': [g[2] for g in genes],
-            'symbolSynonyms': [[{'label': 'KINASEFAM', 'source': 's'}] if g[1].startswith('K') else [] for g in genes],
+            'symbolSynonyms': [_synonyms(g[1]) for g in genes],
             'obsoleteSymbols': [[] for _ in genes],
             'nameSynonyms': [[] for _ in genes],
         },
         schema={
             'id': pl.String,
             'approvedSymbol': pl.String,
+            'biotype': pl.String,
+            'genomicLocation': pl.Struct({
+                'chromosome': pl.String,
+                'start': pl.Int64,
+                'end': pl.Int64,
+                'strand': pl.Int64,
+            }),
             'approvedName': pl.String,
             'symbolSynonyms': LABELS,
             'obsoleteSymbols': LABELS,
@@ -136,6 +163,7 @@ def _build(moa: pl.DataFrame, report: pl.DataFrame = REPORT, **settings: object)
         link_share=merged['link_share'],
         class_level_genes=merged['class_level_genes'],
         report_min_confidence=merged['report_min_confidence'],
+        suggestion_min_confidence=merged['suggestion_min_confidence'],
     )
 
 
@@ -276,6 +304,26 @@ def test_confidence_below_the_report_minimum_is_dropped() -> None:
 
     assert _build(moa)['mechanismOfAction'].to_list() == ['EGFR inhibitor']
     assert _build(moa, report_min_confidence=0.5).height == 2
+
+
+def test_confident_unsupported_suggestion_grounds_by_fallback() -> None:
+    moa = _moa(
+        _mechanism(targetFromSource='DA-2', targetSymbolSuggestion=['DRD2'], confidence=0.9, mechanismOfAction='hi'),
+        _mechanism(targetFromSource='DA-2', targetSymbolSuggestion=['DRD2'], confidence=0.75, mechanismOfAction='lo'),
+    )
+
+    candidates = _build(moa)
+
+    assert candidates.select('mechanismOfAction', 'targets').to_dicts() == [
+        {'mechanismOfAction': 'hi', 'targets': ['ENSG_DRD2']}
+    ]
+    assert _build(moa, suggestion_min_confidence=0.7).height == 2
+
+
+def test_pseudoautosomal_target_grounds_to_its_x_copy() -> None:
+    candidates = _build(_moa(_mechanism(targetFromSource='CD123', targetSymbolSuggestion=['IL3RA'])))
+
+    assert candidates['targets'].to_list() == [['ENSG_IL3RA_X']]
 
 
 def test_pool_without_a_linking_trial_is_dropped() -> None:

@@ -109,6 +109,12 @@ def _read(path: str | Path, columns: list[str] | None = None) -> pl.DataFrame:
     return pl.read_parquet(source, columns=columns)
 
 
+def _columns(path: str | Path) -> set[str]:
+    path = Path(path)
+    source = str(path / '*.parquet') if path.is_dir() else str(path)
+    return set(pl.scan_parquet(source).collect_schema().names())
+
+
 def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
@@ -181,8 +187,14 @@ def cmd_extract(run: Path, args: argparse.Namespace) -> None:
 
 
 def cmd_ground(run: Path, args: argparse.Namespace) -> None:
-    index = grounding.build_label_index(_read(args.target_view, ['id', *grounding.FIELDS]))
-    grounded = grounding.ground_mechanisms(pl.read_parquet(run / 'mechanisms.parquet'), index)
+    available = _columns(args.target_view)
+    located = [f for f in grounding.LOCATION_FIELDS if f in available]
+    index = grounding.build_label_index(_read(args.target_view, ['id', *grounding.FIELDS, *located]))
+    grounded = grounding.ground_mechanisms(
+        pl.read_parquet(run / 'mechanisms.parquet'),
+        index,
+        suggestion_min_confidence=args.suggestion_min_confidence,
+    )
     grounded.write_parquet(run / 'grounded.parquet')
     logger.info(f'ground: {dict(grounded.group_by("grounding").len().iter_rows())}')
 
@@ -356,7 +368,14 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument('--all', action='store_true', help='every pool, not only the pilot')
     extract.add_argument('--cached-only', action='store_true', help='use cached results only; call no model')
 
-    command('ground', cmd_ground).add_argument('--target-view', required=True)
+    ground = command('ground', cmd_ground)
+    ground.add_argument('--target-view', required=True)
+    ground.add_argument(
+        '--suggestion-min-confidence',
+        type=float,
+        default=None,
+        help="ground mechanisms at or above this confidence to the model's suggestion even if the name disagrees",
+    )
 
     judge_cmd = command('judge', cmd_judge)
     judge_cmd.add_argument('--concurrency', type=int, default=20)

@@ -12,7 +12,13 @@ import polars as pl
 from loguru import logger
 
 from pts.transformers.clinical_mira.moa.benchmark import link_pools
-from pts.transformers.clinical_mira.moa.grounding import GROUNDED, build_label_index, ground_mechanisms
+from pts.transformers.clinical_mira.moa.grounding import (
+    FIELDS,
+    GROUNDED,
+    LOCATION_FIELDS,
+    build_label_index,
+    ground_mechanisms,
+)
 from pts.transformers.clinical_mira.staged_outputs import MOA
 from pts.transformers.drug_molecule import compute_max_phase_per_drug
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -20,7 +26,7 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 if TYPE_CHECKING:
     from otter.config.model import Config
 
-LABEL_COLUMNS = ['id', 'approvedSymbol', 'symbolSynonyms', 'obsoleteSymbols', 'approvedName', 'nameSynonyms']
+LABEL_COLUMNS = ['id', *FIELDS, *LOCATION_FIELDS]
 
 CANDIDATE_COLUMNS = [
     'parentChemblId',
@@ -135,6 +141,7 @@ def build_candidates(
     link_share: float,
     class_level_genes: int,
     report_min_confidence: float,
+    suggestion_min_confidence: float,
 ) -> pl.DataFrame:
     """Link, ground and filter the staged mechanisms.
 
@@ -146,6 +153,8 @@ def build_candidates(
         link_share: The share of a pool's single-drug trials one drug must cover to link it.
         class_level_genes: A target grounding to more genes than this names a class.
         report_min_confidence: The lowest confidence a mechanism may have.
+        suggestion_min_confidence: The lowest confidence at which a mechanism whose target name
+            does not support the model's symbol suggestion still grounds to that suggestion.
 
     Returns:
         pl.DataFrame: One row per surviving mechanism, with ``CANDIDATE_COLUMNS``.
@@ -191,9 +200,9 @@ def build_candidates(
         & (pl.col('confidence') >= report_min_confidence)
     )
     index = build_label_index(target.select(LABEL_COLUMNS))
-    grounded = ground_mechanisms(kept.with_columns(kept=pl.lit(True)), index, class_level_genes).filter(
-        pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level')
-    )
+    grounded = ground_mechanisms(
+        kept.with_columns(kept=pl.lit(True)), index, class_level_genes, suggestion_min_confidence
+    ).filter(pl.col('grounding').is_in(GROUNDED) & ~pl.col('class_level'))
     rows = (
         grounded
         .join(links, on='drugName', how='inner', maintain_order='left')
@@ -238,7 +247,8 @@ def drug_mechanism_of_action_aact(
     Args:
         source: Paths to ``moa`` (the staged snapshot), ``clinical_report``, ``chembl_molecule`` and ``target``.
         destination: Path to ``candidates``.
-        settings: ``link_share``, ``class_level_genes`` and ``report_min_confidence``.
+        settings: ``link_share``, ``class_level_genes``, ``report_min_confidence`` and
+            ``suggestion_min_confidence``.
         config: Config object (not used).
     """
     logger.info(f'Reading the staged mechanisms from {source["moa"]}')
@@ -257,6 +267,7 @@ def drug_mechanism_of_action_aact(
         link_share=settings['link_share'],
         class_level_genes=settings['class_level_genes'],
         report_min_confidence=settings['report_min_confidence'],
+        suggestion_min_confidence=settings['suggestion_min_confidence'],
     )
     logger.info(f'Writing {candidates.height} candidates of {moa.height} mechanisms')
     write_dataset(candidates, destination['candidates'])

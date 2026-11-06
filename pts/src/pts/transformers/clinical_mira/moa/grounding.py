@@ -15,8 +15,11 @@ import polars as pl
 FIELDS = ('approvedSymbol', 'symbolSynonyms', 'obsoleteSymbols', 'approvedName', 'nameSynonyms')
 """Label fields of the target view, most specific first."""
 
-GROUNDED = ('source', 'suggestion', 'receptor')
+GROUNDED = ('source', 'suggestion', 'receptor', 'suggestion_fallback')
 """Grounding outcomes that give a mechanism its genes."""
+
+LOCATION_FIELDS = ('biotype', 'genomicLocation')
+"""Target view fields that settle which copy of a shared approved symbol is labelled."""
 
 CLASS_LEVEL_GENES = 20
 """A prediction grounding to more genes than this names a class, not a target."""
@@ -29,12 +32,35 @@ def normalise_label(label: str) -> str:
     return re.sub(r'\s+', ' ', label.lower().replace('-', '')).strip()
 
 
+def _preferred_copies(target_view: pl.DataFrame) -> pl.DataFrame:
+    """Keep, of the genes sharing an approved symbol, the protein-coding ones off chromosome Y.
+
+    A copy is dropped only when another gene with its symbol ranks higher: protein-coding
+    first, then not on Y. Genes with a symbol of their own are kept whatever they are.
+    """
+    rank = (pl.col('biotype') != 'protein_coding').fill_null(True).cast(pl.Int8) * 2 + (
+        pl.col('genomicLocation').struct.field('chromosome') == 'Y'
+    ).fill_null(False).cast(pl.Int8)
+    return (
+        target_view
+        .with_columns(_rank=rank)
+        .filter(pl.col('approvedSymbol').is_null() | (pl.col('_rank') == pl.col('_rank').min().over('approvedSymbol')))
+        .drop('_rank')
+    )
+
+
 def build_label_index(target_view: pl.DataFrame) -> pl.DataFrame:
     """Return every label of every target, with the field it came from.
+
+    When the target view carries ``biotype`` and ``genomicLocation``, genes that share an
+    approved symbol with a better copy are left out (``_preferred_copies``), so that a
+    pseudoautosomal gene's Y copy or a pseudogene does not make the symbol ambiguous.
 
     Returns:
         pl.DataFrame: ``label`` (normalised), ``field``, ``targetId``.
     """
+    if all(f in target_view.columns for f in LOCATION_FIELDS):
+        target_view = _preferred_copies(target_view)
     parts = []
     for field in FIELDS:
         column = pl.col(field)
@@ -185,8 +211,42 @@ def resolve(label: str, index: pl.DataFrame) -> list[str]:
     return _resolve(label, _to_lookup(index.filter(pl.col('label') == normalise_label(label))))
 
 
+def _ground_one(row: dict, lookup: Lookup, labels: dict[str, set[str]]) -> tuple[list[str], str, set[str]]:
+    """Ground one mechanism: its genes, its outcome and the genes its suggestions resolve to."""
+    if not (row['kept'] and row['isHumanTarget']):
+        return [], 'skipped', set()
+    resolved = {g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)}
+    if row['actsOnReceptor']:
+        receptors = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
+        outcome = 'receptor' if receptors else 'suggestion_unsupported' if resolved else 'unresolved'
+        return sorted(receptors), outcome, resolved
+    source = _resolve(row['targetFromSource'], lookup)
+    if source:
+        trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
+        if not trusted and len(resolved) > 1 and set(source) <= resolved:
+            return sorted(resolved), 'suggestion', resolved
+        if trusted or not resolved or set(source) <= resolved:
+            return source, 'source', resolved
+        return [], 'conflict', resolved
+    candidates = _candidates(row['targetFromSource'], lookup)
+    if candidates:
+        supported = resolved & set(candidates)
+    else:
+        supported = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
+    if supported:
+        return sorted(supported), 'suggestion', resolved
+    return [], 'suggestion_unsupported' if resolved else 'unresolved', resolved
+
+
+FALLBACK_FROM = frozenset({'suggestion_unsupported', 'conflict'})
+"""Outcomes a confident mechanism may ground from its suggestions alone."""
+
+
 def ground_mechanisms(
-    mechanisms: pl.DataFrame, index: pl.DataFrame, class_level_genes: int = CLASS_LEVEL_GENES
+    mechanisms: pl.DataFrame,
+    index: pl.DataFrame,
+    class_level_genes: int = CLASS_LEVEL_GENES,
+    suggestion_min_confidence: float | None = None,
 ) -> pl.DataFrame:
     """Add ``targetIds``, ``grounding`` and ``class_level`` to the mechanisms.
 
@@ -204,47 +264,27 @@ def ground_mechanisms(
     resolve to other genes, is a ``conflict`` and is left ungrounded: short aliases (``MEK``,
     ``TORC1``, ``A2A``) are often synonyms of an unrelated gene. A synonym match that is one of
     several suggested genes names a family (``HDAC``), and grounds to all of them.
+
+    With ``suggestion_min_confidence`` set, a ``suggestion_unsupported`` or ``conflict``
+    mechanism whose ``confidence`` is at least that grounds to the genes its suggestions
+    resolve to, as ``suggestion_fallback``. The mechanisms then need a ``confidence`` column.
     """
     lookup = _to_lookup(index)
     labels = _labels_by_gene(index)
     target_ids, grounding = [], []
     columns = ['targetFromSource', 'targetSymbolSuggestion', 'kept', 'isHumanTarget', 'actsOnReceptor']
+    if suggestion_min_confidence is not None:
+        columns.append('confidence')
     for row in mechanisms.select(columns).iter_rows(named=True):
-        if not (row['kept'] and row['isHumanTarget']):
-            target_ids.append([])
-            grounding.append('skipped')
-            continue
-        resolved = {g for s in row['targetSymbolSuggestion'] or [] for g in _resolve(s, lookup)}
-        if row['actsOnReceptor']:
-            receptors = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
-            target_ids.append(sorted(receptors))
-            grounding.append('receptor' if receptors else 'suggestion_unsupported' if resolved else 'unresolved')
-            continue
-        source = _resolve(row['targetFromSource'], lookup)
-        if source:
-            trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
-            if not trusted and len(resolved) > 1 and set(source) <= resolved:
-                target_ids.append(sorted(resolved))
-                grounding.append('suggestion')
-            elif trusted or not resolved or set(source) <= resolved:
-                target_ids.append(source)
-                grounding.append('source')
-            else:
-                target_ids.append([])
-                grounding.append('conflict')
-            continue
-        candidates = _candidates(row['targetFromSource'], lookup)
-        if candidates:
-            supported = resolved & set(candidates)
-        else:
-            supported = {g for g in resolved if _named_in(row['targetFromSource'], labels[g])}
-        target_ids.append(sorted(supported))
-        if supported:
-            grounding.append('suggestion')
-        elif resolved:
-            grounding.append('suggestion_unsupported')
-        else:
-            grounding.append('unresolved')
+        genes, outcome, resolved = _ground_one(row, lookup, labels)
+        if (
+            suggestion_min_confidence is not None
+            and outcome in FALLBACK_FROM
+            and (row['confidence'] or 0) >= suggestion_min_confidence
+        ):
+            genes, outcome = sorted(resolved), 'suggestion_fallback'
+        target_ids.append(genes)
+        grounding.append(outcome)
     symbol_of = dict(index.filter(pl.col('field') == 'approvedSymbol').select('targetId', 'label').iter_rows())
     return mechanisms.with_columns(
         targetIds=pl.Series(target_ids, dtype=pl.List(pl.String)),

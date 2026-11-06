@@ -1,7 +1,7 @@
 import polars as pl
 import pytest
 
-from pts.transformers.clinical_mira.moa.grounding import build_label_index, ground_mechanisms, resolve
+from pts.transformers.clinical_mira.moa.grounding import GROUNDED, build_label_index, ground_mechanisms, resolve
 
 LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
 
@@ -256,3 +256,127 @@ def test_family_name_uses_the_members_not_a_single_synonym(index):
     assert rows.select('targetIds', 'grounding').to_dicts() == [
         {'targetIds': ['ENSG_HDAC1', 'ENSG_HDAC9'], 'grounding': 'suggestion'}
     ]
+
+
+def _located_index(*genes: tuple[str, str, str, str, list[str]]) -> pl.DataFrame:
+    target_view = pl.DataFrame(
+        {
+            'id': [g[0] for g in genes],
+            'approvedSymbol': [g[1] for g in genes],
+            'biotype': [g[2] for g in genes],
+            'genomicLocation': [{'chromosome': g[3]} for g in genes],
+            'approvedName': [None for _ in genes],
+            'symbolSynonyms': [_labels(*g[4]) for g in genes],
+            'obsoleteSymbols': [[] for _ in genes],
+            'nameSynonyms': [[] for _ in genes],
+        },
+        schema={
+            'id': pl.String,
+            'approvedSymbol': pl.String,
+            'biotype': pl.String,
+            'genomicLocation': pl.Struct({'chromosome': pl.String}),
+            'approvedName': pl.String,
+            'symbolSynonyms': LABELS,
+            'obsoleteSymbols': LABELS,
+            'nameSynonyms': LABELS,
+        },
+    )
+    return build_label_index(target_view)
+
+
+def test_pseudoautosomal_y_copy_gives_way_to_the_x_copy():
+    index = _located_index(
+        ('ENSG_X', 'IL3RA', 'protein_coding', 'X', ['CD123']),
+        ('ENSG_Y', 'IL3RA', 'protein_coding', 'Y', ['CD123']),
+    )
+
+    assert resolve('IL3RA', index) == ['ENSG_X']
+    assert resolve('CD123', index) == ['ENSG_X']
+
+
+def test_protein_coding_copy_wins_over_other_biotypes():
+    index = _located_index(
+        ('ENSG_RNA', 'SIGLEC5', 'lncRNA', '19', []),
+        ('ENSG_PC', 'SIGLEC5', 'protein_coding', '19', []),
+    )
+
+    assert resolve('SIGLEC5', index) == ['ENSG_PC']
+
+
+def test_two_protein_coding_copies_stay_ambiguous():
+    index = _located_index(
+        ('ENSG_A', 'PDE4C', 'protein_coding', '19', []),
+        ('ENSG_B', 'PDE4C', 'protein_coding', '19', []),
+    )
+
+    assert resolve('PDE4C', index) == []
+
+
+def test_y_gene_with_its_own_symbol_is_kept():
+    index = _located_index(('ENSG_SRY', 'SRY', 'protein_coding', 'Y', []))
+
+    assert resolve('SRY', index) == ['ENSG_SRY']
+
+
+def _confident(*rows: dict) -> pl.DataFrame:
+    frame = _mechanisms(*[{k: v for k, v in r.items() if k != 'confidence'} for r in rows])
+    return frame.with_columns(confidence=pl.Series([r['confidence'] for r in rows], dtype=pl.Float64))
+
+
+def test_confident_unsupported_suggestion_falls_back_to_the_suggestion(index):
+    rows = ground_mechanisms(
+        _confident(
+            {'targetFromSource': 'DA-2', 'targetSymbolSuggestion': ['DRD2'], 'confidence': 0.9},
+            {'targetFromSource': 'DA-2', 'targetSymbolSuggestion': ['DRD2'], 'confidence': 0.75},
+            {'targetFromSource': 'DA-2', 'targetSymbolSuggestion': ['NOPE'], 'confidence': 0.9},
+        ),
+        index,
+        suggestion_min_confidence=0.8,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_DRD2'], 'grounding': 'suggestion_fallback'},
+        {'targetIds': [], 'grounding': 'suggestion_unsupported'},
+        {'targetIds': [], 'grounding': 'unresolved'},
+    ]
+
+
+def test_confident_conflict_falls_back_to_the_suggestion(index):
+    rows = ground_mechanisms(
+        _confident({'targetFromSource': 'MEK', 'targetSymbolSuggestion': ['MAP2K1'], 'confidence': 0.95}),
+        index,
+        suggestion_min_confidence=0.8,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_M1'], 'grounding': 'suggestion_fallback'}
+    ]
+
+
+def test_confident_receptor_without_a_named_ligand_falls_back_to_the_suggestion(index):
+    rows = ground_mechanisms(
+        _confident({
+            'targetFromSource': 'its receptor',
+            'targetSymbolSuggestion': ['EGFR'],
+            'actsOnReceptor': True,
+            'confidence': 0.8,
+        }),
+        index,
+        suggestion_min_confidence=0.8,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_EGFR'], 'grounding': 'suggestion_fallback'}
+    ]
+
+
+def test_without_a_fallback_confidence_suggestions_stay_unsupported(index):
+    rows = ground_mechanisms(
+        _confident({'targetFromSource': 'DA-2', 'targetSymbolSuggestion': ['DRD2'], 'confidence': 0.99}), index
+    )
+
+    assert rows['grounding'].to_list() == ['suggestion_unsupported']
+
+
+def test_fallback_is_a_grounded_outcome():
+    assert 'suggestion_fallback' in GROUNDED
