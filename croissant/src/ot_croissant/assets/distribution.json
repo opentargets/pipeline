@@ -73,6 +73,12 @@
   {
     "id": "biosample_enrichment",
     "nice_name": "Biosample enrichment",
+    "key": [
+      "diseaseId",
+      "studyId",
+      "biosampleId",
+      "biosampleDataset"
+    ],
     "tags": [
       "Genetics",
       "Disease"
