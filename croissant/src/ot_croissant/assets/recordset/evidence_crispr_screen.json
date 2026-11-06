@@ -50,8 +50,8 @@
     "description": "PubMed identifier of the publication describing the CRISPRbrain screen"
   },
   {
-    "id": "log2FoldChangeValue",
-    "description": "Phenotype score of the target in the CRISPRbrain screen"
+    "id": "phenotypicConsequenceScore",
+    "description": "Phenotype score of the target in the CRISPRbrain screen: the effect of the target perturbation on the screened phenotype, as computed by the CRISPRbrain analysis pipeline (e.g. a z-score against non-targeting controls for MAGeCK-iNC screens). Positive for positive hits, negative for negative hits"
   },
   {
     "id": "projectId",

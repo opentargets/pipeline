@@ -94,6 +94,7 @@ evidence_schema: dict[str, Any] = {
     'phenotypicConsequenceFDR': pl.Float64,
     'phenotypicConsequenceLogFoldChange': pl.Float64,
     'phenotypicConsequencePValue': pl.Float64,
+    'phenotypicConsequenceScore': pl.Float64,
     'projectDescription': pl.String,
     'releaseVersion': pl.String,
     'statisticalMethod': pl.String,
