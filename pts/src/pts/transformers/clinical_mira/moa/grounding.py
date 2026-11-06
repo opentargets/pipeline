@@ -199,11 +199,23 @@ def _stem_of(word: str, label_word: str) -> bool:
     return len(word) >= STEM_MIN and label_word.startswith(word) and 0 < len(label_word) - len(word) <= STEM_SUFFIX_MAX
 
 
+NUMBERED_RANGE = re.compile(r'[a-z]\d+\s*(?:[-\u2013\u2014/,&+]|\band\b|\bto\b)\s*\d', re.IGNORECASE)
+"""A numbered member followed by more numbers: ``FGFR1-3`` (any dash), ``JAK1/2``, ``FGFR1 and 3``."""
+
+
+def _range_stems(name: str) -> set[str]:
+    """The stems a numbered range spans (``fgfr`` for ``FGFR1-3``), none for a single numbered member."""
+    if not NUMBERED_RANGE.search(name):
+        return set()
+    return {re.sub(r'\d+$', '', w) for w in _words(name) if re.search(r'[a-z]\d+$', w)}
+
+
 def _named_in(name: str, labels: set[str]) -> bool:
     """Whether the name shares a specific word, or a family stem, with any of a gene's labels."""
     name_words = (_words(name) | _words(name.replace('-', ''))) - GENERIC_WORDS
+    stems = name_words | (_range_stems(name) - GENERIC_WORDS)
     label_words = {w for label in labels for w in _words(label)}
-    return bool(name_words & label_words) or any(_stem_of(w, lw) for w in name_words for lw in label_words)
+    return bool(name_words & label_words) or any(_stem_of(w, lw) for w in stems for lw in label_words)
 
 
 def resolve(label: str, index: pl.DataFrame) -> list[str]:
@@ -223,6 +235,9 @@ def _ground_one(row: dict, lookup: Lookup, labels: dict[str, set[str]]) -> tuple
     source = _resolve(row['targetFromSource'], lookup)
     if source:
         trusted = _best_field(row['targetFromSource'], lookup) in APPROVED_FIELDS
+        name = normalise_label(row['targetFromSource'])
+        if trusted and resolved and not set(source) & resolved and all(name in labels[g] for g in resolved):
+            return sorted(resolved), 'suggestion', resolved
         if not trusted and len(resolved) > 1 and set(source) <= resolved:
             return sorted(resolved), 'suggestion', resolved
         if trusted or not resolved or set(source) <= resolved:

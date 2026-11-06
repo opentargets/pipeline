@@ -35,6 +35,10 @@ def index() -> pl.DataFrame:
         ('ENSG_GNRHR', 'GNRHR', 'gonadotropin releasing hormone receptor', _labels('LHRHR'), []),
         ('ENSG_FGFR1', 'FGFR1', 'fibroblast growth factor receptor 1', [], []),
         ('ENSG_FGFR2', 'FGFR2', 'fibroblast growth factor receptor 2', [], []),
+        ('ENSG_FGFR3', 'FGFR3', 'fibroblast growth factor receptor 3', [], []),
+        ('ENSG_ACAT1', 'ACAT1', 'acetyl-CoA acetyltransferase 1', [], []),
+        ('ENSG_MLST8', 'MLST8', 'MTOR associated protein, LST8 homolog', [], _labels('TORC subunit LST8')),
+        ('ENSG_SOAT1', 'SOAT1', 'sterol O-acyltransferase 1', _labels('ACAT1', 'ACAT'), []),
         ('ENSG_M7', 'MAP2K7', 'mitogen-activated protein kinase kinase 7', _labels('MEK'), []),
         ('ENSG_M1', 'MAP2K1', 'mitogen-activated protein kinase kinase 1', _labels('MEK1'), []),
         ('ENSG_DRD2', 'DRD2', 'dopamine receptor D2', [], []),
@@ -238,6 +242,59 @@ def test_family_shorthand_is_the_stem_of_its_members(index):
         {'targetIds': ['ENSG_FGFR1', 'ENSG_FGFR2'], 'grounding': 'suggestion'},
         {'targetIds': [], 'grounding': 'conflict'},
         {'targetIds': [], 'grounding': 'suggestion_unsupported'},
+    ]
+
+
+def test_symbol_that_is_also_a_synonym_of_the_suggested_gene_grounds_to_the_suggestion(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'ACAT1', 'targetSymbolSuggestion': ['SOAT1']},
+            {'targetFromSource': 'ACAT1', 'targetSymbolSuggestion': ['ACAT1']},
+            {'targetFromSource': 'ACAT1', 'targetSymbolSuggestion': []},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_SOAT1'], 'grounding': 'suggestion'},
+        {'targetIds': ['ENSG_ACAT1'], 'grounding': 'source'},
+        {'targetIds': ['ENSG_ACAT1'], 'grounding': 'source'},
+    ]
+
+
+def test_numbered_range_covers_every_member_it_spans(index):
+    rows = ground_mechanisms(
+        _mechanisms(
+            {'targetFromSource': 'FGFR1\u20133', 'targetSymbolSuggestion': ['FGFR1', 'FGFR2', 'FGFR3']},
+            {'targetFromSource': 'FGFR1/2', 'targetSymbolSuggestion': ['FGFR1', 'FGFR2']},
+            {'targetFromSource': 'FGFR1 and 3', 'targetSymbolSuggestion': ['FGFR1', 'FGFR3']},
+        ),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_FGFR1', 'ENSG_FGFR2', 'ENSG_FGFR3'], 'grounding': 'suggestion'},
+        {'targetIds': ['ENSG_FGFR1', 'ENSG_FGFR2'], 'grounding': 'suggestion'},
+        {'targetIds': ['ENSG_FGFR1', 'ENSG_FGFR3'], 'grounding': 'suggestion'},
+    ]
+
+
+def test_range_stem_does_not_match_the_bare_word(index):
+    rows = ground_mechanisms(_mechanisms({'targetFromSource': 'TORC1/2', 'targetSymbolSuggestion': ['MLST8']}), index)
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': [], 'grounding': 'suggestion_unsupported'}
+    ]
+
+
+def test_single_numbered_member_does_not_cover_its_siblings(index):
+    rows = ground_mechanisms(
+        _mechanisms({'targetFromSource': 'FGFR1 kinase domain', 'targetSymbolSuggestion': ['FGFR1', 'FGFR2']}),
+        index,
+    )
+
+    assert rows.select('targetIds', 'grounding').to_dicts() == [
+        {'targetIds': ['ENSG_FGFR1'], 'grounding': 'suggestion'}
     ]
 
 
