@@ -1,10 +1,7 @@
-"""Derive the train and test splits from the genes of the pinned, predefined test set.
+"""Split the L2G training rows into train and test sets.
 
-The test genes are pinned across releases rather than resampled, so models stay comparable. This
-module implements only that path, as gentropy v4 `LocusToGeneTrainTestSplitStep` does with
-`predefined_test_parquet_path`: gentropy's fresh hierarchical split is not ported, because the
-pipeline always supplies the predefined test set and a second split would defeat the point of
-pinning the first.
+We expect a predefined set of test genes, which limits the space of possible test rows. Only the
+positive genes of that set are used, so it stays valid when credible set ids change.
 """
 
 from typing import Any
@@ -45,13 +42,12 @@ def derive_splits(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Split the annotated gold-standard matrix on the positive genes of a pinned test set.
 
-    Mirrors gentropy v4 `LocusToGeneTrainTestSplitStep._split_by_test_genes`. Only the positive
-    genes of the predefined test set are used; its credible sets, negatives and features are
-    rebuilt from the current matrix, so the pinned set does not need this release's ids.
+    Only the positive genes of the predefined test set are used; its credible sets, negatives and
+    features are rebuilt from the current matrix, so the pinned set does not need this release's ids.
 
     A credible set goes to the test set when all its positives are test genes, and to the training
-    set when it contains no test gene at all, positive or negative. Credible sets with positives
-    on both sides are dropped, so no positive gene is shared between the sets.
+    set when it contains no test gene at all. Every other credible set is dropped: those with
+    positives on both sides, and those whose only test genes are negatives.
 
     Args:
         annotated: output of `gold_standard.annotate`, string or integer labels.

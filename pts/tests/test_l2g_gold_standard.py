@@ -8,28 +8,16 @@ from pts.transformers.l2g.gold_standard import annotate, parse_gold_standard
 CURATED = {
     'credibleSetId': ['sl1'],
     'geneId': ['g1'],
-    'diseaseIds': [['EFO_1']],
+    'extra': ['dropped'],
     'variantId': ['1_1_A_G'],
     'studyId': ['GCST1'],
     'goldStandardSet': ['positive'],
 }
 
 
-def test_parse_drops_diseaseids_and_keeps_the_curated_columns() -> None:
+def test_parse_drops_extra_columns_and_keeps_the_curated_columns() -> None:
     out = parse_gold_standard(pl.LazyFrame(CURATED)).collect()
     assert out.columns == ['credibleSetId', 'variantId', 'studyId', 'geneId', 'goldStandardSet']
-
-
-def test_parse_rejects_the_unported_otg_curation_format() -> None:
-    frame = pl.LazyFrame({
-        'association_info': [None],
-        'gold_standard_info': [None],
-        'metadata': [None],
-        'sentinel_variant': [None],
-        'trait_info': [None],
-    })
-    with pytest.raises(ValueError, match='OTG curation format'):
-        parse_gold_standard(frame)
 
 
 def test_parse_rejects_a_frame_missing_a_curated_column() -> None:
@@ -81,7 +69,7 @@ def test_annotate_drops_non_protein_coding_rows() -> None:
     assert out.height == 0
 
 
-def test_annotate_deduplicates_rows_differing_only_in_the_gold_standards_own_study_locus() -> None:
+def test_annotate_deduplicates_rows_differing_only_in_the_gold_standards_own_credible_set() -> None:
     """The gold standard's `credibleSetId` must not reach the join, or the dedup cannot see past it.
 
     The two curated rows below agree on everything the annotated matrix carries -- study, variant,

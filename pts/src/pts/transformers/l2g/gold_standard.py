@@ -1,11 +1,7 @@
 """Parse the L2G gold standard and annotate it with feature-matrix rows.
 
-The gold standard is the training set gentropy's `training_set` step builds from the effector
-gene list (`intermediate/l2g_training_set`), keyed by `credibleSetId` as in gentropy v4.
-gentropy's `_parse_gold_standard` has three branches; only the curated one, which keeps the
-mandatory columns, is ported. The OTG-curation branch
-needs `find_overlaps`, the variant index and the PPI dataset, and has never run on this data, so
-it is NOT ported. A file in that format must fail loudly rather than be mis-parsed.
+The gold standard is the L2G training set (`intermediate/l2g_training_set`): one row per
+credible set and gene, labelled `positive` or `negative`.
 """
 
 from collections.abc import Sequence
@@ -31,15 +27,6 @@ column, and is absent from `split_stats` for the same reason -- add the column h
 statistic there together, or neither.
 """
 
-OTG_CURATION_COLUMNS: frozenset[str] = frozenset({
-    'association_info',
-    'gold_standard_info',
-    'metadata',
-    'sentinel_variant',
-    'trait_info',
-})
-"""Columns that identify the legacy OTG curation format, which is not supported here."""
-
 LABEL_COLUMN = 'goldStandardSet'
 
 
@@ -53,17 +40,9 @@ def parse_gold_standard(frame: pl.LazyFrame) -> pl.LazyFrame:
         LazyFrame of `CURATED_COLUMNS`.
 
     Raises:
-        ValueError: if the frame is in the unported OTG curation format, or is missing a
-            mandatory column.
+        ValueError: if the frame is missing a mandatory column.
     """
     columns = set(frame.collect_schema().names())
-
-    if present := OTG_CURATION_COLUMNS & columns:
-        msg = (
-            f'gold standard is in the OTG curation format (found {sorted(present)}), which is not '
-            'supported. Port `L2GGoldStandard.from_otg_curation` before using such a file.'
-        )
-        raise ValueError(msg)
 
     if missing := [name for name in CURATED_COLUMNS if name not in columns]:
         msg = f'gold standard is missing mandatory columns {missing}'
