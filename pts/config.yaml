@@ -1506,7 +1506,7 @@ steps:
         panels:
           - datasourceId: gtex
             biosampleType: tissue
-        pool_by_disease: false
+        pool_by_disease: true
         standard_errors: region
         region_window: 1000000
         density_window: 1000000

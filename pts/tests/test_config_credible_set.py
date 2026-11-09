@@ -244,6 +244,7 @@ CREDIBLE_SET_DATASETS = {
 """The credible sets and their variants as validation and annotation write them."""
 
 CONSUMER_TEST = {
+    'biosample_enrichment': 'test_biosample_enrichment.py',
     'variant': 'test_variant_rows.py',
     'credible_set.annotation': 'test_credible_set_stages.py',
     'coding_variant': 'test_coding_variant.py',

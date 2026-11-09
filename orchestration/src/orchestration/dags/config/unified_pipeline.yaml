@@ -493,10 +493,8 @@ steps:
   # published, but no other step reads it
   pts_biosample_enrichment:
     depends_on:
+      # pts_l2g brings pts_credible_set, pts_study and pts_target
       - pts_l2g
-      - pts_credible_set
-      - pts_study
-      - pts_target
       - pts_baseline_expression
 
   # GENETICS STEPS (PTS and Gentropy)

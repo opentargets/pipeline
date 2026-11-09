@@ -172,11 +172,11 @@ def study_gene_scores(l2g: pl.LazyFrame, credible_set: pl.LazyFrame, units: pl.L
     Returns:
         `studyId`, `unitId`, `geneId` and `score`.
     """
-    loci = credible_set.select('studyLocusId', 'studyId').unique()
+    sets = credible_set.select(pl.col('id').alias('credibleSetId'), 'studyId').unique()
     return (
         l2g
-        .select('studyLocusId', 'geneId', 'score')
-        .join(loci, on='studyLocusId')
+        .select('credibleSetId', 'geneId', 'score')
+        .join(sets, on='credibleSetId')
         .join(units, on='studyId')
         .group_by('studyId', 'unitId', 'geneId')
         .agg(pl.col('score').max())

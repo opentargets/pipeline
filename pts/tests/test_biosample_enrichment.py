@@ -15,6 +15,7 @@ from pts.transformers.biosample_enrichment import (
     gwas_studies,
     specificity_matrix,
 )
+from tests.credible_set_fixtures import published_credible_set
 
 N_GENES = 400
 TISSUES = ['UBERON_A', 'UBERON_B', 'UBERON_HOT', 'UBERON_C', 'UBERON_D']
@@ -100,14 +101,18 @@ def workspace(tmp_path: Path) -> dict[str, str]:
     hot = np.argsort(-specificity[:, TISSUES.index('UBERON_HOT')])[:40]
 
     l2g = pl.DataFrame({
-        'studyLocusId': [f'hot{i}' for i in range(len(hot))] + ['twin0', 'lnc0', 'lnc1', 'qtl0'],
+        'credibleSetId': [f'hot{i}' for i in range(len(hot))] + ['twin0', 'lnc0', 'lnc1', 'qtl0'],
         'geneId': [coding[g] for g in hot] + [coding[5], genes[-1], genes[-2], coding[0]],
         'score': [*list(rng.uniform(0.3, 0.95, size=len(hot))), 0.4, 0.9, 0.8, 0.99],
     })
-    credible_set = pl.DataFrame({
-        'studyLocusId': l2g['studyLocusId'],
-        'studyId': ['GCST_HOT'] * len(hot) + ['GCST_TWIN', 'GCST_LNC', 'GCST_LNC', 'QTL'],
-    })
+    credible_set = published_credible_set(*[
+        {'id': set_id, 'studyId': study_id}
+        for set_id, study_id in zip(
+            l2g['credibleSetId'],
+            ['GCST_HOT'] * len(hot) + ['GCST_TWIN', 'GCST_LNC', 'GCST_LNC', 'QTL'],
+            strict=True,
+        )
+    ])
     study = pl.DataFrame({
         'studyId': ['GCST_HOT', 'GCST_TWIN', 'GCST_LNC', 'QTL', 'GCST_EMPTY'],
         'studyType': ['gwas', 'gwas', 'gwas', 'eqtl', 'gwas'],
