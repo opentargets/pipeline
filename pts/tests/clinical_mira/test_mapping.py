@@ -2,6 +2,7 @@ import polars as pl
 import pytest
 
 from pts.transformers.clinical_mira import map_entities
+from pts.transformers.utils.disease_mapping.mapping import AMBIGUOUS_LABEL_LENGTH
 from tests.clinical_mira.mapping_fixtures import (
     CHEMBL_CURATION,
     DISEASE,
@@ -38,11 +39,22 @@ def _without_preset_fan_out(rows: list[tuple]) -> list[tuple]:
     return sorted([*kept, *{row for row in rows if row[0] in preset}], key=lambda row: [(v is None, v) for v in row])
 
 
+def _without_ambiguous_disease_ids(rows: list[tuple]) -> list[tuple]:
+    """`rows` with `diseaseId` null where the disease label is ambiguous, unless the report had preset ids."""
+    preset = set(REPORTS.filter(pl.col('drugId').is_not_null() | pl.col('diseaseId').is_not_null())['id'])
+
+    def ambiguous(row: tuple) -> bool:
+        label = row[2]
+        return row[0] not in preset and label is not None and len(label.strip()) <= AMBIGUOUS_LABEL_LENGTH
+
+    return [(*row[:4], None) if ambiguous(row) else row for row in rows]
+
+
 def test_map_entities_matches_ontoma() -> None:
-    """Mira's rows, except that preset-id rows appear once, unlike mira."""
+    """Mira's rows, except that preset-id rows appear once and ambiguous disease labels map to null, unlike mira."""
     mapped = _map(REPORTS, CHEMBL_CURATION)
     assert mapped.columns == MAPPED_COLUMNS
-    expected = _without_preset_fan_out(MAPPED)
+    expected = _without_ambiguous_disease_ids(_without_preset_fan_out(MAPPED))
     assert len(expected) == len(MAPPED) - 3
     assert _rows(mapped) == expected
 
@@ -87,7 +99,7 @@ def test_curation_and_preset_ids_win() -> None:
         ('CHEMBL_IND1', 'CHEMBL_PRESET', 'EFO_PRESET'),
         ('CHEMBL_IND2', 'CHEMBL_PRESET', 'EFO_PRESET'),
         ('NCT01', 'CHEMBL25', 'MONDO_0009061'),
-        ('NCT02', 'CHEMBL2010601', 'MONDO_0009061'),
+        ('NCT02', 'CHEMBL2010601', None),
         ('NCT12', 'CHEMBL_CURATED', 'EFO_CURATED_3'),
         ('NCT14', 'CHEMBL_CURATED_NER', 'EFO_CURATED_NER'),
     ]

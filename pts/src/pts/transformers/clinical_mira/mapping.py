@@ -2,6 +2,7 @@
 
 Ported from mira's `map_entities` (`utils/mapping.py`), with OnToma replaced by the polars lookup tables of
 `pts.transformers.ontoma_lut` and the polars `OnToma.map_entities` of `pts.transformers.utils.disease_mapping`.
+Unlike mira, drug and disease labels of 3 characters or less once trimmed are ambiguous and map to null.
 """
 
 from __future__ import annotations
