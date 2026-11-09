@@ -27,26 +27,32 @@ _BIOSAMPLE_COLUMNS: dict[str, tuple[str, str]] = {
     'celltype': ('celltypeBiosampleId', 'tissueBiosampleId'),
 }
 
-OUTPUT_SCHEMA = pl.Schema({
-    'studyId': pl.String,
-    'datasourceId': pl.String,
-    'biosampleType': pl.String,
-    'biosampleId': pl.String,
-    'nGenesScored': pl.Int32,
-    'nStudiesPooled': pl.Int32,
-    'beta': pl.Float64,
-    'standardError': pl.Float64,
-    'zScore': pl.Float64,
-    'pValue': pl.Float64,
-    'pValueBonferroni': pl.Float64,
-    'qValue': pl.Float64,
-})
-"""Release schema. `nStudiesPooled` is 1 when studies are not pooled."""
-
-_STATISTICS_SCHEMA = {
-    name: OUTPUT_SCHEMA[name]
-    for name in ('biosampleId', 'beta', 'standardError', 'zScore', 'pValue', 'pValueBonferroni', 'qValue')
+_SOURCE_COLUMNS: dict[str, str] = {
+    'tissue': 'tissueBiosampleFromSource',
+    'celltype': 'celltypeBiosampleFromSource',
 }
+
+ENRICHMENT_APPROACH = 'l2g_regression'
+"""Value of `enrichmentApproach` for this method."""
+
+OUTPUT_SCHEMA = pl.Schema({
+    'diseaseId': pl.String,
+    'studyId': pl.String,
+    'biosampleId': pl.String,
+    'biosampleDataset': pl.String,
+    'biosampleFromSource': pl.String,
+    'enrichmentApproach': pl.String,
+    'beta': pl.Float64,
+    'betaError': pl.Float64,
+    'pValue': pl.Float64,
+})
+"""Release schema, as in the croissant `biosample_enrichment` record set.
+
+Exactly one of `studyId` and `diseaseId` is set: `studyId` for a single study, `diseaseId` for
+the studies of one disease pooled together.
+"""
+
+_STATISTICS_SCHEMA = {name: OUTPUT_SCHEMA[name] for name in ('biosampleId', 'beta', 'betaError', 'pValue')}
 
 _UNIT_BATCH = 512
 """Units fitted per pass, keeping the genes x units score matrix to about 80 MB."""
@@ -125,28 +131,31 @@ def gene_covariates(target: pl.LazyFrame, density_window: int) -> pl.DataFrame:
 def gwas_studies(study: pl.LazyFrame, pool_by_disease: bool) -> pl.LazyFrame:
     """Assign every GWAS study to the unit it is scored in.
 
-    A unit is the study itself or, when pooling, every study with the same set of diseases.
-    Studies with no diseases are not pooled.
+    A unit is the study itself or, when pooling, every study of the same single disease.
+    Studies with no disease or with several diseases are not pooled.
 
     Args:
         study: the study index.
-        pool_by_disease: pool studies with an identical `diseaseIds` set into one unit.
+        pool_by_disease: pool studies that have the same single disease into one unit.
 
     Returns:
-        `studyId` and `unitId`. Without pooling, `unitId` is the study id.
+        `studyId`, `unitId` and `diseaseId`. `diseaseId` is set only for pooled studies.
+        Without pooling, `unitId` is the study id.
     """
     gwas = study.filter(pl.col('studyType') == 'gwas').select('studyId', 'diseaseIds')
     if not pool_by_disease:
-        return gwas.select('studyId', pl.col('studyId').alias('unitId'))
-    diseases = pl.col('diseaseIds').list.unique().list.sort().list.join(';')
-    return gwas.select(
+        return gwas.select('studyId', pl.col('studyId').alias('unitId'), pl.lit(None, pl.String).alias('diseaseId'))
+    diseases = pl.col('diseaseIds').list.unique()
+    disease_id = pl.when(diseases.list.len() == 1).then(diseases.list.first())
+    return gwas.select('studyId', disease_id.alias('diseaseId')).select(
         'studyId',
-        # prefixed so a disease set can never collide with a study id
+        # prefixed so a disease can never collide with a study id
         pl
-        .when(pl.col('diseaseIds').list.len() > 0)
-        .then(pl.lit('diseases:') + diseases)
+        .when(pl.col('diseaseId').is_not_null())
+        .then(pl.lit('disease:') + pl.col('diseaseId'))
         .otherwise(pl.lit('study:') + pl.col('studyId'))
         .alias('unitId'),
+        'diseaseId',
     )
 
 
@@ -208,6 +217,38 @@ def specificity_matrix(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.Da
     return wide.select('geneId', *biosamples).sort('geneId')
 
 
+def biosample_sources(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.DataFrame:
+    """The source name of each biosample in a panel.
+
+    Args:
+        baseline_expression: the baseline expression dataset.
+        panel: the panel to read.
+
+    Returns:
+        `biosampleId` and `biosampleFromSource`, one row per biosample. When several source
+        biosamples map to one id, their names are sorted and joined with `; `.
+    """
+    id_column, null_column = _BIOSAMPLE_COLUMNS[panel.biosample_type]
+    sources = (
+        baseline_expression
+        .filter(
+            pl.col('datasourceId') == panel.datasource_id,
+            pl.col(id_column).is_not_null(),
+            pl.col(null_column).is_null(),
+        )
+        .select(pl.col(id_column).alias('biosampleId'), pl.col(_SOURCE_COLUMNS[panel.biosample_type]).alias('source'))
+        .unique()
+        .group_by('biosampleId')
+        .agg(pl.col('source').drop_nulls().sort().str.join('; ').alias('biosampleFromSource'))
+        .with_columns(pl.col('biosampleFromSource').replace('', None))
+        .collect()
+    )
+    shared = sources.filter(pl.col('biosampleFromSource').str.contains('; ', literal=True)).height
+    if shared:
+        logger.warning(f'{shared} biosamples in panel {panel} have several source biosamples')
+    return sources
+
+
 def _standardise(values: np.ndarray) -> np.ndarray:
     spread = values.std(0)
     return (values - values.mean(0)) / np.where(spread > 0, spread, 1.0)
@@ -231,8 +272,8 @@ def score_panel(
         region_window: window size, in base pairs, for `region` standard errors.
 
     Returns:
-        `unitId`, `biosampleId`, `nGenesScored`, `beta`, `standardError`, `zScore`, `pValue`,
-        `pValueBonferroni` and `qValue`. A unit with no scored gene in the universe has no rows.
+        `unitId`, `biosampleId`, `beta`, `betaError` and `pValue`. A unit with no scored gene in
+        the universe has no rows.
     """
     # L2G only scores protein-coding genes; any other gene could never be prioritised
     universe = (
@@ -264,7 +305,7 @@ def score_panel(
         .filter(pl.col('score') > 0)
         .sort('unitId', 'geneIndex')
     )
-    units = in_universe.group_by('unitId').agg(pl.len().alias('nGenesScored')).sort('unitId')
+    units = in_universe.select('unitId').unique().sort('unitId')
     unit_index = units.with_row_index('unitIndex').select('unitId', 'unitIndex')
     cells = in_universe.join(unit_index, on='unitId')
     logger.info(f'{units.height} units with at least one scored gene')
@@ -280,27 +321,23 @@ def score_panel(
         with np.errstate(divide='ignore', invalid='ignore'):
             z = beta / se
         z = np.where(np.isfinite(z), z, np.nan)
-        # one-sided: only enrichment is of interest; corrections are across each unit's biosamples
+        # one-sided: only enrichment is of interest
         p = regression.upper_tail_p(z)
         frames.append(
             pl.DataFrame({
                 'unitIndex': np.repeat(np.arange(start, stop), len(biosamples)),
                 'biosampleId': np.tile(biosamples, stop - start),
                 'beta': beta.ravel(),
-                'standardError': se.ravel(),
-                'zScore': z.ravel(),
+                'betaError': se.ravel(),
                 'pValue': p.ravel(),
-                'pValueBonferroni': regression.bonferroni(p).ravel(),
-                'qValue': regression.benjamini_hochberg(p).ravel(),
             }).with_columns(pl.col('unitIndex').cast(pl.UInt32))
         )
     if not frames:
-        return pl.DataFrame(schema={'unitId': pl.String, 'nGenesScored': pl.UInt32, **_STATISTICS_SCHEMA})
+        return pl.DataFrame(schema={'unitId': pl.String, **_STATISTICS_SCHEMA})
     return (
         pl
         .concat(frames)
         .join(unit_index, on='unitIndex')
-        .join(units, on='unitId')
         .drop('unitIndex')
         # undefined statistics (a biosample with no specificity variance left) are null, not NaN
         .with_columns(pl.col(pl.Float64).fill_nan(None))
@@ -339,13 +376,20 @@ def biosample_enrichment(
     study_scores = study_gene_scores(
         scan_dataset(source['l2g_prediction']), scan_dataset(source['credible_set']), units.lazy()
     ).collect()
-    # when pooling, a gene's score for the group is its highest over the group's studies
+    # when pooling, a gene's score for the disease is its highest over the disease's studies
     scores = study_scores.group_by('unitId', 'geneId').agg(pl.col('score').max())
-    # only studies with predictions of their own get the group's result; one with no credible
-    # sets contributed nothing to it
-    members = study_scores.select('studyId', 'unitId').unique()
-    pooled = members.group_by('unitId').agg(pl.len().cast(pl.Int32).alias('nStudiesPooled'))
-    logger.info(f'{members.height} studies in {pooled.height} units')
+    # a pooled unit is reported by its disease, a single study by its study id
+    labels = (
+        units
+        .join(study_scores.select('unitId').unique(), on='unitId')
+        .select(
+            'unitId',
+            pl.when(pl.col('diseaseId').is_null()).then(pl.col('studyId')).alias('studyId'),
+            'diseaseId',
+        )
+        .unique('unitId')
+    )
+    logger.info(f'{study_scores["studyId"].n_unique()} studies in {labels.height} units')
 
     baseline_expression = scan_dataset(source['baseline_expression'])
     results = []
@@ -360,18 +404,18 @@ def biosample_enrichment(
         )
         results.append(
             fitted
-            .join(members, on='unitId')
-            .join(pooled, on='unitId')
+            .join(labels, on='unitId')
+            .join(biosample_sources(baseline_expression, panel), on='biosampleId', how='left')
             .with_columns(
-                pl.lit(panel.datasource_id).alias('datasourceId'),
-                pl.lit(panel.biosample_type).alias('biosampleType'),
+                pl.lit(panel.datasource_id).alias('biosampleDataset'),
+                pl.lit(ENRICHMENT_APPROACH).alias('enrichmentApproach'),
             )
         )
     output = (
         pl
         .concat(results, how='diagonal_relaxed')
         .select([pl.col(name).cast(dtype) for name, dtype in OUTPUT_SCHEMA.items()])
-        .sort('studyId', 'datasourceId', 'biosampleType', 'biosampleId')
+        .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', nulls_last=True)
     )
     write_dataset(output, destination)
     logger.info(f'wrote {output.height} rows')

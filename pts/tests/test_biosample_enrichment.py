@@ -10,6 +10,7 @@ from pts.transformers.biosample_enrichment import (
     OUTPUT_SCHEMA,
     Panel,
     biosample_enrichment,
+    biosample_sources,
     gene_covariates,
     gwas_studies,
     specificity_matrix,
@@ -44,6 +45,8 @@ def _baseline_expression(genes: list[str], rng: np.random.Generator) -> tuple[pl
             'datasourceId': 'gtex',
             'tissueBiosampleId': tissue,
             'celltypeBiosampleId': None,
+            'tissueBiosampleFromSource': f'{tissue} source',
+            'celltypeBiosampleFromSource': None,
             'specificity_score': float(specificity[g, t]),
         }
         for g, gene in enumerate(genes)
@@ -56,6 +59,8 @@ def _baseline_expression(genes: list[str], rng: np.random.Generator) -> tuple[pl
             'datasourceId': 'other',
             'tissueBiosampleId': 'UBERON_X',
             'celltypeBiosampleId': None,
+            'tissueBiosampleFromSource': 'X',
+            'celltypeBiosampleFromSource': None,
             'specificity_score': 1.0,
         },
         {
@@ -63,6 +68,8 @@ def _baseline_expression(genes: list[str], rng: np.random.Generator) -> tuple[pl
             'datasourceId': 'gtex',
             'tissueBiosampleId': 'UBERON_A',
             'celltypeBiosampleId': 'CL_1',
+            'tissueBiosampleFromSource': 'A pair',
+            'celltypeBiosampleFromSource': 'CL 1',
             'specificity_score': 1.0,
         },
     ]
@@ -81,9 +88,9 @@ def _write(frame: pl.DataFrame, path: Path) -> str:
 def workspace(tmp_path: Path) -> dict[str, str]:
     """Input datasets for four GWAS studies and one eQTL study.
 
-    GCST_HOT prioritises the genes most specific to UBERON_HOT. GCST_TWIN has the same diseases in
-    another order and one gene of its own. GCST_LNC prioritises only non-coding genes. GCST_EMPTY
-    has the same diseases as GCST_HOT but no credible sets. QTL is not a GWAS study.
+    GCST_HOT prioritises the genes most specific to UBERON_HOT. GCST_TWIN has the same single
+    disease and one gene of its own. GCST_LNC prioritises only non-coding genes. GCST_EMPTY has the
+    same disease as GCST_HOT but no credible sets. QTL is not a GWAS study.
     """
     rng = np.random.default_rng(11)
     target = _target()
@@ -104,7 +111,7 @@ def workspace(tmp_path: Path) -> dict[str, str]:
     study = pl.DataFrame({
         'studyId': ['GCST_HOT', 'GCST_TWIN', 'GCST_LNC', 'QTL', 'GCST_EMPTY'],
         'studyType': ['gwas', 'gwas', 'gwas', 'eqtl', 'gwas'],
-        'diseaseIds': [['EFO_2', 'EFO_1'], ['EFO_1', 'EFO_2'], ['EFO_3'], [], ['EFO_1', 'EFO_2']],
+        'diseaseIds': [['EFO_1'], ['EFO_1', 'EFO_1'], ['EFO_3'], [], ['EFO_1']],
     })
     return {
         'l2g_prediction': _write(l2g, tmp_path / 'l2g'),
@@ -128,34 +135,47 @@ def test_output_has_the_pinned_schema(workspace) -> None:
     assert out.schema == OUTPUT_SCHEMA
 
 
-def test_the_planted_biosample_gets_the_top_z(workspace) -> None:
-    hot = _run(workspace).filter(pl.col('studyId') == 'GCST_HOT').sort('zScore', descending=True)
+def test_the_planted_biosample_gets_the_top_p(workspace) -> None:
+    hot = _run(workspace).filter(pl.col('studyId') == 'GCST_HOT').sort('pValue')
     assert hot['biosampleId'][0] == 'UBERON_HOT'
-    assert hot['zScore'][0] > 3
-    assert hot['qValue'][0] < 0.05
-    assert hot['nGenesScored'].unique().to_list() == [40]
+    assert (hot['beta'][0] / hot['betaError'][0]) > 3
+    assert hot['pValue'][0] < 0.05 / len(TISSUES)
+
+
+def test_rows_carry_the_panel_and_approach(workspace) -> None:
+    out = _run(workspace)
+    assert out['biosampleDataset'].unique().to_list() == ['gtex']
+    assert out['enrichmentApproach'].unique().to_list() == ['l2g_regression']
+    assert out['biosampleFromSource'].to_list() == [f'{b} source' for b in out['biosampleId']]
 
 
 def test_only_gwas_studies_with_a_scored_gene_in_the_universe_get_rows(workspace) -> None:
     out = _run(workspace)
     assert sorted(out['studyId'].unique()) == ['GCST_HOT', 'GCST_TWIN']
     assert out.group_by('studyId').len()['len'].to_list() == [len(TISSUES)] * 2
-    assert out['nStudiesPooled'].unique().to_list() == [1]
+    assert out['diseaseId'].null_count() == out.height
 
 
-def test_pooling_scores_identical_disease_sets_once(workspace) -> None:
+def test_rows_are_unique_on_the_key(workspace) -> None:
+    for settings in ({}, {'pool_by_disease': True}):
+        workspace['out'] += '_x'
+        out = _run(workspace, **settings)
+        assert not out.select('diseaseId', 'studyId', 'biosampleId', 'biosampleDataset').is_duplicated().any()
+
+
+def test_pooling_reports_one_disease_once(workspace) -> None:
     single = _run(workspace).filter(pl.col('studyId') == 'GCST_HOT').sort('biosampleId')
     workspace['out'] += '_pooled'
-    pooled = _run(workspace, pool_by_disease=True).sort('studyId', 'biosampleId')
-    hot = pooled.filter(pl.col('studyId') == 'GCST_HOT')
-    twin = pooled.filter(pl.col('studyId') == 'GCST_TWIN')
-    stats = ['beta', 'standardError', 'zScore', 'pValue', 'qValue']
-    assert hot.select(stats).equals(twin.select(stats))
-    assert hot['nStudiesPooled'].unique().to_list() == [2]
-    assert sorted(pooled['studyId'].unique()) == ['GCST_HOT', 'GCST_TWIN']
+    pooled = _run(workspace, pool_by_disease=True)
+    # exactly one of studyId and diseaseId is set
+    assert (pooled['studyId'].is_null() ^ pooled['diseaseId'].is_null()).all()
+    disease = pooled.filter(pl.col('diseaseId') == 'EFO_1').sort('biosampleId')
+    assert disease.height == len(TISSUES)
+    assert pooled['diseaseId'].drop_nulls().unique().to_list() == ['EFO_1']
+    # GCST_LNC's only genes are non-coding, so EFO_3 has no rows; no study is reported on its own
+    assert pooled['studyId'].null_count() == pooled.height
     # GCST_TWIN's own gene joins the 40, so the pooled fit differs from GCST_HOT's alone
-    assert hot['nGenesScored'].unique().to_list() == [41]
-    assert not np.allclose(hot['beta'].to_numpy(), single['beta'].to_numpy())
+    assert not np.allclose(disease['beta'].to_numpy(), single['beta'].to_numpy())
 
 
 def test_standard_error_kinds_change_only_the_uncertainty(workspace) -> None:
@@ -163,7 +183,7 @@ def test_standard_error_kinds_change_only_the_uncertainty(workspace) -> None:
     workspace['out'] += '_gene'
     gene = _run(workspace, standard_errors='gene').sort('studyId', 'biosampleId')
     np.testing.assert_allclose(region['beta'].to_numpy(), gene['beta'].to_numpy())
-    assert not np.allclose(region['standardError'].to_numpy(), gene['standardError'].to_numpy())
+    assert not np.allclose(region['betaError'].to_numpy(), gene['betaError'].to_numpy())
 
 
 def test_an_unknown_standard_error_kind_is_rejected(workspace) -> None:
@@ -178,6 +198,30 @@ def test_specificity_matrix_reads_one_panel_and_collapses_repeats(workspace) -> 
     assert matrix.columns == ['geneId', *sorted(TISSUES)]
     assert matrix.height == N_GENES - 10
     assert matrix['geneId'].is_unique().all()
+
+
+def test_biosample_sources_read_one_panel(workspace) -> None:
+    sources = biosample_sources(
+        pl.scan_parquet(f'{workspace["baseline_expression"]}/*.parquet'), Panel('gtex', 'tissue')
+    ).sort('biosampleId')
+    assert sources['biosampleId'].to_list() == sorted(TISSUES)
+    # UBERON_A's tissue x cell type row is not part of the tissue panel
+    assert sources['biosampleFromSource'].to_list() == [f'{t} source' for t in sorted(TISSUES)]
+
+
+def test_several_source_biosamples_are_joined() -> None:
+    expression = pl.DataFrame(
+        {
+            'datasourceId': ['gtex'] * 3,
+            'tissueBiosampleId': ['U1', 'U1', 'U2'],
+            'celltypeBiosampleId': [None, None, None],
+            'tissueBiosampleFromSource': ['Skin b', 'Skin a', 'Liver'],
+            'celltypeBiosampleFromSource': [None, None, None],
+        },
+        schema_overrides={'celltypeBiosampleId': pl.String, 'celltypeBiosampleFromSource': pl.String},
+    )
+    sources = dict(biosample_sources(expression.lazy(), Panel('gtex', 'tissue')).iter_rows())
+    assert sources == {'U1': 'Skin a; Skin b', 'U2': 'Liver'}
 
 
 def test_an_empty_panel_is_an_error(workspace) -> None:
@@ -211,13 +255,19 @@ def test_gene_covariates_count_tsss_within_the_window() -> None:
     np.testing.assert_allclose(cov['logLength'].to_numpy(), np.log10([1_000, 10, 100, 100]))
 
 
-def test_gwas_studies_pool_on_the_disease_set_not_its_order() -> None:
+def test_gwas_studies_pool_only_single_disease_studies() -> None:
     study = pl.DataFrame({
-        'studyId': ['s1', 's2', 's3', 's4', 'q'],
-        'studyType': ['gwas', 'gwas', 'gwas', 'gwas', 'eqtl'],
-        'diseaseIds': [['B', 'A'], ['A', 'B'], [], None, ['A', 'B']],
+        'studyId': ['s1', 's2', 's3', 's4', 's5', 'q'],
+        'studyType': ['gwas', 'gwas', 'gwas', 'gwas', 'gwas', 'eqtl'],
+        'diseaseIds': [['A'], ['A', 'A'], ['A', 'B'], [], None, ['A']],
     })
-    units = dict(gwas_studies(study.lazy(), pool_by_disease=True).collect().iter_rows())
-    assert units == {'s1': 'diseases:A;B', 's2': 'diseases:A;B', 's3': 'study:s3', 's4': 'study:s4'}
-    unpooled = dict(gwas_studies(study.lazy(), pool_by_disease=False).collect().iter_rows())
-    assert unpooled == {'s1': 's1', 's2': 's2', 's3': 's3', 's4': 's4'}
+    pooled = {r[0]: r[1:] for r in gwas_studies(study.lazy(), pool_by_disease=True).collect().iter_rows()}
+    assert pooled == {
+        's1': ('disease:A', 'A'),
+        's2': ('disease:A', 'A'),
+        's3': ('study:s3', None),
+        's4': ('study:s4', None),
+        's5': ('study:s5', None),
+    }
+    unpooled = {r[0]: r[1:] for r in gwas_studies(study.lazy(), pool_by_disease=False).collect().iter_rows()}
+    assert unpooled == {s: (s, None) for s in ['s1', 's2', 's3', 's4', 's5']}
