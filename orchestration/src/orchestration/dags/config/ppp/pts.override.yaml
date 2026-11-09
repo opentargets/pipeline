@@ -2,20 +2,53 @@
 steps:
   # PPP adds the curated LoF annotations to the variant index.
   variant:
-    - name: pyspark variant index
-      pyspark: variant
+    - name: transform FoldX annotations
+      source: input/variant/foldx
+      destination: intermediate/variant/foldx
+      transformer: foldx
+      settings:
+        plddt_threshold: 0.7
+
+    - name: transform variant index
+      requires:
+        - transform FoldX annotations
+      transformer: variant
       source:
-        vep: intermediate/variant_annotation
+        uniprot_variants: input/evidence/uniprot_variants.json.gz
+        eva: input/evidence/eva.json.gz
+        pharmacogenomics: output/pharmacogenomics
+        credible_set: output/credible_set
+        fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+        gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
+        gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw
+        vep_cache: input/variant/vep_cache/homo_sapiens_vep_116_GRCh38.tar.gz
+        sift_predictions: input/variant/variation/protein_function_predictions.txt.gz
+        sift_translation_md5: input/variant/variation/translation_md5.txt.gz
+        sift_attrib: input/variant/variation/attrib.txt.gz
+        peptides: input/variant/reference/Homo_sapiens.GRCh38.pep.all.fa.gz
+        alphamissense: input/variant/alphamissense/AlphaMissense_hg38.tsv.gz
+        alphamissense_isoforms: input/variant/alphamissense/AlphaMissense_isoforms_hg38.tsv.gz
+        ancestor: input/variant/loftee/human_ancestor.fa.gz
+        core: input/ensembl/homo_sapiens
         variant_annotations:
           - input/variant/gnomad
           - intermediate/variant/lof_curation
         amino_acid_annotations:
           - intermediate/variant/foldx
+        gpn_star: input/variant/gpn_star
       destination:
         output: output/variant
       settings:
         hash_threshold: 300
-        output_partitions: 25
+        parallel_chromosomes: 8
+        parallel_chunks: 32
+        # songlab/gpn-star-scores@204d08a92bdf07117f5d869db667c45f9029ed48: genome-wide quantiles 0.1 / 0.01 / 0.001 and minimum
+        # measured with cutoffs_from_histogram(llr_histogram(sorted(gpn_star_files(<mirror>).values())))
+        gpn_star:
+          top_10_percent: -2.392
+          top_1_percent: -5.448
+          top_0_1_percent: -9.851
+          minimum: -13.698
 
   # PPP validates its own study and credible-set inputs instead of the platform molQTL sources.
   study:

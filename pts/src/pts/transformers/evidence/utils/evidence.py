@@ -400,7 +400,7 @@ class Evidence:
         )
 
     def hash_long_variant_identifiers(self) -> Evidence:
-        """Hash `variantId` values longer than `VARIANT_HASH_LENGTH`.
+        """Hash `variantId` values at least `VARIANT_HASH_LENGTH` characters long.
 
         Self is returned unchanged if `variantId` is absent.
 

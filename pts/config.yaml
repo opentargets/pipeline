@@ -4,7 +4,7 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  string_version: '12.0'
+  string_version: '12.5'
 
 steps:
   #: VARIANT PPP STEP :############################################################################
@@ -15,31 +15,54 @@ steps:
       transformer: lof_curation
   ##################################################################################################
 
-  #: FOLDX STEP :##################################################################################
-  foldx:
+  #: VARIANT STEP :################################################################################
+  variant:
     - name: transform FoldX annotations
       source: input/variant/foldx
       destination: intermediate/variant/foldx
       transformer: foldx
       settings:
         plddt_threshold: 0.7
-  ##################################################################################################
 
-  #: VARIANT STEP :################################################################################
-  variant:
-    - name: pyspark variant index
-      pyspark: variant
+    - name: transform variant index
+      requires:
+        - transform FoldX annotations
+      transformer: variant
       source:
-        vep: intermediate/variant_annotation
+        uniprot_variants: input/evidence/uniprot_variants.json.gz
+        eva: input/evidence/eva.json.gz
+        pharmacogenomics: output/pharmacogenomics
+        credible_set: output/credible_set
+        fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+        gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
+        gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw
+        vep_cache: input/variant/vep_cache/homo_sapiens_vep_116_GRCh38.tar.gz
+        sift_predictions: input/variant/variation/protein_function_predictions.txt.gz
+        sift_translation_md5: input/variant/variation/translation_md5.txt.gz
+        sift_attrib: input/variant/variation/attrib.txt.gz
+        peptides: input/variant/reference/Homo_sapiens.GRCh38.pep.all.fa.gz
+        alphamissense: input/variant/alphamissense/AlphaMissense_hg38.tsv.gz
+        alphamissense_isoforms: input/variant/alphamissense/AlphaMissense_isoforms_hg38.tsv.gz
+        ancestor: input/variant/loftee/human_ancestor.fa.gz
+        core: input/ensembl/homo_sapiens
         variant_annotations:
           - input/variant/gnomad
         amino_acid_annotations:
           - intermediate/variant/foldx
+        gpn_star: input/variant/gpn_star
       destination:
         output: output/variant
       settings:
         hash_threshold: 300
-        output_partitions: 25
+        parallel_chromosomes: 8
+        parallel_chunks: 32
+        # songlab/gpn-star-scores@204d08a92bdf07117f5d869db667c45f9029ed48: genome-wide quantiles 0.1 / 0.01 / 0.001 and minimum
+        # measured with cutoffs_from_histogram(llr_histogram(sorted(gpn_star_files(<mirror>).values())))
+        gpn_star:
+          top_10_percent: -2.392
+          top_1_percent: -5.448
+          top_0_1_percent: -9.851
+          minimum: -13.698
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -74,10 +97,7 @@ steps:
           - input/gwas/study/gcss_pics
           - input/gwas/study/gcss_susie
           - input/gwas/study/finngen
-          - input/molqtl/study/eqtl_catalogue/r7
-          - input/molqtl/study/otar2077/MAGE_OTAR
-          - input/molqtl/study/otar2077/IBDverse
-          - input/molqtl/study/GTEx_v10
+          - input/molqtl/study/eqtl_catalogue/r8
           - input/molqtl/study/ukb_ppp_eur
         target: output/target
         disease: output/disease
@@ -120,10 +140,7 @@ steps:
           - input/gwas/credible_set/gcss_pics
           - input/gwas/credible_set/gcss_susie
           - input/gwas/credible_set/finngen
-          - input/molqtl/credible_set/eqtl_catalogue/r7
-          - input/molqtl/credible_set/otar2077/MAGE_OTAR
-          - input/molqtl/credible_set/otar2077/IBDverse
-          - input/molqtl/credible_set/GTEx_v10
+          - input/molqtl/credible_set/eqtl_catalogue/r8
           - input/molqtl/credible_set/ukb_ppp_eur
         study: output/study
         target: output/target
@@ -405,21 +422,6 @@ steps:
       destination: output/chemical_probe
   ##################################################################################################
 
-  #: VARIANT PARTITION STEP :#######################################################################
-  variant_partition:
-    - name: transform variant partitions
-      transformer: variant_partition
-      source:
-        uniprot_variants: input/evidence/uniprot_variants.json.gz
-        eva: input/evidence/eva.json.gz
-        pharmacogenomics: output/pharmacogenomics
-        credible_set: output/credible_set
-      destination:
-        output: intermediate/variant_partition
-      settings:
-        partition_size: 2000
-  ##################################################################################################
-
   #: CODING VARIANT STEP :##########################################################################
   coding_variant:
     - name: transform coding_variant view
@@ -437,29 +439,19 @@ steps:
       destination: view/coding_variant
   ##################################################################################################
 
-  #: OPENFDA STEP :#################################################################################
-  openfda_input_preparation:
-    - name: explode_glob transform openfda drug events
-      glob: input/openfda/**/*.zip
-      do:
-        - name: transform ${match_path}/${match_stem}
-          source: ${uri}
-          destination: intermediate/openfda/${uuid}.parquet
-          transformer: openfda
-
-  openfda:
-    - name: pyspark openfda
-      pyspark: openfda
+  #: PHARMACOVIGILANCE STEP :#######################################################################
+  pharmacovigilance:
+    - name: transform pharmacovigilance
+      transformer: pharmacovigilance
       source:
         drug_molecule: output/drug_molecule
-        fda_data: intermediate/openfda/*.parquet
+        fda_events: input/openfda
         blacklisted_events: input/openfda/blacklisted_events.txt
-      destination:
-        fda_unfiltered: intermediate/openfda_adverse_drug_reactions
-        fda_results: output/openfda_significant_adverse_drug_reactions
+      destination: output/pharmacovigilance
       settings:
         montecarlo_permutations: 500
         montecarlo_percentile: 0.95
+        archive_workers: 8
   ##################################################################################################
 
   #: SO STEP :######################################################################################
@@ -925,37 +917,72 @@ steps:
       destination:
         output: output/drug_molecule
         excluded: excluded/drug_molecule_failed_report
+      settings:
+        invalid_clinical_report_qc:
+          - PHASE_IV_NOT_APPROVED
   ##################################################################################################
 
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
-  # Not part of a release. The `aact_trial_extraction` DAG runs this step with
-  # release_uri pointed at gs://aact_data/${aact_version}, so every path below
-  # resolves inside that snapshot, except for the cache
+  # Not part of a release. The `clinical_staging` DAG runs this step with
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below
+  # resolves inside that snapshot, except for the record store
   aact_trial_extraction:
-    - name: llm_extract aact trials
+    - name: transform aact_trial_extraction
+      transformer: clinical_mira.aact_trial_extraction
       source:
         aact: input/aact.zip
       destination:
-        prompts: prompts/prompts.parquet
-        extraction: extraction/extractions.parquet
-        errors: errors/errors.jsonl
-      cache_uri: gs://aact_data/cache/trial_extraction
-      # the AACT version, so a rerun against the same archive resumes from the
-      # shards the last attempt finished instead of paying for them again
-      snapshot: '{{snapshot}}'
-      model: gpt-5-nano-2025-08-07
-      service_tier: auto
-      concurrency: 75
-      shard_size: 200
-      publications:
-        # see PublicationsSpec — this fetches abstracts for every trial, not
-        # only cache misses, so it needs its own cache before a full run
-        enabled: false
+        extraction: extraction
+      settings:
+        store_uri: gs://clinical_staging/store
+        # the AACT version, prefixing the store runs this step writes
+        snapshot: '{{snapshot}}'
+        model: gpt-5-nano-2025-08-07
+        service_tier: auto
+        concurrency: 75
+        shard_size: 200
+  ##################################################################################################
+
+  #: AACT_TRIAL_MODELS STEP :######################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG, with
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}; the record stores sit outside it
+  aact_trial_models:
+    - name: transform aact_trial_models
+      transformer: clinical_mira.aact_trial_models
+      source:
+        aact: input/aact.zip
+        extraction: extraction
+        models: input/models
+      destination:
+        stop_reasons: stop_reasons
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
+  ##################################################################################################
+
+  #: CLINICAL_MINING_MODELS STEP :#################################################################
+  # Not part of a release. Runs with release_uri pointed at
+  # gs://clinical_staging/clinical_mining/${staging_version}; the record stores sit outside it
+  clinical_mining_models:
+    - name: transform clinical_mining_models
+      transformer: clinical_mira.clinical_mining_models
+      source:
+        ttd: input/ttd.txt
+        ema: input/ema_medicines.xlsx
+        pmda: input/pmda.pdf
+        models: input/models
+      destination:
+        drug_entities: drug_entities
+        disease_entities: disease_entities
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#######################################################################
   clinical_report:
-    - name: pyspark clinical_report
+    - name: transform clinical_report
+      transformer: clinical_report
       source:
         chembl_molecule: intermediate/chembl_molecule
         disease: output/disease
@@ -966,13 +993,12 @@ steps:
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
         trial_extraction: input/clinical_report/aact_trial_extraction
-        ner_cache_path: input/clinical_report/ner_cache.parquet
-        models: input/clinical_report/models
+        aact_stop_reasons: input/clinical_report/aact_stop_reasons
+        aact_drug_entities: input/clinical_report/aact_drug_entities
+        mining_drug_entities: input/clinical_report/mining_drug_entities
+        mining_disease_entities: input/clinical_report/mining_disease_entities
       destination:
         output: output/clinical_report
-      settings:
-        ner_batch_size: 256
-      pyspark: clinical_report
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################
@@ -1451,7 +1477,8 @@ steps:
         humanmapping: input/interaction/HUMAN_9606_idmapping.dat.gz
         ensproteins: input/interaction/Homo_sapiens.GRCh38.chr.gtf.gz
         intact: input/interaction/intact-interactors.json
-        strings: input/interaction/string-interactions.txt.gz
+        string_detailed: input/interaction/string-links-detailed.txt.gz
+        string_full: input/interaction/string-links-full.txt.gz
       destination:
         interactions: output/interaction
         interactions_evidence: output/interaction_evidence

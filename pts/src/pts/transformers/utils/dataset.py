@@ -62,6 +62,21 @@ _GLOBS: dict[str, str] = {
 _SEPARATORS: dict[str, str] = {'csv': ',', 'tsv': '\t'}
 
 
+def list_parts(path: str, pattern: str) -> list[str]:
+    """The files matching `pattern` below the directory `path`, sorted, or `path` itself when it is a file.
+
+    Raises:
+        ValueError: for a directory with no files matching `pattern`.
+    """
+    handle = StorageHandle(path)
+    if not handle.stat().is_dir:
+        return [path]
+    parts = sorted(handle.glob(pattern))
+    if not parts:
+        raise ValueError(f'no {pattern} files found in {path}')
+    return parts
+
+
 def scan_dataset(
     path: str,
     *,
@@ -125,14 +140,7 @@ def scan_dataset(
         msg = f'options {sorted(options)} are not forwarded for parquet, which carries its own schema'
         raise ValueError(msg)
 
-    pattern = _GLOBS[format]
-    handle = StorageHandle(path)
-    if handle.stat().is_dir:
-        parts: str | list[str] = sorted(handle.glob(pattern))
-        if not parts:
-            raise ValueError(f'no {pattern} files found in {path}')
-    else:
-        parts = path
+    parts = list_parts(path, _GLOBS[format])
 
     if format == 'parquet':
         return pl.scan_parquet(parts)

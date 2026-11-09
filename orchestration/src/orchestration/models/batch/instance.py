@@ -6,7 +6,7 @@ from functools import cached_property
 from typing import Annotated, ClassVar, Literal
 
 from google.cloud import batch_v1
-from pydantic import BaseModel, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
 from orchestration.utils.common import GCP_REGION
 from orchestration.utils.labels import Labels
@@ -24,6 +24,8 @@ class InstanceSpec(BaseModel):
         provisioning_model: Provisioning model for the batch task. Must be one of `STANDARD`, `SPOT`, or `PREEMPTIBLE`.
             The default value is `SPOT`.
     """
+
+    model_config = ConfigDict(extra='forbid')
 
     machine_type: Annotated[str, StringConstraints(pattern=r'^n\d-(standard|highmem|highcpu)-\d+$')] = 'n1-standard-4'
     """Type of machine to be used for the batch task. Must be n*-[standard|highmem|highcpu]-* (e.g., n1-standard-4,
@@ -76,6 +78,8 @@ class InstanceResourceSpec(BaseModel):
         | MB   | Decimal | 10^6        | 1,000,000 |
     """
 
+    model_config = ConfigDict(extra='forbid')
+
     cpu_milli: int
     """Size of CPU resources in milli-CPUs. For example, 1000 = 1 full CPU, 2000 = 2 CPUs, etc."""
 
@@ -113,6 +117,8 @@ class InstanceResourceSpec(BaseModel):
 
 class AllocationSpec(BaseModel):
     """Allocation specification for Google Batch tasks."""
+
+    model_config = ConfigDict(extra='forbid')
 
     DEFAULT_REGION: ClassVar[str] = f'regions/{GCP_REGION}'
 

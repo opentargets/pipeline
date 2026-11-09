@@ -19,8 +19,9 @@ def test_lof_ingestion_and_consumer_are_enabled_together(monkeypatch, ppp):
     variant = config.step_definition('pts_variant')
     assert 'pts_variant_ppp' not in variant['depends_on']
     assert 'pts_variant_ppp' in variant['depends_on_ppp']
-    [task] = config.pts.config['steps']['variant']
-    assert task['pyspark'] == 'variant'
+    foldx, task = config.pts.config['steps']['variant']
+    assert foldx['transformer'] == 'foldx'
+    assert task['transformer'] == 'variant'
     assert task['source']['amino_acid_annotations'] == ['intermediate/variant/foldx']
     annotations = task['source']['variant_annotations']
     assert 'input/variant/gnomad' in annotations

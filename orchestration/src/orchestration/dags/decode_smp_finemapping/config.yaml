@@ -1,0 +1,126 @@
+---
+description: Open Targets Genetics — deCODE SMP pQTL PICS fine-mapping on the frozen harmonised summary statistics
+env: prod
+
+environments:
+  prod:
+    input:
+      # the frozen deCODE release of 2026-09-16: harmonised summary statistics, pQTL
+      # study index and target index. Nothing in it is rewritten.
+      decode: gs://decode_data/prod/20260916T175627/output
+      gnomad: gs://gnomad_data_2
+    output: gs://decode_data/prod/20261103T122701
+    scratchpad:
+      gentropy_version: 4.0.0-dev.13
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-decode-smp-finemapping:
+      project_id: open-targets-genetics-dev
+      # one fixed cluster for the four steps. The window clumping reads the harmonised
+      # summary statistics of 5,278 smp studies (2.8 TiB, 5,278 files) and collects the
+      # summary statistics within 1 Mb of each lead into locus. The v3 window clumping,
+      # with leads only, took 8 minutes on 15 n2-standard-16 (2026-09-16).
+      # 16 x 16 cores, 512 GB pd-ssd disks: about 8 TB of disk for the shuffles of locus
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 16
+      worker_machine_type: n2d-highmem-16
+      worker_disk_type: pd-ssd
+      worker_disk_size: 512
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # broadcast the joins with a side of up to 64 MiB: the study index. At 512 MiB, a
+        # join of pics with the entries of locus was broadcast in the GWAS Catalog run, and
+        # its collect exceeded spark.driver.maxResultSize
+        'spark:spark.sql.autoBroadcastJoinThreshold': '67108864'
+        # the shuffles of locus are large: many shuffle partitions, which adaptive
+        # execution merges into partitions of about 256 MB, and split skewed join partitions
+        'spark:spark.sql.shuffle.partitions': '16000'
+        'spark:spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
+        'spark:spark.sql.adaptive.skewJoin.enabled': 'true'
+        # broadcasts are collected on the driver
+        'spark:spark.driver.maxResultSize': '4g'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  study:
+    kind: dataproc
+    definition:
+      cluster: otg-decode-smp-finemapping
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=pQTL_study_index_transformation \
+          step.protein_study_index_path={{input.decode}}/smp/pqtl_study_qc_annotated \
+          step.target_index_path={{input.decode}}/target \
+          step.study_index_path={{output}}/output/study \
+          step.session.write_mode=overwrite \
+          step.session.spark_uri=yarn
+
+  window_clumping:
+    kind: dataproc
+    definition:
+      cluster: otg-decode-smp-finemapping
+      main: '{{output}}/bin/cli.py'
+      # 1.8e-9 is the study-wide threshold of the deCODE publications. The distance is
+      # both the clumping window and the half-width of each locus.
+      args: |
+        step=window_based_clumping \
+          step.summary_statistics_input_path={{input.decode}}/smp/harmonised_summary_statistics \
+          step.study_locus_output_path={{output}}/output/study_locus \
+          step.gwas_significance=1.8e-9 \
+          step.distance=1000000 \
+          step.collect_locus=true \
+          step.recursive_file_lookup=false \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=200 \
+          step.session.spark_uri=yarn
+
+  # The LD annotation and PICS read the pQTL study index, not the study of the step
+  # `study`: that one has a row per gene of a multi-gene aptamer with the same studyId
+  # (opentargets/issues#4595), and the study index join of PICS would duplicate their
+  # credible sets. Both indexes give the same studyType and ldPopulationStructure.
+  ld_annotation:
+    depends_on: [window_clumping]
+    kind: dataproc
+    definition:
+      cluster: otg-decode-smp-finemapping
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=ld_based_clumping \
+          step.ld_index_path={{input.gnomad}}/v2.1.1/ld_index \
+          step.study_locus_input_path={{output}}/output/study_locus \
+          step.study_index_path={{input.decode}}/smp/pqtl_study_qc_annotated \
+          step.clumped_study_locus_output_path={{output}}/output/ld_annotated_study_locus \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=200 \
+          step.session.spark_uri=yarn
+
+  pics:
+    depends_on: [ld_annotation]
+    kind: dataproc
+    definition:
+      cluster: otg-decode-smp-finemapping
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=pics \
+          step.study_locus_ld_annotated_in={{output}}/output/ld_annotated_study_locus \
+          step.study_index_path={{input.decode}}/smp/pqtl_study_qc_annotated \
+          step.picsed_study_locus_out={{output}}/output/credible_set \
+          step.picsed_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=20 \
+          step.session.spark_uri=yarn

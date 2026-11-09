@@ -1,0 +1,99 @@
+---
+description: Open Targets Genetics — GWAS Catalog top hits
+env: prod
+
+environments:
+  prod:
+    input:
+      gwas_catalog: gs://gwas_catalog_inputs
+      gnomad: gs://gnomad_data_2
+    output: gs://gwas_catalog_top_hits/prod/20261028T234317
+    scratchpad:
+      gentropy_version: 4.0.0-dev.4
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-tophit-gwascatalog:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers: preempted secondary workers lose
+      # their shuffle data. 64 cores: a run was about 6.5 core-hours of tasks on
+      # gentropy v4.0.0-dev.3, with at most 3.5 GB of shuffle
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 4
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 128
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: 'v{{gentropy_version}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+        # broadcast the joins with a side of up to 512 MiB: all the joins of pics.
+        # The joins with the gnomAD tables are broadcast by gentropy itself
+        'spark:spark.sql.autoBroadcastJoinThreshold': '536870912'
+        # 32 MiB splits: the GWAS Catalog TSVs are read with 23 tasks instead of 6
+        'spark:spark.sql.files.maxPartitionBytes': '33554432'
+        # gwas_catalog_inputs is a requester pays bucket
+        'core:fs.gs.requester.pays.mode': 'AUTO'
+        'core:fs.gs.requester.pays.project.id': 'open-targets-genetics-dev'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  ingestion:
+    kind: dataproc
+    definition:
+      cluster: otg-tophit-gwascatalog
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=gwas_catalog_top_hit_ingestion \
+          "step.catalog_study_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_studies.tsv']" \
+          "step.catalog_ancestry_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_ancestries.tsv']" \
+          step.catalog_associations_file={{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_associations_ontology_annotated.tsv \
+          step.variant_annotation_path={{input.gnomad}}/v4.1/variant_index \
+          step.catalog_studies_out={{output}}/output/study \
+          step.catalog_associations_out={{output}}/output/study_locus \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=1 \
+          step.session.spark_uri=yarn
+
+  ld_annotation:
+    depends_on: [ingestion]
+    kind: dataproc
+    definition:
+      cluster: otg-tophit-gwascatalog
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=ld_based_clumping \
+          step.ld_index_path={{input.gnomad}}/v2.1.1/ld_index \
+          step.study_locus_input_path={{output}}/output/study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.clumped_study_locus_output_path={{output}}/output/ld_annotated_study_locus \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=4 \
+          step.session.spark_uri=yarn
+
+  pics:
+    depends_on: [ld_annotation]
+    kind: dataproc
+    definition:
+      cluster: otg-tophit-gwascatalog
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=pics \
+          step.study_locus_ld_annotated_in={{output}}/output/ld_annotated_study_locus \
+          step.study_index_path={{output}}/output/study \
+          step.picsed_study_locus_out={{output}}/output/credible_set \
+          step.picsed_credible_set_variant_out={{output}}/output/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=2 \
+          step.session.spark_uri=yarn

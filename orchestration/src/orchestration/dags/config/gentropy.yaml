@@ -14,60 +14,6 @@ steps:
       # OUTPUTS
       step.coloc_path: '{{release_uri}}/output/colocalisation'
 
-  variant_annotation:
-    cluster: false
-    google_batch_index_specs:
-      pointer: 'vep' # pointer to the vep manifest generator implementation.
-      max_task_count: 500 # Max number of tasks running in a single google batch job.
-      generator_specs:
-        generator_options:
-          # INPUTS
-          # Based on vcf_input_path, the job environment variables $INPUT_FILE and $OUTPUT_FILE are discovered.
-          vcf_input_path: &vep_input_uri '{{release_uri}}/intermediate/variant_partition/'
-          vep_cache_path: &vep_cache_uri 'gs://vep_cache_data/vep/cache'
-          # OUTPUTS
-          vep_output_path: &vep_output_uri '{{release_uri}}/intermediate/variant_annotation/'
-    google_batch:
-      job:
-        task_group:
-          parallelism: 500 # Max number of VEP tasks run at a time in parallel on all machines.
-          # 1, not 2: two co-resident VEP processes reading the remote-mounted cache
-          # put the VM under page-cache pressure until both stop making progress
-          # (opentargets/issues#4513). memory_mib is the wrong knob -- it is not heap.
-          task_count_per_node: 1 # Number of tasks running at the same time on a single machine.
-          task_environments:
-            # Populated at runtime by BatchIndexOperator with dictionaries
-            # containing $INPUT_FILE and $OUTPUT_FILE
-            environments: []
-          task_config:
-            max_retry_count: 2
-            max_run_duration: '2h'
-            instance_resource_spec:
-              cpu_milli: 2000
-              memory_mib: 2000
-              boot_disk_mib: 10000
-            runnable_spec:
-              image_uri: 'europe-west1-docker.pkg.dev/open-targets-eu-dev/vep/custom_ensembl_vep:{{vep_version}}'
-              entrypoint: /bin/bash
-              script_file: annotate_variants.sh # In src.orchestration.assets
-              script_variables: # variables templated into the script before execution.
-                cache_dir: &vep_cache_mount '/mnt/disks/share/cache/'
-                input_dir: &vep_input_mount '/mnt/disks/share/input/'
-                output_dir: &vep_output_mount '/mnt/disks/share/output/'
-            shared_volumes:
-              mounting_points:
-                - remote_uri: *vep_input_uri
-                  mount_point: *vep_input_mount
-                - remote_uri: *vep_output_uri
-                  mount_point: *vep_output_mount
-                - remote_uri: *vep_cache_uri
-                  mount_point: *vep_cache_mount
-        allocation:
-          instance:
-            machine_type: n1-standard-4
-            provisioning_model: STANDARD # Other options: SPOT (but careful with max_retry_count)
-        logs: {}
-
   l2g_feature_matrix:
     params:
       step: locus_to_gene_feature_matrix
