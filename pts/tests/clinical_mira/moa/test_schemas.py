@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 from pydantic import ValidationError
 
@@ -104,3 +106,12 @@ def test_extract_prompt_states_the_full_run_lessons():
     assert 'releasing agent' in prompt
     assert 'list every member' in prompt
     assert 'class of drugs' in prompt
+
+
+def test_literature_system_prompt_matches_experiment() -> None:
+    prompt = schemas.literature_system_prompt()
+    assert prompt.startswith(load_prompt('extract'))
+    assert (
+        hashlib.sha256(prompt.encode()).hexdigest()
+        == 'b104cd4b33d7517e63643da4ba67d51688f8e3f60e9768dc19faac0e6a835d6d'
+    )

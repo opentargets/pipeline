@@ -23,7 +23,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
-from pts.transformers.clinical_mira.moa import pooling, schemas
+from pts.transformers.clinical_mira.moa import literature, pooling, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -396,6 +396,25 @@ MOA = MoaOutput(
         'content_fields': list(pooling.CONTENT_FIELDS),
         'effort': 'medium',
         'extract_prompt_sha256': schemas.ruleset_sha256('extract'),
+        'schema_sha256': schema_digest(schemas.MoaExtraction),
+    },
+    logic_version=1,
+)
+
+MOA_LITERATURE = MoaOutput(
+    name='moa_literature',
+    model=MOA.model,
+    params={
+        'per_drug': literature.PER_DRUG,
+        'per_file_cap': literature.PER_FILE_CAP,
+        'cue': literature.CUE,
+        'section_rank': literature.SECTION_RANK,
+        'min_chars': literature.MIN_CHARS,
+        'max_chars': literature.MAX_CHARS,
+        'carry_forward': True,
+        'effort': MOA.params['effort'],
+        'extract_prompt_sha256': schemas.ruleset_sha256('extract'),
+        'addendum_sha256': hashlib.sha256(schemas.load_literature_addendum().encode('utf-8')).hexdigest(),
         'schema_sha256': schema_digest(schemas.MoaExtraction),
     },
     logic_version=1,

@@ -12,6 +12,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.clinical_mira.moa import literature, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -32,6 +33,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DRUG_ENTITIES,
     EXTRACTION,
     MOA,
+    MOA_LITERATURE,
     STOP_REASONS,
     StagedOutput,
     schema_digest,
@@ -423,3 +425,23 @@ def test_moa_read_rejects_another_kind(tmp_path: Path) -> None:
 def test_moa_read_rejects_another_tag(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=re.escape(MOA.tag())):
         MOA.read(moa_snapshot(tmp_path, 'moa', tag='x'))
+
+
+def test_moa_literature_tag() -> None:
+    assert re.fullmatch(r'claude-opus-5-5-p[0-9a-f]{8}', MOA_LITERATURE.tag())
+    assert MOA_LITERATURE.tag() != MOA.tag()
+    assert MOA_LITERATURE.params['effort'] == MOA.params['effort']
+    addendum_sha256 = hashlib.sha256(schemas.load_literature_addendum().encode()).hexdigest()
+    assert MOA_LITERATURE.params['addendum_sha256'] == addendum_sha256
+    constants = {
+        'per_drug': literature.PER_DRUG,
+        'per_file_cap': literature.PER_FILE_CAP,
+        'cue': literature.CUE,
+        'section_rank': literature.SECTION_RANK,
+        'min_chars': literature.MIN_CHARS,
+        'max_chars': literature.MAX_CHARS,
+    }
+    for key, value in constants.items():
+        assert MOA_LITERATURE.params[key] == value
+        changed = {**MOA_LITERATURE.params, key: [value, 'changed']}
+        assert dataclasses.replace(MOA_LITERATURE, params=changed).tag() != MOA_LITERATURE.tag()

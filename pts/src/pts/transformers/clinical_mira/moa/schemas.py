@@ -116,6 +116,16 @@ def load_prompt(name: Literal['extract', 'judge']) -> str:
     return (resources.files(PROMPTS_PACKAGE) / f'{name}.txt').read_text(encoding='utf-8')
 
 
+def load_literature_addendum() -> str:
+    """Return the packaged addendum that adapts the extractor prompt to literature sentences."""
+    return (resources.files(PROMPTS_PACKAGE) / 'extract_literature_addendum.txt').read_text(encoding='utf-8')
+
+
+def literature_system_prompt() -> str:
+    """Return the extractor system prompt followed by the literature addendum."""
+    return load_prompt('extract') + load_literature_addendum()
+
+
 def ruleset_sha256(name: Literal['extract', 'judge']) -> str:
     """Return the sha256 of a stage's system prompt and response schema."""
     schema = json.dumps(RESPONSE_MODELS[name].model_json_schema(by_alias=True), sort_keys=True)
