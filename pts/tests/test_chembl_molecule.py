@@ -7,8 +7,9 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
+from pts.schemas.drug_molecule import chembl_molecule_schema, structural_alert_schema
 from pts.transformers import chembl_molecule as chembl_molecule_module
-from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecule, process_molecules
+from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecule, pains_alerts, process_molecules
 from pts.transformers.clinical_mira.record_store import publish_snapshot
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, schema_digest
@@ -105,6 +106,10 @@ def rows_by_id(df: pl.DataFrame) -> dict:
     return {r['id']: r for r in df.to_dicts()}
 
 
+NO_ALERTS = pl.DataFrame(schema={'molregno': pl.Int64, 'structuralAlerts': structural_alert_schema})
+"""`pains_alerts` output for a dump in which no molecule has a PAINS alert."""
+
+
 def _preprocess(t: dict, db: pl.DataFrame) -> pl.DataFrame:
     return _molecule_preprocess(
         t['molecule_dictionary'],
@@ -122,6 +127,7 @@ def _process(t: dict, aact_batch: pl.DataFrame | None = None) -> pl.DataFrame:
         t['molecule_hierarchy'],
         t['molecule_synonyms'],
         t['drugbank_lookup'],
+        t.get('structural_alerts', NO_ALERTS),
         aact_batch,
     )
 
@@ -223,6 +229,7 @@ class TestProcessMolecules:
             molecule_hierarchy,
             molecule_synonyms,
             tables()['drugbank_lookup'],
+            NO_ALERTS,
         )
         rows = rows_by_id(result)
         assert rows['CHEMBLPARENT']['childChemblIds'] == ['CHEMBLCHILD']
@@ -266,6 +273,7 @@ class TestSynonymStructs:
             molecule_hierarchy,
             molecule_synonyms,
             tables()['drugbank_lookup'],
+            NO_ALERTS,
         )
         row = rows_by_id(result)['CHEMBL10']
         assert [(s['label'], s['source']) for s in row['synonyms']] == [('ASA', 'ChEMBL')]
@@ -311,6 +319,7 @@ class TestSynonymStructs:
             molecule_hierarchy,
             molecule_synonyms,
             tables()['drugbank_lookup'],
+            NO_ALERTS,
         )
         row = rows_by_id(result)['CHEMBL20']
         assert row['synonyms'] == [{'label': 'Realonym', 'source': 'ChEMBL'}]
@@ -357,6 +366,7 @@ class TestMergeAndTwoSource:
             molecule_hierarchy,
             molecule_synonyms,
             tables()['drugbank_lookup'],
+            NO_ALERTS,
             batch,
         )
         row = rows_by_id(result)['CHEMBL1']
@@ -458,7 +468,7 @@ class TestStepExtraction:
 
     @staticmethod
     def _source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
-        t = tables()
+        t = tables() | alert_tables()
         monkeypatch.setattr(chembl_molecule_module, 'read_dump_tables', lambda *args, **kwargs: t)
         drugbank_file = tmp_path / 'drugbank.tsv'
         drugbank_file.write_text("From src:'1'\tTo src:'2'\n")
@@ -496,3 +506,69 @@ class TestStepExtraction:
         source = self._source(tmp_path, monkeypatch)
         chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
         assert pl.read_parquet(tmp_path / 'out').height == tables()['molecule_dictionary'].height
+
+
+# --- Tests for pains_alerts ---
+
+
+def alert_tables() -> dict[str, pl.DataFrame]:
+    """Raw ChEMBL alert tables, typed as `read_dump_tables` returns them."""
+    return {
+        # molregno 1: two PAINS alerts, one listed twice, plus a Glaxo one; 2: Glaxo only
+        'compound_structural_alerts': pl.DataFrame({'molregno': [1, 1, 1, 1, 2], 'alert_id': [40, 9, 7, 9, 12]}),
+        'structural_alerts': pl.DataFrame({
+            'alert_id': [7, 9, 12, 40],
+            'alert_set_id': [4, 4, 1, 4],
+            'alert_name': ['quinone_A(370)', 'ene_rhod_A(235)', 'Michael acceptor', 'catechol_A(92)'],
+        }),
+        'structural_alert_sets': pl.DataFrame({'alert_set_id': [1, 4], 'set_name': ['Glaxo', 'PAINS']}),
+    }
+
+
+def _pains(**overrides: pl.DataFrame) -> pl.DataFrame:
+    t = alert_tables() | overrides
+    return pains_alerts(t['compound_structural_alerts'], t['structural_alerts'], t['structural_alert_sets'])
+
+
+class TestPainsAlerts:
+    def test_several_pains_alerts_sorted_by_id_without_duplicates(self):
+        assert _pains().rows() == [
+            (
+                1,
+                [
+                    {'alertId': 7, 'alertName': 'quinone_A(370)'},
+                    {'alertId': 9, 'alertName': 'ene_rhod_A(235)'},
+                    {'alertId': 40, 'alertName': 'catechol_A(92)'},
+                ],
+            )
+        ]
+
+    @pytest.mark.parametrize('set_names', [['Glaxo', 'PAINS_v2'], ['PAINS', 'PAINS']], ids=['renamed', 'duplicated'])
+    def test_pains_set_must_exist_exactly_once(self, set_names):
+        sets = pl.DataFrame({'alert_set_id': [1, 4], 'set_name': set_names})
+        with pytest.raises(ValueError, match='one alert set named PAINS'):
+            _pains(structural_alert_sets=sets)
+
+    @staticmethod
+    def _alerts(compound_structural_alerts: pl.DataFrame) -> dict:
+        result = _process(
+            tables() | {'structural_alerts': _pains(compound_structural_alerts=compound_structural_alerts)}
+        )
+        assert dict(result.schema) == dict(chembl_molecule_schema)
+        return {
+            r['id']: None if r['structuralAlerts'] is None else [a['alertId'] for a in r['structuralAlerts']]
+            for r in result.iter_rows(named=True)
+        }
+
+    def test_process_molecules_joins_alerts_on_molregno_and_keeps_every_molecule(self):
+        # CHEMBL1 has two PAINS alerts and CHEMBL3 only a Glaxo one; CHEMBL4 has a molfile but no SMILES
+        alerts = self._alerts(pl.DataFrame({'molregno': [1, 1, 3], 'alert_id': [9, 7, 12]}))
+        assert alerts['CHEMBL1'] == [7, 9]
+        assert [alerts[i] for i in ('CHEMBL3', 'CHEMBL4', 'CHEMBL5', 'CHEMBL6', 'CHEMBL7')] == [[]] * 5
+
+    def test_a_molecule_without_a_structure_has_no_alert_list(self):
+        # CHEMBL2, an antibody, has no structure: not checked, rather than clean
+        assert self._alerts(pl.DataFrame({'molregno': [1], 'alert_id': [7]}))['CHEMBL2'] is None
+
+    def test_alerts_on_a_molecule_without_a_published_structure_are_kept(self):
+        assert self._alerts(pl.DataFrame({'molregno': [2], 'alert_id': [9]}))['CHEMBL2'] == [9]
