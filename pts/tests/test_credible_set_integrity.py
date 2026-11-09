@@ -1,5 +1,6 @@
 """Validation: integrity checks of the written datasets, and a write without a sort."""
 
+import importlib
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,11 +10,13 @@ from otter.config.model import Config
 from polars.io.plugins import register_io_source
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
-from pts.transformers.credible_set import validation as validation_module
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.validation import validation, validation_check
 from pts.transformers.utils import dataset as dataset_module
 from pts.transformers.utils.dataset import scan_dataset
+
+validation_module = importlib.import_module('pts.transformers.credible_set.validation')
+"""The validation module itself: the package exports its `validation` function under the same name."""
 
 MHC = CredibleSetFlag.IN_MHC.value
 

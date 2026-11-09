@@ -1,11 +1,65 @@
-"""Schemas for the CredibleSet and CredibleSetVariant datasets."""
+"""Schemas for the CredibleSet and CredibleSetVariant datasets, and the vocabularies they type columns with.
+
+`FinemappingMethod` and `Chromosome` are the fixed vocabularies of `fineMappingMethod` and
+`chromosome`: the validated and published sets type those columns as enums of them, and set QC
+flags a set outside them.
+"""
 
 from __future__ import annotations
+
+from enum import StrEnum
 
 import polars as pl
 
 from pts.schemas.study import StudyType
-from pts.transformers.credible_set.vocabulary import Chromosome, FinemappingMethod
+
+
+class FinemappingMethod(StrEnum):
+    """Fine-mapping methods."""
+
+    PICS = 'PICS'
+    SUSIE = 'SuSiE'
+    SUSIE_INF = 'SuSiE-inf'
+
+    @classmethod
+    def susie(cls) -> tuple[FinemappingMethod, ...]:
+        """The methods of the SuSiE family."""
+        return (cls.SUSIE, cls.SUSIE_INF)
+
+
+class Chromosome(StrEnum):
+    """Chromosomes a credible set or a variant may lie on, in genome order.
+
+    These are the Ensembl canonical chromosomes, which the genes and the gnomAD variants that
+    credible sets are joined to lie on. There is no XY: a pseudoautosomal variant is on X or Y.
+    """
+
+    CHR_1 = '1'
+    CHR_2 = '2'
+    CHR_3 = '3'
+    CHR_4 = '4'
+    CHR_5 = '5'
+    CHR_6 = '6'
+    CHR_7 = '7'
+    CHR_8 = '8'
+    CHR_9 = '9'
+    CHR_10 = '10'
+    CHR_11 = '11'
+    CHR_12 = '12'
+    CHR_13 = '13'
+    CHR_14 = '14'
+    CHR_15 = '15'
+    CHR_16 = '16'
+    CHR_17 = '17'
+    CHR_18 = '18'
+    CHR_19 = '19'
+    CHR_20 = '20'
+    CHR_21 = '21'
+    CHR_22 = '22'
+    CHR_X = 'X'
+    CHR_Y = 'Y'
+    CHR_MT = 'MT'
+
 
 credible_set_schema = pl.Schema({
     'id': pl.String(),

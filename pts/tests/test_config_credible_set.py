@@ -7,11 +7,13 @@ import polars as pl
 import pytest
 from otter.config.yaml import parse_yaml
 
+from pts.schemas.credible_set import FinemappingMethod
+from pts.tasks.transform import Transform
+from pts.transformers import credible_set
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings
 from pts.transformers.credible_set.validation import ValidationSettings
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
-from pts.transformers.credible_set.vocabulary import FinemappingMethod
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""
@@ -284,3 +286,16 @@ def test_every_task_reading_the_credible_sets_has_a_contract_test() -> None:
 def test_the_tests_of_a_credible_set_reader_build_its_input_as_the_producers_write_it(consumer: str) -> None:
     test_module = Path(__file__).parent / CONSUMER_TEST[consumer]
     assert 'tests.credible_set_fixtures import' in test_module.read_text(), consumer
+
+
+def test_every_credible_set_task_runs_an_entry_point_the_package_exports() -> None:
+    names = {
+        spec['transformer']
+        for tasks in parse_yaml(CONFIG_PATH)['steps'].values()
+        for task in tasks
+        for spec in [task, *task.get('do', [])]
+        if spec.get('transformer', '').startswith('credible_set.')
+    }
+    assert names == {f'credible_set.{name}' for name in credible_set.__all__} - {'credible_set.validation_check'}
+    for name in names:
+        assert Transform.load_transformer(name) is getattr(credible_set, name.removeprefix('credible_set.'))

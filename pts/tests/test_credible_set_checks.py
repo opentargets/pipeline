@@ -194,3 +194,32 @@ def test_validation_pairs_gcs_paths_by_their_folder_in_the_release() -> None:
             [f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set_variant', f'{root}/qc/gwas/gcca/credible_set_variant'],
             root,
         )
+
+
+def test_validation_pairs_the_sets_and_variants_of_each_source(tmp_path) -> None:
+    """Each source's datasets sit in its folder; a trailing slash does not change the folder."""
+    credible_set, credible_set_variant = [], []
+    for source in ('a', 'b'):
+        for dataset, frame in [
+            ('credible_set', _set(id=source * 32).collect()),
+            (
+                'credible_set_variant',
+                _variant('1_100_A_T').with_columns(pl.lit(source * 32).alias('credibleSetId')).collect(),
+            ),
+        ]:
+            path = tmp_path / 'qc/gwas' / source / dataset
+            path.mkdir(parents=True)
+            frame.write_parquet(path / 'part-0.parquet')
+        credible_set.append(str(tmp_path / 'qc/gwas' / source / 'credible_set') + '/')
+        credible_set_variant.append(str(tmp_path / 'qc/gwas' / source / 'credible_set_variant'))
+    destination = {
+        name: str(tmp_path / 'out' / name)
+        for name in ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant')
+    }
+    validation(
+        source={'credible_set': credible_set, 'credible_set_variant': credible_set_variant},
+        destination=destination,
+        settings={},
+        config=Mock(spec=Config, work_path=str(tmp_path), release_uri=None),
+    )
+    assert sorted(pl.read_parquet(tmp_path / 'out/valid_variant/*.parquet')['credibleSetId']) == ['a' * 32, 'b' * 32]

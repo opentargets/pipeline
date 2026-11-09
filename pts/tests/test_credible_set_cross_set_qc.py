@@ -4,7 +4,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema, cross_set_flags_schema
-from pts.transformers.credible_set.cross_set_qc import flag_across_sets
+from pts.transformers.credible_set.cross_set_qc import add_cross_set_flags, flag_across_sets
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.validation import ValidationSettings
 
@@ -162,3 +162,26 @@ def test_a_surviving_susie_set_still_explains_a_pics_set(validate_source) -> Non
     sets = _sets(_pics('pics', leadVariantId='1_150_A_T'), _susie('susie', 100, 200))
     variants = _variants(('pics', '1_150_A_T', []), ('susie', '1_100_A_T', []))
     assert _valid_ids(validate_source, sets, variants, 'EXPLAINED_BY_SUSIE') == ['susie']
+
+
+def test_a_cross_set_flag_reaches_only_the_copies_of_its_id_that_its_rule_flags() -> None:
+    """Two sources may share an id; a summary statistics set is not a redundant top hit, nor a SuSiE set explained."""
+    shared = 'x' * 32
+    cross_set_flag = pl.LazyFrame(
+        {
+            'id': [shared],
+            'qualityControls': [[CredibleSetFlag.REDUNDANT_PICS_TOP_HIT, CredibleSetFlag.EXPLAINED_BY_SUSIE]],
+        },
+        schema=cross_set_flags_schema,
+    )
+    sets = _sets(_pics(shared, qualityControls=[TOP_HIT]), _pics(shared), _susie(shared, 100, 200))
+    flagged = add_cross_set_flags(sets, cross_set_flag).collect()
+    flags_by_set = {
+        (row['fineMappingMethod'], TOP_HIT in row['qualityControls']): set(row['qualityControls']) - {TOP_HIT}
+        for row in flagged.iter_rows(named=True)
+    }
+    assert flags_by_set == {
+        ('PICS', True): {CredibleSetFlag.REDUNDANT_PICS_TOP_HIT, CredibleSetFlag.EXPLAINED_BY_SUSIE},
+        ('PICS', False): {CredibleSetFlag.EXPLAINED_BY_SUSIE},
+        ('SuSiE', False): set(),
+    }

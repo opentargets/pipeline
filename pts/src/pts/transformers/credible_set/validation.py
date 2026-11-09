@@ -266,7 +266,9 @@ def _set_keys(credible_set: pl.LazyFrame, excluded_set: pl.LazyFrame | None = No
     """One row per set id of a source, with what its variants are checked against.
 
     The chromosome and the lead of the set, and whether the set is excluded: a set whose id is
-    among `excluded_set`, which is unknown until the sets are decided.
+    among `excluded_set`, which is unknown until the sets are decided. An id the source repeats
+    keeps its first row: its copies are excluded together, and its variants must not be joined
+    once per copy.
 
     Examples:
         >>> credible_set = pl.LazyFrame({
@@ -280,7 +282,7 @@ def _set_keys(credible_set: pl.LazyFrame, excluded_set: pl.LazyFrame | None = No
         pl.col('chromosome').alias('_set_chromosome'),
         pl.col('leadVariantId').alias('_set_lead'),
         pl.lit(True).alias('_known'),
-    ).unique()
+    ).unique(subset='credibleSetId', keep='first', maintain_order=True)
     if excluded_set is None:
         return key.with_columns(pl.lit(False).alias('_set_excluded'))
     excluded = excluded_set.select(pl.col('id').alias('credibleSetId'), pl.lit(True).alias('_set_excluded')).unique()
@@ -393,10 +395,10 @@ def _flag_duplicated_ids(
     """Flag DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES on the copies of an id that another source keeps.
 
     Within a source an id is unique by then, as `_decide_sets` excludes every copy of a repeated one.
-    Across sources the variants of a copy are its own source's, so one copy can be kept. As
-    gentropy's credible set validation does, only the valid sets are compared, and the copy with
-    the fewest valid variants is kept. Ties go to the copy of the earlier source, then to the
-    smaller hash of its row, so the kept copy does not depend on row order. When the flag is in
+    Across sources the variants of a copy are its own source's, so one copy can be kept. Only the
+    valid sets are compared, and the copy with the fewest valid variants is kept. Ties go to the
+    copy of the earlier source, then to the smaller hash of its row, so the kept copy does not
+    depend on row order. When the flag is in
     `cs_invalid_qc_reasons`, the other copies are excluded. The ranking is collected once, and
     each source takes its sets from it.
 

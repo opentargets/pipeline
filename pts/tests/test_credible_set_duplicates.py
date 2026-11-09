@@ -145,3 +145,12 @@ def test_copies_within_one_source_leave_even_without_an_exclusion_list(tmp_path:
     )
     assert written['valid_set'].height == 0
     assert written['valid_variant'].height == 0
+
+
+def test_copies_within_one_source_with_different_leads_leave_once_with_their_variants(tmp_path: Path) -> None:
+    """The copies of an id may differ in what the id should have hashed; their variants are not doubled."""
+    other_lead = {**_set(DUP_ID, 'second'), 'leadVariantId': '1_101_A_T'}
+    written = _validate(tmp_path, {'a': ([_set(DUP_ID, 'first'), other_lead], _variants(DUP_ID, 2))})
+    assert written['valid_set'].height == 0
+    assert written['excluded_set']['qualityControls'].to_list() == [[WITHIN], [WITHIN]]
+    assert written['excluded_variant'].height == 2

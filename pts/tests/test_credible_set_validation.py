@@ -6,7 +6,9 @@ from pydantic import ValidationError
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.set_qc import SetQcSource
 from pts.transformers.credible_set.validation import ValidationSettings
+from pts.transformers.credible_set.variant_qc import VariantQcSource
 
 EXCEEDS = CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value
 SETTINGS = ValidationSettings(
@@ -183,7 +185,5 @@ def test_the_lead_and_orphan_flags_are_ordinary_flags() -> None:
 )
 def test_qc_reads_only_its_own_dataset(transformer: str, other: str) -> None:
     """The checks that need both datasets of a source run in validation, so QC rejects the other dataset."""
-    from pts.transformers.credible_set import set_qc, variant_qc
-
-    model = {'set_qc': set_qc.SetQcSource, 'variant_qc': variant_qc.VariantQcSource}[transformer]
+    model = {'set_qc': SetQcSource, 'variant_qc': VariantQcSource}[transformer]
     assert other not in model.model_fields

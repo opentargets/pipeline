@@ -1,7 +1,8 @@
 """The vocabularies of the credible set stages match gentropy and the PRDs."""
 
+from pts.schemas.credible_set import Chromosome, FinemappingMethod
 from pts.schemas.study import StudyType
-from pts.transformers.credible_set.vocabulary import Chromosome, FinemappingMethod, KnownGenomicRegion
+from pts.transformers.credible_set.region import KnownGenomicRegion
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 
 

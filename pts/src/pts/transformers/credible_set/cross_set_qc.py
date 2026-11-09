@@ -8,19 +8,35 @@ validation decides each source's sets:
 - EXPLAINED_BY_SUSIE: a set that is not SuSiE is explained when one of its members lies in the
   locus of a SuSiE set of the same study.
 
-Only a set that validation would keep on its own flags explains another: a set that is not
-published cannot replace one. `flag_across_sets` gives the flags as a lookup table, one row per
-flagged set, and `add_cross_set_flags` adds them to a source's sets.
+Only a set that validation would keep on its own flags explains another. A summary statistics set
+that is itself explained by SuSiE still makes the study's curated hits redundant: the rule is about
+the study, which has summary statistics whatever becomes of that set. `flag_across_sets` gives the
+flags as a lookup table, one row per flagged id, and `add_cross_set_flags` adds each flag to the
+sets of that id its rule applies to: two sources may share an id.
 """
 
 from __future__ import annotations
 
 import polars as pl
 
-from pts.schemas.credible_set import cross_set_flags_schema
+from pts.schemas.credible_set import FinemappingMethod, cross_set_flags_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.identifier import variant_position
-from pts.transformers.credible_set.vocabulary import FinemappingMethod
+
+_TOP_HIT = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
+"""A curated top hit."""
+
+_PICS = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
+"""A set fine-mapped by PICS."""
+
+_SUSIE = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
+"""A set fine-mapped by SuSiE or SuSiE-inf."""
+
+_FLAGGED_ROW = {
+    CredibleSetFlag.REDUNDANT_PICS_TOP_HIT: _TOP_HIT,
+    CredibleSetFlag.EXPLAINED_BY_SUSIE: ~_SUSIE,
+}
+"""The sets each cross-set flag applies to: the candidates of its rule."""
 
 
 def flag_across_sets(
@@ -74,18 +90,25 @@ def flag_across_sets(
 
 
 def add_cross_set_flags(credible_set: pl.LazyFrame, cross_set_flag: pl.LazyFrame) -> pl.LazyFrame:
-    """Append the cross-set flags of each set to its `qualityControls`; other sets are unchanged."""
+    """Append the cross-set flags of each set to its `qualityControls`; other sets are unchanged.
+
+    A flag is added only to the sets its rule applies to (`_FLAGGED_ROW`), so the copy of an id in
+    another source does not take a flag meant for this one: a summary statistics set that shares
+    its id with a curated top hit does not become a redundant top hit.
+    """
     set_flag = cross_set_flag.select('id', pl.col('qualityControls').alias('_cross_set_flags'))
-    merged = pl.concat_list(pl.col('qualityControls'), pl.col('_cross_set_flags')).list.unique().list.sort()
+    no_flag = pl.lit([], dtype=pl.List(pl.String))
+    listed = pl.col('_cross_set_flags').fill_null(no_flag)
+    added = pl.concat_list([
+        pl.when(listed.list.contains(flag.value) & applies).then(pl.lit([flag.value])).otherwise(no_flag)
+        for flag, applies in _FLAGGED_ROW.items()
+    ])
+    merged = pl.concat_list(pl.col('qualityControls'), added).list.unique().list.sort()
     return (
         credible_set
         .join(set_flag, on='id', how='left')
         .with_columns(
-            pl
-            .when(pl.col('_cross_set_flags').is_not_null())
-            .then(merged)
-            .otherwise(pl.col('qualityControls'))
-            .alias('qualityControls')
+            pl.when(added.list.len() > 0).then(merged).otherwise(pl.col('qualityControls')).alias('qualityControls')
         )
         .drop('_cross_set_flags')
     )
@@ -108,11 +131,13 @@ def _redundant_pics_top_hits(credible_set: pl.LazyFrame, explaining_set: pl.Lazy
         >>> _redundant_pics_top_hits(credible_set, credible_set).collect()['id'].to_list()
         ['top']
     """
-    top_hit = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
-    pics = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
-    study_with_summary_statistics = explaining_set.filter(pics & ~top_hit).select('studyId').unique()
+    study_with_summary_statistics = explaining_set.filter(_PICS & ~_TOP_HIT).select('studyId').unique()
     return (
-        credible_set.filter(top_hit).join(study_with_summary_statistics, on='studyId', how='semi').select('id').unique()
+        credible_set
+        .filter(_TOP_HIT)
+        .join(study_with_summary_statistics, on='studyId', how='semi')
+        .select('id')
+        .unique()
     )
 
 
@@ -143,9 +168,8 @@ def _explained_by_susie(
         >>> _explained_by_susie(credible_set, credible_set_variant, credible_set).collect()['id'].to_list()
         ['inside']
     """
-    susie = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
-    susie_region = explaining_set.filter(susie).select('studyId', 'chromosome', 'locusStart', 'locusEnd').unique()
-    other_set = credible_set.filter(~susie).select('id', 'studyId', 'chromosome').unique()
+    susie_region = explaining_set.filter(_SUSIE).select('studyId', 'chromosome', 'locusStart', 'locusEnd').unique()
+    other_set = credible_set.filter(~_SUSIE).select('id', 'studyId', 'chromosome').unique()
     member = (
         credible_set_variant
         .filter(~pl.col('qualityControls').list.contains(CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value))

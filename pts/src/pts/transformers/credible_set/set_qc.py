@@ -19,12 +19,12 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.credible_set import credible_set_required, credible_set_schema
+from pts.schemas.credible_set import Chromosome, FinemappingMethod, credible_set_required, credible_set_schema
 from pts.schemas.study import StudyType
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.identifier import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
+from pts.transformers.credible_set.region import KnownGenomicRegion
 from pts.transformers.credible_set.source import read_source_dataset
-from pts.transformers.credible_set.vocabulary import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows

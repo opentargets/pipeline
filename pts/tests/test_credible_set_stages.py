@@ -1,5 +1,6 @@
 """The credible set stages run end to end on real new-schema credible sets of three sources."""
 
+import importlib
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -17,7 +18,6 @@ from pts.schemas.credible_set import (
 from pts.schemas.study import study_schema
 from pts.schemas.target import GENOMIC_LOCATION
 from pts.schemas.variant import variant_schema
-from pts.transformers.credible_set import annotation as annotation_module
 from pts.transformers.credible_set.annotation import annotation
 from pts.transformers.credible_set.confidence import CredibleSetConfidence
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
@@ -34,6 +34,9 @@ from tests.credible_set_fixtures import (
     MHC_SET,
     MHC_VARIANTS,
 )
+
+annotation_module = importlib.import_module('pts.transformers.credible_set.annotation')
+"""The annotation module itself: the package exports its `annotation` function under the same name."""
 
 UNREPORTED = {**CLEAN_VARIANTS[-1], 'effectAlleleFrequency': None}
 """A clean variant whose source frequency is dropped, so that annotation takes it from gnomAD."""

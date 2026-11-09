@@ -11,8 +11,8 @@ from enum import IntEnum
 
 import polars as pl
 
+from pts.schemas.credible_set import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag
-from pts.transformers.credible_set.vocabulary import FinemappingMethod
 
 
 class CredibleSetConfidence(IntEnum):

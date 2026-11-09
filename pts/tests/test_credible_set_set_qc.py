@@ -7,10 +7,9 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
-from pts.schemas.credible_set import credible_set_schema
+from pts.schemas.credible_set import FinemappingMethod, credible_set_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings, set_qc
-from pts.transformers.credible_set.vocabulary import FinemappingMethod
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 
 CS_ID = '0' * 32
