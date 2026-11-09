@@ -28,8 +28,6 @@ pis_version: "26.12.0rc21"
 pts_version: "26.12.0rc35"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
-# 4.0.0-rc.1 reads the credible sets as CredibleSet and CredibleSetVariant, and has
-# the effector_gene_list and training_set steps.
 gentropy_version: "4.0.0-rc.1"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
