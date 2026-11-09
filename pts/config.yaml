@@ -1022,7 +1022,7 @@ steps:
         import_for_tag: claude-opus-5-5-p15139b69
         import_for_release: '26.09'
         min_seeded_share: 0.69
-        max_compute: 3000
+        max_compute: 4500
         shard_size: 5000
         billing_project: open-targets-eu-dev
   ##################################################################################################
