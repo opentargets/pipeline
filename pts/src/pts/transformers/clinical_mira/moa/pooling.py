@@ -12,7 +12,6 @@ import re
 
 import polars as pl
 
-from pts.transformers.clinical_mira.moa.papers import paper_id, paper_text
 from pts.transformers.utils.aact_synonyms import EXACT_MATCH_BLOCKLIST, _normalize_name
 
 MOA_VOCAB = (
@@ -60,11 +59,6 @@ def trial_content_sha256(prompt: str) -> str:
         if keep:
             lines.append(line)
     return _sha256(re.sub(r'\s+', ' ', '\n'.join(lines)).strip())
-
-
-def content_key(drug_name: str, entries: list[tuple[str, str]]) -> str:
-    """Hash a drug name and its ``(id, content sha256)`` entries, whatever their order."""
-    return _sha256(drug_name + '\x1f' + '|'.join(f'{entry_id}:{sha}' for entry_id, sha in sorted(entries)))
 
 
 def trial_texts(archive: str, scratch_root: str) -> pl.DataFrame:
@@ -154,15 +148,14 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
     )
     keys = (
         ordered
+        .sort('drug_name', 'nct_id')
         .group_by('drug_name', maintain_order=True)
-        .agg(entries=pl.struct('nct_id', 'content'))
+        .agg(content_key=pl.concat_str(pl.col('nct_id'), pl.col('content'), separator=':').str.join('|'))
         .with_columns(
-            content_key=pl.struct('drug_name', 'entries').map_elements(
-                lambda row: content_key(row['drug_name'], [(e['nct_id'], e['content']) for e in row['entries']]),
-                return_dtype=pl.String,
+            content_key=pl.concat_str(pl.col('drug_name'), pl.col('content_key'), separator='\x1f').map_elements(
+                _sha256, return_dtype=pl.String
             )
         )
-        .select('drug_name', 'content_key')
     )
     used = ordered.filter((pl.col('rank') == 0) | (pl.col('running') <= char_budget))
     pools = used.group_by('drug_name', maintain_order=True).agg(
@@ -179,82 +172,4 @@ def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60
             pool_sha256=pl.col('text').map_elements(_sha256, return_dtype=pl.String),
         )
         .select('pool_id', 'drug_name', 'nct_ids', 'n_trials', 'n_trials_used', 'text', 'pool_sha256', 'content_key')
-    )
-
-
-def add_papers(
-    pools: pl.DataFrame,
-    trials: pl.DataFrame,
-    texts: pl.DataFrame,
-    selected: pl.DataFrame,
-    abstracts: pl.DataFrame,
-    abstract_chars: int,
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Append each pool's publications that have an abstract to its text, ids and content key.
-
-    Publications are appended newest first. The content key is recomputed over every trial of the
-    drug and the pool's publications; pools without publications are returned unchanged.
-
-    Returns:
-        ``(pools, trials, texts)``, the last two with a row per added publication.
-    """
-    rendered = (
-        selected
-        .join(abstracts.select('pmid', 'title', 'abstract'), on='pmid', how='inner', maintain_order='left')
-        .filter(pl.col('abstract').is_not_null() & (pl.col('abstract').str.strip_chars().str.len_chars() > 0))
-        .join(pools.select('drug_name'), on='drug_name', how='semi', maintain_order='left')
-        .sort(pl.col('pmid').cast(pl.Int64), descending=True)
-        .with_columns(
-            id=pl.col('pmid').map_elements(paper_id, return_dtype=pl.String),
-            prompt=pl.struct('pmid', 'title', 'abstract').map_elements(
-                lambda r: paper_text(r['pmid'], r['title'], r['abstract'], abstract_chars), return_dtype=pl.String
-            ),
-        )
-        .with_columns(prompt_sha256=pl.col('prompt').map_elements(_sha256, return_dtype=pl.String))
-    )
-    if rendered.is_empty():
-        return pools, trials, texts
-
-    trial_entries = (
-        trials
-        .select('nct_id', 'drug_name')
-        .join(texts.select(pl.col('id').alias('nct_id'), 'prompt'), on='nct_id', how='inner', maintain_order='left')
-        .with_columns(content=pl.col('prompt').map_elements(trial_content_sha256, return_dtype=pl.String))
-    )
-    entries: dict[str, list[tuple[str, str]]] = {}
-    for row in trial_entries.iter_rows(named=True):
-        entries.setdefault(row['drug_name'], []).append((row['nct_id'], row['content']))
-    appended: dict[str, list[dict[str, str]]] = {}
-    for row in rendered.iter_rows(named=True):
-        appended.setdefault(row['drug_name'], []).append(row)
-
-    rows = []
-    for pool in pools.iter_rows(named=True):
-        added = appended.get(pool['drug_name'])
-        if added:
-            drug_entries = entries.get(pool['drug_name'], []) + [
-                (a['id'], trial_content_sha256(a['prompt'])) for a in added
-            ]
-            text = TRIAL_SEPARATOR.join([pool['text'], *(a['prompt'] for a in added)])
-            pool = {
-                **pool,
-                'nct_ids': [*pool['nct_ids'], *(a['id'] for a in added)],
-                'text': text,
-                'pool_sha256': _sha256(text),
-                'content_key': content_key(pool['drug_name'], drug_entries),
-            }
-        rows.append(pool)
-    new_pools = pl.DataFrame(rows, schema=pools.schema)
-
-    new_trials = rendered.select(pl.col('id').alias('nct_id'), 'drug_name')
-    new_texts = (
-        rendered
-        .select('id', 'prompt', 'prompt_sha256')
-        .unique('id', keep='first', maintain_order=True)
-        .join(texts.select('id'), on='id', how='anti', maintain_order='left')
-    )
-    return (
-        new_pools,
-        pl.concat([trials, new_trials.select(trials.columns)], how='vertical_relaxed'),
-        pl.concat([texts, new_texts.select(texts.columns)], how='vertical_relaxed'),
     )

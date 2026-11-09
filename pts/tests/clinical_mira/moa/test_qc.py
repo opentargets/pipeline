@@ -32,7 +32,6 @@ def _write_release(root, moa, candidates, precedence, associations):
                 'confidence': pl.Float64,
                 'maximumClinicalStage': pl.String,
                 'drugType': pl.String,
-                'evidenceSource': pl.String,
             },
         ),
     )
@@ -48,8 +47,8 @@ def _qc(tmp_path, moa, candidates, precedence_release=(), precedence_without=(),
     return out
 
 
-def _candidate(drug, genes, confidence=0.9, stage='PHASE_1', chembl_ids=None, source='trial'):
-    return (drug, chembl_ids or [drug], genes, confidence, stage, 'Small molecule', source)
+def _candidate(drug, genes, confidence=0.9, stage='PHASE_1', chembl_ids=None):
+    return (drug, chembl_ids or [drug], genes, confidence, stage, 'Small molecule')
 
 
 def test_qc_benchmarks_candidates_against_manual_only(tmp_path):
@@ -138,26 +137,6 @@ def test_qc_scores_a_candidate_against_a_manual_row_of_its_salt(tmp_path):
     assert 'scorable against a manual mechanism: 2' in text
 
 
-def test_qc_reports_precision_by_evidence_source(tmp_path):
-    moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
-    candidates = [
-        _candidate('CHEMBL1', ['ENSG1'], source='trial'),
-        _candidate('CHEMBL1', ['ENSG9'], source='trial'),
-        _candidate('CHEMBL1', ['ENSG1'], source='publication'),
-        _candidate('CHEMBL1', ['ENSG1'], source='both'),
-        _candidate('CHEMBL1', ['ENSG9'], source='both'),
-        _candidate('CHEMBL1', ['ENSG9'], source='both'),
-    ]
-    text = (_qc(tmp_path, moa, candidates) / 'qc.md').read_text()
-    section = text.split('## Precision by evidence source')[1].split('##')[0]
-    rows = {line.split('|')[1].strip(): line for line in section.splitlines() if line.startswith('|')}
-    assert {'both', 'publication', 'trial'} <= set(rows)
-    both = [c.strip() for c in rows['both'].split('|')]
-    assert both[2:4] == ['3', '1']
-    publication = [c.strip() for c in rows['publication'].split('|')]
-    assert publication[2:4] == ['1', '1']
-
-
 def _snapshot(rows):
     return pl.DataFrame(
         rows,
@@ -165,47 +144,41 @@ def _snapshot(rows):
             'drugName': pl.String,
             'targetSymbolSuggestion': pl.List(pl.String),
             'actionType': pl.String,
-            'papers': pl.List(pl.Struct({'pmid': pl.String, 'nctId': pl.String})),
         },
         orient='row',
     )
 
 
-def _paper(pmid):
-    return {'pmid': pmid, 'nctId': 'NCT1'}
-
-
 def test_diff_snapshots_reports_gained_and_lost_targets():
     old = _snapshot([
-        ('aspirin', ['PTGS1'], 'INHIBITOR', []),
-        ('aspirin', ['PTGS2'], 'INHIBITOR', []),
-        ('gone', ['EGFR'], 'INHIBITOR', []),
+        ('aspirin', ['PTGS1'], 'INHIBITOR'),
+        ('aspirin', ['PTGS2'], 'INHIBITOR'),
+        ('gone', ['EGFR'], 'INHIBITOR'),
     ])
     new = _snapshot([
-        ('aspirin', ['PTGS1'], 'INHIBITOR', [_paper('1'), _paper('2')]),
-        ('aspirin', ['B', 'A'], 'MODULATOR', [_paper('1')]),
-        ('fresh', ['KIT'], 'INHIBITOR', []),
+        ('aspirin', ['PTGS1'], 'INHIBITOR'),
+        ('aspirin', ['B', 'A'], 'MODULATOR'),
+        ('fresh', ['KIT'], 'INHIBITOR'),
     ])
     diff = qc.diff_snapshots(old, new).sort('drugName')
-    assert diff.columns == ['drugName', 'gained', 'lost', 'papers']
+    assert diff.columns == ['drugName', 'gained', 'lost']
     assert diff.rows() == [
-        ('aspirin', ['A,B|MODULATOR'], ['PTGS2|INHIBITOR'], 2),
-        ('fresh', ['KIT|INHIBITOR'], [], 0),
-        ('gone', [], ['EGFR|INHIBITOR'], 0),
+        ('aspirin', ['A,B|MODULATOR'], ['PTGS2|INHIBITOR']),
+        ('fresh', ['KIT|INHIBITOR'], []),
+        ('gone', [], ['EGFR|INHIBITOR']),
     ]
 
 
 def test_diff_snapshots_ignores_unchanged_drugs():
-    rows = [('aspirin', ['B', 'A'], 'INHIBITOR', [_paper('1')])]
-    same = _snapshot(rows)
-    reordered = _snapshot([('aspirin', ['A', 'B'], 'INHIBITOR', [])])
+    same = _snapshot([('aspirin', ['B', 'A'], 'INHIBITOR')])
+    reordered = _snapshot([('aspirin', ['A', 'B'], 'INHIBITOR')])
     assert qc.diff_snapshots(same, reordered).is_empty()
 
 
 def test_diff_snapshots_cli_writes_csv(tmp_path, capsys):
     for name, rows in {
-        'old': [('a', ['X'], 'INHIBITOR', [])],
-        'new': [('a', ['Y'], 'INHIBITOR', []), ('a', ['W'], 'INHIBITOR', []), ('b', ['Z'], 'INHIBITOR', [])],
+        'old': [('a', ['X'], 'INHIBITOR')],
+        'new': [('a', ['Y'], 'INHIBITOR'), ('a', ['W'], 'INHIBITOR'), ('b', ['Z'], 'INHIBITOR')],
     }.items():
         (tmp_path / name).mkdir()
         _snapshot(rows).write_parquet(tmp_path / name / 'data.parquet')
@@ -220,21 +193,21 @@ def test_diff_snapshots_cli_writes_csv(tmp_path, capsys):
     ])
     out = pl.read_csv(tmp_path / 'o' / 'snapshot_diff.csv').sort('drugName')
     assert out.rows() == [
-        ('a', 'W|INHIBITOR;Y|INHIBITOR', 'X|INHIBITOR', 0),
-        ('b', 'Z|INHIBITOR', '', 0),
+        ('a', 'W|INHIBITOR;Y|INHIBITOR', 'X|INHIBITOR'),
+        ('b', 'Z|INHIBITOR', ''),
     ]
 
 
 def test_diff_snapshots_compares_null_targets_and_actions():
-    old = _snapshot([('a', None, 'INHIBITOR', []), ('b', ['X'], None, [])])
-    new = _snapshot([('a', ['X'], 'INHIBITOR', []), ('b', ['X'], 'INHIBITOR', [])])
+    old = _snapshot([('a', None, 'INHIBITOR'), ('b', ['X'], None)])
+    new = _snapshot([('a', ['X'], 'INHIBITOR'), ('b', ['X'], 'INHIBITOR')])
     diff = qc.diff_snapshots(old, new)
-    assert diff.rows() == [('a', ['X|INHIBITOR'], ['|INHIBITOR'], 0), ('b', ['X|INHIBITOR'], ['X|'], 0)]
+    assert diff.rows() == [('a', ['X|INHIBITOR'], ['|INHIBITOR']), ('b', ['X|INHIBITOR'], ['X|'])]
 
 
 def test_diff_snapshots_with_empty_snapshots():
     empty = _snapshot([])
-    full = _snapshot([('a', ['X'], 'INHIBITOR', [_paper('1')])])
+    full = _snapshot([('a', ['X'], 'INHIBITOR')])
     assert qc.diff_snapshots(empty, empty).is_empty()
-    assert qc.diff_snapshots(empty, full).rows() == [('a', ['X|INHIBITOR'], [], 1)]
-    assert qc.diff_snapshots(full, empty).rows() == [('a', [], ['X|INHIBITOR'], 0)]
+    assert qc.diff_snapshots(empty, full).rows() == [('a', ['X|INHIBITOR'], [])]
+    assert qc.diff_snapshots(full, empty).rows() == [('a', [], ['X|INHIBITOR'])]

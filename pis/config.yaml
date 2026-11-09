@@ -39,7 +39,7 @@ scratchpad:
   drug_entities_tag: b57181cea10a3943c35cf31bb375ff9217886730+8cd97116de5fdc911817166df8cb41a022874b10-pbd6d0afb
   disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
   extraction_tag: 82af315af627-pfd3cdab9
-  moa_tag: claude-opus-5-5-p6527d57b
+  moa_tag: claude-opus-5-5-p4e6708cf
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'

@@ -21,8 +21,7 @@ SETTINGS = {
 
 LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
 DRUGS = pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String}))
-EVIDENCE = pl.List(pl.Struct({'nctId': pl.String, 'pmid': pl.String, 'quote': pl.String}))
-PAPERS = pl.List(pl.Struct({'pmid': pl.String, 'nctId': pl.String}))
+EVIDENCE = pl.List(pl.Struct({'nctId': pl.String, 'quote': pl.String}))
 
 
 def _synonyms(symbol: str) -> list[dict]:
@@ -99,14 +98,6 @@ def _report(rows: list[tuple[str, str, str]]) -> pl.DataFrame:
     )
 
 
-def _trial_quote(nct_id: str, quote: str) -> dict:
-    return {'nctId': nct_id, 'pmid': None, 'quote': quote}
-
-
-def _paper_quote(pmid: str, quote: str) -> dict:
-    return {'nctId': None, 'pmid': pmid, 'quote': quote}
-
-
 def _mechanism(**overrides: object) -> dict:
     return {
         'drugName': 'drug a',
@@ -121,9 +112,8 @@ def _mechanism(**overrides: object) -> dict:
         'statementType': 'drug_description',
         'confidence': 0.9,
         'effect_wording': 'inhibits',
-        'evidence': [_trial_quote('nct2', 'q2'), _trial_quote('nct1', 'q1')],
+        'evidence': [{'nctId': 'nct2', 'quote': 'q2'}, {'nctId': 'nct1', 'quote': 'q1'}],
         'isHumanTarget': True,
-        'papers': [],
     } | overrides
 
 
@@ -145,7 +135,6 @@ def _moa(*rows: dict) -> pl.DataFrame:
             'effect_wording': pl.String,
             'evidence': EVIDENCE,
             'isHumanTarget': pl.Boolean,
-            'papers': PAPERS,
         },
     )
 
@@ -184,57 +173,9 @@ def test_a_linked_grounded_mechanism_becomes_a_candidate() -> None:
 
 
 def test_output_nct_ids_are_the_cited_trials_not_the_pool() -> None:
-    moa = _moa(_mechanism(nctIds=['NCT1', 'NCT2', 'NCT3'], evidence=[_trial_quote('nct2', 'q')]))
+    moa = _moa(_mechanism(nctIds=['NCT1', 'NCT2', 'NCT3'], evidence=[{'nctId': 'nct2', 'quote': 'q'}]))
 
     assert _build(moa)['nctIds'].to_list() == [['NCT2']]
-
-
-def test_candidate_paper_quote_lists_paper_trials_and_pmid() -> None:
-    moa = _moa(
-        _mechanism(
-            nctIds=['NCT1', 'NCT2'],
-            evidence=[_paper_quote('200', 'pq'), _paper_quote('30', 'pq2')],
-            papers=[
-                {'pmid': '200', 'nctId': 'nct2'},
-                {'pmid': '30', 'nctId': 'NCT1'},
-                {'pmid': '999', 'nctId': 'NCT9'},
-            ],
-        )
-    )
-
-    row = _build(moa).row(0, named=True)
-
-    assert row['nctIds'] == ['NCT1', 'NCT2']
-    assert row['pmids'] == ['30', '200']
-    assert (row['quote'], row['quoteNctId'], row['quotePmid']) == ('pq', None, '200')
-    assert row['evidenceSource'] == 'publication'
-
-
-def test_candidate_quoted_pmid_missing_from_papers_adds_no_trial() -> None:
-    moa = _moa(_mechanism(evidence=[_trial_quote('nct1', 'q'), _paper_quote('7', 'pq')], papers=[]))
-
-    row = _build(moa).row(0, named=True)
-
-    assert row['nctIds'] == ['NCT1']
-    assert row['pmids'] == ['7']
-    assert row['evidenceSource'] == 'both'
-
-
-def test_candidate_evidence_source_values() -> None:
-    papers = [{'pmid': '5', 'nctId': 'NCT1'}]
-    moa = _moa(
-        _mechanism(mechanismOfAction='t', evidence=[_trial_quote('nct1', 'q')], papers=papers),
-        _mechanism(mechanismOfAction='p', evidence=[_paper_quote('5', 'q')], papers=papers),
-        _mechanism(mechanismOfAction='b', evidence=[_trial_quote('nct2', 'q'), _paper_quote('5', 'q')], papers=papers),
-    )
-
-    candidates = _build(moa)
-
-    assert candidates.select('mechanismOfAction', 'evidenceSource', 'quoteNctId', 'quotePmid', 'pmids').rows() == [
-        ('t', 'trial', 'NCT1', None, []),
-        ('p', 'publication', None, '5', ['5']),
-        ('b', 'both', 'NCT2', None, ['5']),
-    ]
 
 
 def test_salt_link_publishes_under_the_parent() -> None:

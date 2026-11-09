@@ -12,7 +12,6 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from pts.transformers.clinical_mira.moa import schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -399,7 +398,7 @@ def test_moa_digest_changes_with_params() -> None:
 
 
 def test_moa_digest_changes_with_logic_version() -> None:
-    assert dataclasses.replace(MOA, logic_version=3).tag() != MOA.tag()
+    assert dataclasses.replace(MOA, logic_version=2).tag() != MOA.tag()
 
 
 def test_moa_metadata_names_the_extraction_tag() -> None:
@@ -424,11 +423,3 @@ def test_moa_read_rejects_another_kind(tmp_path: Path) -> None:
 def test_moa_read_rejects_another_tag(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=re.escape(MOA.tag())):
         MOA.read(moa_snapshot(tmp_path, 'moa', tag='x'))
-
-
-def test_moa_params_include_papers_settings() -> None:
-    assert MOA.params['papers_per_pool'] == 5
-    assert MOA.params['abstract_chars'] == 4000
-    assert MOA.params['reference_types'] == ['DERIVED', 'RESULT']
-    assert MOA.params['papers_prompt_sha256'] == schemas.ruleset_sha256('extract_papers')
-    assert MOA.logic_version == 2

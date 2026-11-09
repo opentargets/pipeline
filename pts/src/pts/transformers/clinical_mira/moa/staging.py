@@ -103,8 +103,8 @@ def carry_forward(
 
     A pool is carried when it has no ``ok`` record at ``tag``, an ``ok`` record at ``tag`` exists
     for its drug name, every trial added or edited since the latest such record has text
-    without :py:data:`pooling.MOA_VOCAB` terms, and every entry of that record that its
-    evidence cites, trial or publication, is still one of the pool's entries.
+    without :py:data:`pooling.MOA_VOCAB` terms, and every trial of that record that its
+    evidence cites is still one of the pool's trials.
 
     Args:
         trials: Output of :py:func:`pool_trials`.
@@ -180,11 +180,6 @@ def import_run_id() -> str:
     return f'import-moa-experiment-{MOA.digest}'
 
 
-def import_papers_run_id() -> str:
-    """The id of the run the cache computed with the publications prompt is imported as."""
-    return f'{import_run_id()}-papers'
-
-
 def import_experiment_cache(
     cache_uri: str,
     pools: pl.DataFrame,
@@ -192,7 +187,6 @@ def import_experiment_cache(
     system_prompt: str,
     store_uri: str,
     config: Config,
-    run_id: str | None = None,
 ) -> int:
     """Import the experiment's result cache into the record store, once.
 
@@ -207,12 +201,11 @@ def import_experiment_cache(
         system_prompt: The prompt the cache was computed with.
         store_uri: Root of the store, an absolute URI.
         config: The otter config, used to resolve storage.
-        run_id: The id of the import run, :py:func:`import_run_id` when ``None``.
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
     """
-    run_id = run_id or import_run_id()
+    run_id = import_run_id()
 
     def records() -> pl.DataFrame:
         cached = _read_cache_rows(cache_uri, config)
@@ -248,52 +241,6 @@ def import_experiment_cache(
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())
 
 
-def _sha8(text: str) -> str:
-    return prompt_sha256(text)[:8]
-
-
-def _state_for(state_uri: str, prompt: str) -> str:
-    stem, dot, suffix = state_uri.rpartition('.')
-    return f'{stem}-{_sha8(prompt)}{dot}{suffix}' if dot else f'{state_uri}-{_sha8(prompt)}'
-
-
-def adopt_records(records: pl.DataFrame, keys: list[str], from_tag: str, tag: str, run_id: str) -> pl.DataFrame:
-    """Copy the ``ok`` records at ``from_tag`` of the given content keys to ``tag``.
-
-    Keys that already have an ``ok`` record at ``tag`` are skipped. When a key has several records at
-    ``from_tag`` the latest is copied.
-
-    Args:
-        records: The record store's records.
-        keys: The content keys to adopt.
-        from_tag: The tag to copy from.
-        tag: The tag to copy to.
-        run_id: The run the copies are written under.
-
-    Returns:
-        pl.DataFrame: Records ready for ``write_run``.
-    """
-    done = records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag))['text'].to_list()
-    adopted = (
-        records
-        .filter(
-            (pl.col('status') == 'ok')
-            & (pl.col('model_revision') == from_tag)
-            & pl.col('text').is_in(keys)
-            & ~pl.col('text').is_in(done)
-        )
-        .sort('computed_at', maintain_order=True)
-        .unique('text', keep='last', maintain_order=True)
-        .with_columns(
-            model_revision=pl.lit(tag),
-            computed_at=pl.lit(datetime.now(UTC), dtype=record_schema(pl.String())['computed_at']),
-            run_id=pl.lit(run_id),
-        )
-    )
-    logger.info(f'{adopted.height} of {len(keys)} pools adopted from {from_tag}')
-    return adopted.select(record_schema(pl.String()).names())
-
-
 def moa_compute(
     pools: pl.DataFrame,
     trials: pl.DataFrame,
@@ -303,15 +250,14 @@ def moa_compute(
     client: Any = None,
     **batch_kwargs: Any,
 ) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
-    """Build the ``compute`` of :py:func:`map_texts` that extracts mechanisms with Claude under one prompt.
+    """Build the ``compute`` of :py:func:`map_texts` that extracts mechanisms with Claude.
 
     Args:
         pools: Output of :py:func:`pooling.build_pools`.
         trials: Output of :py:func:`pool_trials`.
         system_prompt: The extraction prompt.
-        state_uri: Where the submitted batch ids are recorded, a path or URI. The file is named by the
-            prompt's sha8.
-        scratch: Local directory for the result cache, named by the prompt's sha8.
+        state_uri: Where the submitted batch ids are recorded, a path or URI.
+        scratch: Local directory for the result cache.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
         **batch_kwargs: Passed to :py:func:`run_batch_cached`.
 
@@ -323,7 +269,7 @@ def moa_compute(
         for row in pools.select('content_key', 'drug_name', 'text').iter_rows(named=True)
     }
     listed = {row['content_key']: row for row in trials.to_dicts()}
-    cache_path = scratch / f'moa_cache-{_sha8(system_prompt)}.jsonl'
+    cache_path = scratch / 'moa_cache.jsonl'
     prompt_sha = prompt_sha256(system_prompt)
 
     def compute(keys: list[str]) -> list[tuple[str | None, str | None]]:
@@ -334,7 +280,7 @@ def moa_compute(
             model=MOA.model,
             effort=MOA.params['effort'],
             cache_path=cache_path,
-            state_uri=_state_for(state_uri, system_prompt),
+            state_uri=state_uri,
             client=client,
             **batch_kwargs,
         )

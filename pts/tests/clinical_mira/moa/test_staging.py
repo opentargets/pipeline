@@ -9,7 +9,6 @@ import pytest
 
 from pts.transformers.clinical_mira.moa import llm, pooling, schemas, staging
 from pts.transformers.clinical_mira.moa.staging import (
-    adopt_records,
     carry_forward,
     import_experiment_cache,
     parse_output,
@@ -233,20 +232,9 @@ def test_carrying_a_record_without_a_prompt_leaves_it_null() -> None:
     assert json.loads(out['output'][0])['prompt_sha256'] is None
 
 
-PAPER_OLD = 'Trial ID: pmid1\nOfficial Title: an old report\nDescription: drugx is a KRAS inhibitor.'
-PAPER_NEW = 'Trial ID: pmid2\nOfficial Title: a new report\nDescription: Adults were enrolled.'
-
-
-def test_a_dropped_paper_the_evidence_cites_blocks_the_carry() -> None:
-    texts, current = _current({'nct1': QUIET, 'pmid2': PAPER_NEW})
-    records = _record_for('drugx', {'nct1': QUIET, 'pmid1': PAPER_OLD}, 'k-prev', _marked('KRAS', 'pmid1'), 1)
-
-    assert carry_forward(current, texts, records, MOA.tag(), 'run1').is_empty()
-
-
-def test_a_dropped_paper_the_evidence_does_not_cite_is_carried() -> None:
-    texts, current = _current({'nct1': QUIET, 'pmid2': PAPER_NEW})
-    records = _record_for('drugx', {'nct1': QUIET, 'pmid1': PAPER_OLD}, 'k-prev', _marked('KRAS', 'nct1'), 1)
+def test_a_removed_trial_the_evidence_does_not_cite_is_carried() -> None:
+    texts, current = _current({'nct1': LOUD})
+    records = _record_for('drugx', {'nct1': LOUD, 'nct2': QUIET}, 'k-prev', _marked('KRAS', 'nct1'), 1)
 
     assert carry_forward(current, texts, records, MOA.tag(), 'run1').height == 1
 
@@ -260,7 +248,7 @@ def test_a_removed_trial_the_evidence_cites_blocks_the_carry() -> None:
 
 def test_a_cited_id_that_was_never_an_entry_does_not_block_the_carry() -> None:
     texts, current = _current({'nct1': LOUD, 'nct2': QUIET})
-    records = _record_for('drugx', {'nct1': LOUD}, 'k-prev', _marked('KRAS', 'nct1', 'pmid999'), 1)
+    records = _record_for('drugx', {'nct1': LOUD}, 'k-prev', _marked('KRAS', 'nct1', 'nct999'), 1)
 
     assert carry_forward(current, texts, records, MOA.tag(), 'run1').height == 1
 
@@ -335,7 +323,7 @@ def test_records_at_another_tag_are_ignored() -> None:
     assert carry_forward(current, texts, records, MOA.tag(), 'run1').is_empty()
 
 
-def test_moa_compute_has_a_cache_and_state_per_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_moa_compute_records_the_prompt_sha256(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     trials, texts = _inputs()
     pools = pooling.build_pools(trials, texts)
     listed = pool_trials(pools, texts, trials)
@@ -343,53 +331,18 @@ def test_moa_compute_has_a_cache_and_state_per_prompt(monkeypatch: pytest.Monkey
     calls: list[dict[str, Any]] = []
 
     def fake_batch(requests, *, system_prompt, cache_path, state_uri, **kwargs):
-        calls.append({
-            'ids': [r[0] for r in requests],
-            'prompt': system_prompt,
-            'cache': cache_path,
-            'state': state_uri,
-        })
+        calls.append({'ids': [r[0] for r in requests], 'cache': cache_path, 'state': state_uri})
         extraction = schemas.MoaExtraction.model_validate({'drugName': 'x', 'notStated': True, 'mechanisms': []})
         return {r[0]: extraction for r in requests}, {}
 
     monkeypatch.setattr(staging, 'run_batch_cached', fake_batch)
     state = str(tmp_path / 'batches' / 's.json')
 
-    out_b = staging.moa_compute(pools, listed, 'prompt b', state, tmp_path)([keys[1], keys[0]])
-    out_a = staging.moa_compute(pools, listed, 'prompt a', state, tmp_path)([keys[0]])
+    out = staging.moa_compute(pools, listed, PROMPT, state, tmp_path)([keys[1], keys[0]])
 
-    assert [c['prompt'] for c in calls] == ['prompt b', 'prompt a']
-    assert [c['ids'] for c in calls] == [[keys[1], keys[0]], [keys[0]]]
-    assert [c['cache'] for c in calls] == [
-        tmp_path / f'moa_cache-{_sha256("prompt b")[:8]}.jsonl',
-        tmp_path / f'moa_cache-{_sha256("prompt a")[:8]}.jsonl',
-    ]
-    assert [c['state'] for c in calls] == [
-        str(tmp_path / 'batches' / f's-{_sha256("prompt b")[:8]}.json'),
-        str(tmp_path / 'batches' / f's-{_sha256("prompt a")[:8]}.json'),
-    ]
-    assert [parse_output(o)['drug_name'] for o, _ in out_b] == [
+    assert calls == [{'ids': [keys[1], keys[0]], 'cache': tmp_path / 'moa_cache.jsonl', 'state': state}]
+    assert [parse_output(o)['drug_name'] for o, _ in out] == [
         pools.filter(pl.col('content_key') == k)['drug_name'][0] for k in [keys[1], keys[0]]
     ]
-    assert all(error is None for _, error in out_b + out_a)
-    assert {parse_output(o)['prompt_sha256'] for o, _ in out_b} == {_sha256('prompt b')}
-    assert parse_output(out_a[0][0])['prompt_sha256'] == _sha256('prompt a')
-
-
-def test_adopt_records_copies_only_listed_keys_and_skips_done() -> None:
-    old = pl.concat([
-        _record_for('drugx', {'nct1': LOUD}, 'k-a', {'mechanisms': ['a']}, 1, tag='old'),
-        _record_for('drugx', {'nct1': LOUD}, 'k-b', {'mechanisms': ['b']}, 2, tag='old'),
-        _record_for('drugx', {'nct1': LOUD}, 'k-c', {'mechanisms': ['c']}, 3, tag='old'),
-        _record_for('drugx', {'nct1': LOUD}, 'k-d', {'mechanisms': ['d']}, 4, tag='other'),
-    ])
-    done = _record_for('drugx', {'nct1': LOUD}, 'k-b', {'mechanisms': ['b']}, 5, tag='new')
-
-    out = adopt_records(pl.concat([old, done]), ['k-a', 'k-b', 'k-d'], 'old', 'new', 'run9')
-
-    assert out.schema == record_schema(pl.String())
-    assert out['text'].to_list() == ['k-a']
-    row = out.row(0, named=True)
-    assert (row['model_revision'], row['run_id'], row['status']) == ('new', 'run9', 'ok')
-    assert parse_output(row['output'])['extraction'] == {'mechanisms': ['a']}
-    assert parse_output(row['output'])['prompt_sha256'] == PREVIOUS_PROMPT_SHA
+    assert all(error is None for _, error in out)
+    assert {parse_output(o)['prompt_sha256'] for o, _ in out} == {_sha256(PROMPT)}

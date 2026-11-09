@@ -44,8 +44,6 @@ CURATION_MANUAL = 'manual'
 CURATION_ELECTRONIC = 'electronic'
 CLINICAL_TRIALS_SOURCE = 'ClinicalTrials'
 CLINICAL_TRIALS_URL = 'https://clinicaltrials.gov/study/'
-PUBMED_SOURCE = 'PubMed'
-EUROPEPMC_URL = 'http://europepmc.org/abstract/MED/'
 
 
 def drug_mechanism_of_action(
@@ -197,8 +195,6 @@ def merge_aact(
         ``new_moa`` and non-overlapping ``extra_target`` candidate, with ``category`` and
         ``chemblCurrentTargets``.
     """
-    if 'pmids' not in candidates.columns:
-        candidates = candidates.with_columns(pmids=pl.lit([], dtype=pl.List(pl.String)))
     deduplicated = (
         candidates
         .with_columns(_targets_key=pl.col('targets').list.sort())
@@ -258,23 +254,13 @@ def merge_aact(
         pl.col('targetFromSource').alias('targetName'),
         'targetType',
         'targets',
-        pl
-        .concat_list(
+        pl.concat_list(
             pl.struct(
                 pl.lit(CLINICAL_TRIALS_SOURCE).alias('source'),
                 pl.col('nctIds').alias('ids'),
                 pl.col('nctIds').list.eval(pl.lit(CLINICAL_TRIALS_URL) + pl.element()).alias('urls'),
-            ),
-            pl.when(pl.col('pmids').fill_null([]).list.len() > 0).then(
-                pl.struct(
-                    pl.lit(PUBMED_SOURCE).alias('source'),
-                    pl.col('pmids').alias('ids'),
-                    pl.col('pmids').list.eval(pl.lit(EUROPEPMC_URL) + pl.element()).alias('urls'),
-                )
-            ),
-        )
-        .list.drop_nulls()
-        .alias('references'),
+            )
+        ).alias('references'),
         pl.lit(CURATION_ELECTRONIC).alias('curation'),
     ).select([pl.col(name).cast(dtype) for name, dtype in chembl_rows.schema.items()])
     return pl.concat([chembl_rows, appended]), report

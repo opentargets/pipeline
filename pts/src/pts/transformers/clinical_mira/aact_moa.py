@@ -19,7 +19,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 from pydantic import BaseModel, ConfigDict
 
-from pts.transformers.clinical_mira.moa import papers, pooling, quotes, schemas, staging
+from pts.transformers.clinical_mira.moa import pooling, quotes, schemas, staging
 from pts.transformers.clinical_mira.record_store import (
     ComputeAborted,
     map_texts,
@@ -50,7 +50,6 @@ SNAPSHOT_COLUMNS = [
     'effect_wording',
     'evidence',
     'isHumanTarget',
-    'papers',
 ]
 """Columns of the published mechanisms."""
 
@@ -75,16 +74,10 @@ class AactMoaSettings(BaseModel):
     """Attempts per pool, within a run and across runs, before it is left out."""
     import_experiment_cache: str | None = None
     """The experiment's jsonl result cache to import into the store, once, before computing."""
-    import_papers_cache: str | None = None
-    """A jsonl result cache computed with the publications prompt, imported for pools with publications."""
     import_for_tag: str | None = None
     """The MOA tag the cache was computed for. The cache is imported only while it is the current tag."""
     min_seeded_share: float = 0.5
     """The lowest share of the current pools the imported cache must cover, or the run aborts before computing."""
-    adopt_from_tag: str | None = None
-    """The MOA tag whose records are adopted for the pools without publications."""
-    europepmc_url: str = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search'
-    """The Europe PMC search endpoint the publication abstracts are fetched from."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
     """Name of the environment variable holding the Claude workspace id."""
 
@@ -117,76 +110,18 @@ def _exists(uri: str, config: Config) -> bool:
     return True
 
 
-PAPERS = pl.List(pl.Struct({'pmid': pl.String, 'nctId': pl.String}))
-PAPER_PREFIX = papers.paper_id('')
-
-
-def _split_evidence(evidence: pl.Expr) -> pl.Expr:
-    """Turn ``{nctId, quote}`` evidence into ``{nctId, pmid, quote}``, exactly one of the ids set."""
-    cited = pl.element().struct.field('nctId')
-    is_paper = cited.str.starts_with(PAPER_PREFIX)
-    return evidence.list.eval(
-        pl.struct(
-            nctId=pl.when(is_paper).then(pl.lit(None, pl.String)).otherwise(cited),
-            pmid=pl.when(is_paper).then(cited.str.slice(len(PAPER_PREFIX))),
-            quote=pl.element().struct.field('quote'),
-        )
-    )
-
-
-def _mechanism_rows(
-    mechanisms: pl.DataFrame, pools: pl.DataFrame, listed: pl.DataFrame, added: pl.DataFrame
-) -> pl.DataFrame:
-    """The kept mechanisms with their pool's drug name, trials and publications."""
-    trial_ids = listed.select(
-        'content_key',
-        nctIds=pl
-        .col('trials')
-        .list.eval(pl.element().struct.field('nct_id'))
-        .list.eval(pl.element().filter(~pl.element().str.starts_with(PAPER_PREFIX))),
-    )
-    pool_papers = (
-        added
-        .sort(pl.col('pmid').cast(pl.Int64), descending=True)
-        .group_by('drug_name', maintain_order=True)
-        .agg(papers=pl.struct('pmid', nctId=pl.col('nct_id')))
-        .with_columns(pl.col('papers').cast(PAPERS))
-    )
+def _mechanism_rows(mechanisms: pl.DataFrame, pools: pl.DataFrame, listed: pl.DataFrame) -> pl.DataFrame:
+    """The kept mechanisms with their pool's drug name and every trial of the pool."""
+    trial_ids = listed.select('content_key', nctIds=pl.col('trials').list.eval(pl.element().struct.field('nct_id')))
     return (
         mechanisms
         .filter(pl.col('kept'))
         .join(pools.select('pool_id', 'drug_name', 'content_key'), on='pool_id', maintain_order='left')
         .join(trial_ids, on='content_key', maintain_order='left')
-        .join(pool_papers, on='drug_name', how='left', maintain_order='left')
         .rename({'drug_name': 'drugName'})
-        .with_columns(
-            evidence=_split_evidence(pl.col('evidence')),
-            papers=pl.coalesce('papers', pl.lit([], dtype=PAPERS)),
-        )
         .sort('drugName', 'mechanism_idx')
         .select(SNAPSHOT_COLUMNS)
     )
-
-
-def _load_abstracts(
-    selected: pl.DataFrame,
-    settings: AactMoaSettings,
-    run_id: str,
-    config: Config,
-    get: Callable[[str], dict[str, Any]] | None,
-) -> tuple[pl.DataFrame, int]:
-    """The abstracts of the selected publications: the cached ones plus those fetched now.
-
-    Returns:
-        The abstracts, and the number fetched.
-    """
-    root = settings.store_uri.rstrip('/')
-    cached = papers.read_abstracts(root, config).select(papers.ABSTRACT_SCHEMA.names())
-    missing = sorted(set(selected['pmid'].to_list()) - set(cached['pmid'].to_list()), key=int)
-    fetched = papers.fetch_abstracts(missing, settings.europepmc_url, get) if missing else cached.clear()
-    if fetched.height:
-        papers.write_abstracts(fetched, root, run_id, config)
-    return pl.concat([cached, fetched]), fetched.height
 
 
 def _pool_table(pools: pl.DataFrame, status: pl.DataFrame, carried: set[str]) -> pl.DataFrame:
@@ -218,7 +153,6 @@ def stage_moa(
     settings: AactMoaSettings,
     config: Config,
     client: Any = None,
-    get: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Stage the mechanisms of action of the drugs of an AACT dump and publish them as a snapshot.
 
@@ -229,7 +163,6 @@ def stage_moa(
         settings: The validated settings.
         config: The otter config.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
-        get: Returns the parsed JSON of a Europe PMC URL, an HTTP fetch when ``None``.
 
     Returns:
         dict[str, Any]: The number of pools, seeded, carried and computed records, failed pools, mechanisms
@@ -247,33 +180,12 @@ def stage_moa(
     texts, counts = pooling.match_texts(pooling.trial_texts(archive, str(config.work_path)), extracted)
     trials = pooling.single_drug_trials(extracted)
     pools = pooling.build_pools(trials, texts, char_budget=MOA.params['char_budget'])
+    listed = staging.pool_trials(pools, texts, trials)
     logger.info(f'texts {counts}, {trials.height} single-drug trials, {pools.height} pools')
 
     store_uri = f'{settings.store_uri.rstrip("/")}/{MOA.name}'
     tag = MOA.tag()
     run_id = new_run_id(settings.snapshot)
-
-    links = papers.trial_papers(archive, str(config.work_path), MOA.params['reference_types'])
-    selected = papers.select_papers(trials, links, MOA.params['papers_per_pool'])
-    abstracts, fetched = _load_abstracts(selected, settings, run_id, config, get)
-    pools, trials, texts = pooling.add_papers(pools, trials, texts, selected, abstracts, MOA.params['abstract_chars'])
-    listed = staging.pool_trials(pools, texts, trials)
-    paper_ids = pl.col('nct_ids').list.eval(pl.element().filter(pl.element().str.starts_with(PAPER_PREFIX)))
-    added = (
-        pools
-        .select('drug_name', pmid=paper_ids)
-        .explode('pmid')
-        .drop_nulls('pmid')
-        .with_columns(pl.col('pmid').str.slice(len(PAPER_PREFIX)))
-        .join(selected, on=['drug_name', 'pmid'], how='left', maintain_order='left')
-        .select('drug_name', 'pmid', 'nct_id')
-    )
-    with_papers = {
-        row['content_key']
-        for row in listed.select('content_key', 'trials').iter_rows(named=True)
-        if any(t['nct_id'].startswith(PAPER_PREFIX) for t in row['trials'] or [])
-    }
-    logger.info(f'{added.height} publications ({fetched} fetched) in {len(with_papers)} pools')
 
     seeded = 0
     importing = settings.import_experiment_cache is not None and settings.import_for_tag == tag
@@ -286,48 +198,21 @@ def stage_moa(
             settings.import_experiment_cache, pools, listed, system_prompt, store_uri, config
         )
         logger.info(f'imported {seeded} cached pools into {store_uri}')
-        if settings.import_papers_cache is not None:
-            paper_seeded = staging.import_experiment_cache(
-                settings.import_papers_cache,
-                pools.filter(pl.col('content_key').is_in(sorted(with_papers))),
-                listed,
-                schemas.papers_prompt(),
-                store_uri,
-                config,
-                run_id=staging.import_papers_run_id(),
-            )
-            seeded += paper_seeded
-            logger.info(f'imported {paper_seeded} cached pools with publications into {store_uri}')
 
     records = read_records(store_uri, config, pl.String())
     if importing:
-        import_runs = [staging.import_run_id(), staging.import_papers_run_id()]
         covered = (
             records
-            .filter(pl.col('run_id').is_in(import_runs))
+            .filter(pl.col('run_id') == staging.import_run_id())
             .filter(pl.col('text').is_in(pools['content_key'].implode()))['text']
             .n_unique()
         )
         if covered < settings.min_seeded_share * pools.height:
             msg = (
-                f'{" and ".join(import_runs)} cover {covered} of {pools.height} pools, '
+                f'{staging.import_run_id()} covers {covered} of {pools.height} pools, '
                 f'below the minimum share {settings.min_seeded_share}'
             )
             raise SeedTooSmall(msg)
-
-    adopted = 0
-    if settings.adopt_from_tag is not None:
-        adopted_records = staging.adopt_records(
-            records,
-            [key for key in pools['content_key'].to_list() if key not in with_papers],
-            settings.adopt_from_tag,
-            tag,
-            f'{run_id}-adopt',
-        )
-        adopted = adopted_records.height
-        if adopted:
-            write_run(adopted_records, store_uri, f'{run_id}-adopt', config, pl.String())
-            records = read_records(store_uri, config, pl.String())
 
     carried = 0
     if MOA.params['carry_forward']:
@@ -336,41 +221,29 @@ def stage_moa(
             write_run(carried_records, store_uri, f'{run_id}-carry', config, pl.String())
         carried = carried_records.height
 
-    keys = pools['content_key']
-    groups = [
-        (keys.filter(keys.is_in(sorted(with_papers))), schemas.papers_prompt(), f'{run_id}-papers'),
-        (keys.filter(~keys.is_in(sorted(with_papers))), system_prompt, run_id),
-    ]
-    frames, computed, failed = [], 0, 0
-    for group_keys, prompt, group_run_id in groups:
-        compute = staging.moa_compute(
-            pools,
-            listed,
-            prompt,
-            f'{store_uri}/batches/{settings.snapshot}-{tag}.json',
-            config.work_path,
-            client=client,
-        )
-        mapped = map_texts(
-            group_keys,
-            compute if client is not None else _guarded(compute, settings.workspace_id_env),
-            store_uri,
-            MOA.name,
-            tag,
-            group_run_id,
-            config,
-            max_attempts=settings.max_attempts,
-            output_dtype=pl.String(),
-            allow_failures=True,
-            shard_size=settings.shard_size,
-        )
-        frames.append(mapped.frame)
-        computed += mapped.computed
-        failed += mapped.failed
+    compute = staging.moa_compute(
+        pools,
+        listed,
+        system_prompt,
+        f'{store_uri}/batches/{settings.snapshot}-{tag}.json',
+        config.work_path,
+        client=client,
+    )
+    mapped = map_texts(
+        pools['content_key'],
+        compute if client is not None else _guarded(compute, settings.workspace_id_env),
+        store_uri,
+        MOA.name,
+        tag,
+        run_id,
+        config,
+        max_attempts=settings.max_attempts,
+        output_dtype=pl.String(),
+        allow_failures=True,
+        shard_size=settings.shard_size,
+    )
 
-    outputs = {
-        key: staging.parse_output(output) for key, output in pl.concat(frames).select('text', 'output').iter_rows()
-    }
+    outputs = {key: staging.parse_output(output) for key, output in mapped.frame.select('text', 'output').iter_rows()}
     extractions = {}
     carried_pools = set()
     for pool_id, key in pools.select('pool_id', 'content_key').iter_rows():
@@ -381,7 +254,7 @@ def stage_moa(
 
     mechanisms = quotes.check_mechanisms(extractions, pools, texts)
     status = quotes.pool_status(pools, extractions, mechanisms)
-    rows = _mechanism_rows(mechanisms, pools, listed, added)
+    rows = _mechanism_rows(mechanisms, pools, listed)
 
     uri = f'{destination.rstrip("/")}/{extraction_tag}/moa/{tag}'
     published = publish_snapshot(rows, uri, MOA.metadata(extraction_tag), config)
@@ -389,15 +262,11 @@ def stage_moa(
         _write_parquet(_pool_table(pools, status, carried_pools), f'{uri}/pools.parquet', config)
 
     return {
-        'papers': added.height,
-        'abstracts_fetched': fetched,
-        'adopted': adopted,
-        'pools_with_papers': len(with_papers),
         'pools': pools.height,
         'seeded': seeded,
         'carried': carried,
-        'computed': computed,
-        'failed': failed,
+        'computed': mapped.computed,
+        'failed': mapped.failed,
         'mechanisms': rows.height,
         'dropped_by_quote_check': mechanisms.filter(~pl.col('kept')).height,
         'published': published,
