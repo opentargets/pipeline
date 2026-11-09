@@ -12,6 +12,7 @@ from pts.transformers.clinical_mira.moa.literature import (
     content_key,
     join_genes,
     pass_file,
+    read_parquet_dir,
     requests,
     select_sentences,
     sentence_pass,
@@ -115,6 +116,38 @@ def test_join_genes_attaches_sorted_unique_genes(tmp_path: Path):
     }).write_parquet(tmp_path / 'gp' / 'a.parquet')
     out = join_genes(tmp_path / 'cd', tmp_path / 'gp').sort('text')
     assert out['genes'].to_list() == [['ENSG1', 'ENSG2'], None]
+
+
+def test_join_genes_without_any_gene_mention_leaves_genes_null(tmp_path: Path):
+    (tmp_path / 'cd').mkdir()
+    (tmp_path / 'gp').mkdir()
+    cd, gp = pass_file(match_frame([match_row(text='s1'), match_row(text='s2')]), PARENTS)
+    cd.write_parquet(tmp_path / 'cd' / 'a.parquet')
+    cd.write_parquet(tmp_path / 'cd' / 'b.parquet')
+    gp.write_parquet(tmp_path / 'gp' / 'a.parquet')
+    gp.write_parquet(tmp_path / 'gp' / 'b.parquet')
+    assert gp.height == 0
+
+    out = join_genes(tmp_path / 'cd', tmp_path / 'gp')
+
+    assert out.height == 4
+    assert out['genes'].dtype == pl.List(pl.String)
+    assert out['genes'].to_list() == [None] * 4
+
+
+def test_read_parquet_dir_concatenates_the_columns_of_every_file(tmp_path: Path):
+    pl.DataFrame({'id': ['a'], 'name': ['x'], 'extra': [1]}).write_parquet(tmp_path / 'part-1.parquet')
+    pl.DataFrame({'id': ['b'], 'name': ['y'], 'extra': [2]}).write_parquet(tmp_path / 'part-0.parquet')
+    (tmp_path / '_SUCCESS').write_text('')
+
+    out = read_parquet_dir(str(tmp_path), ['id', 'name'])
+
+    assert out.to_dicts() == [{'id': 'b', 'name': 'y'}, {'id': 'a', 'name': 'x'}]
+
+
+def test_read_parquet_dir_rejects_a_directory_without_parquet_files(tmp_path: Path):
+    with pytest.raises(ValueError, match='no parquet files found under'):
+        read_parquet_dir(str(tmp_path / 'missing'), ['id'])
 
 
 def test_clinical_parents_drops_preclinical_and_maps_salts_to_parent():

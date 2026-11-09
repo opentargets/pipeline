@@ -26,7 +26,6 @@ from pts.transformers.clinical_mira.aact_moa import (
 from pts.transformers.clinical_mira.moa import literature, literature_staging, quotes, schemas
 from pts.transformers.clinical_mira.record_store import map_texts, new_run_id, publish_snapshot, read_records, write_run
 from pts.transformers.clinical_mira.staged_outputs import MOA_LITERATURE
-from pts.transformers.utils.dataset import scan_dataset
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -62,7 +61,7 @@ class MoaLiteratureSettings(BaseModel):
     min_seeded_share: float = 0.69
     """The lowest share of the current drugs the imported seed must cover, or the run aborts before computing."""
     billing_project: str | None = None
-    """The project billed for reading a requester-pays literature match, or None to read it unbilled."""
+    """The project billed for reading the requester-pays match and drug molecules, or None to read them unbilled."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
     """Name of the environment variable holding the Claude workspace id."""
 
@@ -144,7 +143,7 @@ def stage_moa_literature(
 
     Args:
         match: The directory of literature match parquet files of ``input_release``.
-        drug_molecule: The drug molecules of ``input_release``.
+        drug_molecule: The directory of drug molecule parquet files of ``input_release``.
         destination: The directory holding one directory per input release, which receives the snapshot
             ``{input_release}/moa_literature/{tag}``.
         settings: The validated settings.
@@ -167,7 +166,7 @@ def stage_moa_literature(
         {'requester_pays': True, 'project': settings.billing_project} if settings.billing_project else None
     )
 
-    molecules = scan_dataset(drug_molecule).select(MOLECULE_COLUMNS).collect()
+    molecules = literature.read_parquet_dir(drug_molecule, MOLECULE_COLUMNS, storage_options)
     parents = literature.clinical_parents(molecules)
     cd_dir, gp_dir = literature.sentence_pass(match, parents, settings.workers, scratch, storage_options)
     sentences = literature.join_genes(cd_dir, gp_dir)

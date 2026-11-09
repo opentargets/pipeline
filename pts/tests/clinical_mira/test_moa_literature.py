@@ -9,7 +9,7 @@ import pytest
 from otter.config.model import Config
 
 from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
-from pts.transformers.clinical_mira.moa import schemas
+from pts.transformers.clinical_mira.moa import literature, schemas
 from pts.transformers.clinical_mira.moa.literature_staging import parse_output
 from pts.transformers.clinical_mira.moa_literature import (
     MoaLiteratureSettings,
@@ -125,11 +125,13 @@ def _config(tmp_path: Path, name: str = 'work') -> Config:
     return Config(step='test', steps=['test'], work_path=tmp_path / name)
 
 
-def _write_inputs(root: Path, sentences: list[tuple[str, str, str, str]]) -> tuple[Path, Path]:
-    """Write the drug ``sentences`` and a KRAS gene mention in the first one as a match file."""
+def _write_inputs(root: Path, sentences: list[tuple[str, str, str, str]], genes: bool = True) -> tuple[Path, Path]:
+    """Write the drug ``sentences``, and with ``genes`` a KRAS gene mention in the first one, as a match file."""
     match = root / 'match'
     match.mkdir(parents=True, exist_ok=True)
-    rows = [('CD', *s) for s in sentences] + [('GP', 'ENSG00000133703', 'KRAS', SENTENCES[0][2], SENTENCES[0][3])]
+    rows = [('CD', *s) for s in sentences]
+    if genes:
+        rows.append(('GP', 'ENSG00000133703', 'KRAS', SENTENCES[0][2], SENTENCES[0][3]))
     pl.DataFrame(
         {
             'pmid': [r[3] for r in rows],
@@ -166,9 +168,10 @@ def _stage(
     sentences: list[tuple[str, str, str, str]] = SENTENCES,
     release: str = '26.09',
     work: str = 'work',
+    genes: bool = True,
     **settings: Any,
 ) -> dict[str, Any]:
-    match, molecule = _write_inputs(tmp_path / 'inputs' / work, sentences)
+    match, molecule = _write_inputs(tmp_path / 'inputs' / work, sentences, genes)
     return stage_moa_literature(
         str(match),
         str(molecule),
@@ -320,6 +323,47 @@ def test_snapshot_is_write_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert (_snapshot(tmp_path) / 'data.parquet').read_bytes() == before
     stats = _stage(tmp_path, FakeBatches(), sentences=edited, release='26.12', work='work3')
     assert stats['published'] is True
+
+
+def test_a_new_sentence_without_a_cue_carries_the_previous_output(tmp_path: Path) -> None:
+    _stage(tmp_path, FakeBatches())
+    added = [*SENTENCES, ('CHEMBL2', 'aspirinx', '3', 'Aspirinx was well tolerated by most of the patients.')]
+    batches = FakeBatches()
+
+    stats = _stage(tmp_path, batches, sentences=added, release='26.12', work='work2')
+
+    assert batches.created == []
+    assert (stats['carried'], stats['computed']) == (1, 0)
+    assert _rows(tmp_path, '26.12') == [('CHEMBL1', 'KRAS'), ('CHEMBL1', 'MEK'), ('CHEMBL2', 'COX')]
+    drugs = pl.read_parquet(_snapshot(tmp_path, '26.12') / 'drugs.parquet').sort('parent')
+    assert drugs.select('parent', 'n_sentences', 'carried').rows() == [('CHEMBL1', 2, False), ('CHEMBL2', 2, True)]
+
+
+def test_match_without_gene_mentions_is_staged(tmp_path: Path) -> None:
+    stats = _stage(tmp_path, FakeBatches(), genes=False)
+
+    assert stats['published'] is True
+    assert _rows(tmp_path) == [('CHEMBL1', 'KRAS'), ('CHEMBL1', 'MEK'), ('CHEMBL2', 'COX')]
+
+
+def test_billing_project_bills_the_match_and_drug_molecule_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict]] = []
+    real = literature.fsspec.core.url_to_fs
+
+    def url_to_fs(url: str, **options: Any) -> Any:
+        calls.append((url, options))
+        return real(url)
+
+    monkeypatch.setattr(literature.fsspec.core, 'url_to_fs', url_to_fs)
+
+    _stage(tmp_path, FakeBatches(), billing_project='my-project')
+
+    billed = {'requester_pays': True, 'project': 'my-project'}
+    inputs = tmp_path / 'inputs' / 'work'
+    assert (str(inputs / 'match'), billed) in calls
+    assert (str(inputs / 'drug_molecule'), billed) in calls
 
 
 def test_entry_point_reads_source_and_writes_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

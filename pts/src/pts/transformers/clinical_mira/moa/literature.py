@@ -105,6 +105,41 @@ def _atomic_write(df: pl.DataFrame, path: Path) -> None:
     tmp.rename(path)
 
 
+def _parquet_files(uri: str, storage_options: dict[str, Any] | None) -> tuple[Any, list[str]]:
+    """The fsspec filesystem serving ``uri`` and the sorted ``*.parquet`` files directly under it.
+
+    Raises:
+        ValueError: If ``uri`` holds no parquet files.
+    """
+    fs, root = fsspec.core.url_to_fs(uri, **(storage_options or {}))
+    files = sorted(fs.glob(root.rstrip('/') + '/*.parquet'))
+    if not files:
+        raise ValueError(f'no parquet files found under {uri}')
+    return fs, files
+
+
+def read_parquet_dir(uri: str, columns: list[str], storage_options: dict[str, Any] | None = None) -> pl.DataFrame:
+    """Read ``columns`` of every parquet file of a directory into one frame, in file name order.
+
+    Args:
+        uri: Directory (local or ``gs://``) holding ``*.parquet`` files.
+        columns: The columns to read.
+        storage_options: Options of the fsspec filesystem serving ``uri``, as in ``sentence_pass``.
+
+    Returns:
+        The rows of every file.
+
+    Raises:
+        ValueError: If ``uri`` holds no parquet files.
+    """
+    fs, files = _parquet_files(uri, storage_options)
+    frames = []
+    for path in files:
+        with fs.open(path, 'rb') as handle:
+            frames.append(pl.read_parquet(handle, columns=columns))
+    return pl.concat(frames)
+
+
 def sentence_pass(
     match_uri: str,
     parents: pl.DataFrame,
@@ -132,10 +167,7 @@ def sentence_pass(
     Raises:
         ValueError: If ``match_uri`` holds no parquet files.
     """
-    fs, root = fsspec.core.url_to_fs(match_uri, **(storage_options or {}))
-    files = sorted(fs.glob(root.rstrip('/') + '/*.parquet'))
-    if not files:
-        raise ValueError(f'no parquet files found under {match_uri}')
+    fs, files = _parquet_files(match_uri, storage_options)
     cd_dir, gp_dir = scratch / 'cd', scratch / 'gp'
     cd_dir.mkdir(parents=True, exist_ok=True)
     gp_dir.mkdir(parents=True, exist_ok=True)
@@ -170,6 +202,8 @@ def join_genes(cd_dir: Path, gp_dir: Path) -> pl.DataFrame:
         ``pub`` and ``h``, or null when there are none.
     """
     cd = pl.scan_parquet(cd_dir / '*.parquet')
+    if pl.scan_parquet(gp_dir / '*.parquet').select(pl.len()).collect().item() == 0:
+        return cd.with_columns(genes=pl.lit(None, dtype=pl.List(pl.String))).collect()
     keys = cd.select('pub', 'h').unique()
     gp = (
         pl
