@@ -62,7 +62,7 @@ steps:
       step.session.output_partitions: 1
       # Matches the old training set.
       step.interaction_score_threshold: 0.8
-      # Keep only credible sets flagged REPLICATED by pts_credible_set. Required for production.
+      # Keep only credible sets flagged REPLICATED by pts_credible_set_annotation. Required for production.
       step.apply_replication_filter: true
       # INPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
