@@ -98,3 +98,6 @@ translation_xrefs = pl.Schema({
     'signalp': pl.List(pl.String()),
 })
 """Output of `pts.transformers.utils.ensembl.queries.translation_xrefs`."""
+
+transcript_rnacentral = pl.Schema({'transcriptId': pl.String(), 'rnacentral': pl.List(pl.String())})
+"""Output of `pts.transformers.utils.ensembl.queries.transcript_rnacentral`."""

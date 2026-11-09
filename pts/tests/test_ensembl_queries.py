@@ -8,7 +8,14 @@ import polars as pl
 import pytest
 
 from pts.schemas import ensembl_core as schema
-from pts.transformers.utils.ensembl import CoreDump, gene_names, genes, transcripts, translation_xrefs
+from pts.transformers.utils.ensembl import (
+    CoreDump,
+    gene_names,
+    genes,
+    transcript_rnacentral,
+    transcripts,
+    translation_xrefs,
+)
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from tests.ensembl_fixtures import cells, ddl, write_dump
 
@@ -112,6 +119,7 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (2000, 'Uniprot/SPTREMBL', 'XREF'),
             (2201, 'Uniprot_isoform', 'XREF'),
             (1100, 'HGNC', 'KNOWNXREF'),
+            (50817, 'RNAcentral', 'KNOWNXREF'),
         ],
     ),
     'xref': (
@@ -126,6 +134,10 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (603, 2000, 'A0A001', 'A0A001', '1'),
             (604, 2201, 'P00001-2', 'P00001-2', '1'),
             (605, 2200, 'Q00009', 'Q00009', '1'),
+            (701, 50817, 'URS0000000002', 'URS0000000002', '1'),
+            (702, 50817, 'URS0000000001', 'URS0000000001', '1'),
+            (703, 50817, 'URS0000000003', 'URS0000000003', '1'),
+            (704, 50817, 'URS0000000004', 'URS0000000004', '1'),
         ],
     ),
     'object_xref': (
@@ -138,6 +150,12 @@ TABLES: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
             (5, 1002, 'Translation', 604),
             (6, 1002, 'Transcript', 605),
             (7, 1, 'Gene', 501),
+            (8, 201, 'Transcript', 701),
+            (9, 201, 'Transcript', 702),
+            (10, 201, 'Transcript', 702),
+            (11, 101, 'Transcript', 703),
+            (12, 301, 'Transcript', 704),
+            (13, 2, 'Gene', 704),
         ],
     ),
     'analysis': (
@@ -301,3 +319,16 @@ def test_translation_on_a_scaffold_gene_has_no_xref_row(dump: CoreDump) -> None:
 
 def test_xref_on_a_transcript_is_ignored(dump: CoreDump) -> None:
     assert 'Q00009' not in translation_xrefs(dump)['uniprot_swissprot'].explode().to_list()
+
+
+def test_transcript_rnacentral_is_unique_and_sorted(dump: CoreDump) -> None:
+    frame = transcript_rnacentral(dump)
+    assert frame.schema == schema.transcript_rnacentral
+    assert frame.to_dicts() == [
+        {'transcriptId': 'ENST01', 'rnacentral': ['URS0000000003']},
+        {'transcriptId': 'ENST03', 'rnacentral': ['URS0000000001', 'URS0000000002']},
+    ]
+
+
+def test_transcript_rnacentral_ignores_scaffold_genes_and_other_object_types(dump: CoreDump) -> None:
+    assert 'URS0000000004' not in transcript_rnacentral(dump)['rnacentral'].explode().to_list()

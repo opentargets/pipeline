@@ -1,8 +1,11 @@
 """Transcript index dataset generation.
 
 Produces a per-transcript index from the Ensembl core database: coordinates, exons and flags from the
-`transcript`, `exon` and `transcript_attrib` tables, and UniProt and AlphaFold identifiers from each
-translation's xrefs and protein features.
+`transcript`, `exon` and `transcript_attrib` tables, UniProt and AlphaFold identifiers from each
+translation's xrefs and protein features, and each transcript's own cross references.
+
+An identifier an application relies on gets its own column. `dbXrefs` is for those that are only
+shown as links, so adding one needs no schema change.
 """
 
 from __future__ import annotations
@@ -62,12 +65,13 @@ def build_flags(attributes: pl.Expr) -> pl.Expr:
     return pl.concat_list(static, appris)
 
 
-def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame) -> pl.DataFrame:
-    """Join transcripts with their translation's xrefs into the transcript index.
+def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame, rnacentral: pl.DataFrame) -> pl.DataFrame:
+    """Join transcripts with their translation's and their own xrefs into the transcript index.
 
     Args:
         transcripts: output of `ensembl.transcripts`.
         xrefs: output of `ensembl.translation_xrefs`.
+        rnacentral: output of `ensembl.transcript_rnacentral`.
 
     Returns:
         DataFrame with the transcript index schema, sorted by gene and transcript.
@@ -75,6 +79,7 @@ def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame) -> pl.Data
     return (
         transcripts
         .join(xrefs.drop('transcriptId'), on='translationId', how='left', maintain_order='left')
+        .join(rnacentral, on='transcriptId', how='left', maintain_order='left')
         .rechunk()
         .select(
             pl.col('geneId').alias('targetId'),
@@ -85,6 +90,10 @@ def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame) -> pl.Data
             _non_empty('uniprot_trembl').alias('uniprotTremblIds'),
             _non_empty('uniprot_isoform').alias('uniprotIsoformIds'),
             _non_empty('alphafold').alias('alphafoldIds'),
+            pl
+            .col('rnacentral')
+            .list.eval(pl.struct(pl.element().alias('id'), pl.lit('RNAcentral').alias('source')))
+            .alias('dbXrefs'),
             _codes(pl.col('attributes')).list.contains('is_canonical').alias('isEnsemblCanonical'),
             'chromosome',
             'start',
@@ -119,7 +128,9 @@ def transcript(
         config: unused.
     """
     dump = ensembl.CoreDump(source['ensembl'])
-    result = build_transcripts(ensembl.transcripts(dump), ensembl.translation_xrefs(dump))
+    result = build_transcripts(
+        ensembl.transcripts(dump), ensembl.translation_xrefs(dump), ensembl.transcript_rnacentral(dump)
+    )
 
     logger.info(f'writing {result.height} transcripts from Ensembl {dump.release} to {destination}')
     write_dataset(result, destination)

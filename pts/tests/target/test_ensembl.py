@@ -5,12 +5,12 @@ from __future__ import annotations
 import polars as pl
 
 from pts.transformers.target.ensembl import ensembl_genes
-from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
+from tests.target.fixtures import GENES, RNACENTRAL, TRANSCRIPTS, XREFS
 from tests.target.rows import rows
 
 
 def _built() -> pl.DataFrame:
-    return ensembl_genes(GENES, TRANSCRIPTS, XREFS)
+    return ensembl_genes(GENES, TRANSCRIPTS, XREFS, RNACENTRAL)
 
 
 def _by_id() -> dict[str, dict]:
@@ -23,7 +23,7 @@ def test_non_ensg_ids_are_excluded() -> None:
 
 def test_genes_on_canonical_chromosomes_are_kept() -> None:
     genes = GENES.with_columns(pl.col('chromosome').replace({'X': 'CHR_HSCHR6_MHC_APD_CTG1'}))
-    ids = set(ensembl_genes(genes, TRANSCRIPTS, XREFS)['id'])
+    ids = set(ensembl_genes(genes, TRANSCRIPTS, XREFS, RNACENTRAL)['id'])
     assert ids == {'ENSG00000141510', 'ENSG00000000003'}
 
 
@@ -57,6 +57,14 @@ def test_signalp_is_tagged() -> None:
     assert _by_id()['ENSG00000141510']['signalP'] == [{'id': 'SignalP-noTM', 'source': 'signalP'}]
 
 
+def test_rnacentral_comes_from_the_canonical_transcript() -> None:
+    assert _by_id()['ENSG00000000003']['rnaCentral'] == [{'id': 'URS0000000010', 'source': 'RNAcentral'}]
+
+
+def test_rnacentral_on_a_non_canonical_transcript_is_ignored() -> None:
+    assert _by_id()['ENSG00000141510']['rnaCentral'] == []
+
+
 def test_canonical_transcript_carries_its_own_coordinates() -> None:
     assert _by_id()['ENSG00000141510']['canonicalTranscript'] == {
         'id': 'ENST00000269305',
@@ -75,7 +83,7 @@ def test_canonical_transcript_on_another_chromosome_is_dropped() -> None:
         .otherwise('chromosome')
         .alias('chromosome')
     )
-    gene = {r['id']: r for r in ensembl_genes(GENES, transcripts, XREFS).to_dicts()}['ENSG00000000002']
+    gene = {r['id']: r for r in ensembl_genes(GENES, transcripts, XREFS, RNACENTRAL).to_dicts()}['ENSG00000000002']
     assert gene['canonicalTranscript'] is None
 
 
@@ -89,7 +97,8 @@ def test_genomic_location_dtype() -> None:
 
 
 def test_matches_the_spark_output() -> None:
-    assert rows(_built(), 'id', ('proteinIds', 'signalP'), empty_as_null=('signalP',)) == SPARK_ROWS
+    built = _built().drop('rnaCentral')  # added after the spark port
+    assert rows(built, 'id', ('proteinIds', 'signalP'), empty_as_null=('signalP',)) == SPARK_ROWS
 
 
 #: The spark output for this fixture, as `rows` normalises it.
@@ -141,5 +150,5 @@ SPARK_ROWS = [
 
 def test_a_duplicated_gene_id_keeps_the_first_input_row() -> None:
     first = GENES.filter(pl.col('id') == 'ENSG00000141510').with_columns(pl.lit('first_row').alias('biotype'))
-    built = ensembl_genes(pl.concat([first, GENES]), TRANSCRIPTS, XREFS)
+    built = ensembl_genes(pl.concat([first, GENES]), TRANSCRIPTS, XREFS, RNACENTRAL)
     assert built.filter(pl.col('id') == 'ENSG00000141510')['biotype'].to_list() == ['first_row']

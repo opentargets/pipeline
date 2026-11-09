@@ -22,6 +22,8 @@ _UNIPROT_DBS = {
     'Uniprot_isoform': 'uniprot_isoform',
 }
 
+_RNACENTRAL_DB = 'RNAcentral'
+
 #: `analysis.logic_name` of the protein features whose `hit_name` is reported.
 _FEATURE_ANALYSES = ['alphafold', 'signalp']
 
@@ -243,6 +245,31 @@ def translation_xrefs(dump: CoreDump) -> pl.DataFrame:
             *[pl.col(field).fill_null(empty) for field in _XREF_FIELDS],
         )
         .sort('translationId')
+        .collect()
+    )
+
+
+def transcript_rnacentral(dump: CoreDump) -> pl.DataFrame:
+    """RNAcentral accessions of the transcripts of `transcripts`.
+
+    Returns:
+        One row per transcript with any accession, sorted by `transcriptId`, with the columns of
+        `schemas.ensembl_core.transcript_rnacentral`. The list is unique and sorted.
+    """
+    external_db = dump.scan('external_db', schema.EXTERNAL_DB).filter(pl.col('db_name') == _RNACENTRAL_DB)
+    transcript = _canonical_transcripts(dump).select('transcript_id', pl.col('stable_id').alias('transcriptId'))
+    return (
+        dump
+        .scan('object_xref', schema.OBJECT_XREF)
+        .filter(pl.col('ensembl_object_type') == 'Transcript')
+        .join(dump.scan('xref', schema.XREF), on='xref_id', how='inner')
+        .join(external_db, on='external_db_id', how='inner')
+        .join(transcript, left_on='ensembl_id', right_on='transcript_id', how='inner')
+        .select('transcriptId', pl.col('dbprimary_acc').alias('rnacentral'))
+        .unique()
+        .sort('transcriptId', 'rnacentral')
+        .group_by('transcriptId', maintain_order=True)
+        .agg('rnacentral')
         .collect()
     )
 

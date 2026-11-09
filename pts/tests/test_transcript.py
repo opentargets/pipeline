@@ -28,6 +28,7 @@ OUTPUT_SCHEMA = {
     'uniprotTremblIds': pl.List(pl.String),
     'uniprotIsoformIds': pl.List(pl.String),
     'alphafoldIds': pl.List(pl.String),
+    'dbXrefs': pl.List(pl.Struct({'id': pl.String, 'source': pl.String})),
     'isEnsemblCanonical': pl.Boolean,
     'chromosome': pl.String,
     'start': pl.Int64,
@@ -61,6 +62,8 @@ XREF_SCHEMA = {
     'alphafold': pl.List(pl.String),
     'signalp': pl.List(pl.String),
 }
+#: `pts.transformers.utils.ensembl.transcript_rnacentral` output, as the contract states it.
+RNACENTRAL_SCHEMA = {'transcriptId': pl.String, 'rnacentral': pl.List(pl.String)}
 
 
 def exon(exon_id: str, start: int, end: int, strand: int = 1, chromosome: str = '1') -> dict[str, Any]:
@@ -107,8 +110,16 @@ def xrefs(rows: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=XREF_SCHEMA)
 
 
-def build(tx_rows: list[dict[str, Any]], xref_rows: list[dict[str, Any]] | None = None) -> pl.DataFrame:
-    return build_transcripts(txs(tx_rows), xrefs(xref_rows or []))
+def rnacentral(rows: list[tuple[str, list[str]]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=RNACENTRAL_SCHEMA, orient='row')
+
+
+def build(
+    tx_rows: list[dict[str, Any]],
+    xref_rows: list[dict[str, Any]] | None = None,
+    rnacentral_rows: list[tuple[str, list[str]]] | None = None,
+) -> pl.DataFrame:
+    return build_transcripts(txs(tx_rows), xrefs(xref_rows or []), rnacentral(rnacentral_rows or []))
 
 
 def only(df: pl.DataFrame) -> dict[str, Any]:
@@ -264,6 +275,14 @@ def test_empty_xref_arrays_are_null() -> None:
     ]
 
 
+def test_rnacentral_is_a_db_xref_of_its_transcript() -> None:
+    result = build([tx('ENST1'), tx('ENST2')], rnacentral_rows=[('ENST1', ['URS0000000001'])])
+    assert result.select('transcriptId', 'dbXrefs').rows() == [
+        ('ENST1', [{'id': 'URS0000000001', 'source': 'RNAcentral'}]),
+        ('ENST2', None),
+    ]
+
+
 # exons
 
 
@@ -298,11 +317,12 @@ def test_multi_chunk_input_matches_single_chunk() -> None:
         tx('ENST3', 'ENSG3', translation_id='ENSP3'),
     ]
     xref_rows = [xref('ENST1', 'ENSP1', uniprot_swissprot=['P1']), xref('ENST3', 'ENSP3', alphafold=['AF-P3-F1'])]
-    single = build_transcripts(txs(rows), xrefs(xref_rows))
+    rna = rnacentral([('ENST2', ['URS0000000001'])])
+    single = build_transcripts(txs(rows), xrefs(xref_rows), rna)
     chunked_tx = pl.concat([txs(rows[:1]), txs(rows[1:])], rechunk=False)
     chunked_xref = pl.concat([xrefs(xref_rows[:1]), xrefs(xref_rows[1:])], rechunk=False)
     assert chunked_tx.n_chunks() == 2
-    assert build_transcripts(chunked_tx, chunked_xref).equals(single)
+    assert build_transcripts(chunked_tx, chunked_xref, rna).equals(single)
 
 
 # end to end, on a core dump
@@ -419,6 +439,7 @@ TABLES: dict[str, list[list[str]]] = {
         row('external_db', external_db_id=2000, db_name='Uniprot/SPTREMBL', status='KNOWN', priority=5, type='MISC'),
         row('external_db', external_db_id=2200, db_name='Uniprot/SWISSPROT', status='KNOWN', priority=5, type='MISC'),
         row('external_db', external_db_id=2201, db_name='Uniprot_isoform', status='KNOWN', priority=5, type='MISC'),
+        row('external_db', external_db_id=50817, db_name='RNAcentral', status='KNOWNXREF', priority=1, type='MISC'),
     ],
     'gene': [
         _gene(1, 'ENSG00000186092', 131, 65419, 71585, 1, 11),
@@ -533,12 +554,22 @@ TABLES: dict[str, list[list[str]]] = {
             version=0,
             info_type='DIRECT',
         ),
+        row(
+            'xref',
+            xref_id=45,
+            external_db_id=50817,
+            dbprimary_acc='URS000044DFF6',
+            display_label='URS000044DFF6',
+            version=1,
+            info_type='CHECKSUM',
+        ),
     ],
     'object_xref': [
         row('object_xref', object_xref_id=51, ensembl_id=21, ensembl_object_type='Translation', xref_id=41),
         row('object_xref', object_xref_id=52, ensembl_id=21, ensembl_object_type='Translation', xref_id=42),
         row('object_xref', object_xref_id=53, ensembl_id=21, ensembl_object_type='Translation', xref_id=43),
         row('object_xref', object_xref_id=54, ensembl_id=22, ensembl_object_type='Translation', xref_id=44),
+        row('object_xref', object_xref_id=55, ensembl_id=13, ensembl_object_type='Transcript', xref_id=45),
     ],
     'protein_feature': [
         row(
@@ -585,6 +616,7 @@ def test_transcript_end_to_end(tmp_path: Path) -> None:
             'uniprotTremblIds': ['A2A2V1', 'X6RKS3'],
             'uniprotIsoformIds': None,
             'alphafoldIds': ['AF-Q8NH21-F1'],
+            'dbXrefs': None,
             'isEnsemblCanonical': True,
             'chromosome': '1',
             'start': 65419,
@@ -612,6 +644,7 @@ def test_transcript_end_to_end(tmp_path: Path) -> None:
             'uniprotTremblIds': None,
             'uniprotIsoformIds': None,
             'alphafoldIds': None,
+            'dbXrefs': [{'id': 'URS000044DFF6', 'source': 'RNAcentral'}],
             'isEnsemblCanonical': True,
             'chromosome': 'MT',
             'start': 648,
@@ -630,6 +663,7 @@ def test_transcript_end_to_end(tmp_path: Path) -> None:
             'uniprotTremblIds': None,
             'uniprotIsoformIds': ['Q6IEY1-2'],
             'alphafoldIds': None,
+            'dbXrefs': None,
             'isEnsemblCanonical': False,
             'chromosome': '1',
             'start': 450740,
