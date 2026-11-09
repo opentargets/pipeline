@@ -1,6 +1,6 @@
 # OTAR2065 microglia single-cell eQTLs
 
-This document was updated on 2026-11-03.
+This document was updated on 2026-11-05.
 
 Single-cell eQTLs of human microglia from the OTAR2065 neuroinflammation project, in three conditions (IFN, LPS, untreated), each split into proliferating and non-proliferating cells. There is no publication. The data is read by the Partner Preview Platform (PPP) only.
 
@@ -72,7 +72,7 @@ The SuSiE files have the same schemas as those of the eQTL Catalogue r8 release.
 The DAG `otar2065_microglia_ingestion` runs the gentropy `eqtl_catalogue` step on the qtlmap output, as for the eQTL Catalogue r8 release, into `CredibleSet` and `CredibleSetVariant`:
 
 ```sh
-gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/
+gs://eqtl_catalogue_data/otar2065_microglia/prod/20261105T204507/
 ├── bin/      gentropy CLI and cluster init script of the run
 ├── config/   otar2065_microglia_ingestion.yaml (the DAG config of the run)
 ├── docs/     README.md + DAG svg
@@ -81,7 +81,7 @@ gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/
 
 ![otar2065_microglia_ingestion](otar2065_microglia_ingestion.svg)
 
-- gentropy commit `b8d49acab42b8357ce999e3ab9995dca235f9e7a` ([opentargets/gentropy#1343](https://github.com/opentargets/gentropy/pull/1343)), one cluster of 8 `n2d-highmem-16` workers; the run took 7 minutes.
+- gentropy [`v4.0.0-rc.2`](https://github.com/opentargets/gentropy/releases/tag/v4.0.0-rc.2), with datasets whose summary statistics are not on the eQTL Catalogue FTP ([opentargets/gentropy#1343](https://github.com/opentargets/gentropy/pull/1343)) and a negative region start parsed as a locus start of 1 ([#1344](https://github.com/opentargets/gentropy/pull/1344)). One cluster of 8 `n2d-highmem-16` workers; the run took 7 minutes.
 - Inputs: `susie/QTD*_credible_sets.parquet`, `susie/QTD*_lbf_variable_merged.parquet`, `susie_batches/QTD*/full/QTD*.full_susie.parquet` and `dataset_metadata.tsv` of `source/` (see [Inputs](#inputs)).
 - `lead_pvalue_threshold` 1e-3, as for r8. `summary_statistics_location` is null: the summary statistics are not public, so the studies have no `summarystatsLocation` and `hasSumstats` is false.
 - `reportedBeta` and `reportedStandardError` are the marginal effects of the qtlmap credible sets; `conditionalBeta` and `conditionalStandardError` come from the full SuSiE output, for every member. `effectAlleleFrequency` is empty, as in r8.
@@ -101,6 +101,7 @@ gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/
 - 11,087 credible sets have the same dataset, gene and lead in both. The 3,293 credible sets flagged `Subsignificant p-value` in the frozen release are not in v4.
 - 17 credible sets of the frozen release are not in v4: their lead p-value is 1.001e-3 to 1.049e-3 in the qtlmap output, stored rounded to 1.0e-3 in the frozen release, so it passed the 1e-3 filter there.
 - 3 credible sets have another lead in v4; the frozen lead is a member of the v4 credible set.
+- 209 credible sets have `locusStart` 1: their 2 Mb window around the gene starts before the first base of the chromosome. No `locusStart` is null.
 - Every credible set has variants and a study, ids are unique, the lead is a member of its credible set, and the posterior probabilities of each credible set sum to 0.95–1.0. One study, of `QTD000763`, has no credible set left after the lead p-value filter.
 
 ## Changelog
@@ -112,3 +113,7 @@ gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/
 ### 2026-11-03 (v4 ingestion)
 
 * New DAG `otar2065_microglia_ingestion`: the gentropy `eqtl_catalogue` step on the qtlmap output, into `gs://eqtl_catalogue_data/otar2065_microglia/prod/20261103T163322/`, see [v4 ingestion](#v4-ingestion). `pis` keeps reading the frozen release until PTS reads `CredibleSet` and `CredibleSetVariant`.
+
+### 2026-11-05 (v4 ingestion on gentropy v4.0.0-rc.2)
+
+* Re-ran `otar2065_microglia_ingestion` on gentropy `v4.0.0-rc.2` into `gs://eqtl_catalogue_data/otar2065_microglia/prod/20261105T204507/`. It replaces `20261103T163322`, in which 209 credible sets had no `locusStart` (gentropy commit `b8d49aca` did not have [opentargets/gentropy#1344](https://github.com/opentargets/gentropy/pull/1344)). Against `20261103T163322`, only these 209 credible sets change, `locusStart` (null → 1) and `id`; the study index and every other credible set and variant are the same, apart from `logBayesFactor` differences below 1e-12.
