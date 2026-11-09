@@ -378,3 +378,30 @@ def test_content_key_ignores_drug_name_and_order():
     renamed = requests(select_sentences(two_doc_fixture()), NAMES.with_columns(name=pl.lit('Renamed')))
     original = requests(select_sentences(two_doc_fixture()), NAMES)
     assert renamed['content_key'].to_list() == original['content_key'].to_list()
+
+
+def test_null_year_doc_excluded_from_request_sentences_and_key():
+    rows = [
+        sentence_row(text='dated sentence from publication one ok', pub='1', pmid='1', year=2020),
+        sentence_row(text='undated sentence from publication two', pub='2', pmid='2', year=None, label='Other'),
+    ]
+    out = requests(select_sentences(sentence_frame(rows)), NAMES)
+    assert out['request'].to_list() == [
+        (
+            'Drug: aspirin\nNames of the drug in these sentences: Drug, Other\n\n'
+            'Trial ID: pmid1\nPublication year: 2020\nSentences:\ndated sentence from publication one ok'
+        )
+    ]
+    assert [d['doc'] for d in out['docs'][0]] == ['pmid1']
+    assert [s['doc'] for s in out['sentences'][0]] == ['pmid1']
+    only_dated = requests(select_sentences(sentence_frame(rows[:1])), NAMES)
+    assert out['content_key'].to_list() == only_dated['content_key'].to_list()
+
+
+def test_drug_with_only_null_year_docs_gets_no_request():
+    rows = [
+        sentence_row(text='undated sentence from publication two', year=None),
+        sentence_row(parent='CHEMBL2', text='dated sentence for the other drug ok'),
+    ]
+    out = requests(select_sentences(sentence_frame(rows)), NAMES)
+    assert out['parent'].to_list() == ['CHEMBL2']

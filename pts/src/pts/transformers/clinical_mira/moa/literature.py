@@ -279,7 +279,10 @@ def requests(picked: pl.DataFrame, names: pl.DataFrame) -> pl.DataFrame:
     """Build the extraction request of each drug from its selected sentences.
 
     Within a document the sentences keep the order of ``picked`` after a stable sort by section
-    rank. Documents are ordered by id. Drugs whose parent is missing from ``names`` are dropped.
+    rank. Documents are ordered by id. Documents without a publication year are left out of the
+    request text, ``sentences``, ``docs`` and the content key (their drug names still appear in the
+    names line). Drugs with no remaining document, and drugs whose parent is missing from
+    ``names``, get no row.
 
     Args:
         picked: Output of ``select_sentences``.
@@ -305,16 +308,23 @@ def requests(picked: pl.DataFrame, names: pl.DataFrame) -> pl.DataFrame:
             + pl.col('sentences').list.join('\n'),
         )
     )
-    drugs = docs.group_by('parent', maintain_order=True).agg(
-        text=pl.col('prompt').str.join('\n---\n'),
-        labels=pl.col('labels').list.explode(keep_nulls=False, empty_as_null=False).unique().sort(),
-        docs=pl.struct('doc', 'text'),
+    shown = pl.col('year').is_not_null()
+    drugs = (
+        docs
+        .group_by('parent', maintain_order=True)
+        .agg(
+            text=pl.col('prompt').filter(shown).str.join('\n---\n'),
+            labels=pl.col('labels').list.explode(keep_nulls=False, empty_as_null=False).unique().sort(),
+            docs=pl.struct('doc', 'text').filter(shown),
+        )
+        .filter(pl.col('docs').list.len() > 0)
     )
     named = drugs.join(names.select('parent', name=pl.col('name').str.to_lowercase()), on='parent')
     if named.height < drugs.height:
         logger.info(f'{drugs.height - named.height} drugs without a name get no request')
     sentences = (
         picked
+        .join(docs.filter(shown).select('parent', 'doc'), on=['parent', 'doc'], how='semi')
         .select(
             'parent',
             'doc',
