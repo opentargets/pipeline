@@ -63,7 +63,49 @@ def test_merges_what_both_spellings_find() -> None:
 
 
 def test_acronym_goes_through_the_symbol_track() -> None:
-    assert _map(pl.DataFrame({'label': ['ALS']}))['ids'].to_list() == [['EFO_0000253', 'MONDO_0004976']]
+    out = _map(pl.DataFrame({'label': ['ALS']}), include_ambiguous_mappings=True)
+    assert out['ids'].to_list() == [['EFO_0000253', 'MONDO_0004976']]
+
+
+def test_ambiguous_mappings_are_null_by_default() -> None:
+    df = pl.DataFrame({'label': ['ALS', ' ALS ', 'cystic fibrosis', None]})
+    out = _map(df)
+    assert out.columns == ['label', 'ids']
+    assert out['ids'].to_list() == [None, None, ['MONDO_0009061'], None]
+
+
+def test_include_ambiguous_mappings_flags_and_keeps_them() -> None:
+    # trimmed of spaces only, as the query is; a null label is not ambiguous
+    df = pl.DataFrame({'label': ['ALS', ' ALS ', 'ALS1', '', 'cystic fibrosis', None]})
+    out = _map(df, include_ambiguous_mappings=True)
+    assert out.columns == ['label', 'isAmbiguousMapping', 'ids']
+    assert out.select('isAmbiguousMapping', 'ids').rows() == [
+        (True, ['EFO_0000253', 'MONDO_0004976']),
+        # ambiguous once trimmed, but its spaces put the raw label on the term track, as in OnToma
+        (True, None),
+        (False, None),
+        (True, None),
+        (False, ['MONDO_0009061']),
+        (False, None),
+    ]
+
+
+def test_ambiguity_flag_follows_the_normalised_label() -> None:
+    out = _map(pl.DataFrame({'label': ['ALS']}), include_normalised_entities=True, include_ambiguous_mappings=True)
+    assert out.columns == ['label', 'entityLabelNormalised', 'isAmbiguousMapping', 'ids']
+
+
+@pytest.mark.parametrize('include', [False, True])
+def test_ids_are_never_ambiguous(include: bool) -> None:
+    df = pl.DataFrame({'id': ['MONDO_0009061', 'x', None]})
+    out = map_entities(
+        df.lazy(), ID_LUT.lazy(), 'ids', 'id', 'id', type_col=pl.lit('DS'), include_ambiguous_mappings=include
+    ).collect()
+    assert out['ids'].to_list() == [['MONDO_0009061'], None, None]
+    if include:
+        assert out['isAmbiguousMapping'].to_list() == [False, False, False]
+    else:
+        assert 'isAmbiguousMapping' not in out.columns
 
 
 def test_identical_rows_collapse_as_in_ontoma() -> None:
@@ -140,6 +182,13 @@ def test_rejects_an_output_column_already_present() -> None:
         _map(pl.DataFrame({'label': ['x'], 'ids': ['y']}))
 
 
+def test_ambiguity_column_clashes_only_when_output() -> None:
+    df = pl.DataFrame({'label': ['ALS'], 'isAmbiguousMapping': ['kept']})
+    with pytest.raises(ValueError, match='already present'):
+        _map(df, include_ambiguous_mappings=True)
+    assert _map(df).rows() == [('ALS', 'kept', None)]
+
+
 def test_input_columns_are_kept_untouched() -> None:
     # OnToma would overwrite these working-column names; the port keeps every input column as is
     df = pl.DataFrame({
@@ -191,9 +240,13 @@ def test_add_efo_mapping_merges_label_and_id_mappings(lut_paths: tuple[str, str]
 
 def test_add_efo_mapping_by_label_only(lut_paths: tuple[str, str]) -> None:
     label_lut, _ = lut_paths
-    evidence = pl.LazyFrame({'diseaseFromSource': ['ALS', 'unknown'], 'diseaseFromSourceId': ['x', 'y']})
+    evidence = pl.LazyFrame({
+        'diseaseFromSource': ['cystic fibrosis', 'ALS', 'unknown'],
+        'diseaseFromSourceId': ['x', 'y', 'z'],
+    })
     out = add_efo_mapping(evidence, label_lut, id_col_name=None).collect()
-    assert out.rows() == [('ALS', 'x', 'EFO_0000253'), ('ALS', 'x', 'MONDO_0004976'), ('unknown', 'y', None)]
+    # ALS is an ambiguous mapping, which add_efo_mapping leaves out
+    assert out.rows() == [('cystic fibrosis', 'x', 'MONDO_0009061'), ('ALS', 'y', None), ('unknown', 'z', None)]
 
 
 @pytest.mark.parametrize('with_id_lut', [False, True])
@@ -201,7 +254,7 @@ def test_add_efo_mapping_keeps_evidence_columns(lut_paths: tuple[str, str], with
     label_lut, id_lut = lut_paths
     # named like the spark implementation's intermediate columns
     evidence = pl.LazyFrame({
-        'diseaseFromSource': ['ALS'],
+        'diseaseFromSource': ['Papillon-Lefèvre syndrome'],
         'diseaseFromSourceId': ['x'],
         'labelMappedResult': [['kept']],
         'idMappedResult': [['kept too']],

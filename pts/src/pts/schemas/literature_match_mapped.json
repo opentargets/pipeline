@@ -119,6 +119,12 @@
         "metadata": {}
       },
       {
+        "name": "isAmbiguousMapping",
+        "type": "boolean",
+        "nullable": true,
+        "metadata": {}
+      },
+      {
         "name": "entityIds",
         "type": {
           "containsNull": true,

@@ -76,7 +76,9 @@ def _distinct_rows(mapped: pl.DataFrame) -> list[tuple]:
             normalised,
             None if ids is None else tuple((i['entityId'], i['entitySource']) for i in ids),
         )
-        for label, entity_type, normalised, ids in mapped.rows()
+        for label, entity_type, normalised, ids in mapped.select(
+            'label', 'type', 'entityLabelNormalised', 'entityIds'
+        ).rows()
     ])
 
 
@@ -89,6 +91,7 @@ def test_map_labels_matches_ontoma(spark, lut_path: str) -> None:
     assert mapped.df.columns == [
         *Match.get_schema().fieldNames(),
         'entityLabelNormalised',
+        'isAmbiguousMapping',
         'entityIds',
         'mappedId',
         'isMapped',
@@ -116,7 +119,7 @@ def test_map_labels_schema(spark, lut_path: str) -> None:
 def test_map_distinct_labels_one_row_per_spelling(lut: pl.DataFrame) -> None:
     pairs = (('Gaucher-Lefèvre disease', 'DS'), ('Ñandú kinase', 'GP'), ('Cystic fibrosis', 'DS'))
     mapped = map_distinct_labels(_labels(*pairs), lut)
-    assert mapped.columns == ['label', 'type', 'entityLabelNormalised', 'entityIds']
+    assert mapped.columns == ['label', 'type', 'entityLabelNormalised', 'isAmbiguousMapping', 'entityIds']
     assert mapped.schema['entityIds'] == pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String}))
     rows = _distinct_rows(mapped)
     assert rows == _expected_distinct(*pairs)
@@ -124,6 +127,23 @@ def test_map_distinct_labels_one_row_per_spelling(lut: pl.DataFrame) -> None:
         ('diseasgaucherlefevr', False),
         ('diseasgaucherlefvr', True),
     ]
+
+
+def test_map_distinct_labels_flags_ambiguous_mappings(lut: pl.DataFrame) -> None:
+    pairs = (('CF', 'DS'), ('TNF', 'GP'), ('Cystic fibrosis', 'DS'), (None, 'DS'))
+    mapped = map_distinct_labels(_labels(*pairs), lut)
+    flags = set(mapped.select('label', 'isAmbiguousMapping').rows())
+    assert flags == {('CF', True), ('TNF', True), ('Cystic fibrosis', False), (None, False)}
+    # ambiguous mappings are kept
+    assert _distinct_rows(mapped) == _expected_distinct(*pairs)
+
+
+def test_map_labels_carries_ambiguity_to_match_mapped(spark, lut_path: str) -> None:
+    rows = _map_labels(spark, match_rows(), lut_path).df.collect()
+    assert {(r.label, r.isAmbiguousMapping) for r in rows} == {
+        (r.label, r.label is not None and len(r.label.strip(' ')) <= 3) for r in rows
+    }
+    assert [(r.mappedId, r.isAmbiguousMapping) for r in rows if r.label == 'CF'] == [('MONDO_0000001', True)]
 
 
 def test_spelling_rows_split_mapped_and_unmapped(spark, lut_path: str) -> None:

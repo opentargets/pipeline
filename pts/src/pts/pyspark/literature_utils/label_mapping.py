@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 #: `map_label_batches` output, as a spark DDL.
 MAPPED_LABELS_DDL = (
-    'label string, type string, entityLabelNormalised string, '
+    'label string, type string, entityLabelNormalised string, isAmbiguousMapping boolean, '
     'entityIds array<struct<entityId: string, entitySource: string>>'
 )
 
@@ -22,6 +22,7 @@ _MAPPED_LABELS = pa.schema([
     ('label', pa.string()),
     ('type', pa.string()),
     ('entityLabelNormalised', pa.string()),
+    ('isAmbiguousMapping', pa.bool_()),
     ('entityIds', pa.list_(pa.struct([('entityId', pa.string()), ('entitySource', pa.string())]))),
 ])
 
@@ -36,7 +37,10 @@ def lookup_table(path: str) -> pl.DataFrame:
 
 
 def map_distinct_labels(labels: pl.DataFrame, lut: pl.DataFrame) -> pl.DataFrame:
-    """Map distinct (`label`, `type`) pairs: a row per pair and normalised spelling, `entityIds` null if unmapped."""
+    """Map distinct (`label`, `type`) pairs: a row per pair and normalised spelling, `entityIds` null if unmapped.
+
+    Ambiguous mappings are kept, flagged in `isAmbiguousMapping`.
+    """
     return map_entities(
         labels.lazy(),
         lut.lazy(),
@@ -46,6 +50,7 @@ def map_distinct_labels(labels: pl.DataFrame, lut: pl.DataFrame) -> pl.DataFrame
         type_col_name='type',
         include_normalised_entities=True,
         include_entity_source=True,
+        include_ambiguous_mappings=True,
     ).collect()
 
 

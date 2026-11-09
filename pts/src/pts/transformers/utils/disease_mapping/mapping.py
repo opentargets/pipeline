@@ -22,6 +22,11 @@ Differences, none of which can change which identifiers are found for the curren
   working columns carry a random prefix that no input column has, and are dropped before
   returning; only an output column already in the input is refused.
 
+Not from OnToma: labels of 3 characters or less once trimmed are treated as ambiguous mappings and,
+by default, map to null, so the default output differs from OnToma's for those labels. With
+include_ambiguous_mappings=True the identifiers are OnToma's and an isAmbiguousMapping column
+flags the ambiguous rows.
+
 Diffed against `OnToma.map_entities` on spark with lookup tables built by OnToma from the disease
 index: 162,085 query rows covering names, synonyms, cross references and perturbed copies of
 them, mapped as labels and as ids, with a type column of mixed and null types and with both
@@ -51,6 +56,10 @@ EntityKind = Literal['label', 'id']
 
 #: Column of the normalised label, in the lookup table and in the output when it is asked for.
 NORMALISED_COLUMN = 'entityLabelNormalised'
+#: Column flagging a label short enough to be an ambiguous acronym, in the output when it is asked for.
+AMBIGUOUS_COLUMN = 'isAmbiguousMapping'
+#: Longest trimmed label that is an ambiguous acronym.
+AMBIGUOUS_LABEL_LENGTH = 3
 
 
 def temporary_prefix(columns: list[str]) -> str:
@@ -142,6 +151,7 @@ def map_entities(
     *,
     include_normalised_entities: bool = False,
     include_entity_source: bool = False,
+    include_ambiguous_mappings: bool = False,
 ) -> pl.LazyFrame:
     """Map the labels or ids in a column to entity identifiers, as `OnToma.map_entities` does.
 
@@ -156,6 +166,9 @@ def map_entities(
         include_normalised_entities: Also output the normalised label, one row per distinct
             normalised label of an input row.
         include_entity_source: Output `{entityId, entitySource}` structs rather than bare ids.
+        include_ambiguous_mappings: Keep the identifiers of ambiguous mappings, labels of 3
+            characters or less once trimmed, and output `isAmbiguousMapping`, True for those.
+            Otherwise they map to null. Ids are never ambiguous.
 
     Returns:
         The input, untouched, with the identifiers found added as a list column, null when there
@@ -175,7 +188,11 @@ def map_entities(
         raise ValueError(f"entity_kind must be 'label' or 'id', not {entity_kind!r}")
 
     columns = lf.collect_schema().names()
-    output_columns = [result_col_name, *([NORMALISED_COLUMN] if include_normalised_entities else [])]
+    output_columns = [
+        result_col_name,
+        *([NORMALISED_COLUMN] if include_normalised_entities else []),
+        *([AMBIGUOUS_COLUMN] if include_ambiguous_mappings else []),
+    ]
     if clashing := set(output_columns) & set(columns):
         raise ValueError(f'output columns already present in the input: {sorted(clashing)}')
 
@@ -204,10 +221,24 @@ def map_entities(
         )
         .rename({w.normalised: NORMALISED_COLUMN}, strict=False)
     )
+    # decided on the raw label, trimmed only; a null label is not ambiguous
+    is_ambiguous = (
+        (spark_trim(pl.col(w.entity)).str.len_chars() <= AMBIGUOUS_LABEL_LENGTH).fill_null(False)
+        if entity_kind == 'label'
+        else pl.lit(False)
+    )
+    result = pl.col(result_col_name)
+    flagged = (
+        [is_ambiguous.alias(AMBIGUOUS_COLUMN), result]
+        if include_ambiguous_mappings
+        else [pl.when(~is_ambiguous).then(result).alias(result_col_name)]
+    )
     return (
         keyed
         .join(found, on=keys, how='left', nulls_equal=True, maintain_order='left')
-        # leaves the input columns, then the normalised label when asked for, then the result
+        # leaves the input columns, then the normalised label when asked for, then the ambiguity
+        # flag when asked for, then the result
+        .select(pl.exclude(result_col_name), *flagged)
         .drop(cs.starts_with(w.prefix))
         .unique(maintain_order=True)
     )

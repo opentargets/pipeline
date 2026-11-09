@@ -79,7 +79,7 @@ class Match(Dataset):
                 ),
                 how='inner',
             )
-            .select('match.*', 'mapped.entityLabelNormalised', 'mapped.entityIds')
+            .select('match.*', 'mapped.entityLabelNormalised', 'mapped.isAmbiguousMapping', 'mapped.entityIds')
         )
 
         logger.info('explode results')
