@@ -1,8 +1,13 @@
-"""Quality flags and confidence classes of the CredibleSet and CredibleSetVariant datasets."""
+"""The quality flags of credible sets and of their variants.
+
+Every stage only adds flags, and each flag says one thing about a row. Whether a flag excludes the
+row is decided in validation, by the lists of its settings, so a flag can stay information on the
+published data or become a reason to exclude, without changing the check that raises it.
+"""
 
 from __future__ import annotations
 
-from enum import IntEnum, StrEnum
+from enum import StrEnum
 
 
 class CredibleSetFlag(StrEnum):
@@ -65,13 +70,3 @@ class CredibleSetVariantFlag(StrEnum):
     MISSING_PVALUE = 'P-value mantissa or exponent is missing'
     ORPHAN_VARIANT = 'Credible set of the variant is not among the credible sets of its source'
     VARIANT_CHROMOSOME_MISMATCH = 'Chromosome of the variant differs from the credible set chromosome'
-
-
-class CredibleSetConfidenceClasses(IntEnum):
-    """Confidence of a credible set, from its fine-mapping method and LD reference."""
-
-    FINEMAPPED_IN_SAMPLE_LD = 4
-    FINEMAPPED_OUT_OF_SAMPLE_LD = 3
-    PICSED_SUMMARY_STATS = 2
-    PICSED_TOP_HIT = 1
-    UNKNOWN = 0

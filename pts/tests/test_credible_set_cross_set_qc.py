@@ -4,8 +4,9 @@ import polars as pl
 import pytest
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema, cross_set_flags_schema
+from pts.transformers.credible_set.cross_set_qc import flag_across_sets
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-from pts.transformers.credible_set.validation import ValidationSettings, flag_across_sets
+from pts.transformers.credible_set.validation import ValidationSettings
 
 TOP_HIT = CredibleSetFlag.TOP_HIT.value
 EXCEEDS = CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value

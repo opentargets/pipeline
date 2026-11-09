@@ -1,4 +1,14 @@
-"""Quality checks of credible sets; the second credible set stage, which only adds flags."""
+"""Set QC: the second credible set stage, which flags each credible set of one source.
+
+Nothing leaves here; validation decides what the flags exclude. `set_qc` reads the source's sets
+under their contract and runs the checks in order:
+
+- the row itself: a credible set id that is not an md5, a chromosome that is not canonical, a lead
+  on another chromosome than its set, a lead in the MHC, a fine-mapping method not accepted;
+- against the validated study index: a study the index does not hold, a study type that is not
+  one of the vocabulary or not the study's, and a curated top hit whose study has summary
+  statistics; a set without a study type takes its study's.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +21,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.credible_set import credible_set_required, credible_set_schema
 from pts.schemas.study import StudyType
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
-from pts.transformers.credible_set.source_dataset import read_source_dataset
-from pts.transformers.credible_set.variant_id import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
+from pts.transformers.credible_set.identifier import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
+from pts.transformers.credible_set.source import read_source_dataset
+from pts.transformers.credible_set.vocabulary import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
@@ -38,31 +48,61 @@ class SetQcSettings(BaseModel):
     """The accepted `fineMappingMethod` values; any other value gets INVALID_FINEMAPPING_METHOD."""
 
 
-def flag_invalid_cs_id(frame: pl.LazyFrame) -> pl.LazyFrame:
+def set_qc(
+    source: dict[str, str | list[str]],
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Add quality flags to the credible sets of one source.
+
+    Args:
+        source: The source's CredibleSet path under `credible_set`, and the validated study index
+            under `study`.
+        destination: Path of the flagged credible sets.
+        settings: The accepted fine-mapping methods under `allowed_fm_methods`.
+        config: Pipeline configuration.
+    """
+    sources = SetQcSource.model_validate(source)
+    options = SetQcSettings.model_validate(settings)
+    flagged = (
+        read_source_dataset(sources.credible_set, credible_set_schema, credible_set_required)
+        .pipe(_flag_invalid_cs_id)
+        .pipe(_flag_invalid_chromosome)
+        .pipe(_flag_lead_chromosome_mismatch)
+        .pipe(_flag_in_mhc)
+        .pipe(_flag_invalid_finemapping_method, options.allowed_fm_methods)
+        .pipe(_flag_study, scan_dataset(sources.study))
+    )
+    logger.info('Writing flagged credible sets to {}', destination)
+    sink_dataset(flagged, destination).collect()
+
+
+def _flag_invalid_cs_id(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible set identifiers that are not a 32-character lowercase hexadecimal md5.
 
     Examples:
         >>> credible_set = pl.LazyFrame({'id': ['0' * 32, 'A' * 32, '0' * 31], 'qualityControls': [[]] * 3})
-        >>> flag_invalid_cs_id(credible_set).collect()['qualityControls'].list.len().to_list()
+        >>> _flag_invalid_cs_id(credible_set).collect()['qualityControls'].list.len().to_list()
         [0, 1, 1]
     """
     invalid = ~pl.col('id').str.contains(CREDIBLE_SET_ID_PATTERN)
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_CS_ID)
 
 
-def flag_invalid_chromosome(frame: pl.LazyFrame) -> pl.LazyFrame:
+def _flag_invalid_chromosome(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible sets whose `chromosome` is not one of `Chromosome` (1 to 22, X, Y, MT).
 
     Examples:
         >>> credible_set = pl.LazyFrame({'chromosome': ['1', 'XY', '23', 'chr1'], 'qualityControls': [[]] * 4})
-        >>> flag_invalid_chromosome(credible_set).collect()['qualityControls'].list.len().to_list()
+        >>> _flag_invalid_chromosome(credible_set).collect()['qualityControls'].list.len().to_list()
         [0, 1, 1, 1]
     """
     invalid = ~pl.col('chromosome').is_in([chromosome.value for chromosome in Chromosome])
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_CHROMOSOME)
 
 
-def flag_lead_chromosome_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
+def _flag_lead_chromosome_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible sets whose lead variant lies on another chromosome than the set.
 
     The chromosome of the lead is the first field of `leadVariantId`.
@@ -73,27 +113,14 @@ def flag_lead_chromosome_mismatch(frame: pl.LazyFrame) -> pl.LazyFrame:
         ...     'leadVariantId': ['2_100_A_T', '1_100_A_T', '23_100_A_T'],
         ...     'qualityControls': [[]] * 3,
         ... })
-        >>> flag_lead_chromosome_mismatch(credible_set).collect()['qualityControls'].list.len().to_list()
+        >>> _flag_lead_chromosome_mismatch(credible_set).collect()['qualityControls'].list.len().to_list()
         [1, 0, 1]
     """
     mismatch = variant_chromosome(pl.col('leadVariantId')) != pl.col('chromosome')
     return flag_rows(frame, mismatch, CredibleSetFlag.LEAD_CHROMOSOME_MISMATCH)
 
 
-def flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[FinemappingMethod]) -> pl.LazyFrame:
-    """Flag credible sets whose `fineMappingMethod` is not one of `allowed`; the comparison is exact.
-
-    Examples:
-        >>> credible_set = pl.LazyFrame({'fineMappingMethod': ['SuSiE', 'SuSie', 'PICS'], 'qualityControls': [[]] * 3})
-        >>> flagged = flag_invalid_finemapping_method(credible_set, [FinemappingMethod.SUSIE])
-        >>> flagged.collect()['qualityControls'].list.len().to_list()
-        [0, 1, 1]
-    """
-    invalid = ~pl.col('fineMappingMethod').is_in([method.value for method in allowed])
-    return flag_rows(frame, invalid, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
-
-
-def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
+def _flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible sets whose lead variant lies in the MHC region.
 
     The lead position is the second field of `leadVariantId`, and the region bounds of
@@ -105,7 +132,7 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
         ...     'leadVariantId': ['6_25726063_A_T', '6_33400556_A_T', '6_33400557_A_T', '7_30000000_A_T'],
         ...     'qualityControls': [[]] * 4,
         ... })
-        >>> flag_in_mhc(credible_set).collect()['qualityControls'].list.len().to_list()
+        >>> _flag_in_mhc(credible_set).collect()['qualityControls'].list.len().to_list()
         [1, 1, 0, 0]
     """
     mhc = KnownGenomicRegion.MHC.value
@@ -114,7 +141,20 @@ def flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, in_mhc, CredibleSetFlag.IN_MHC)
 
 
-def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
+def _flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[FinemappingMethod]) -> pl.LazyFrame:
+    """Flag credible sets whose `fineMappingMethod` is not one of `allowed`; the comparison is exact.
+
+    Examples:
+        >>> credible_set = pl.LazyFrame({'fineMappingMethod': ['SuSiE', 'SuSie', 'PICS'], 'qualityControls': [[]] * 3})
+        >>> flagged = _flag_invalid_finemapping_method(credible_set, [FinemappingMethod.SUSIE])
+        >>> flagged.collect()['qualityControls'].list.len().to_list()
+        [0, 1, 1]
+    """
+    invalid = ~pl.col('fineMappingMethod').is_in([method.value for method in allowed])
+    return flag_rows(frame, invalid, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
+
+
+def _flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     """Flag credible sets against the study index, and fill a missing `studyType` from it.
 
     A set without a `studyType` takes its study's from the index, with no flag; a set that has one
@@ -138,7 +178,7 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
         ...     'studyType': ['eqtl', 'gwas', 'pqtl'],
         ...     'qualityControls': [[], [], []],
         ... })
-        >>> for row in flag_study(credible_set, study).sort('studyId').collect().iter_rows(named=True):
+        >>> for row in _flag_study(credible_set, study).sort('studyId').collect().iter_rows(named=True):
         ...     flag_name = sorted(CredibleSetFlag(flag).name for flag in row['qualityControls'])
         ...     print(row['studyId'], row['studyType'], flag_name)
         s eQTL ['INVALID_STUDY_TYPE', 'STUDY_TYPE_MISMATCH']
@@ -166,33 +206,3 @@ def flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
         .with_columns(pl.coalesce('studyType', '_study_type').alias('studyType'))
         .drop('_study_type', '_study_qc', '_study_found')
     )
-
-
-def set_qc(
-    source: dict[str, str | list[str]],
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Add quality flags to the credible sets of one source.
-
-    Args:
-        source: The source's CredibleSet path under `credible_set`, and the validated study index
-            under `study`.
-        destination: Path of the flagged credible sets.
-        settings: The accepted fine-mapping methods under `allowed_fm_methods`.
-        config: Pipeline configuration.
-    """
-    sources = SetQcSource.model_validate(source)
-    options = SetQcSettings.model_validate(settings)
-    flagged = (
-        read_source_dataset(sources.credible_set, credible_set_schema, credible_set_required)
-        .pipe(flag_invalid_cs_id)
-        .pipe(flag_invalid_chromosome)
-        .pipe(flag_lead_chromosome_mismatch)
-        .pipe(flag_in_mhc)
-        .pipe(flag_invalid_finemapping_method, options.allowed_fm_methods)
-        .pipe(flag_study, scan_dataset(sources.study))
-    )
-    logger.info('Writing flagged credible sets to {}', destination)
-    sink_dataset(flagged, destination).collect()

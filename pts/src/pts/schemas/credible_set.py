@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 
 from pts.schemas.study import StudyType
-from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod
+from pts.transformers.credible_set.vocabulary import Chromosome, FinemappingMethod
 
 credible_set_schema = pl.Schema({
     'id': pl.String(),

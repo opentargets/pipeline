@@ -19,7 +19,8 @@ from pts.schemas.target import GENOMIC_LOCATION
 from pts.schemas.variant import variant_schema
 from pts.transformers.credible_set import annotation as annotation_module
 from pts.transformers.credible_set.annotation import annotation
-from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.confidence import CredibleSetConfidence
+from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import set_qc
 from pts.transformers.credible_set.validation import validation
 from pts.transformers.credible_set.variant_qc import variant_qc
@@ -171,7 +172,7 @@ def test_the_valid_sets_of_every_source_are_published_together(tmp_path: Path) -
     published_variants = _read(tmp_path / 'output/credible_set_variant')
 
     assert published_sets['id'].to_list() == [CLEAN_SET['id']]
-    assert published_sets['confidence'].to_list() == [CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD]
+    assert published_sets['confidence'].to_list() == [CredibleSetConfidence.FINEMAPPED_IN_SAMPLE_LD]
     assert sorted(published_variants['variantId']) == sorted(v['variantId'] for v in CLEAN_VARIANTS)
 
 

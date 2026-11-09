@@ -6,16 +6,13 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
-from pts.transformers.credible_set.confidence import assign_confidence
-from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag, CredibleSetVariantFlag
-from pts.transformers.credible_set.set_qc import flag_in_mhc
-from pts.transformers.credible_set.validation import (
-    ValidationSettings,
-    ValidationSource,
-    pair_sources,
-    type_valid_sets,
-)
-from pts.transformers.credible_set.variant_qc import flag_invalid_variant_id
+from pts.schemas.credible_set import credible_set_schema
+from pts.transformers.credible_set.confidence import CredibleSetConfidence, assign_confidence
+from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
+from pts.transformers.credible_set.validation import ValidationSettings, validation
+from tests.credible_set_fixtures import published_credible_set_variant
+
+CS_ID = '0' * 32
 
 
 def _flagged(frame: pl.LazyFrame, flag: str) -> bool:
@@ -36,15 +33,25 @@ def _flagged(frame: pl.LazyFrame, flag: str) -> bool:
         ('22_100_A_T', False),
     ],
 )
-def test_invalid_variant_id(variant_id: str, invalid: bool) -> None:
-    frame = pl.LazyFrame({'variantId': [variant_id], 'qualityControls': [[]]})
-    assert _flagged(flag_invalid_variant_id(frame), CredibleSetVariantFlag.INVALID_VARIANT_ID) is invalid
+def test_invalid_variant_id(qc_variants, variant_id: str, invalid: bool) -> None:
+    frame = _variant(variant_id)
+    assert _flagged(qc_variants(frame), CredibleSetVariantFlag.INVALID_VARIANT_ID) is invalid
 
 
-def test_invalid_variant_id_keeps_existing_flags() -> None:
-    frame = pl.LazyFrame({'variantId': ['1_100_A_A'], 'qualityControls': [[CredibleSetVariantFlag.NOT_IN_LOCUS.value]]})
-    flags = flag_invalid_variant_id(frame).collect()['qualityControls'].item().to_list()
-    assert set(flags) == {CredibleSetVariantFlag.NOT_IN_LOCUS, CredibleSetVariantFlag.INVALID_VARIANT_ID}
+def test_invalid_variant_id_keeps_existing_flags(qc_variants) -> None:
+    frame = _variant('1_100_A_A', [CredibleSetVariantFlag.NOT_IN_LOCUS.value])
+    flags = qc_variants(frame).collect()['qualityControls'].item().to_list()
+    assert {CredibleSetVariantFlag.NOT_IN_LOCUS, CredibleSetVariantFlag.INVALID_VARIANT_ID} <= set(flags)
+
+
+def _variant(variant_id: str, flags: list[str] | None = None) -> pl.LazyFrame:
+    """One credible set variant, the only member of its set."""
+    return published_credible_set_variant({
+        'credibleSetId': CS_ID,
+        'variantId': variant_id,
+        'posteriorProbability': 1.0,
+        'qualityControls': flags or [],
+    }).lazy()
 
 
 @pytest.mark.parametrize(
@@ -58,20 +65,36 @@ def test_invalid_variant_id_keeps_existing_flags() -> None:
         ('7', '7_30000000_A_T', False),
     ],
 )
-def test_in_mhc(chromosome: str, lead: str, in_mhc: bool) -> None:
-    frame = pl.LazyFrame({'chromosome': [chromosome], 'leadVariantId': [lead], 'qualityControls': [[]]})
-    assert _flagged(flag_in_mhc(frame), CredibleSetFlag.IN_MHC) is in_mhc
+def test_in_mhc(qc_sets, chromosome: str, lead: str, in_mhc: bool) -> None:
+    assert _flagged(qc_sets(_set(chromosome=chromosome, leadVariantId=lead)), CredibleSetFlag.IN_MHC) is in_mhc
+
+
+def _set(**values: str | int | list[str]) -> pl.LazyFrame:
+    """One credible set row; unset columns are null, flags empty."""
+    row = {
+        'id': CS_ID,
+        'chromosome': '1',
+        'locusStart': 1,
+        'locusEnd': 1_000_000,
+        'studyId': 's',
+        'studyType': 'gwas',
+        'leadVariantId': '1_100_A_T',
+        'fineMappingMethod': 'SuSiE',
+        'qualityControls': [],
+        **values,
+    }
+    return pl.LazyFrame([{name: row.get(name) for name in credible_set_schema}], schema=credible_set_schema)
 
 
 @pytest.mark.parametrize(
     ('method', 'flags', 'confidence'),
     [
-        ('SuSiE-inf', [], CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD),
-        ('SuSiE-inf', [CredibleSetFlag.OUT_OF_SAMPLE_LD], CredibleSetConfidenceClasses.FINEMAPPED_OUT_OF_SAMPLE_LD),
-        ('SuSiE', [], CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD),
-        ('PICS', [], CredibleSetConfidenceClasses.PICSED_SUMMARY_STATS),
-        ('PICS', [CredibleSetFlag.TOP_HIT], CredibleSetConfidenceClasses.PICSED_TOP_HIT),
-        ('SuSie', [], CredibleSetConfidenceClasses.UNKNOWN),
+        ('SuSiE-inf', [], CredibleSetConfidence.FINEMAPPED_IN_SAMPLE_LD),
+        ('SuSiE-inf', [CredibleSetFlag.OUT_OF_SAMPLE_LD], CredibleSetConfidence.FINEMAPPED_OUT_OF_SAMPLE_LD),
+        ('SuSiE', [], CredibleSetConfidence.FINEMAPPED_IN_SAMPLE_LD),
+        ('PICS', [], CredibleSetConfidence.PICSED_SUMMARY_STATS),
+        ('PICS', [CredibleSetFlag.TOP_HIT], CredibleSetConfidence.PICSED_TOP_HIT),
+        ('SuSie', [], CredibleSetConfidence.UNKNOWN),
     ],
 )
 def test_confidence(method: str, flags: list[str], confidence: int) -> None:
@@ -84,22 +107,17 @@ def test_confidence(method: str, flags: list[str], confidence: int) -> None:
     assert result['confidence'].item() == confidence
 
 
-def test_typing_valid_sets_rejects_a_chromosome_outside_the_enum() -> None:
-    sets = pl.LazyFrame({'chromosome': ['23'], 'studyType': ['gwas'], 'fineMappingMethod': ['PICS']})
+@pytest.mark.parametrize(
+    'outside',
+    [{'chromosome': '23', 'leadVariantId': '23_100_A_T'}, {'studyType': 'customqtl'}, {'fineMappingMethod': 'SuSie'}],
+    ids=['chromosome', 'study type', 'fine-mapping method'],
+)
+def test_validation_refuses_to_write_a_valid_set_outside_the_vocabularies(validate_source, outside: dict) -> None:
+    """Set QC excludes such a set first; validation fails rather than write one it was given."""
+    lead = outside.get('leadVariantId', '1_100_A_T')
+    variant = published_credible_set_variant({'credibleSetId': CS_ID, 'variantId': lead, 'posteriorProbability': 1.0})
     with pytest.raises(pl.exceptions.InvalidOperationError):
-        type_valid_sets(sets).collect()
-
-
-def test_typing_valid_sets_rejects_a_study_type_outside_the_enum() -> None:
-    sets = pl.LazyFrame({'chromosome': ['1'], 'studyType': ['customqtl'], 'fineMappingMethod': ['PICS']})
-    with pytest.raises(pl.exceptions.InvalidOperationError):
-        type_valid_sets(sets).collect()
-
-
-def test_typing_valid_sets_rejects_a_finemapping_method_outside_the_enum() -> None:
-    sets = pl.LazyFrame({'chromosome': ['1'], 'studyType': ['gwas'], 'fineMappingMethod': ['SuSie']})
-    with pytest.raises(pl.exceptions.InvalidOperationError):
-        type_valid_sets(sets).collect()
+        validate_source(_set(**outside), variant.lazy(), ValidationSettings())
 
 
 def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed(validate_source) -> None:
@@ -143,34 +161,16 @@ def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed(validate_s
     assert excluded_variant.collect()['credibleSetId'].to_list() == ['top_hit']
 
 
-def _config(release_uri: str | None = None) -> Config:
-    return Mock(spec=Config, work_path='/work', release_uri=release_uri)
-
-
-def test_validation_pairs_the_sets_and_variants_of_each_source() -> None:
-    sources = ValidationSource(
-        credible_set=['/work/qc/gwas/a/credible_set', '/work/qc/gwas/b/credible_set'],
-        credible_set_variant=['/work/qc/gwas/a/credible_set_variant', '/work/qc/gwas/b/credible_set_variant'],
+def _validate_paths(credible_set: list[str], credible_set_variant: list[str], release_uri: str | None = None) -> None:
+    """Run validation on paths that are never read: the pairing of the sources fails first."""
+    validation(
+        source={'credible_set': credible_set, 'credible_set_variant': credible_set_variant},
+        destination={
+            name: '/out/' + name for name in ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant')
+        },
+        settings={},
+        config=Mock(spec=Config, work_path='/work', release_uri=release_uri),
     )
-    assert pair_sources(sources, _config()) == [
-        ('qc/gwas/a', '/work/qc/gwas/a/credible_set', '/work/qc/gwas/a/credible_set_variant'),
-        ('qc/gwas/b', '/work/qc/gwas/b/credible_set', '/work/qc/gwas/b/credible_set_variant'),
-    ]
-
-
-def test_validation_pairs_gcs_paths_by_their_folder_in_the_release() -> None:
-    root = 'gs://bucket/26.12'
-    sources = ValidationSource(
-        credible_set=[f'{root}/qc/gwas/gcca/credible_set', f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set/'],
-        credible_set_variant=[
-            f'{root}/qc/gwas/gcca/credible_set_variant',
-            f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set_variant',
-        ],
-    )
-    assert [source for source, _, _ in pair_sources(sources, _config(root))] == [
-        'qc/gwas/gcca',
-        'qc/molqtl/eQTLGen/coeqtl',
-    ]
 
 
 @pytest.mark.parametrize(
@@ -182,8 +182,15 @@ def test_validation_pairs_gcs_paths_by_their_folder_in_the_release() -> None:
     ids=['missing source', 'different order'],
 )
 def test_validation_rejects_set_and_variant_lists_that_do_not_pair_up(variants: list[str]) -> None:
-    sources = ValidationSource(
-        credible_set=['/work/qc/gwas/a/credible_set', '/work/qc/gwas/b/credible_set'], credible_set_variant=variants
-    )
     with pytest.raises(ValueError, match='qc/gwas/a'):
-        pair_sources(sources, _config())
+        _validate_paths(['/work/qc/gwas/a/credible_set', '/work/qc/gwas/b/credible_set'], variants)
+
+
+def test_validation_pairs_gcs_paths_by_their_folder_in_the_release() -> None:
+    root = 'gs://bucket/26.12'
+    with pytest.raises(ValueError, match='qc/molqtl/eQTLGen/coeqtl'):
+        _validate_paths(
+            [f'{root}/qc/gwas/gcca/credible_set', f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set/'],
+            [f'{root}/qc/molqtl/eQTLGen/coeqtl/credible_set_variant', f'{root}/qc/gwas/gcca/credible_set_variant'],
+            root,
+        )

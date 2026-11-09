@@ -7,11 +7,11 @@ import polars as pl
 import pytest
 from otter.config.yaml import parse_yaml
 
-from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings
 from pts.transformers.credible_set.validation import ValidationSettings
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
+from pts.transformers.credible_set.vocabulary import FinemappingMethod
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""

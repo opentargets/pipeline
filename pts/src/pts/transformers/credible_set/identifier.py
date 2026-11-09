@@ -1,20 +1,23 @@
-"""Credible set and variant identifiers: what a valid one looks like, and the fields of a variant identifier."""
+"""Credible set and variant identifiers: what a valid one looks like, and the fields of a variant identifier.
+
+A credible set is identified by the md5 of the columns that define it, and a variant by
+`chromosome_position_reference_alternate`. The patterns say what a valid one is, for the QC
+stages; the fields are read from a variant identifier, for every rule that locates a variant.
+"""
 
 from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.credible_set.enums import Chromosome
+from pts.transformers.credible_set.vocabulary import Chromosome
 
 #: A credible set identifier: a 32-character lowercase md5 hex digest.
+
+
 CREDIBLE_SET_ID_PATTERN = r'^[0-9a-f]{32}$'
 
-#: A variant identifier on a canonical chromosome, with a positive position and nucleotide alleles.
+
 VARIANT_ID_PATTERN = rf'^(?:{"|".join(chromosome.value for chromosome in Chromosome)})_[1-9][0-9]*_[ACGT]+_[ACGT]+$'
-
-
-def _field(variant_id: pl.Expr, index: int) -> pl.Expr:
-    return variant_id.str.split('_').list.get(index, null_on_oob=True)
 
 
 def variant_chromosome(variant_id: pl.Expr) -> pl.Expr:
@@ -46,3 +49,7 @@ def variant_reference_allele(variant_id: pl.Expr) -> pl.Expr:
 def variant_alternate_allele(variant_id: pl.Expr) -> pl.Expr:
     """The alternate allele, the fourth field of `variant_id`."""
     return _field(variant_id, 3)
+
+
+def _field(variant_id: pl.Expr, index: int) -> pl.Expr:
+    return variant_id.str.split('_').list.get(index, null_on_oob=True)

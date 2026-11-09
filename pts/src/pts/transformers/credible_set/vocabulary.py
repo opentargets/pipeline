@@ -1,4 +1,9 @@
-"""Fine-mapping methods, chromosomes and known genomic regions of credible sets."""
+"""The fixed vocabularies of credible sets: fine-mapping methods, chromosomes and known regions.
+
+The validated and published credible sets type `fineMappingMethod` and `chromosome` as enums of
+these, and set QC flags a set outside them. The known regions are those a rule treats apart, such
+as the MHC, whose long-range LD makes its credible sets unreliable.
+"""
 
 from __future__ import annotations
 

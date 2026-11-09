@@ -15,7 +15,7 @@ from otter.config.yaml import parse_yaml
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.validation import validation
-from pts.transformers.credible_set.variant_qc import VariantQcSettings, flag_variants
+from pts.transformers.credible_set.variant_qc import VariantQcSettings
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""
@@ -69,15 +69,11 @@ def _write(frame: pl.DataFrame, path: Path) -> str:
     return str(path)
 
 
-def _qc_and_validate(tmp_path: Path, sets: list[dict], variants: list[dict]) -> dict[str, pl.DataFrame]:
+def _qc_and_validate(tmp_path: Path, qc_variants, sets: list[dict], variants: list[dict]) -> dict[str, pl.DataFrame]:
     """Variant QC of one source's variants, then validation of the source; return the four written datasets."""
     qc = VariantQcSettings.model_validate(_settings('credible_set.variant_qc'))
-    flagged_variant = (
-        _frame(credible_set_variant_schema, variants)
-        .lazy()
-        .pipe(flag_variants, qc.coverage, qc.pip_tolerance)
-        .collect()
-    )
+    variant = _frame(credible_set_variant_schema, variants).lazy()
+    flagged_variant = qc_variants(variant, qc.coverage, qc.pip_tolerance).collect()
     out = tmp_path / 'out'
     names = ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant')
     validation(
@@ -99,8 +95,8 @@ def _flag_name(frame: pl.DataFrame, enum: type[CredibleSetFlag] | type[CredibleS
     return [sorted(enum(flag).name for flag in row) for row in frame['qualityControls']]
 
 
-def test_two_sets_of_only_their_lead_are_both_excluded_as_duplicated(tmp_path: Path) -> None:
-    written = _qc_and_validate(tmp_path, [_set(), _set()], [_variant(LEAD, 1.0), _variant(LEAD, 1.0)])
+def test_two_sets_of_only_their_lead_are_both_excluded_as_duplicated(tmp_path: Path, qc_variants) -> None:
+    written = _qc_and_validate(tmp_path, qc_variants, [_set(), _set()], [_variant(LEAD, 1.0), _variant(LEAD, 1.0)])
 
     assert written['valid_set'].height == 0
     assert written['valid_variant'].height == 0
@@ -116,10 +112,10 @@ def test_two_sets_of_only_their_lead_are_both_excluded_as_duplicated(tmp_path: P
     ]
 
 
-def test_two_sets_of_different_sizes_sharing_their_lead_are_both_excluded(tmp_path: Path) -> None:
+def test_two_sets_of_different_sizes_sharing_their_lead_are_both_excluded(tmp_path: Path, qc_variants) -> None:
     larger = [_variant(LEAD, 0.9), _variant('1_200_C_G', 0.06), _variant('1_300_G_A', 0.04)]
     smaller = [_variant(LEAD, 0.9), _variant('1_400_T_C', 0.1)]
-    written = _qc_and_validate(tmp_path, [_set(), _set()], [*larger, *smaller])
+    written = _qc_and_validate(tmp_path, qc_variants, [_set(), _set()], [*larger, *smaller])
 
     assert written['valid_set'].height == 0
     assert written['valid_variant'].height == 0
@@ -144,10 +140,14 @@ def test_two_sets_of_different_sizes_sharing_their_lead_are_both_excluded(tmp_pa
     ]
 
 
-def test_two_sets_listing_their_variants_once_are_both_excluded_whatever_their_own_flags(tmp_path: Path) -> None:
+def test_two_sets_listing_their_variants_once_are_both_excluded_whatever_their_own_flags(
+    tmp_path: Path, qc_variants
+) -> None:
     """The review's case: one copy carries an excluding flag of its own; neither copy can keep the variants."""
     excluded = _set([CredibleSetFlag.INCONSISTENCY_FLAG.value])
-    written = _qc_and_validate(tmp_path, [_set(), excluded], [_variant(LEAD, 0.9), _variant('1_200_C_G', 0.1)])
+    written = _qc_and_validate(
+        tmp_path, qc_variants, [_set(), excluded], [_variant(LEAD, 0.9), _variant('1_200_C_G', 0.1)]
+    )
 
     assert written['valid_set'].height == 0
     assert written['valid_variant'].height == 0

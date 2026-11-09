@@ -18,7 +18,9 @@ from pyspark.sql import SparkSession
 
 from pts.pyspark.common.session import Session
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
+from pts.transformers.credible_set.set_qc import set_qc
 from pts.transformers.credible_set.validation import ValidationSettings, validation
+from pts.transformers.credible_set.variant_qc import variant_qc
 
 
 @pytest.fixture(scope='session')
@@ -113,3 +115,58 @@ def validate_source(tmp_path: Path) -> Callable[..., tuple[pl.LazyFrame, pl.Lazy
         return valid_set, valid_variant, excluded_set, excluded_variant
 
     return validate
+
+
+@pytest.fixture
+def qc_variants(tmp_path: Path) -> Callable[..., pl.LazyFrame]:
+    """Run variant QC on one source's credible set variants, as the task does; return what it writes."""
+    run = iter(range(1_000))
+
+    def qc(credible_set_variant: pl.LazyFrame, coverage: float = 0.95, pip_tolerance: float = 1e-4) -> pl.LazyFrame:
+        root = tmp_path / f'variant_qc_{next(run)}'
+        source = root / 'credible_set_variant'
+        source.mkdir(parents=True)
+        credible_set_variant.collect().write_parquet(source / 'part-0.parquet')
+        variant_qc(
+            source={'credible_set_variant': str(source)},
+            destination=str(root / 'out'),
+            settings={'coverage': coverage, 'pip_tolerance': pip_tolerance},
+            config=Mock(spec=Config, work_path=str(tmp_path), release_uri=None),
+        )
+        return pl.scan_parquet(root / 'out' / '*.parquet')
+
+    return qc
+
+
+@pytest.fixture
+def qc_sets(tmp_path: Path) -> Callable[..., pl.LazyFrame]:
+    """Run set QC on one source's credible sets, as the task does; return what it writes.
+
+    Without a study index, each set's study is in it with the set's own type (GWAS when it has
+    none), so only the checks of the set row flag it.
+    """
+    run = iter(range(1_000))
+
+    def qc(
+        credible_set: pl.LazyFrame, study: pl.LazyFrame | None = None, allowed_fm_methods: list[str] | None = None
+    ) -> pl.LazyFrame:
+        if study is None:
+            study = credible_set.select(
+                'studyId',
+                pl.col('studyType').fill_null('gwas'),
+                pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'),
+            ).unique()
+        root = tmp_path / f'set_qc_{next(run)}'
+        root.mkdir()
+        credible_set.collect().write_parquet(root / 'credible_set.parquet')
+        study.collect().write_parquet(root / 'study.parquet')
+        settings = {} if allowed_fm_methods is None else {'allowed_fm_methods': allowed_fm_methods}
+        set_qc(
+            source={'credible_set': str(root / 'credible_set.parquet'), 'study': str(root / 'study.parquet')},
+            destination=str(root / 'out'),
+            settings=settings,
+            config=Mock(spec=Config, work_path=str(tmp_path), release_uri=None),
+        )
+        return pl.scan_parquet(root / 'out' / '*.parquet')
+
+    return qc

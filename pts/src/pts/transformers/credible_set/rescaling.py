@@ -1,4 +1,11 @@
-"""The rescaled effect size of credible set variants, from their p-value, frequency and study design."""
+"""The rescaled effect size of credible set variants: effects on one scale, comparable across sources.
+
+Sources report effects on their own scales, or not at all. The rescaled effect is derived instead
+from what every source reports: the p-value gives the strength of the association, and the allele
+frequency, sample size and study design give the standard error of a per-allele effect on the
+trait's scale (standard deviations, or the log-odds). The sign comes from the conditional effect,
+else the reported one. `rescaled_effect_size` sets it on every variant it can.
+"""
 
 from __future__ import annotations
 
@@ -6,55 +13,20 @@ import polars as pl
 from scipy.stats import chi2
 
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
-from pts.transformers.credible_set.study_lookup import study_of_set
+from pts.transformers.credible_set.source import study_of_set
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.quality_flags import flag_rows
 
-CHI2_EXACT_MIN_EXPONENT = -300
+_CHI2_EXACT_MIN_EXPONENT = -300
 """The smallest p-value exponent with an exact chi-squared statistic; below it the p-value underflows."""
-CHI2_APPROXIMATION_SLOPE = 4.596
+
+
+_CHI2_APPROXIMATION_SLOPE = 4.596
 """The slope of the linear approximation of the chi-squared statistic from -log10(p), a constant."""
-CHI2_APPROXIMATION_INTERCEPT = -5.367
+
+
+_CHI2_APPROXIMATION_INTERCEPT = -5.367
 """The intercept of the linear approximation of the chi-squared statistic from -log10(p), a constant."""
-
-
-def _finite(value: pl.Expr) -> pl.Expr:
-    """`value` as a float, null when it is missing, NaN or infinite."""
-    value = value.cast(pl.Float64)
-    return pl.when(value.is_finite()).then(value)
-
-
-def _signed(beta: pl.Expr) -> pl.Expr:
-    """`beta` as a float, null when it has no direction: missing, NaN, infinite or zero."""
-    beta = _finite(beta)
-    return pl.when(beta != 0).then(beta)
-
-
-def _chi2_isf(p_value: pl.Series) -> pl.Series:
-    """The exact chi-squared statistic (1 degree of freedom) of each p-value, null when it is not finite."""
-    statistic = pl.Series(chi2.isf(p_value.to_numpy(), df=1))
-    return statistic.set(~statistic.is_finite(), None)
-
-
-def chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
-    """The chi-squared statistic (1 degree of freedom) of a p-value given as mantissa and exponent.
-
-    From `CHI2_EXACT_MIN_EXPONENT` up it is the inverse survival function of the chi-squared
-    distribution. Below it, where the p-value underflows, it is the linear approximation
-    `CHI2_APPROXIMATION_SLOPE * -log10(p) + CHI2_APPROXIMATION_INTERCEPT`, whose slope 4.596 and
-    intercept -5.367 are constants. It is null when the p-value is missing or invalid.
-
-    Examples:
-        >>> frame = pl.DataFrame({'mantissa': [5.0, 9.0, 9.0, None], 'exponent': [-8, -300, -301, -8]})
-        >>> frame.select(chi2_from_pvalue(pl.col('mantissa'), pl.col('exponent')).round(2))['chi2'].to_list()
-        [29.72, 1369.48, 1373.64, None]
-    """
-    neglog = -(mantissa.cast(pl.Float64).log10() + exponent)
-    approximation = neglog * CHI2_APPROXIMATION_SLOPE + CHI2_APPROXIMATION_INTERCEPT
-    p_value = mantissa.cast(pl.Float64) * pl.lit(10.0).pow(exponent)
-    # the Python function appears once in the plan: the optimiser does not share it between uses
-    exact = p_value.map_batches(_chi2_isf, return_dtype=pl.Float64, is_elementwise=True)
-    return pl.when(exponent < CHI2_EXACT_MIN_EXPONENT).then(_finite(approximation)).otherwise(exact).alias('chi2')
 
 
 def rescaled_effect_size(
@@ -62,7 +34,7 @@ def rescaled_effect_size(
 ) -> pl.LazyFrame:
     """Set the rescaled effect size of every variant from its p-value, frequency and study design.
 
-    `|z|` is the square root of `chi2_from_pvalue`, `varG = 2 * AF * (1 - AF)` and N is the study
+    `|z|` is the square root of `_chi2_from_pvalue`, `varG = 2 * AF * (1 - AF)` and N is the study
     `nSamples`. The trait class comes from the study design flag:
 
     - MEASUREMENT_STUDY_DESIGN, quantitative: `SE = sqrt(1 / (varG * N))`;
@@ -115,7 +87,7 @@ def rescaled_effect_size(
     )
     conditional_beta, reported_beta = _signed(pl.col('conditionalBeta')), _signed(pl.col('reportedBeta'))
     beta = pl.coalesce(conditional_beta, reported_beta)
-    z = chi2_from_pvalue(pl.col('pValueMantissa'), pl.col('pValueExponent')).sqrt()
+    z = _chi2_from_pvalue(pl.col('pValueMantissa'), pl.col('pValueExponent')).sqrt()
     rescalable = (
         af.is_between(0, 1, closed='none') & (n > 0) & beta.is_not_null() & z.is_not_null() & standard_error.is_finite()
     ).fill_null(False)
@@ -139,3 +111,42 @@ def rescaled_effect_size(
         .pipe(flag_rows, pl.col('_rescaled') & ~conditional, CredibleSetVariantFlag.RESCALED_FROM_MARGINAL)
         .select(credible_set_variant.collect_schema().names())
     )
+
+
+def _chi2_from_pvalue(mantissa: pl.Expr, exponent: pl.Expr) -> pl.Expr:
+    """The chi-squared statistic (1 degree of freedom) of a p-value given as mantissa and exponent.
+
+    From `_CHI2_EXACT_MIN_EXPONENT` up it is the inverse survival function of the chi-squared
+    distribution. Below it, where the p-value underflows, it is the linear approximation
+    `_CHI2_APPROXIMATION_SLOPE * -log10(p) + _CHI2_APPROXIMATION_INTERCEPT`, whose slope 4.596 and
+    intercept -5.367 are constants. It is null when the p-value is missing or invalid.
+
+    Examples:
+        >>> frame = pl.DataFrame({'mantissa': [5.0, 9.0, 9.0, None], 'exponent': [-8, -300, -301, -8]})
+        >>> frame.select(_chi2_from_pvalue(pl.col('mantissa'), pl.col('exponent')).round(2))['chi2'].to_list()
+        [29.72, 1369.48, 1373.64, None]
+    """
+    neglog = -(mantissa.cast(pl.Float64).log10() + exponent)
+    approximation = neglog * _CHI2_APPROXIMATION_SLOPE + _CHI2_APPROXIMATION_INTERCEPT
+    p_value = mantissa.cast(pl.Float64) * pl.lit(10.0).pow(exponent)
+    # the Python function appears once in the plan: the optimiser does not share it between uses
+    exact = p_value.map_batches(_chi2_isf, return_dtype=pl.Float64, is_elementwise=True)
+    return pl.when(exponent < _CHI2_EXACT_MIN_EXPONENT).then(_finite(approximation)).otherwise(exact).alias('chi2')
+
+
+def _chi2_isf(p_value: pl.Series) -> pl.Series:
+    """The exact chi-squared statistic (1 degree of freedom) of each p-value, null when it is not finite."""
+    statistic = pl.Series(chi2.isf(p_value.to_numpy(), df=1))
+    return statistic.set(~statistic.is_finite(), None)
+
+
+def _signed(beta: pl.Expr) -> pl.Expr:
+    """`beta` as a float, null when it has no direction: missing, NaN, infinite or zero."""
+    beta = _finite(beta)
+    return pl.when(beta != 0).then(beta)
+
+
+def _finite(value: pl.Expr) -> pl.Expr:
+    """`value` as a float, null when it is missing, NaN or infinite."""
+    value = value.cast(pl.Float64)
+    return pl.when(value.is_finite()).then(value)

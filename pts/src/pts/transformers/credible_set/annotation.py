@@ -1,4 +1,15 @@
-"""Annotate the validated credible sets and variants, and publish them."""
+"""Annotation: the fourth credible set stage, which annotates the validated sets and publishes them.
+
+`annotation` reads the validated sets and variants, applies one rule module after another, and
+writes the published datasets:
+
+- on the sets: their confidence (`confidence`), and the TRANS_QTL (`trans_qtl`) and REPLICATED
+  (`replication`) flags;
+- on the variants: their effect allele frequency (`allele_frequency`), then their rescaled effect
+  size (`rescaling`), which needs it.
+
+Each input dataset is read once and shared by every rule that uses it.
+"""
 
 from __future__ import annotations
 
