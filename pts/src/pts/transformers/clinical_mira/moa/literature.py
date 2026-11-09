@@ -126,9 +126,14 @@ def sentence_pass(
 
     Returns:
         The ``cd`` and ``gp`` directories.
+
+    Raises:
+        ValueError: If ``match_uri`` holds no parquet files.
     """
     fs, root = fsspec.core.url_to_fs(match_uri, **(storage_options or {}))
     files = sorted(fs.glob(root.rstrip('/') + '/*.parquet'))
+    if not files:
+        raise ValueError(f'no parquet files found under {match_uri}')
     cd_dir, gp_dir = scratch / 'cd', scratch / 'gp'
     cd_dir.mkdir(parents=True, exist_ok=True)
     gp_dir.mkdir(parents=True, exist_ok=True)

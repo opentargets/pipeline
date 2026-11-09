@@ -37,6 +37,7 @@ nlp = ["huggingface-hub>=2.0.0", "torch>=2.10.0", "transformers>=5.0.0"]
 llm = [
     "anthropic[google-cloud]>=2.5.0",
     "openai>=3.26.0",
+    "gcsfs>=2026.2.0",
 ]
 # image-only: pts clusters do not install it
 # xgboost-cpu has no macos wheels

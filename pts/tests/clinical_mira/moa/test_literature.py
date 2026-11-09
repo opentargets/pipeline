@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from pts.transformers.clinical_mira.moa import literature
 from pts.transformers.clinical_mira.moa.literature import (
@@ -148,3 +149,8 @@ def test_sentence_pass_skips_written_files(tmp_path: Path):
     write_match(match_dir / 'part-0001-x.snappy.parquet', 'changed')
     sentence_pass(str(match_dir), PARENTS, 2, scratch, None)
     assert marker.read_bytes() == b'sentinel'
+
+
+def test_sentence_pass_rejects_a_match_uri_without_parquet_files(tmp_path: Path):
+    with pytest.raises(ValueError, match='no parquet files found under'):
+        sentence_pass(str(tmp_path / 'missing'), PARENTS, 1, tmp_path / 'scratch', None)
