@@ -49,6 +49,7 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
         'pts_aact_moa',
         'pis_clinical_mining',
         'pts_clinical_mining_models',
+        'pis_moa_literature',
         'pts_moa_literature',
     ]
     assert config.step_definition('pts_aact_trial_extraction')['depends_on'] == ['pis_aact']
@@ -72,6 +73,7 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
         ('pts_aact_moa', aact),
         ('pis_clinical_mining', mining),
         ('pts_clinical_mining_models', mining),
+        ('pis_moa_literature', literature),
         ('pts_moa_literature', literature),
     ]:
         assert config.release_uri(step_name) == uri
@@ -189,11 +191,35 @@ def test_moa_literature_step_has_timeout_and_env(config: ClinicalStagingConfig) 
     assert list(config.step_config('pts_moa_literature')['steps']) == ['moa_literature']
 
 
-def test_moa_literature_has_no_staging_dependencies(config: ClinicalStagingConfig) -> None:
-    """moa_literature reads published releases, so it waits for no other step and none waits for it."""
-    assert not config.step_definition('pts_moa_literature').get('depends_on')
+def test_moa_literature_waits_for_its_input_copies_only(config: ClinicalStagingConfig) -> None:
+    """moa_literature waits for the pis copy of its inputs, which waits for nothing, and none waits for it."""
+    assert config.step_definition('pts_moa_literature')['depends_on'] == ['pis_moa_literature']
+    assert not config.step_definition('pis_moa_literature').get('depends_on')
+    assert list(config.step_config('pis_moa_literature')['steps']) == ['moa_literature']
     for step_name in config.steps():
         assert 'pts_moa_literature' not in (config.step_definition(step_name).get('depends_on') or [])
+
+
+def test_moa_literature_reads_the_paths_pis_copies_to(config: ClinicalStagingConfig) -> None:
+    """Resolved against their release URIs, the pis copy destinations are the pts sources."""
+    pis = config.step_config('pis_moa_literature')
+    scratchpad = pis['scratchpad']
+    copied = set()
+    for task in pis['steps']['moa_literature']:
+        destination = task['destination']
+        for key, value in scratchpad.items():
+            destination = destination.replace(f'${{{key}}}', str(value))
+        assert '${' not in destination
+        copied.add(f'{pis["release_uri"]}/{destination}')
+
+    pts = config.step_config('pts_moa_literature')
+    (task,) = pts['steps']['moa_literature']
+    read = {f'{pts["release_uri"]}/{path}' for path in task['source'].values()}
+
+    release = task['settings']['input_release']
+    root = f'gs://clinical_staging/literature/{config.staging_version}/input/literature/{release}'
+    assert copied == read == {f'{root}/match', f'{root}/drug_molecule'}
+    assert scratchpad['moa_literature_input_release'] == release
 
 
 def test_moa_literature_snapshot_lands_under_the_literature_root(config: ClinicalStagingConfig) -> None:

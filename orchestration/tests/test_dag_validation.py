@@ -106,11 +106,13 @@ def test_drug_mechanism_of_action_follows_its_candidate_inputs(dag_bag: DagBag) 
     dag.topological_sort()
 
 
-def test_moa_literature_runs_alone_with_its_timeout_and_env(dag_bag: DagBag) -> None:
-    """moa_literature has no upstream step, runs with its timeout and the Claude workspace, and gates nothing."""
+def test_moa_literature_waits_for_its_copies_with_its_timeout_and_env(dag_bag: DagBag) -> None:
+    """moa_literature waits for the pis copy of its inputs only, runs with its timeout and the Claude workspace,
+    and gates nothing."""
     dag = dag_bag.dags['clinical_staging']
     start = dag.get_task('pts_moa_literature.upload_config_pts_moa_literature')
-    assert not start.upstream_task_ids
+    assert start.upstream_task_ids == {'pis_moa_literature.end_pis_moa_literature'}
+    assert not dag.get_task('pis_moa_literature.upload_config_pis_moa_literature').upstream_task_ids
     run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_moa_literature.run_pts_moa_literature'))
     assert run.execution_timeout == timedelta(hours=30)
     assert run.container_env is not None

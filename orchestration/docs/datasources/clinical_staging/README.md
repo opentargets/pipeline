@@ -36,6 +36,7 @@ gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.par
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<staging_version>/{drug_entities,disease_entities}/<tag>/
+gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/{match,drug_molecule}/  # copies of the published release
 gs://clinical_staging/literature/<input_release>/moa_literature/<tag>/  # data.parquet + drugs.parquet + metadata.json
 ```
 
@@ -69,6 +70,17 @@ published release it reads instead,
    forward pass (`ner_model_batch_size`), the disease NER on one text at a
    time. It waits for `pts_aact_trial_models`, because both write the shared
    drug-entity store.
+6. `pis_moa_literature` — copies every parquet file of the literature match
+   (`gs://open-targets-data-releases/<input_release>/intermediate/literature/match`)
+   and the drug molecules (`.../<input_release>/output/drug_molecule`) of the
+   published release `moa_literature_input_release` in `pis/config.yaml` to
+   `input/literature/<input_release>/{match,drug_molecule}`, billing the
+   requester-pays reads to `open-targets-eu-dev`.
+7. `pts_moa_literature` (n2d-highmem-32) — reads those copies, at
+   `gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/`,
+   and publishes `gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`.
+   Its `input_release` setting in `pts/config.yaml` must equal
+   `moa_literature_input_release`.
 
 ## Upstream sources
 

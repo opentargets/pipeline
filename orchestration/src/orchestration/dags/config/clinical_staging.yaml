@@ -64,10 +64,16 @@ steps:
       - pts_aact_trial_models
     machine_type: 'n2d-standard-16'
 
+  # Copies the literature match and drug molecules of the published release moa_literature reads.
+  pis_moa_literature:
+    source: literature
+
   # Extracts the mechanisms of action the literature states for each clinical drug with Claude. Reads
-  # published releases only; its snapshot lands under gs://clinical_staging/literature/<release>.
+  # the copies of a published release; its snapshot lands under gs://clinical_staging/literature/<release>.
   pts_moa_literature:
     source: literature
+    depends_on:
+      - pis_moa_literature
     machine_type: 'n2d-highmem-32'
     execution_timeout_hours: 30
     service_account: clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com
