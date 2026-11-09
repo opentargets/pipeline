@@ -231,3 +231,56 @@ def test_the_variant_views_read_the_published_credible_sets_and_their_variants(s
     [view] = [spec for spec in parse_yaml(CONFIG_PATH)['steps'][step] if spec['name'] == task]
     assert view['source']['credible_set'] == 'output/credible_set'
     assert view['source']['credible_set_variant'] == 'output/credible_set_variant'
+
+
+CREDIBLE_SET_DATASETS = {
+    'intermediate/validated/credible_set',
+    'intermediate/validated/credible_set_variant',
+    'output/credible_set',
+    'output/credible_set_variant',
+}
+"""The credible sets and their variants as validation and annotation write them."""
+
+CONSUMER_TEST = {
+    'variant': 'test_variant_rows.py',
+    'credible_set.annotation': 'test_credible_set_stages.py',
+    'coding_variant': 'test_coding_variant.py',
+    'l2g_train': 'test_l2g_train.py',
+    'l2g_predict': 'test_l2g_predict.py',
+    'evidence.gwas_credible_sets': 'evidence/test_gwas_credible_sets.py',
+    'vep_view': 'test_vep_view.py',
+    'search': 'test_search_entrypoint.py',
+}
+"""The tests of every task that reads `CREDIBLE_SET_DATASETS`, which build their inputs as the producers write them."""
+
+
+def _paths(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return set().union(*(_paths(item) for item in value))
+    return set()
+
+
+def _consumers() -> set[str]:
+    """The transformers of every task in the config that reads `CREDIBLE_SET_DATASETS`."""
+    return {
+        spec['transformer']
+        for tasks in parse_yaml(CONFIG_PATH)['steps'].values()
+        for task in tasks
+        for spec in [task, *task.get('do', [])]
+        if 'transformer' in spec and _paths(spec.get('source')) & CREDIBLE_SET_DATASETS
+    }
+
+
+def test_every_task_reading_the_credible_sets_has_a_contract_test() -> None:
+    """A new reader of the credible sets fails here until its tests are listed in `CONSUMER_TEST`."""
+    assert _consumers() == set(CONSUMER_TEST)
+
+
+@pytest.mark.parametrize('consumer', sorted(CONSUMER_TEST))
+def test_the_tests_of_a_credible_set_reader_build_its_input_as_the_producers_write_it(consumer: str) -> None:
+    test_module = Path(__file__).parent / CONSUMER_TEST[consumer]
+    assert 'tests.credible_set_fixtures import' in test_module.read_text(), consumer

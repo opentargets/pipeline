@@ -11,6 +11,7 @@ from pts.transformers.l2g.features import FEATURES
 from pts.transformers.l2g.model import load_model, to_matrix
 from pts.transformers.l2g_train import l2g_train
 from pts.transformers.utils.dataset import scan_dataset
+from tests.credible_set_fixtures import published_credible_set
 
 
 @pytest.fixture
@@ -31,12 +32,12 @@ def workspace(tmp_path):
     (tmp_path / 'fm').mkdir()
     matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
 
-    credible = pl.DataFrame({
-        'id': loci,
-        'leadVariantId': [f'1_{i}_A_G' for i in range(40)],
-        'studyId': [f'GCST{i}' for i in range(40)],
-        'studyType': ['gwas'] * 40,
-    })
+    credible = published_credible_set(
+        *(
+            {'id': locus, 'leadVariantId': f'1_{i}_A_G', 'studyId': f'GCST{i}', 'studyType': 'gwas'}
+            for i, locus in enumerate(loci)
+        )
+    )
     (tmp_path / 'cs').mkdir()
     credible.write_parquet(tmp_path / 'cs' / 'part-0.parquet')
 

@@ -10,6 +10,7 @@ import yaml
 from pts.transformers.l2g.features import FEATURES
 from pts.transformers.l2g.model import DEFAULT_HYPERPARAMETERS, fit, save_model
 from pts.transformers.l2g_predict import build_output, l2g_predict
+from tests.credible_set_fixtures import published_credible_set
 
 
 def test_build_output_pins_the_release_schema() -> None:
@@ -57,10 +58,9 @@ def workspace(tmp_path):
     (tmp_path / 'fm').mkdir()
     matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
 
-    credible = pl.DataFrame({
-        'id': [f'sl{i}' for i in range(n)],
-        'studyType': ['gwas'] * (n - 10) + ['eqtl'] * 10,
-    })
+    credible = published_credible_set(
+        *({'id': f'sl{i}', 'studyType': 'gwas' if i < n - 10 else 'eqtl'} for i in range(n))
+    )
     (tmp_path / 'cs').mkdir()
     credible.write_parquet(tmp_path / 'cs' / 'part-0.parquet')
 
@@ -96,10 +96,7 @@ def multi_gene_workspace(tmp_path):
     (tmp_path / 'fm').mkdir()
     matrix.write_parquet(tmp_path / 'fm' / 'part-0.parquet')
 
-    credible = pl.DataFrame({
-        'id': [f'sl{i:02d}' for i in reversed(range(12))],
-        'studyType': ['gwas'] * 12,
-    })
+    credible = published_credible_set(*({'id': f'sl{i:02d}', 'studyType': 'gwas'} for i in reversed(range(12))))
     (tmp_path / 'cs').mkdir()
     credible.write_parquet(tmp_path / 'cs' / 'part-0.parquet')
 

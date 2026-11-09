@@ -4,6 +4,7 @@ import polars as pl
 import pytest
 
 from pts.transformers.l2g.gold_standard import annotate, parse_gold_standard
+from tests.credible_set_fixtures import published_credible_set
 
 CURATED = {
     'credibleSetId': ['sl1'],
@@ -36,12 +37,10 @@ def _feature_matrix() -> pl.LazyFrame:
 
 
 def _credible_set() -> pl.LazyFrame:
-    return pl.LazyFrame({
-        'id': ['sl1', 'sl2'],
-        'leadVariantId': ['1_1_A_G', '2_2_C_T'],
-        'studyId': ['GCST1', 'GCST2'],
-        'studyType': ['gwas', 'gwas'],
-    })
+    return published_credible_set(
+        {'id': 'sl1', 'leadVariantId': '1_1_A_G', 'studyId': 'GCST1', 'studyType': 'gwas'},
+        {'id': 'sl2', 'leadVariantId': '2_2_C_T', 'studyId': 'GCST2', 'studyType': 'gwas'},
+    ).lazy()
 
 
 def test_annotate_keeps_only_gold_standard_pairs() -> None:

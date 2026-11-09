@@ -1,11 +1,50 @@
-"""Three real credible sets and their variants, taken from the 2026-10 new-schema PIS inputs.
+"""Credible sets as their producers write them, for the stages and the tasks that read them.
+
+Three real credible sets and their variants, taken from the 2026-10 new-schema PIS inputs:
 
 - `ALT_CONTIG`: a GWAS Catalog curated top hit (`gcca`) with a member on an alternate contig.
 - `MHC`: a GWAS Catalog PICS set (`gcss_pics`) with its lead in the MHC region.
 - `CLEAN`: a FinnGen SuSiE set (`finngen`) that passes every check.
+
+`published_credible_set` and `published_credible_set_variant` build the datasets validation and
+annotation write, with every column and dtype: the tasks that read them are tested on these, so a
+change of either side breaks their tests.
 """
 
 from typing import Any
+
+import polars as pl
+
+from pts.schemas.credible_set import credible_set_variant_schema, validated_credible_set_schema
+
+
+def published_credible_set(*row: dict[str, Any]) -> pl.DataFrame:
+    """Credible sets as validation and annotation write them: every column, with its enum dtypes.
+
+    A column missing from a row is null, and `qualityControls` is empty.
+    """
+    return pl.DataFrame(
+        [
+            {name: {'qualityControls': [], **set_row}.get(name) for name in validated_credible_set_schema}
+            for set_row in row
+        ],
+        schema=validated_credible_set_schema,
+    )
+
+
+def published_credible_set_variant(*row: dict[str, Any]) -> pl.DataFrame:
+    """Credible set variants as validation and annotation write them: every column, with its dtypes.
+
+    A column missing from a row is null, and `qualityControls` is empty.
+    """
+    return pl.DataFrame(
+        [
+            {name: {'qualityControls': [], **variant_row}.get(name) for name in credible_set_variant_schema}
+            for variant_row in row
+        ],
+        schema=credible_set_variant_schema,
+    )
+
 
 ALT_CONTIG_SET: dict[str, Any] = {
     'id': '97a0793ea0f67c070ac3970f00bb39c4',
