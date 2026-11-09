@@ -212,26 +212,48 @@ def numbered(n, **kw):
     ]
 
 
-def test_select_is_deterministic_under_shuffle():
-    rows = [
+def tied_rows():
+    return [
+        sentence_row(text='tied duplicate text one about the drug', pub='4', pmid='4', h=4, mappedId='CHEMBL1S'),
+        sentence_row(text='tied duplicate text one about the drug', pub='4', pmid='4', h=4, mappedId='CHEMBL1'),
+        sentence_row(text='tied duplicate text two about the drug', pub='5', pmid='5', h=5, section='results'),
+        sentence_row(text='tied duplicate text two about the drug', pub='5', pmid='5', h=5, section='abstract'),
+        sentence_row(text='tied duplicate text three about the drug', pub='6', pmid='6', h=6, pmcid='PMC2'),
+        sentence_row(text='tied duplicate text three about the drug', pub='6', pmid='6', h=6, pmcid='PMC1'),
+        sentence_row(text='tied ranking text beta about the drug', pub='8', pmid='8', h=8),
+        sentence_row(text='tied ranking text alpha about the drug', pub='8', pmid='8', h=8),
         sentence_row(text='same text twice but different label here', label='B', h=1),
         sentence_row(text='same text twice but different label here', label='A', h=1),
-        sentence_row(text='same text twice in another publication', pub='2', pmid='2', h=2),
-        sentence_row(text='same text twice in another publication', pub='3', pmid='3', h=2),
         sentence_row(text='gene sentence one in publication nine', pub='9', pmid='9', h=3, genes=['G1']),
         sentence_row(text='cue sentence one in publication nine', pub='9', pmid='9', h=4, cue=True),
-        sentence_row(text='cue sentence two in publication nine', pub='9', pmid='9', h=5, cue=True),
-        sentence_row(text='tie sentence one in publication eight', pub='8', pmid='8', h=6, year=None),
-        sentence_row(text='tie sentence two in publication eight', pub='8', pmid='8', h=6, year=None),
         sentence_row(text='second drug sentence is long enough', parent='CHEMBL2', h=7),
-        *numbered(40),
+        *numbered(10),
     ]
-    expected = requests(select_sentences(sentence_frame(rows)), NAMES)
+
+
+def test_select_is_deterministic_under_shuffle():
+    rows = tied_rows()
+    expected = select_sentences(sentence_frame(rows))
+    expected_requests = requests(expected, NAMES)
+    survivors = expected.filter(pl.col('text').str.contains('tied duplicate')).sort('text')
+    assert survivors['mappedId'].to_list() == ['CHEMBL1', 'CHEMBL1', 'CHEMBL1']
+    assert survivors['section'].to_list() == ['abstract', 'abstract', 'abstract']
+    assert survivors['pmcid'].to_list() == [None, 'PMC1', None]
     rng = random.Random(3)
-    for _ in range(5):
+    for _ in range(20):
         shuffled = rows[:]
         rng.shuffle(shuffled)
-        assert requests(select_sentences(sentence_frame(shuffled)), NAMES).equals(expected)
+        got = select_sentences(sentence_frame(shuffled))
+        assert got.equals(expected)
+        assert requests(got, NAMES).equals(expected_requests)
+
+
+def test_select_orders_equal_ranking_keys_by_text():
+    out = select_sentences(sentence_frame(tied_rows())).filter(pl.col('text').str.contains('tied ranking'))
+    assert out['text'].to_list() == [
+        'tied ranking text alpha about the drug',
+        'tied ranking text beta about the drug',
+    ]
 
 
 def test_select_tiers_cue_gene_first():
@@ -405,3 +427,37 @@ def test_drug_with_only_null_year_docs_gets_no_request():
     ]
     out = requests(select_sentences(sentence_frame(rows)), NAMES)
     assert out['parent'].to_list() == ['CHEMBL2']
+
+
+def test_doc_without_an_id_excluded_from_request_sentences_and_key():
+    rows = [
+        sentence_row(text='identified sentence from publication one', pub='1', pmid='1'),
+        sentence_row(text='anonymous sentence without any id here', pub=None, pmid=None, pmcid=None, label='Other'),
+    ]
+    out = requests(select_sentences(sentence_frame(rows)), NAMES)
+    assert out['request'].to_list() == [
+        (
+            'Drug: aspirin\nNames of the drug in these sentences: Drug, Other\n\n'
+            'Trial ID: pmid1\nPublication year: 2020\nSentences:\nidentified sentence from publication one'
+        )
+    ]
+    assert [d['doc'] for d in out['docs'][0]] == ['pmid1']
+    assert [s['doc'] for s in out['sentences'][0]] == ['pmid1']
+    only_identified = requests(select_sentences(sentence_frame(rows[:1])), NAMES)
+    assert out['content_key'].to_list() == only_identified['content_key'].to_list()
+
+
+def test_drug_with_only_docs_without_an_id_gets_no_request():
+    rows = [sentence_row(text='anonymous sentence without any id here', pub=None, pmid=None, pmcid=None)]
+    assert requests(select_sentences(sentence_frame(rows)), NAMES).height == 0
+
+
+def test_sentences_of_a_doc_keep_picked_order_on_a_section_rank_tie():
+    rows = [
+        sentence_row(text='aaa plain sentence of the publication ok', h=1, srank=1),
+        sentence_row(text='zzz cue sentence of the publication ok', h=2, srank=1, cue=True),
+    ]
+    out = requests(select_sentences(sentence_frame(rows)), NAMES)
+    assert (
+        out['docs'][0][0]['text'] == 'zzz cue sentence of the publication ok\naaa plain sentence of the publication ok'
+    )

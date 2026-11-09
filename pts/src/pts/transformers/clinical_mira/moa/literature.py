@@ -239,9 +239,8 @@ def select_sentences(sentences: pl.DataFrame) -> pl.DataFrame:
             'srank',
             'year',
             'h',
-            'pub',
             'text',
-            descending=[False, False, False, True, False, False, False],
+            descending=[False, False, False, True, False, False],
             maintain_order=True,
         )
         .with_columns(nth_in_pub=pl.int_range(pl.len()).over('parent', 'pub', 'tier'))
@@ -279,7 +278,7 @@ def requests(picked: pl.DataFrame, names: pl.DataFrame) -> pl.DataFrame:
     """Build the extraction request of each drug from its selected sentences.
 
     Within a document the sentences keep the order of ``picked`` after a stable sort by section
-    rank. Documents are ordered by id. Documents without a publication year are left out of the
+    rank. Documents are ordered by id. Documents without a publication year or an id are left out of the
     request text, ``sentences``, ``docs`` and the content key (their drug names still appear in the
     names line). Drugs with no remaining document, and drugs whose parent is missing from
     ``names``, get no row.
@@ -308,7 +307,7 @@ def requests(picked: pl.DataFrame, names: pl.DataFrame) -> pl.DataFrame:
             + pl.col('sentences').list.join('\n'),
         )
     )
-    shown = pl.col('year').is_not_null()
+    shown = pl.col('year').is_not_null() & pl.col('doc').is_not_null()
     drugs = (
         docs
         .group_by('parent', maintain_order=True)
