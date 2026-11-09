@@ -2,7 +2,7 @@
 environment_specs:
   - name: Prod
     vars:
-      root_path: gs://ukb_ppp_eur_data
+      root_path: gs://ukb_ppp_eur_data/prod/20260526T131650/output
       date: '20250129'
       gentropy_ref: '2.0.2-rc.2'
   - name: Test
@@ -73,8 +73,8 @@ nodes:
       - finemapping_batch_job
     params:
       step: credible_set_qc
-      step.credible_sets_path: gs://ukb_ppp_eur_data/credible_set_datasets/susie/20250129
-      step.output_path: gs://ukb_ppp_eur_data/credible_set_clean/20250129
+      step.credible_sets_path: '{root_path}/credible_set_datasets/susie/{date}'
+      step.output_path: '{root_path}/credible_set_clean/{date}'
       step.p_value_threshold: 1.0e-5
       step.purity_min_r2: 0.25
       step.n_partitions: 50

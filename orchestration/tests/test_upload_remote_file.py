@@ -1,9 +1,8 @@
 """Tests for ``UploadRemoteFileOperator``.
 
-The operator stages a large remote artifact (the ~629 MB Spark-NLP fat jar) into
-GCS once per cluster. Its two risky behaviours are ``skip_if_exists`` — which
-must not trust an object just because the name matches — and cleanup of the
-temporary download, which is big enough to fill a worker's disk across retries.
+The operator stages a large remote artifact into GCS. Its two risky behaviours are
+``skip_if_exists`` — which must not trust an object just because the name matches — and
+cleanup of the temporary download, which is big enough to fill a worker's disk across retries.
 """
 
 import tempfile
@@ -15,8 +14,8 @@ import requests
 
 from orchestration.operators.gcs import UploadRemoteFileOperator
 
-DST = 'gs://opentargets-pipelines/up/pts/jars/spark-nlp-assembly-6.1.5.jar'
-SRC = 'https://s3.amazonaws.com/auxdata.johnsnowlabs.com/public/jars/spark-nlp-assembly-6.1.5.jar'
+DST = 'gs://opentargets-pipelines/up/bin/artifact.jar'
+SRC = 'https://example.org/artifacts/artifact.jar'
 PAYLOAD = b'jar-bytes'
 
 
@@ -62,9 +61,7 @@ def _staged(bucket: MagicMock, size: int, *, verified: int | None = None) -> Non
     bucket.get_blob.return_value = existing
 
 
-def _download(
-    http: MagicMock, body: bytes, content_length: int | None, encoding: str | None = None
-) -> None:
+def _download(http: MagicMock, body: bytes, content_length: int | None, encoding: str | None = None) -> None:
     r = MagicMock()
     r.__enter__.return_value = r
     headers = {} if content_length is None else {'Content-Length': str(content_length)}
@@ -107,7 +104,7 @@ def test_skips_when_existing_object_matches_source_size(gcs, http):
 def test_restages_when_existing_object_is_the_wrong_size(gcs, http):
     """A stale or truncated object under the right name must not be trusted.
 
-    The realistic trigger is a hand-staged jar of a different version sitting in
+    The realistic trigger is a hand-staged file of a different version sitting in
     the bucket under the name this run expects.
     """
     _staged(gcs, 999999)

@@ -6,6 +6,7 @@ import polars as pl
 
 from pts.transformers.search import search
 from pts.transformers.search.helpers import LIST_STR
+from tests.credible_set_fixtures import published_credible_set
 
 LABELLED = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
 IDENTIFIED = pl.List(pl.Struct({'id': pl.String, 'source': pl.String}))
@@ -83,7 +84,7 @@ def _build_release(root: Path) -> dict[str, str]:
         schema={'variantId': pl.String, 'rsIds': LIST_STR, 'hgvsId': pl.String, 'dbXrefs': IDENTIFIED,
                 'chromosome': pl.String, 'position': pl.Int32, 'transcriptConsequences': CONSEQUENCES},
     ))
-    paths['credible_sets'] = _write(root, 'credible_set', pl.DataFrame([{'studyId': 'S1'}]))
+    paths['credible_sets'] = _write(root, 'credible_set', published_credible_set({'id': 'cs1', 'studyId': 'S1'}))
     return paths
 
 

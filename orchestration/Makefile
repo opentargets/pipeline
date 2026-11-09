@@ -4,11 +4,12 @@ LOCAL_DEV_CREDENTIALS ?= ~/.config/gcloud/application_default_credentials.json
 ### HOUSEKEEPING TARGETS ###
 .PHONY: help clean clean-vm \
         test lint check local-airflow cloud-airflow tunnel \
-				upload-eqtl-catalogue-readme upload-ukb-ppp-bucket-readme \
+				upload-eqtl-catalogue-readme upload-ukb-ppp-readme \
 				upload-finngen-gwas-readme upload-finngen-multiome-readme \
+				upload-finngen-meta-three-way-readme \
 				upload-gwas-catalog-buckets-readme \
 				upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-				upload-finngen-meta-readme upload-decode-bucket-readme
+				upload-decode-readme upload-decode-smp-finemapping-readme upload-eqtlgen-readme upload-sle-map-readme upload-otar2065-microglia-readme
 
 help: ## Show the help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-36s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -79,11 +80,13 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/gnomad_data/gnomad_ingestion \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_finemapping \
 		datasources/ukb_ppp_eur_data/ukb_ppp_eur_harmonisation \
-		datasources/finngen_meta_data/finngen_ukb_mvp_meta \
-		datasources/finngen_data/finngen_gwas/finngen_ingestion \
+		datasources/finngen_data/meta/three-way/finngen_ukb_mvp_meta \
+		datasources/finngen_data/finngen_gwas/finngen_gwas_ingestion \
 		datasources/finngen_data/finngen_multiome/finngen_multiome_ingestion \
 		datasources/eqtl_catalogue_data/eqtl_catalogue_ingestion \
+		datasources/eqtl_catalogue_data/otar2065_microglia/otar2065_microglia_ingestion \
 		datasources/decode_data/decode_ingestion \
+		datasources/decode_data/decode_smp_finemapping/decode_smp_finemapping \
 		credible_set_qc/credible_set_qc \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
@@ -92,9 +95,9 @@ upload-eqtl-catalogue-readme: ## Upload the eqtl_catalogue_data readme to a run 
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtl-catalogue-readme BUCKET=gs://eqtl_catalogue_data/r8/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/eqtl_catalogue_data $(BUCKET)/docs
 
-upload-ukb-ppp-bucket-readme: ## Upload ukb_ppp_eur_data readme to the bucket
-	@gcloud storage rsync docs/datasources/ukb_ppp_eur_data gs://ukb_ppp_eur_data/docs
-	@gcloud storage rsync docs/credible_set_qc gs://ukb_ppp_eur_data/docs/credible_set_qc
+upload-ukb-ppp-readme: ## Upload the ukb_ppp_eur README.md to a run folder: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-ukb-ppp-readme BUCKET=gs://ukb_ppp_eur_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/ukb_ppp_eur_data/README.md $(BUCKET)/docs/README.md
 
 upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-gwas-readme BUCKET=gs://finngen_data/gwas/prod/<YYYYMMDDTHHMMSS>))
@@ -103,6 +106,10 @@ upload-finngen-gwas-readme: ## Upload the finngen gwas readme to a run folder: m
 upload-finngen-multiome-readme: ## Upload the finngen multiome readme to a run folder: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-multiome-readme BUCKET=gs://finngen_data/multiome/prod/<YYYYMMDDTHHMMSS>))
 	@gcloud storage rsync docs/datasources/finngen_data/finngen_multiome $(BUCKET)/docs
+
+upload-finngen-meta-three-way-readme: ## Upload the finngen three-way meta-analysis readme to a run folder: make upload-finngen-meta-three-way-readme BUCKET=gs://finngen_data/meta/three-way/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-finngen-meta-three-way-readme BUCKET=gs://finngen_data/meta/three-way/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/finngen_data/meta/three-way $(BUCKET)/docs
 
 upload-gwas-catalog-buckets-readme: ## Upload gwas_catalog readme to the bucket(s)
 	@gcloud storage rsync docs/datasources/gwas_catalog_data gs://gwas_catalog_inputs/docs
@@ -123,15 +130,26 @@ upload-gnomad-bucket-readme: ## Upload gnomad_data readme to the bucket
 upload-intervals-bucket-readme: ## Upload intervals readme to the bucket
 	@gcloud storage rsync docs/datasources/interval_data gs://interval_data/docs
 
-upload-finngen-meta-readme: ## Upload finngen-meta readme to the bucket
-	@gcloud storage rsync docs/datasources/finngen_meta_data gs://finngen_ukb_mvp_meta_data/docs
+upload-sle-map-readme: ## Upload the sle_map_data readme to a run folder: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/sle_map_data/README.md $(BUCKET)/docs/README.md
 
-upload-decode-bucket-readme: ## Upload decode_data readme to the bucket(s)
-	@gcloud storage rsync docs/datasources/decode_data gs://decode_data/docs
-	@gcloud storage rsync docs/datasources/decode_data gs://decode_inputs/docs
+upload-otar2065-microglia-readme: ## Upload the OTAR2065 microglia readme to a run folder: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/eqtl_catalogue_data/otar2065_microglia $(BUCKET)/docs
+
+upload-eqtlgen-readme: ## Upload the eqtlgen_data readme to a run folder: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-eqtlgen-readme BUCKET=gs://eqtlgen_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/eqtlgen_data/README.md $(BUCKET)/docs/README.md
+
+upload-decode-smp-finemapping-readme: ## Upload the decode smp fine-mapping readme to a run folder: make upload-decode-smp-finemapping-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-decode-smp-finemapping-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage rsync docs/datasources/decode_data/decode_smp_finemapping $(BUCKET)/docs
+
+upload-decode-readme: ## Upload the decode_data readme to a run folder: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>
+	$(if $(BUCKET),,$(error BUCKET is not set: make upload-decode-readme BUCKET=gs://decode_data/prod/<YYYYMMDDTHHMMSS>))
+	@gcloud storage cp docs/datasources/decode_data/README.md docs/datasources/decode_data/decode_ingestion.svg $(BUCKET)/docs/
 
 update-bucket-docs: ## Upload all datasource readmes to their buckets
-update-bucket-docs: upload-ukb-ppp-bucket-readme \
-									  upload-gwas-catalog-buckets-readme \
-										upload-gnomad-bucket-readme upload-intervals-bucket-readme \
-										upload-finngen-meta-readme upload-decode-bucket-readme
+update-bucket-docs: upload-gwas-catalog-buckets-readme \
+										upload-gnomad-bucket-readme upload-intervals-bucket-readme

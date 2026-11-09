@@ -11,62 +11,9 @@ steps:
         {spark.executor.memory: '22g', spark.executor.memoryOverhead: '4g', spark.executor.cores: '4', spark.memory.fraction: '0.8', spark.memory.storageFraction: '0.2'}
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.credible_set_variant_path: '{{release_uri}}/output/credible_set_variant'
       # OUTPUTS
       step.coloc_path: '{{release_uri}}/output/colocalisation'
-
-  variant_annotation:
-    cluster: false
-    google_batch_index_specs:
-      pointer: 'vep' # pointer to the vep manifest generator implementation.
-      max_task_count: 500 # Max number of tasks running in a single google batch job.
-      generator_specs:
-        generator_options:
-          # INPUTS
-          # Based on vcf_input_path, the job environment variables $INPUT_FILE and $OUTPUT_FILE are discovered.
-          vcf_input_path: &vep_input_uri '{{release_uri}}/intermediate/variant_partition/'
-          vep_cache_path: &vep_cache_uri 'gs://vep_cache_data/vep/cache'
-          # OUTPUTS
-          vep_output_path: &vep_output_uri '{{release_uri}}/intermediate/variant_annotation/'
-    google_batch:
-      job:
-        task_group:
-          parallelism: 500 # Max number of VEP tasks run at a time in parallel on all machines.
-          # 1, not 2: two co-resident VEP processes reading the remote-mounted cache
-          # put the VM under page-cache pressure until both stop making progress
-          # (opentargets/issues#4513). memory_mib is the wrong knob -- it is not heap.
-          task_count_per_node: 1 # Number of tasks running at the same time on a single machine.
-          task_environments:
-            # Populated at runtime by BatchIndexOperator with dictionaries
-            # containing $INPUT_FILE and $OUTPUT_FILE
-            environments: []
-          task_config:
-            max_retry_count: 2
-            max_run_duration: '2h'
-            instance_resource_spec:
-              cpu_milli: 2000
-              memory_mib: 2000
-              boot_disk_mib: 10000
-            runnable_spec:
-              image_uri: 'europe-west1-docker.pkg.dev/open-targets-eu-dev/vep/custom_ensembl_vep:{{vep_version}}'
-              entrypoint: /bin/bash
-              script_file: annotate_variants.sh # In src.orchestration.assets
-              script_variables: # variables templated into the script before execution.
-                cache_dir: &vep_cache_mount '/mnt/disks/share/cache/'
-                input_dir: &vep_input_mount '/mnt/disks/share/input/'
-                output_dir: &vep_output_mount '/mnt/disks/share/output/'
-            shared_volumes:
-              mounting_points:
-                - remote_uri: *vep_input_uri
-                  mount_point: *vep_input_mount
-                - remote_uri: *vep_output_uri
-                  mount_point: *vep_output_mount
-                - remote_uri: *vep_cache_uri
-                  mount_point: *vep_cache_mount
-        allocation:
-          instance:
-            machine_type: n1-standard-4
-            provisioning_model: STANDARD # Other options: SPOT (but careful with max_retry_count)
-        logs: {}
 
   l2g_feature_matrix:
     params:
@@ -75,6 +22,7 @@ steps:
       +step.session.extended_spark_conf: '{spark.sql.autoBroadcastJoinThreshold:''-1''}'
       # INPUTS
       step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.credible_set_variant_path: '{{release_uri}}/output/credible_set_variant'
       step.variant_index_path: '{{release_uri}}/output/variant'
       step.colocalisation_path: '{{release_uri}}/output/colocalisation'
       step.study_index_path: '{{release_uri}}/output/study'
@@ -83,4 +31,46 @@ steps:
       step.gene_interactions_path: '{{release_uri}}/output/interaction'
       # OUTPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+
+  l2g_effector_gene_list:
+    params:
+      step: effector_gene_list
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Keeps the top tier of every curated source and ClinVar pathogenic calls with stated criteria.
+      step.rare_variant_score_threshold: 0.91
+      # INPUTS
+      # Rare-variant evidence, one path per datasource; filtered on step.rare_variant_score_threshold.
+      step.rare_variant_evidence_paths:
+        - '{{release_uri}}/output/evidence_eva'
+        - '{{release_uri}}/output/evidence_genomics_england'
+        - '{{release_uri}}/output/evidence_clingen'
+        - '{{release_uri}}/output/evidence_gene2phenotype'
+        - '{{release_uri}}/output/evidence_orphanet'
+        - '{{release_uri}}/output/evidence_uniprot_variants'
+        - '{{release_uri}}/output/evidence_uniprot_literature'
+      step.clinical_evidence_path: '{{release_uri}}/output/evidence_clinical_precedence'
+      # Legacy OTG gold standard curation with remapped disease ids; pis_l2g stages it.
+      step.gold_standard_path: '{{release_uri}}/input/l2g/otg_gold_standard.json'
+      # OUTPUTS
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+
+  l2g_training_set:
+    params:
+      step: training_set
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Matches the old training set.
+      step.interaction_score_threshold: 0.8
+      # Keep only credible sets flagged REPLICATED by pts_credible_set_annotation. Required for production.
+      step.apply_replication_filter: true
+      # INPUTS
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+      # Validated credible sets; the training set keeps the ones flagged REPLICATED.
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.study_index_path: '{{release_uri}}/output/study'
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+      step.interaction_path: '{{release_uri}}/output/interaction'
+      # OUTPUTS
+      step.training_set_path: '{{release_uri}}/intermediate/l2g_training_set'
 

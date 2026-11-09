@@ -14,9 +14,7 @@ from airflow.task.trigger_rule import TriggerRule
 from airflow.utils.edgemodifier import Label
 
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
-from orchestration.models.batch import BatchIndexOperatorSpec, BatchJobOperatorSpec
 from orchestration.models.pts_step import PTSDataprocStep, pts_step_from_config
-from orchestration.operators.batch import BatchCollectOperator, BatchIndexOperator, BatchJobOperator
 from orchestration.operators.dataproc import (
     CreateClusterOperator,
     DeleteClusterOperator,
@@ -29,8 +27,8 @@ from orchestration.operators.differs.manifest_artifact_differ import ManifestArt
 from orchestration.operators.differs.spark_job_differ import SparkJobDiffer
 from orchestration.operators.differs.step_result_differ import StepResultDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
-from orchestration.operators.gcs import UploadFileOperator, UploadRemoteFileOperator, UploadStringOperator
-from orchestration.utils import clean_name, resolve_jar_staging, resource_name, strhash, to_yaml
+from orchestration.operators.gcs import UploadFileOperator, UploadStringOperator
+from orchestration.utils import resource_name, strhash, to_yaml
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
 from orchestration.utils.labels import Labels
 
@@ -148,7 +146,6 @@ with DAG(
     # ==============================================================================================
     def pts_stage() -> None:
         pts_clusters = {}  # map of cluster_name to a list of step_names
-        pts_cluster_spark_jars = {}  # map of cluster_name to its rendered spark.jars
         for step_name in config.steps('pts_'):
 
             @task_group(group_id=step_name)
@@ -190,7 +187,7 @@ with DAG(
                         container_scopes=config.service_account_extra_scopes,
                         container_files={config_uri: '/config.yaml'},
                         container_secret_files=step_definition.get('gce_secret_files'),
-                        work_disk_size_gb=config.pts_disk_size,
+                        work_disk_size_gb=s.disk_size,
                         boot_disk_size_gb=config.pts_boot_disk_size,
                         machine_type=s.machine_type,
                         source_image=config.cos_image,
@@ -236,14 +233,6 @@ with DAG(
                     steps_in_cluster = pts_clusters.get(cluster_name, [])
                     pts_clusters[cluster_name] = [*steps_in_cluster, step_name]
 
-                    # The jar a cluster needs is staged once for the whole cluster,
-                    # not once per step — see the staging loop after this one. The
-                    # step only records the tasks that loop wires itself between.
-                    cluster_props = s.cluster_definition.config.get('properties', {})
-                    pts_cluster_spark_jars[cluster_name] = str(
-                        cluster_props.get('spark:spark.jars', '')
-                    )
-
                     chain(u, Label('dataproc pts step'), u2, c, r)
 
                 e = EmptyOperator(
@@ -263,60 +252,11 @@ with DAG(
 
             pts_step(step_name)
 
-        # stage a cluster's jars once, before that cluster is created
-        #
-        # Jars a cluster references via spark.jars are staged into the pipelines
-        # bucket (skipped when already there), then read from GCS at submit time
-        # instead of being resolved from Maven Central on every spark-submit.
-        # Resolved from the rendered spark.jars value against the `staged_jars`
-        # registry, so every such jar on every cluster (currently the Spark-NLP
-        # fat jar on `pts`) is covered automatically; a GCS
-        # jar with no registered source fails the DAG at parse time.
-        #
-        # One task per destination object, not per step and not per cluster: the
-        # steps of a cluster share the one object, and so do the clusters —
-        # any clusters that point spark.jars at the same jar share it. Staging per
-        # step meant ~60 tasks racing to download the same ~629 MB artifact; per
-        # cluster still left two, and two unsynchronised writers can replace the
-        # object with a new generation while a cluster created by the other one is
-        # already reading it.
-        staged: dict[tuple[str, str], UploadRemoteFileOperator] = {}
-        for cluster_name, steps_in_cluster in pts_clusters.items():
-            dataproc_steps = [s_n for s_n in steps_in_cluster if 'create_cluster' in steps[s_n]]
-            for src_url, dst_uri in resolve_jar_staging(
-                pts_cluster_spark_jars.get(cluster_name, ''),
-                config.staged_jars,
-                config.staged_jar_prefix,
-            ):
-                stage = staged.get((src_url, dst_uri))
-                if stage is None:
-                    # A root task, deliberately: the steps depend on each other, so
-                    # hanging one shared task off every step's upload would close a
-                    # cycle (step B's upload -> stage -> step A's cluster -> ... ->
-                    # step B's upload). Staging has no inputs anyway, and after the
-                    # first run it is an existence check.
-                    stage = UploadRemoteFileOperator(
-                        task_id=f'stage_jar_{clean_name(dst_uri.rsplit("/", 1)[-1])}',
-                        src_url=src_url,
-                        dst_uri=dst_uri,
-                        skip_if_exists=True,
-                        # The DAG's default_args set retries=0, which suits tasks
-                        # whose failure is local to one step. This one gates every
-                        # cluster creation, so a single reset mid-transfer from a
-                        # third-party host would otherwise take down the whole PTS
-                        # stage — where an Ivy failure used to cost one job.
-                        retries=3,
-                        retry_delay=timedelta(minutes=2),
-                    )
-                    staged[(src_url, dst_uri)] = stage
-                for step_name in dataproc_steps:
-                    stage.set_downstream(steps[step_name]['create_cluster'])
-
         # upload the init action the pts clusters run, once, before any of them is created
         #
-        # A root task for the same reason as the jar staging above. The clusters
-        # read it from this run's prefix, so a cluster always installs pts with the
-        # script of the orchestration version that created it.
+        # A root task: hanging it off the steps' uploads would close a cycle. The
+        # clusters read it from this run's prefix, so a cluster always installs pts
+        # with the script of the orchestration version that created it.
         init_action = UploadFileOperator(
             task_id='upload_pts_init_action',
             project_id=GCP_PROJECT_PLATFORM,
@@ -352,25 +292,21 @@ with DAG(
     # We can get rid of this once we work on https://github.com/opentargets/issues/issues/3652
     # ==============================================================================================
     def gsp(step_name: str, param_name: str) -> dict[str, Any]:
-        step_config = config.step_specific_config(step_name)
-        if 'google_batch_index_specs' in step_config:
-            batch_index_specs = step_config.get('google_batch_index_specs', {})
-            manifest_generator_specs = batch_index_specs.get('manifest_generator_specs', {})
-            step_params = manifest_generator_specs.get('options', {})
-        else:
-            step_params = step_config.get('params', {})
-        return step_params.get(param_name)
+        return config.step_specific_config(step_name).get('params', {}).get(param_name)
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
             'gentropy_colocalisation': {
                 'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
             },
-            'gentropy_variant_annotation': {
-                'vep_output_path': gsp('gentropy_variant_annotation', 'vep_output_path'),
-            },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
+            },
+            'gentropy_l2g_effector_gene_list': {
+                'step.effector_gene_list_path': gsp('gentropy_l2g_effector_gene_list', 'step.effector_gene_list_path'),
+            },
+            'gentropy_l2g_training_set': {
+                'step.training_set_path': gsp('gentropy_l2g_training_set', 'step.training_set_path'),
             },
         }
 
@@ -379,14 +315,7 @@ with DAG(
             SparkJobDiffer(outputs=gentropy_step_outputs.get(step_name)),
         ]
 
-        gentropy_step_differs: dict[str, list[Differ]] = {
-            'gentropy_variant_annotation': [
-                ConfigDiffer(),
-                # TODO: What else can we check in here?
-            ],
-        }
-
-        return gentropy_step_differs.get(step_name, default_differs)
+        return default_differs
 
     # ==============================================================================================
     # GENTROPY stage of the DAG — two paths
@@ -394,8 +323,8 @@ with DAG(
     # 1.
     #   d. Diff   — the state and decide the step needs to run.
     #   u. Upload — the step's config to GCS.
-    #   c. create — cluster cluster in dataproc, or do nothing if the step does not run on a cluster.
-    #   r.  Run   — the step on the cluster from task `c`, or using custom operators.
+    #   c. create — the step's cluster in dataproc.
+    #   r.  Run   — the step on the cluster from task `c`.
     #   e.  End            — the step (does nothing).
     #
     # 2.
@@ -429,61 +358,34 @@ with DAG(
                     overwrite=True,
                 )
 
-                # find what cluster type the step runs on, if any
+                # find what cluster type the step runs on
                 cluster_definition = config.step_cluster_definition(step_name)
-                if cluster_definition:
-                    cluster_name = cluster_definition.cluster_type
+                if cluster_definition is None:
+                    raise ValueError(f'{step_name} has no cluster: the unified pipeline runs gentropy on Dataproc')
+                cluster_name = cluster_definition.cluster_type
 
-                    c = CreateClusterOperator(
-                        task_id=f'cluster_create_{cluster_name}',
-                        cluster_name=resource_name(cluster_name),
-                        cluster_config=cluster_definition.cluster_config,
-                        labels=labels,
-                    )
-                    # add the run task to the proper cluster list in the gentropy_clusters dict
-                    steps_in_cluster = gentropy_clusters.get(cluster_name, [])
-                    gentropy_clusters[cluster_name] = [*steps_in_cluster, step_name]
+                c = CreateClusterOperator(
+                    task_id=f'cluster_create_{cluster_name}',
+                    cluster_name=resource_name(cluster_name),
+                    cluster_config=cluster_definition.cluster_config,
+                    labels=labels,
+                )
+                # add the run task to the proper cluster list in the gentropy_clusters dict
+                steps_in_cluster = gentropy_clusters.get(cluster_name, [])
+                gentropy_clusters[cluster_name] = [*steps_in_cluster, step_name]
 
-                    r = SubmitJobOperator(
-                        task_id=f'run_{step_name}',
-                        cluster_name=resource_name(cluster_name),
-                        step_name=step_name,
-                        py_spark_job=GentropyJobBuilder(
-                            main_python_file_uri=config.gentropy_main_python_file_uri,
-                            params=config.step_specific_config(step_name).get('params'),
-                            properties=config.step_job_properties(step_name),
-                        ).build(),
-                        labels=labels,
-                    )
-                    gentropy_steps[step_name] = r
-                else:
-                    c = EmptyOperator(task_id='skip_cluster')
-
-                    @task_group(group_id=step_name + '_batch_jobs')
-                    def batch_jobs(step_name: str) -> None:
-                        batch_job_spec = BatchJobOperatorSpec(
-                            **config.step_specific_config(step_name).get('google_batch', {})
-                        )
-                        i = BatchIndexOperator(
-                            task_id=f'generate_manifest_{step_name}',
-                            batch_index_specs=BatchIndexOperatorSpec(
-                                **config.step_specific_config(step_name).get('google_batch_index_specs', {})
-                            ),
-                        )
-                        b = BatchJobOperator.partial(
-                            job_name=resource_name(step_name),
-                            task_id=f'run_{step_name}',
-                            batch_job_spec=batch_job_spec,
-                            project_id=GCP_PROJECT_PLATFORM,
-                            labels=labels,
-                        ).expand(batch_index_row=i.output)
-                        bc = BatchCollectOperator(
-                            task_id=f'collect_{step_name}',
-                            collect_spec=batch_job_spec.collect,
-                        )
-                        chain(i, b, bc)
-
-                    r = batch_jobs(step_name)
+                r = SubmitJobOperator(
+                    task_id=f'run_{step_name}',
+                    cluster_name=resource_name(cluster_name),
+                    step_name=step_name,
+                    py_spark_job=GentropyJobBuilder(
+                        main_python_file_uri=config.gentropy_main_python_file_uri,
+                        params=config.step_specific_config(step_name).get('params'),
+                        properties=config.step_job_properties(step_name),
+                    ).build(),
+                    labels=labels,
+                )
+                gentropy_steps[step_name] = r
 
                 e = EmptyOperator(
                     task_id=f'end_{step_name}',

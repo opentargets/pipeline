@@ -51,3 +51,25 @@ def test_every_gce_task_matches_its_step(dag_bag, config: UnifiedPipelineConfig)
         )
         checked += 1
     assert checked > 1, f'expected several gce steps, checked {checked}'
+
+
+def test_step_without_a_disk_size_uses_the_default(config: UnifiedPipelineConfig) -> None:
+    """Most steps must keep the shared work disk size."""
+    step = pts_step_from_config('pts_target', config)
+    assert step.disk_size == config.pts_disk_size
+
+
+def test_every_gce_task_gets_its_step_disk_size(dag_bag, config: UnifiedPipelineConfig) -> None:
+    """Every GCE task must carry the work disk size its step resolves."""
+    dag = dag_bag.dags['unified_pipeline']
+    checked = 0
+    for step_name in config.steps('pts_'):
+        step = pts_step_from_config(step_name, config)
+        if not step.is_gce:
+            continue
+        task = dag.get_task(f'{step_name}.run_{step_name}')
+        assert task.work_disk_size_gb == step.disk_size, (
+            f'{step_name}: task has {task.work_disk_size_gb}, step resolves {step.disk_size}'
+        )
+        checked += 1
+    assert checked > 1, f'expected several gce steps, checked {checked}'

@@ -1,7 +1,10 @@
 """Tests for the drug_molecule transformer."""
 
+from unittest.mock import Mock
+
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.schemas.disease import schema as disease_index_schema
 from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
@@ -10,6 +13,7 @@ from pts.transformers.drug_molecule import (
     _generate_description,
     _join_semantic,
     _process_clinical_report_indications,
+    drug_molecule,
     process_drug_index,
 )
 
@@ -438,3 +442,47 @@ class TestProcessDrugIndex:
         molblocks = _by_id(drug_index_result, 'molblock')
         assert molblocks['CHEMBL1'] == 'MOLBLOCK_CHEMBL1'
         assert molblocks['CHEMBL2'] is None
+
+
+# --- Tests for the drug_molecule step ---
+
+
+def test_step_excludes_reports_with_an_invalid_qc_flag(
+    tmp_path, molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df
+):
+    """A report with a listed flag goes to `excluded` and sets no stage; an unlisted flag keeps the report."""
+    flagged = _report(
+        'flagged', 'PHASE_4', [('Drug C', 'CHEMBL3')], [('Disease X', 'EFO_0001')], ['PHASE_IV_NOT_APPROVED']
+    )
+    unlisted = _report('unlisted', 'PHASE_4', [('Drug B', 'CHEMBL2')], [('Disease Y', 'EFO_0002')], ['NO_DISEASE'])
+    reports = pl.concat([
+        clinical_report_df,
+        pl.DataFrame([flagged, unlisted], schema=CLINICAL_REPORT_SCHEMA, orient='row'),
+    ])
+    frames = {
+        'molecule': molecule_df,
+        'chemical_probes': chemical_probes_df,
+        'mechanism_of_action': mechanism_df,
+        'clinical_report': reports,
+        'disease': disease_df,
+    }
+    source = {}
+    for name, frame in frames.items():
+        path = tmp_path / f'{name}.parquet'
+        frame.write_parquet(path)
+        source[name] = str(path)
+    destination = {'output': str(tmp_path / 'output'), 'excluded': str(tmp_path / 'excluded')}
+
+    drug_molecule(
+        source=source,
+        destination=destination,
+        settings={'invalid_clinical_report_qc': ['PHASE_IV_NOT_APPROVED']},
+        config=Mock(spec=Config),
+    )
+
+    output = pl.read_parquet(list((tmp_path / 'output').glob('*.parquet')))
+    excluded = pl.read_parquet(list((tmp_path / 'excluded').glob('*.parquet')))
+    assert excluded['id'].to_list() == ['flagged']
+    stages = _by_id(output, 'maximumClinicalStage')
+    assert stages['CHEMBL3'] == 'PHASE_1'
+    assert stages['CHEMBL2'] == 'APPROVAL'

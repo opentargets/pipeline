@@ -1,0 +1,8 @@
+# Copyright 2023 DeepMind Technologies Limited
+#
+# Licensed under CC BY-NC-SA 4.0 license
+#CHROM	POS	REF	ALT	genome	transcript_id	protein_variant	am_pathogenicity	am_class
+chr1	69094	G	T	hg38	ENST00000641515.2	V23L	0.3037	likely_benign
+chr1	3426142	G	C	hg38	ENST00000511072.5	E1068D	0.4458	ambiguous
+chr1	3426142	G	C	hg38	ENST00000378391.6	E1067D	0.4743	ambiguous
+chr1	12746434	T	A	hg38	ENST00000614859.5	F2I	0.1341	likely_benign
