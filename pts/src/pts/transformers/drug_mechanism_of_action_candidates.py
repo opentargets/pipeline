@@ -275,5 +275,5 @@ def build_literature_candidates(
         report_min_confidence=report_min_confidence,
         suggestion_min_confidence=suggestion_min_confidence,
     )
-    cited = pl.col('evidence').list.eval(pl.element().struct.field('nctId'))
+    cited = pl.col('evidence').list.eval(pl.element().struct.field('nctId').str.to_lowercase())
     return _candidates(_with_family(grounded, chembl_molecule), SOURCE_LITERATURE, cited)

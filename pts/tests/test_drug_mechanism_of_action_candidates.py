@@ -362,3 +362,12 @@ def test_literature_candidates_are_filtered_and_grounded_like_trial_text() -> No
     )
 
     assert _build_literature(moa)['mechanismOfAction'].to_list() == ['kept']
+
+
+def test_literature_doc_ids_are_lower_cased() -> None:
+    moa = _literature(_paper(evidence=[{'nctId': 'PMID22', 'quote': 'p22'}, {'nctId': 'PMC7', 'quote': 'p7'}]))
+
+    row = _build_literature(moa).row(0, named=True)
+
+    assert row['docIds'] == ['pmc7', 'pmid22']
+    assert row['quoteDocId'] == 'pmid22'

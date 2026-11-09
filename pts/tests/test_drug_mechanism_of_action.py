@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.transformers import drug_mechanism_of_action as module
 from pts.transformers.clinical_mira.record_store import publish_snapshot
@@ -770,8 +771,8 @@ class TestMergeInferred:
             {'source': 'ClinicalTrials', 'ids': ['NCT02'], 'urls': ['https://clinicaltrials.gov/study/NCT02']},
             {
                 'source': 'PubMed',
-                'ids': ['22', '3'],
-                'urls': ['http://europepmc.org/abstract/MED/22', 'http://europepmc.org/abstract/MED/3'],
+                'ids': ['3', '22'],
+                'urls': ['http://europepmc.org/abstract/MED/3', 'http://europepmc.org/abstract/MED/22'],
             },
             {'source': 'PMC', 'ids': ['PMC7'], 'urls': ['http://europepmc.org/article/PMC/PMC7']},
         ]
@@ -812,6 +813,39 @@ class TestMergeInferred:
     def test_a_source_without_exclude_stages_raises(self, chembl: pl.DataFrame) -> None:
         with pytest.raises(ValueError, match='literature'):
             self.merge(chembl, candidate(), paper(), exclude_stages={'aact': ['APPROVAL']})
+
+    def test_trial_candidates_of_one_gene_set_union_their_trials(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.9, docIds=['NCT02'], mechanismOfAction='strong'),
+            candidate(confidence=0.85, docIds=['NCT01', 'NCT03'], mechanismOfAction='weaker'),
+        )
+        row = merged.tail(1).to_dicts()[0]
+        assert row['mechanismOfAction'] == 'strong'
+        assert row['references'] == [
+            {
+                'source': 'ClinicalTrials',
+                'ids': ['NCT01', 'NCT02', 'NCT03'],
+                'urls': [f'https://clinicaltrials.gov/study/NCT0{i}' for i in (1, 2, 3)],
+            }
+        ]
+
+    def test_pubmed_ids_sort_numerically(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(chembl, paper(docIds=['pmid22', 'pmid3', 'pmc10', 'pmc9']))
+        references = merged.tail(1)['references'].to_list()[0]
+        assert [(r['source'], r['ids']) for r in references] == [('PubMed', ['3', '22']), ('PMC', ['PMC10', 'PMC9'])]
+        assert references[0]['urls'] == ['http://europepmc.org/abstract/MED/3', 'http://europepmc.org/abstract/MED/22']
+
+    def test_a_candidate_without_a_known_doc_id_is_not_published(self, chembl: pl.DataFrame) -> None:
+        messages: list[str] = []
+        handler = logger.add(lambda message: messages.append(message.record['message']))
+        try:
+            merged, report = self.merge(chembl, paper(docIds=['doi10.1/x'], quoteDocId='doi10.1/x'))
+        finally:
+            logger.remove(handler)
+        assert merged.equals(chembl)
+        assert report['docIds'].to_list() == [['doi10.1/x']]
+        assert any('1 candidates' in m and 'no reference' in m for m in messages), messages
 
 
 LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))

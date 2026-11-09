@@ -81,6 +81,11 @@ def test_qc_release_filter_excludes_stages_per_source(tmp_path):
     assert '| literature | 1 | 0 |' in text
 
 
+def test_qc_rejects_a_repeated_exclude_stages_source(tmp_path):
+    with pytest.raises(SystemExit, match='aact'):
+        _qc(tmp_path, [], [], options=['--exclude-stages', 'aact:APPROVAL', 'aact:', 'literature:'])
+
+
 def test_release_filter_needs_every_source():
     candidates = pl.DataFrame(
         {'confidence': [0.9], 'maximumClinicalStage': ['PHASE_1'], 'source': ['literature']},

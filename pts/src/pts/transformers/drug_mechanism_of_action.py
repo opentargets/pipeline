@@ -256,7 +256,7 @@ def merge_inferred(
     is at least ``release_min_confidence`` and its stage is not excluded for its source. Of the
     published candidates of one drug and gene set, the most confident gives the row, and the
     doc ids of all of them give its references: NCT ids as ``ClinicalTrials``, ``pmid…`` ids as
-    ``PubMed`` and ``pmc…`` ids as ``PMC``.
+    ``PubMed`` and ``pmc…`` ids as ``PMC``. A row left with no reference is not published.
 
     Args:
         chembl_rows: Output of ``process_mechanism_of_action``.
@@ -279,20 +279,30 @@ def merge_inferred(
     eligible = classified.filter(
         (pl.col('category') == 'new_moa') & (pl.col('confidence') >= release_min_confidence) & ~excluded
     )
-    published = _most_confident(eligible, by_source=False).rechunk()
+    published = (
+        _most_confident(eligible, by_source=False).rechunk().with_columns(_references=_references(pl.col('docIds')))
+    )
     unknown = published.select(pl.col('docIds').list.eval(~_is_known_doc(pl.element())).list.sum().sum()).item()
     if unknown:
         logger.warning(f'{unknown} doc ids of published candidates are of no known kind and are not referenced')
-    appended = published.select(
-        'chemblIds',
-        'mechanismOfAction',
-        'actionType',
-        pl.col('targetFromSource').alias('targetName'),
-        'targetType',
-        'targets',
-        _references(pl.col('docIds')).alias('references'),
-        pl.lit(CURATION_ELECTRONIC).alias('curation'),
-    ).select([pl.col(name).cast(dtype) for name, dtype in chembl_rows.schema.items()])
+    unreferenced = published.filter(pl.col('_references').list.len() == 0).height
+    if unreferenced:
+        logger.warning(f'{unreferenced} candidates not published: they have no reference')
+    appended = (
+        published
+        .filter(pl.col('_references').list.len() > 0)
+        .select(
+            'chemblIds',
+            'mechanismOfAction',
+            'actionType',
+            pl.col('targetFromSource').alias('targetName'),
+            'targetType',
+            'targets',
+            pl.col('_references').alias('references'),
+            pl.lit(CURATION_ELECTRONIC).alias('curation'),
+        )
+        .select([pl.col(name).cast(dtype) for name, dtype in chembl_rows.schema.items()])
+    )
     return pl.concat([chembl_rows, appended]), report
 
 
@@ -363,9 +373,12 @@ def _is_known_doc(doc_id: pl.Expr) -> pl.Expr:
 
 
 def _references(doc_ids: pl.Expr) -> pl.Expr:
-    """One reference per kind of doc id present, ``ClinicalTrials``, then ``PubMed``, then ``PMC``."""
+    """One reference per kind of doc id present, ``ClinicalTrials``, then ``PubMed``, then ``PMC``.
 
-    def reference(source: str, url: str, prefix: str, transform: pl.Expr) -> pl.Expr:
+    PubMed ids sort by length, then as strings, which orders them as numbers; the others sort as strings.
+    """
+
+    def reference(source: str, url: str, prefix: str, transform: pl.Expr, numeric: bool = False) -> pl.Expr:
         ids = (
             doc_ids.list
             .eval(pl.element().filter(pl.element().str.starts_with(prefix)))
@@ -373,6 +386,8 @@ def _references(doc_ids: pl.Expr) -> pl.Expr:
             .list.unique()
             .list.sort()
         )
+        if numeric:
+            ids = ids.list.eval(pl.element().sort_by(pl.element().str.len_chars(), maintain_order=True))
         return pl.struct(
             pl.lit(source).alias('source'),
             ids.alias('ids'),
@@ -382,7 +397,7 @@ def _references(doc_ids: pl.Expr) -> pl.Expr:
     element = pl.element()
     return pl.concat_list(
         reference(CLINICAL_TRIALS_SOURCE, CLINICAL_TRIALS_URL, 'NCT', element),
-        reference(PUBMED_SOURCE, PUBMED_URL, 'pmid', element.str.strip_prefix('pmid')),
+        reference(PUBMED_SOURCE, PUBMED_URL, 'pmid', element.str.strip_prefix('pmid'), numeric=True),
         reference(PMC_SOURCE, PMC_URL, 'pmc', element.str.to_uppercase()),
     ).list.eval(pl.element().filter(pl.element().struct.field('ids').list.len() > 0))
 

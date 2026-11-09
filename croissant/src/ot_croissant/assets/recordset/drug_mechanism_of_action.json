@@ -11,7 +11,7 @@
   },
   {
     "id": "curation",
-    "description": "How the mechanism was curated: manual (ChEMBL) or electronic (inferred from ClinicalTrials.gov trial text by a language model)"
+    "description": "How the mechanism was curated: manual (ChEMBL) or electronic (inferred by a language model from ClinicalTrials.gov trial text or Europe PMC literature sentences)"
   },
   {
     "id": "mechanismOfAction",

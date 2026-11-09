@@ -303,6 +303,9 @@ def _exclude_stages(entries: list[str]) -> dict[str, list[str]]:
         if not separator or not source:
             msg = f'--exclude-stages entry {entry!r} is not source:STAGE[,STAGE...]'
             raise SystemExit(msg)
+        if source in excluded:
+            msg = f'--exclude-stages names source {source!r} more than once'
+            raise SystemExit(msg)
         excluded[source] = [stage for stage in stages.split(',') if stage]
     return excluded
 
