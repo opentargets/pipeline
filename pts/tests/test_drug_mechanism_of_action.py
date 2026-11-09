@@ -7,6 +7,8 @@ import polars as pl
 import pytest
 
 from pts.transformers import drug_mechanism_of_action as module
+from pts.transformers.clinical_mira.record_store import publish_snapshot
+from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action import (
     ORDER_BY,
     TABLES,
@@ -14,7 +16,7 @@ from pts.transformers.drug_mechanism_of_action import (
     _consolidate_duplicate_references,
     _with_target_chembl_id,
     drug_mechanism_of_action,
-    merge_aact,
+    merge_inferred,
     process_mechanism_of_action,
 )
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -37,16 +39,14 @@ MECHANISM_SCHEMA = {
 
 @pytest.fixture
 def tables() -> dict:
-    drug_mechanism = pl.DataFrame(
-        {
-            'mec_id': [100, 101],
-            'record_id': [1000, 1001],
-            'molregno': [1, 3],
-            'mechanism_of_action': ['Inhibits enzyme X', 'Blocks receptor'],
-            'tid': [20, 21],
-            'action_type': ['INHIBITOR', 'ANTAGONIST'],
-        }
-    )
+    drug_mechanism = pl.DataFrame({
+        'mec_id': [100, 101],
+        'record_id': [1000, 1001],
+        'molregno': [1, 3],
+        'mechanism_of_action': ['Inhibits enzyme X', 'Blocks receptor'],
+        'tid': [20, 21],
+        'action_type': ['INHIBITOR', 'ANTAGONIST'],
+    })
     mechanism_refs = pl.DataFrame({
         'mecref_id': [1, 2],
         'mec_id': [100, 100],
@@ -202,10 +202,7 @@ class TestCrossDrugReferenceCrosstalk:
     def test_neither_drug_inherits_the_other_s_references(self, shared_mechanism: dict) -> None:
         result = process_mechanism_of_action(**shared_mechanism)
         exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
-        urls = {
-            r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']})
-            for r in exploded.to_dicts()
-        }
+        urls = {r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']}) for r in exploded.to_dicts()}
         assert urls['CHEMBL1'] == ['http://fda/drug-one']
         assert urls['CHEMBL3'] == ['http://fda/drug-three']
 
@@ -301,16 +298,24 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -329,10 +334,14 @@ class TestConsolidateDuplicateReferences:
         df = pl.DataFrame(
             [
                 {
-                    'mechanismOfAction': 'Inhibits X', 'actionType': 'INHIBITOR',
-                    'chemblIds': ['CHEMBL1'], 'parentChemblId': 'CHEMBL1',
-                    'references': [], 'targetName': 'X',
-                    'targetType': 'single protein', 'targets': ['ENSG1'],
+                    'mechanismOfAction': 'Inhibits X',
+                    'actionType': 'INHIBITOR',
+                    'chemblIds': ['CHEMBL1'],
+                    'parentChemblId': 'CHEMBL1',
+                    'references': [],
+                    'targetName': 'X',
+                    'targetType': 'single protein',
+                    'targets': ['ENSG1'],
                 }
             ],
             schema=MECHANISM_SCHEMA,
@@ -354,16 +363,24 @@ class TestConsolidateDuplicateReferences:
         drug_b_refs = [{'source': 'FDA', 'ids': ['label-b'], 'urls': ['url-b']}]
         data = [
             {
-                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_A'], 'parentChemblId': 'CHEMBL_A',
-                'references': drug_a_refs, 'targetName': 'Enzyme X',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Inhibits enzyme X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_A'],
+                'parentChemblId': 'CHEMBL_A',
+                'references': drug_a_refs,
+                'targetName': 'Enzyme X',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_B_SALT', 'CHEMBL_B'], 'parentChemblId': 'CHEMBL_B',
-                'references': drug_b_refs, 'targetName': 'Enzyme X',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Inhibits enzyme X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_B_SALT', 'CHEMBL_B'],
+                'parentChemblId': 'CHEMBL_B',
+                'references': drug_b_refs,
+                'targetName': 'Enzyme X',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -383,28 +400,31 @@ class TestConsolidateDuplicateReferences:
         """A drug must never carry a reference belonging to a different drug."""
         data = [
             {
-                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_A'], 'parentChemblId': 'CHEMBL_A',
+                'mechanismOfAction': 'Inhibits enzyme X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_A'],
+                'parentChemblId': 'CHEMBL_A',
                 'references': [{'source': 'FDA', 'ids': ['label-a'], 'urls': ['url-a']}],
                 'targetName': 'Enzyme X',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Inhibits enzyme X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_B'], 'parentChemblId': 'CHEMBL_B',
+                'mechanismOfAction': 'Inhibits enzyme X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_B'],
+                'parentChemblId': 'CHEMBL_B',
                 'references': [{'source': 'FDA', 'ids': ['label-b'], 'urls': ['url-b']}],
                 'targetName': 'Enzyme X',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
 
         result = _consolidate_duplicate_references(df)
         exploded = result.explode('chemblIds', empty_as_null=True).rename({'chemblIds': 'drugId'})
-        urls = {
-            r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']})
-            for r in exploded.to_dicts()
-        }
+        urls = {r['drugId']: sorted({u for ref in r['references'] for u in ref['urls']}) for r in exploded.to_dicts()}
 
         assert urls['CHEMBL_A'] == ['url-a']
         assert urls['CHEMBL_B'] == ['url-b']
@@ -413,16 +433,24 @@ class TestConsolidateDuplicateReferences:
         """The anchor is the parent, so sibling salts still collapse onto one row."""
         data = [
             {
-                'mechanismOfAction': 'Inhibits X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_SALT_A', 'CHEMBL_PARENT'], 'parentChemblId': 'CHEMBL_PARENT',
+                'mechanismOfAction': 'Inhibits X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_SALT_A', 'CHEMBL_PARENT'],
+                'parentChemblId': 'CHEMBL_PARENT',
                 'references': [{'source': 'PubMed', 'ids': ['1'], 'urls': ['u1']}],
-                'targetName': 'X', 'targetType': 'single protein', 'targets': ['ENSG1'],
+                'targetName': 'X',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Inhibits X', 'actionType': 'INHIBITOR',
-                'chemblIds': ['CHEMBL_SALT_B', 'CHEMBL_PARENT'], 'parentChemblId': 'CHEMBL_PARENT',
+                'mechanismOfAction': 'Inhibits X',
+                'actionType': 'INHIBITOR',
+                'chemblIds': ['CHEMBL_SALT_B', 'CHEMBL_PARENT'],
+                'parentChemblId': 'CHEMBL_PARENT',
                 'references': [{'source': 'PubMed', 'ids': ['2'], 'urls': ['u2']}],
-                'targetName': 'X', 'targetType': 'single protein', 'targets': ['ENSG1'],
+                'targetName': 'X',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -437,16 +465,24 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Dopamine D2 receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': 'D2',
-                'targetType': 'single protein', 'targets': ['ENSG2'],
+                'mechanismOfAction': 'Dopamine D2 receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': 'D2',
+                'targetType': 'single protein',
+                'targets': ['ENSG2'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -464,16 +500,24 @@ class TestConsolidateDuplicateReferences:
         refs = [{'source': 'PubMed', 'ids': ['111'], 'urls': ['u1']}]
         data = [
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
             {
-                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist', 'actionType': 'ANTAGONIST',
-                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'], 'parentChemblId': 'CHEMBL479',
-                'references': refs, 'targetName': '5-HT2a',
-                'targetType': 'single protein', 'targets': ['ENSG1'],
+                'mechanismOfAction': 'Serotonin 2a (5-HT2a) receptor antagonist',
+                'actionType': 'ANTAGONIST',
+                'chemblIds': ['CHEMBL1200916', 'CHEMBL479'],
+                'parentChemblId': 'CHEMBL479',
+                'references': refs,
+                'targetName': '5-HT2a',
+                'targetType': 'single protein',
+                'targets': ['ENSG1'],
             },
         ]
         df = pl.DataFrame(data, schema=MECHANISM_SCHEMA)
@@ -549,10 +593,12 @@ CANDIDATE_SCHEMA = {
     'mechanismOfAction': pl.String,
     'confidence': pl.Float64,
     'statementType': pl.String,
-    'nctIds': pl.List(pl.String),
+    'source': pl.String,
+    'docIds': pl.List(pl.String),
     'quote': pl.String,
-    'quoteNctId': pl.String,
+    'quoteDocId': pl.String,
 }
+EXCLUDE_APPROVED = {'aact': ['APPROVAL'], 'literature': ['APPROVAL']}
 
 
 def candidate(**overrides: object) -> dict:
@@ -569,9 +615,10 @@ def candidate(**overrides: object) -> dict:
         'mechanismOfAction': 'Kinase K inhibitor',
         'confidence': 0.9,
         'statementType': 'explicit',
-        'nctIds': ['NCT01', 'NCT02'],
+        'source': 'aact',
+        'docIds': ['NCT01', 'NCT02'],
         'quote': 'inhibits K',
-        'quoteNctId': 'NCT01',
+        'quoteDocId': 'NCT01',
     }
     return row | overrides
 
@@ -580,13 +627,24 @@ def candidates_frame(*rows: dict) -> pl.DataFrame:
     return pl.DataFrame(list(rows), schema=CANDIDATE_SCHEMA)
 
 
-class TestMergeAact:
+def paper(**overrides: object) -> dict:
+    return candidate(source='literature', docIds=['pmid22'], quoteDocId='pmid22') | overrides
+
+
+class TestMergeInferred:
     @pytest.fixture
     def chembl(self, tables: dict) -> pl.DataFrame:
         return process_mechanism_of_action(**tables)
 
-    def merge(self, chembl: pl.DataFrame, *rows: dict, minimum: float = 0.8) -> tuple[pl.DataFrame, pl.DataFrame]:
-        return merge_aact(chembl, candidates_frame(*rows), minimum, ['APPROVAL'])
+    def merge(
+        self,
+        chembl: pl.DataFrame,
+        *rows: dict,
+        minimum: float = 0.8,
+        exclude_stages: dict[str, list[str]] | None = None,
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        excluded = EXCLUDE_APPROVED if exclude_stages is None else exclude_stages
+        return merge_inferred(chembl, candidates_frame(*rows), minimum, excluded)
 
     def test_without_aact_only_curation_is_added(self, tables: dict) -> None:
         result = process_mechanism_of_action(**tables)
@@ -628,7 +686,7 @@ class TestMergeAact:
         assert sorted(report['parentChemblId'].to_list()) == ['CHEMBL91', 'CHEMBL92']
         assert set(report['category'].to_list()) == {'new_moa'}
         assert report['chemblCurrentTargets'].to_list() == [[], []]
-        assert {'quote', 'confidence', 'nctIds'} <= set(report.columns)
+        assert {'quote', 'confidence', 'docIds', 'source'} <= set(report.columns)
 
     def test_aact_row_cites_its_trials(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(chembl, candidate(chemblIds=['CHEMBL90', 'CHEMBL93']))
@@ -677,14 +735,178 @@ class TestMergeAact:
         assert merged.height == chembl.height + 3
         assert not merged.select('chemblIds', 'mechanismOfAction', 'targets').is_duplicated().any()
 
+    def test_merge_without_literature_source_is_unchanged(self, chembl: pl.DataFrame) -> None:
+        merged, report = self.merge(
+            chembl,
+            candidate(),
+            candidate(parentChemblId='CHEMBL3', chemblIds=['CHEMBL3'], targets=['ENSG9']),
+            exclude_stages={'aact': ['APPROVAL']},
+        )
+        assert merged.head(chembl.height).equals(chembl)
+        assert merged.tail(1)['references'].to_list() == [
+            [
+                {
+                    'source': 'ClinicalTrials',
+                    'ids': ['NCT01', 'NCT02'],
+                    'urls': ['https://clinicaltrials.gov/study/NCT01', 'https://clinicaltrials.gov/study/NCT02'],
+                }
+            ]
+        ]
+        assert report.select('source', 'category').rows() == [('aact', 'new_moa'), ('aact', 'extra_target')]
+
+    def test_merge_unions_trial_and_paper_references(self, chembl: pl.DataFrame) -> None:
+        merged, report = self.merge(
+            chembl,
+            candidate(confidence=0.85, docIds=['NCT02'], mechanismOfAction='trial'),
+            paper(confidence=0.9, docIds=['pmid3', 'pmc7', 'pmid22'], targets=['ENSG9'], mechanismOfAction='paper'),
+            paper(confidence=0.8, docIds=['pmid4'], maximumClinicalStage='APPROVAL', mechanismOfAction='approved'),
+            candidate(confidence=0.5, docIds=['NCT77'], mechanismOfAction='weak'),
+        )
+        assert merged.height == chembl.height + 1
+        row = merged.tail(1).to_dicts()[0]
+        assert row['mechanismOfAction'] == 'paper'
+        assert row['curation'] == 'electronic'
+        assert row['references'] == [
+            {'source': 'ClinicalTrials', 'ids': ['NCT02'], 'urls': ['https://clinicaltrials.gov/study/NCT02']},
+            {
+                'source': 'PubMed',
+                'ids': ['22', '3'],
+                'urls': ['http://europepmc.org/abstract/MED/22', 'http://europepmc.org/abstract/MED/3'],
+            },
+            {'source': 'PMC', 'ids': ['PMC7'], 'urls': ['http://europepmc.org/article/PMC/PMC7']},
+        ]
+        assert sorted(report.select('source', 'mechanismOfAction').rows()) == [
+            ('aact', 'trial'),
+            ('literature', 'paper'),
+        ]
+
+    def test_merge_emits_pmc_reference_for_pmc_only_doc(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(chembl, paper(docIds=['pmc7'], quoteDocId='pmc7'))
+        assert merged.tail(1)['references'].to_list() == [
+            [{'source': 'PMC', 'ids': ['PMC7'], 'urls': ['http://europepmc.org/article/PMC/PMC7']}]
+        ]
+        assert merged.schema == chembl.schema
+
+    def test_exclude_stages_per_source(self, chembl: pl.DataFrame) -> None:
+        approved = paper(maximumClinicalStage='APPROVAL')
+        excluded, report = self.merge(chembl, approved)
+        published, _ = self.merge(chembl, approved, exclude_stages={'aact': ['APPROVAL'], 'literature': []})
+        assert excluded.equals(chembl)
+        assert report['source'].to_list() == ['literature']
+        assert published.height == chembl.height + 1
+        assert published.tail(1)['references'].to_list() == [
+            [{'source': 'PubMed', 'ids': ['22'], 'urls': ['http://europepmc.org/abstract/MED/22']}]
+        ]
+
+    def test_filtering_comes_before_deduplication(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.95, maximumClinicalStage='APPROVAL', mechanismOfAction='trial'),
+            paper(confidence=0.85, maximumClinicalStage='APPROVAL', mechanismOfAction='paper'),
+            exclude_stages={'aact': ['APPROVAL'], 'literature': []},
+        )
+        row = merged.tail(1).to_dicts()[0]
+        assert row['mechanismOfAction'] == 'paper'
+        assert [reference['source'] for reference in row['references']] == ['PubMed']
+
+    def test_a_source_without_exclude_stages_raises(self, chembl: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match='literature'):
+            self.merge(chembl, candidate(), paper(), exclude_stages={'aact': ['APPROVAL']})
+
+
+LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
+
+
+def _snapshot_moa(columns: dict) -> pl.DataFrame:
+    return pl.DataFrame({name: [None] for name in columns}, schema=columns)
+
 
 class TestEntryPoint:
     @pytest.fixture
     def staged(self, tables: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         monkeypatch.setattr(module, 'read_dump_tables', lambda *_a, **_k: tables)
-        write_dataset(tables['gene_df'], str(tmp_path / 'target'))
-        write_dataset(candidates_frame(candidate()), str(tmp_path / 'aact'))
-        return {'target': tmp_path / 'target', 'aact': tmp_path / 'aact', 'root': tmp_path}
+        target = tables['gene_df'].with_columns(
+            approvedSymbol=pl.lit('S'),
+            biotype=pl.lit('protein_coding'),
+            genomicLocation=pl.lit({'chromosome': '1', 'start': 1, 'end': 2, 'strand': 1}),
+            approvedName=pl.lit('n'),
+            symbolSynonyms=pl.lit([], dtype=LABELS),
+            obsoleteSymbols=pl.lit([], dtype=LABELS),
+            nameSynonyms=pl.lit([], dtype=LABELS),
+        )
+        write_dataset(target, str(tmp_path / 'target'))
+        write_dataset(
+            pl.DataFrame(
+                {'id': ['NCT1'], 'source': ['x'], 'drugs': [[]], 'clinicalStage': ['PHASE_1']},
+                schema={
+                    'id': pl.String,
+                    'source': pl.String,
+                    'drugs': pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String})),
+                    'clinicalStage': pl.String,
+                },
+            ),
+            str(tmp_path / 'clinical_report'),
+        )
+        write_dataset(
+            pl.DataFrame(
+                {'id': ['CHEMBL90'], 'parentId': [None], 'childChemblIds': [[]], 'drugType': ['Small molecule']},
+                schema={
+                    'id': pl.String,
+                    'parentId': pl.String,
+                    'childChemblIds': pl.List(pl.String),
+                    'drugType': pl.String,
+                },
+            ),
+            str(tmp_path / 'chembl_molecule'),
+        )
+        publish_snapshot(_snapshot_moa({'drugName': pl.String}), str(tmp_path / 'aact'), MOA.metadata('x'), None)
+        publish_snapshot(
+            _snapshot_moa({'drugId': pl.String}), str(tmp_path / 'literature'), MOA_LITERATURE.metadata('x'), None
+        )
+        calls: dict[str, dict] = {}
+
+        def fake(name: str, row: dict):
+            def build(moa: pl.DataFrame, *args: object, **kwargs: object) -> pl.DataFrame:
+                calls[name] = {'columns': moa.columns, 'args': args, 'kwargs': kwargs}
+                return candidates_frame(row)
+
+            return build
+
+        monkeypatch.setattr(module, 'build_trial_candidates', fake('aact', candidate()))
+        monkeypatch.setattr(
+            module,
+            'build_literature_candidates',
+            fake('literature', paper(parentChemblId='CHEMBL95', chemblIds=['CHEMBL95'], targets=['ENSG5'])),
+        )
+        return {
+            'chembl': Path('dump'),
+            'target': tmp_path / 'target',
+            'clinical_report': tmp_path / 'clinical_report',
+            'chembl_molecule': tmp_path / 'chembl_molecule',
+            'aact': tmp_path / 'aact',
+            'literature': tmp_path / 'literature',
+            'root': tmp_path,
+            'calls': calls,
+        }
+
+    @staticmethod
+    def settings() -> dict:
+        return {
+            'release_min_confidence': 0.8,
+            'exclude_stages': EXCLUDE_APPROVED,
+            'report_min_confidence': 0.7,
+            'link_share': 0.8,
+            'class_level_genes': 20,
+            'suggestion_min_confidence': 0.8,
+        }
+
+    @staticmethod
+    def sources(staged: dict, *names: str) -> dict:
+        return {name: staged[name] for name in ('chembl', 'target', 'clinical_report', 'chembl_molecule', *names)}
+
+    @staticmethod
+    def destinations(root: Path) -> dict:
+        return {'output': root / 'out', 'chembl_report': root / 'report', 'candidates': root / 'candidates'}
 
     def test_a_plain_destination_without_aact_writes_the_chembl_rows(self, staged: dict) -> None:
         out = staged['root'] / 'out'
@@ -695,13 +917,51 @@ class TestEntryPoint:
         assert result.height == 2
         assert set(result['curation']) == {'manual'}
 
-    def test_aact_source_and_report_destination_write_both_outputs(self, staged: dict) -> None:
-        out, report = staged['root'] / 'out', staged['root'] / 'report'
+    def test_without_either_source_no_candidates_are_written(self, staged: dict) -> None:
+        root = staged['root']
         drug_mechanism_of_action(
-            {'chembl': Path('dump'), 'target': staged['target'], 'aact': staged['aact']},
-            {'output': out, 'chembl_report': report},
-            {'release_min_confidence': 0.8, 'exclude_stages': ['APPROVAL']},
-            SimpleNamespace(work_path=staged['root']),
+            self.sources(staged), self.destinations(root), self.settings(), SimpleNamespace(work_path=root)
         )
-        assert sorted(scan_dataset(str(out)).collect()['curation'].to_list()) == ['electronic', 'manual', 'manual']
-        assert scan_dataset(str(report)).collect()['category'].to_list() == ['new_moa']
+        assert set(scan_dataset(str(root / 'out')).collect()['curation']) == {'manual'}
+        assert not (root / 'candidates').exists()
+        assert not (root / 'report').exists()
+        assert staged['calls'] == {}
+
+    def test_both_sources_write_candidates_report_and_output(self, staged: dict) -> None:
+        root = staged['root']
+        drug_mechanism_of_action(
+            self.sources(staged, 'aact', 'literature'),
+            self.destinations(root),
+            self.settings(),
+            SimpleNamespace(work_path=root),
+        )
+        out = scan_dataset(str(root / 'out')).collect()
+        assert sorted(out['curation'].to_list()) == ['electronic', 'electronic', 'manual', 'manual']
+        assert sorted(scan_dataset(str(root / 'candidates')).collect()['source'].to_list()) == ['aact', 'literature']
+        assert sorted(scan_dataset(str(root / 'report')).collect()['source'].to_list()) == ['aact', 'literature']
+        assert staged['calls']['aact']['columns'] == ['drugName']
+        assert staged['calls']['aact']['kwargs']['link_share'] == 0.8
+        assert staged['calls']['literature']['columns'] == ['drugId']
+        assert 'link_share' not in staged['calls']['literature']['kwargs']
+
+    def test_the_trial_source_alone_publishes_trial_rows(self, staged: dict) -> None:
+        root = staged['root']
+        drug_mechanism_of_action(
+            self.sources(staged, 'aact'),
+            self.destinations(root),
+            self.settings() | {'exclude_stages': {'aact': ['APPROVAL']}},
+            SimpleNamespace(work_path=root),
+        )
+        out = scan_dataset(str(root / 'out')).collect()
+        assert sorted(out['curation'].to_list()) == ['electronic', 'manual', 'manual']
+        assert scan_dataset(str(root / 'candidates')).collect()['source'].to_list() == ['aact']
+
+    def test_a_snapshot_of_the_wrong_kind_is_refused(self, staged: dict) -> None:
+        root = staged['root']
+        with pytest.raises(ValueError, match='kind'):
+            drug_mechanism_of_action(
+                self.sources(staged) | {'literature': staged['aact']},
+                {'output': root / 'out'},
+                self.settings(),
+                SimpleNamespace(work_path=root),
+            )

@@ -1,4 +1,5 @@
 import polars as pl
+import pytest
 
 from pts.transformers.clinical_mira.moa import __main__ as cli
 from pts.transformers.clinical_mira.moa import qc
@@ -22,7 +23,7 @@ def _write_release(root, moa, candidates, precedence, associations):
     )
     _write_dataset(
         root,
-        'intermediate/drug_mechanism_of_action_aact',
+        'intermediate/drug_mechanism_of_action_candidates',
         pl.DataFrame(
             candidates,
             schema={
@@ -32,7 +33,9 @@ def _write_release(root, moa, candidates, precedence, associations):
                 'confidence': pl.Float64,
                 'maximumClinicalStage': pl.String,
                 'drugType': pl.String,
+                'source': pl.String,
             },
+            orient='row',
         ),
     )
     _write_dataset(root, 'output/evidence_clinical_precedence', pl.DataFrame(precedence, schema=pairs, orient='row'))
@@ -47,8 +50,43 @@ def _qc(tmp_path, moa, candidates, precedence_release=(), precedence_without=(),
     return out
 
 
-def _candidate(drug, genes, confidence=0.9, stage='PHASE_1', chembl_ids=None):
-    return (drug, chembl_ids or [drug], genes, confidence, stage, 'Small molecule')
+def _candidate(drug, genes, confidence=0.9, stage='PHASE_1', chembl_ids=None, source='aact'):
+    return (drug, chembl_ids or [drug], genes, confidence, stage, 'Small molecule', source)
+
+
+def test_qc_precision_by_source(tmp_path):
+    moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
+    candidates = [
+        _candidate('CHEMBL1', ['ENSG1']),
+        _candidate('CHEMBL1', ['ENSG9']),
+        _candidate('CHEMBL1', ['ENSG1'], source='literature'),
+    ]
+    text = (_qc(tmp_path, moa, candidates) / 'qc.md').read_text()
+    section = text.split('## Strict precision by source\n')[1].split('##')[0]
+    assert '| aact | 2 | 1 |' in section
+    assert '| literature | 1 | 1 |' in section
+
+
+def test_qc_release_filter_excludes_stages_per_source(tmp_path):
+    moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
+    candidates = [
+        _candidate('CHEMBL1', ['ENSG1'], stage='APPROVAL'),
+        _candidate('CHEMBL1', ['ENSG9'], stage='APPROVAL', source='literature'),
+    ]
+    default = (_qc(tmp_path / 'default', moa, candidates) / 'qc.md').read_text()
+    assert 'candidates passing the release filter: 0' in default
+    options = ['--exclude-stages', 'aact:APPROVAL', 'literature:']
+    text = (_qc(tmp_path / 'open', moa, candidates, options=options) / 'qc.md').read_text()
+    assert 'candidates passing the release filter: 1' in text
+    assert '| literature | 1 | 0 |' in text
+
+
+def test_release_filter_needs_every_source():
+    candidates = pl.DataFrame(
+        {'confidence': [0.9], 'maximumClinicalStage': ['PHASE_1'], 'source': ['literature']},
+    )
+    with pytest.raises(ValueError, match='literature'):
+        qc.release_filter(candidates, 0.8, {'aact': ['APPROVAL']})
 
 
 def test_qc_benchmarks_candidates_against_manual_only(tmp_path):

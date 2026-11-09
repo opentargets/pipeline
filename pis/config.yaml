@@ -40,6 +40,8 @@ scratchpad:
   disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
   extraction_tag: 82af315af627-pfd3cdab9
   moa_tag: claude-opus-5-5-p4e6708cf
+  moa_literature_tag: claude-opus-5-5-p15139b69
+  moa_literature_input_release: '26.09'
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
@@ -315,6 +317,12 @@ steps:
         - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/data.parquet
         - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/metadata.json
       destination: input/drug_mechanism_of_action/aact_moa
+
+    - name: copy_many literature moa
+      sources:
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/data.parquet
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/metadata.json
+      destination: input/drug_mechanism_of_action/literature_moa
 
     - name: copy ttd
       source: gs://clinical_staging/clinical_mining/${staging_version}/input/ttd.txt

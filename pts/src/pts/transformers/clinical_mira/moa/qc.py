@@ -8,6 +8,7 @@ import polars as pl
 
 from pts.transformers.clinical_mira.moa.benchmark import phase_group, wilson
 from pts.transformers.clinical_mira.moa.report import GO_PRECISION, markdown_table
+from pts.transformers.drug_mechanism_of_action_candidates import stage_excluded
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,12 +21,24 @@ def read_dataset(root: Path, name: str, columns: list[str] | None = None) -> pl.
     return pl.read_parquet(str(root / name / '*.parquet'), columns=columns)
 
 
-def release_filter(candidates: pl.DataFrame, min_confidence: float, exclude_stages: list[str]) -> pl.DataFrame:
-    """Keep the candidates the release merge would publish."""
-    return candidates.filter(
-        (pl.col('confidence') >= min_confidence)
-        & ~pl.col('maximumClinicalStage').is_in(exclude_stages).fill_null(False)
-    )
+def release_filter(
+    candidates: pl.DataFrame, min_confidence: float, exclude_stages: dict[str, list[str]]
+) -> pl.DataFrame:
+    """Keep the candidates the release merge would publish.
+
+    Args:
+        candidates: The candidates of every source.
+        min_confidence: The lowest confidence published.
+        exclude_stages: For each source, the maximum clinical stages not published.
+
+    Returns:
+        pl.DataFrame: The candidates at or above ``min_confidence`` whose stage their source does not exclude.
+
+    Raises:
+        ValueError: If a candidate source has no ``exclude_stages`` entry.
+    """
+    excluded = stage_excluded(candidates, exclude_stages)
+    return candidates.filter((pl.col('confidence') >= min_confidence) & ~excluded)
 
 
 def score_candidates(candidates: pl.DataFrame, moa: pl.DataFrame) -> pl.DataFrame:
@@ -118,13 +131,13 @@ def run_qc(
     without: Path,
     out: Path,
     min_confidence: float,
-    exclude_stages: list[str],
+    exclude_stages: dict[str, list[str]],
     min_scorable: int,
 ) -> str:
     """Write ``qc.md`` and ``new_evidence_pairs.csv`` to ``out``; return the go line."""
     out.mkdir(parents=True, exist_ok=True)
     moa = read_dataset(release, 'output/drug_mechanism_of_action', ['chemblIds', 'targets', 'curation'])
-    candidates = read_dataset(release, 'intermediate/drug_mechanism_of_action_aact')
+    candidates = read_dataset(release, 'intermediate/drug_mechanism_of_action_candidates')
     released = release_filter(candidates, min_confidence, exclude_stages)
     scored = score_candidates(released, moa)
     go = verdict(scored, min_scorable)
@@ -153,7 +166,7 @@ def run_qc(
             f'scorable against a manual mechanism: {scored.height}\n'
         ),
     ]
-    for by in ('phase_group', 'drugType'):
+    for by in ('phase_group', 'drugType', 'source'):
         sections.append(f'## Strict precision by {by}\n')
         sections.append(markdown_table(precision_table(scored, by)) if scored.height else 'no scorable rows\n')
     sections += [

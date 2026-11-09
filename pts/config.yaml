@@ -900,28 +900,21 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         target: output/target
-        aact: intermediate/drug_mechanism_of_action_aact
+        aact: input/drug_mechanism_of_action/aact_moa
+        literature: input/drug_mechanism_of_action/literature_moa
+        clinical_report: output/clinical_report
+        chembl_molecule: intermediate/chembl_molecule
       destination:
         output: output/drug_mechanism_of_action
-        chembl_report: intermediate/drug_mechanism_of_action_aact_chembl_report
+        candidates: intermediate/drug_mechanism_of_action_candidates
+        chembl_report: intermediate/drug_mechanism_of_action_chembl_report
       settings:
         release_min_confidence: 0.80
         exclude_stages:
-          - APPROVAL
-  ##################################################################################################
-
-  #: DRUG_MECHANISM_OF_ACTION_AACT STEP :##########################################################
-  drug_mechanism_of_action_aact:
-    - name: transform drug_mechanism_of_action_aact
-      transformer: drug_mechanism_of_action_aact
-      source:
-        moa: input/drug_mechanism_of_action/aact_moa
-        clinical_report: output/clinical_report
-        chembl_molecule: intermediate/chembl_molecule
-        target: output/target
-      destination:
-        candidates: intermediate/drug_mechanism_of_action_aact
-      settings:
+          aact:
+            - APPROVAL
+          literature:
+            - APPROVAL
         report_min_confidence: 0.70
         link_share: 0.8
         class_level_genes: 20

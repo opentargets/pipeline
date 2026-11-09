@@ -1,4 +1,4 @@
-"""Tests for the drug_mechanism_of_action_aact transformer."""
+"""Tests for the trial and literature candidate mechanisms of drug_mechanism_of_action."""
 
 from pathlib import Path
 
@@ -6,10 +6,11 @@ import polars as pl
 import yaml
 from loguru import logger
 
-from pts.transformers.clinical_mira.record_store import publish_snapshot
-from pts.transformers.clinical_mira.staged_outputs import MOA
-from pts.transformers.drug_mechanism_of_action_aact import build_candidates, drug_mechanism_of_action_aact
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.drug_mechanism_of_action_candidates import (
+    CANDIDATE_COLUMNS,
+    build_literature_candidates,
+    build_trial_candidates,
+)
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 SETTINGS = {
@@ -144,7 +145,7 @@ REPORT = _report([('NCT1', 'CHEMBL1', 'PHASE_2'), ('NCT2', 'CHEMBL1', 'PHASE_3')
 
 def _build(moa: pl.DataFrame, report: pl.DataFrame = REPORT, **settings: object) -> pl.DataFrame:
     merged = SETTINGS | settings
-    return build_candidates(
+    return build_trial_candidates(
         moa,
         report,
         _molecule(),
@@ -168,14 +169,15 @@ def test_a_linked_grounded_mechanism_becomes_a_candidate() -> None:
     assert row['targetSymbols'] == ['EGFR']
     assert row['targetType'] == 'protein'
     assert row['actionType'] == 'INHIBITOR'
-    assert row['nctIds'] == ['NCT1', 'NCT2']
-    assert (row['quote'], row['quoteNctId']) == ('q2', 'NCT2')
+    assert row['source'] == 'aact'
+    assert row['docIds'] == ['NCT1', 'NCT2']
+    assert (row['quote'], row['quoteDocId']) == ('q2', 'NCT2')
 
 
 def test_output_nct_ids_are_the_cited_trials_not_the_pool() -> None:
     moa = _moa(_mechanism(nctIds=['NCT1', 'NCT2', 'NCT3'], evidence=[{'nctId': 'nct2', 'quote': 'q'}]))
 
-    assert _build(moa)['nctIds'].to_list() == [['NCT2']]
+    assert _build(moa)['docIds'].to_list() == [['NCT2']]
 
 
 def test_salt_link_publishes_under_the_parent() -> None:
@@ -199,7 +201,7 @@ def test_a_parent_absent_from_the_molecules_still_lists_itself_in_chembl_ids() -
     ])
     report = _report([('NCT1', 'CHEMBL5SALT', 'PHASE_2'), ('NCT2', 'CHEMBL5SALT', 'PHASE_2')])
 
-    candidates = build_candidates(_moa(), report, molecule, _target(), **SETTINGS)
+    candidates = build_trial_candidates(_moa(), report, molecule, _target(), **SETTINGS)
 
     assert candidates.select('parentChemblId', 'chemblIds').rows() == [('CHEMBL5', ['CHEMBL5'])]
 
@@ -271,27 +273,92 @@ def test_pool_without_a_linking_trial_is_dropped() -> None:
     assert _build(_moa(), _report([('NCT9', 'CHEMBL1', 'PHASE_2')])).is_empty()
 
 
-def test_stage_comes_from_clinical_report_not_drug_molecule() -> None:
-    task = yaml.safe_load(CONFIG_PATH.read_text())['steps']['drug_mechanism_of_action_aact'][0]
+def test_the_release_step_carries_the_candidate_settings() -> None:
+    task = yaml.safe_load(CONFIG_PATH.read_text())['steps']['drug_mechanism_of_action'][0]
 
-    assert task['transformer'] == 'drug_mechanism_of_action_aact'
-    assert set(task['source']) == {'moa', 'clinical_report', 'chembl_molecule', 'target'}
-    assert task['destination'] == {'candidates': 'intermediate/drug_mechanism_of_action_aact'}
-    assert task['settings'] == SETTINGS
+    assert task['transformer'] == 'drug_mechanism_of_action'
+    assert {'aact', 'literature', 'clinical_report', 'chembl_molecule', 'target'} <= set(task['source'])
+    assert task['destination']['candidates'] == 'intermediate/drug_mechanism_of_action_candidates'
+    assert SETTINGS.items() <= task['settings'].items()
+    assert 'drug_mechanism_of_action_aact' not in yaml.safe_load(CONFIG_PATH.read_text())['steps']
 
 
-def test_the_step_reads_and_writes_datasets(tmp_path: Path) -> None:
-    publish_snapshot(_moa(), str(tmp_path / 'moa'), MOA.metadata('abc'), None)
-    write_dataset(REPORT, str(tmp_path / 'report'))
-    write_dataset(_molecule(), str(tmp_path / 'molecule'))
-    write_dataset(_target(), str(tmp_path / 'target'))
-    source = {
-        'moa': str(tmp_path / 'moa'),
-        'clinical_report': str(tmp_path / 'report'),
-        'chembl_molecule': str(tmp_path / 'molecule'),
-        'target': str(tmp_path / 'target'),
-    }
+def _paper(**overrides: object) -> dict:
+    row = _mechanism(evidence=[{'nctId': 'pmid22', 'quote': 'p22'}, {'nctId': 'pmc7', 'quote': 'p7'}]) | overrides
+    row.pop('nctIds', None)
+    row.pop('drugName', None)
+    return {'drugId': 'CHEMBL1', 'docIds': ['pmc7', 'pmid22']} | row
 
-    drug_mechanism_of_action_aact(source, {'candidates': str(tmp_path / 'out')}, SETTINGS, None)  # type: ignore[arg-type]
 
-    assert scan_dataset(str(tmp_path / 'out')).collect().height == 1
+def _literature(*rows: dict) -> pl.DataFrame:
+    schema = dict(_moa().schema)
+    schema.pop('drugName')
+    schema.pop('nctIds')
+    return pl.DataFrame(
+        list(rows) or [_paper()],
+        schema={'drugId': pl.String, 'docIds': pl.List(pl.String), **schema},
+    )
+
+
+def _build_literature(moa: pl.DataFrame, report: pl.DataFrame = REPORT, **settings: object) -> pl.DataFrame:
+    merged = SETTINGS | settings
+    return build_literature_candidates(
+        moa,
+        report,
+        _molecule(),
+        _target(),
+        class_level_genes=merged['class_level_genes'],
+        report_min_confidence=merged['report_min_confidence'],
+        suggestion_min_confidence=merged['suggestion_min_confidence'],
+    )
+
+
+def test_a_grounded_literature_mechanism_becomes_a_candidate() -> None:
+    candidates = _build_literature(_literature())
+
+    assert candidates.columns == CANDIDATE_COLUMNS
+    row = candidates.row(0, named=True)
+    assert row['source'] == 'literature'
+    assert row['parentChemblId'] == 'CHEMBL1'
+    assert row['chemblIds'] == ['CHEMBL1', 'CHEMBL1SALT']
+    assert row['maximumClinicalStage'] == 'PHASE_3'
+    assert row['drugType'] == 'Small molecule'
+    assert row['targets'] == ['ENSG_EGFR']
+    assert row['targetType'] == 'protein'
+    assert row['docIds'] == ['pmc7', 'pmid22']
+    assert (row['quote'], row['quoteDocId']) == ('p22', 'pmid22')
+
+
+def test_literature_candidates_reparent_salts_and_drop_missing_ids() -> None:
+    moa = _literature(
+        _paper(drugId='CHEMBL1SALT', mechanismOfAction='salt'),
+        _paper(drugId='CHEMBL404', mechanismOfAction='missing'),
+        _paper(drugId='CHEMBL2', mechanismOfAction='antibody'),
+    )
+    report = _report([('NCT1', 'CHEMBL1', 'PHASE_2'), ('NCT3', 'CHEMBL2', 'APPROVAL')])
+    messages: list[str] = []
+    handler = logger.add(lambda message: messages.append(message.record['message']))
+    try:
+        candidates = _build_literature(moa, report)
+    finally:
+        logger.remove(handler)
+
+    assert candidates.select('mechanismOfAction', 'parentChemblId', 'chemblIds', 'maximumClinicalStage').rows() == [
+        ('salt', 'CHEMBL1', ['CHEMBL1', 'CHEMBL1SALT'], 'PHASE_2'),
+        ('antibody', 'CHEMBL2', ['CHEMBL2'], 'APPROVAL'),
+    ]
+    assert candidates['drugType'].to_list() == ['Small molecule', 'Antibody']
+    assert any('1 literature mechanisms' in m and 'chembl_molecule' in m for m in messages), messages
+
+
+def test_literature_candidates_are_filtered_and_grounded_like_trial_text() -> None:
+    moa = _literature(
+        _paper(relation='indirect'),
+        _paper(statementType='hypothesis'),
+        _paper(isHumanTarget=False),
+        _paper(confidence=0.69),
+        _paper(targetFromSource='unknown thing', targetSymbolSuggestion=[]),
+        _paper(mechanismOfAction='kept'),
+    )
+
+    assert _build_literature(moa)['mechanismOfAction'].to_list() == ['kept']

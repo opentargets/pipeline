@@ -295,8 +295,27 @@ def cmd_evaluate(run: Path, args: argparse.Namespace) -> None:
     logger.info(f'evaluate: report at {run / "report.md"}')
 
 
+def _exclude_stages(entries: list[str]) -> dict[str, list[str]]:
+    """Parse ``source:STAGE[,STAGE…]`` entries; ``source:`` excludes no stage of that source."""
+    excluded = {}
+    for entry in entries:
+        source, separator, stages = entry.partition(':')
+        if not separator or not source:
+            msg = f'--exclude-stages entry {entry!r} is not source:STAGE[,STAGE...]'
+            raise SystemExit(msg)
+        excluded[source] = [stage for stage in stages.split(',') if stage]
+    return excluded
+
+
 def cmd_qc(_run: Path, args: argparse.Namespace) -> None:
-    go = qc.run_qc(args.release, args.without, args.out, args.min_confidence, args.exclude_stages, args.min_scorable)
+    go = qc.run_qc(
+        args.release,
+        args.without,
+        args.out,
+        args.min_confidence,
+        _exclude_stages(args.exclude_stages),
+        args.min_scorable,
+    )
     logger.info(f'qc: {go}')
 
 
@@ -391,11 +410,16 @@ def build_parser() -> argparse.ArgumentParser:
         sub_parser.add_argument('--vertex-location', default=vertex.DEFAULT_LOCATION)
 
     qc_cmd = commands.add_parser('qc')
-    qc_cmd.add_argument('--release', required=True, type=Path, help='release output root with the aact source')
-    qc_cmd.add_argument('--without', required=True, type=Path, help='release output root without the aact source')
+    qc_cmd.add_argument('--release', required=True, type=Path, help='release output root with the inferred sources')
+    qc_cmd.add_argument('--without', required=True, type=Path, help='release output root without them')
     qc_cmd.add_argument('--out', required=True, type=Path)
     qc_cmd.add_argument('--min-confidence', type=float, default=0.80)
-    qc_cmd.add_argument('--exclude-stages', nargs='*', default=['APPROVAL'])
+    qc_cmd.add_argument(
+        '--exclude-stages',
+        nargs='*',
+        default=['aact:APPROVAL', 'literature:APPROVAL'],
+        help='source:STAGE[,STAGE...] per candidate source; source: excludes none',
+    )
     qc_cmd.add_argument('--min-scorable', type=int, default=30, help='early-phase scorable candidates for a verdict')
     qc_cmd.set_defaults(handler=cmd_qc, run_dir=None)
 

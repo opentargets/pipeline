@@ -16,6 +16,8 @@ FAKE_TAGS = {
     'drug_entities_tag': 'bbbb2222+cccc3333-p22222222',
     'disease_entities_tag': 'dddd4444-p33333333',
     'moa_tag': 'claude-opus-5-5-p55555555',
+    'moa_literature_tag': 'claude-opus-5-5-p66666666',
+    'moa_literature_input_release': 'R',
 }
 
 
@@ -111,6 +113,7 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
         f'gs://clinical_staging/aact/S/extraction/{extraction}/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/disease_entities/{disease}',
+        f'gs://clinical_staging/literature/R/moa_literature/{FAKE_TAGS["moa_literature_tag"]}',
     ):
         for name in ('data.parquet', 'metadata.json'):
             assert f'{base}/{name}' in text

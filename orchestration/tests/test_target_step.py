@@ -28,6 +28,7 @@ def test_target_waits_for_its_inputs_and_reactome(config: UnifiedPipelineConfig)
 def test_target_index_readers_wait_for_target(config: UnifiedPipelineConfig) -> None:
     assert config.step_definition('pts_drug_mechanism_of_action')['depends_on'] == [
         'pts_target',
-        'pts_drug_mechanism_of_action_aact',
+        'pts_clinical_report',
+        'pts_chembl_molecule',
     ]
     assert 'pts_target' in config.step_definition('pts_study')['depends_on']
