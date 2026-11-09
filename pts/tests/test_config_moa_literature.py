@@ -31,10 +31,11 @@ def test_moa_literature_caps_compute_and_shards() -> None:
 
 
 def test_moa_literature_reads_the_input_release() -> None:
-    """Both sources and the settings name the same release, and the snapshot goes to the literature root."""
+    """Both sources are the staged copies of the settings' release, and the snapshot goes to the literature root."""
     task = _task()
     release = task['settings']['input_release']
-    assert f'/{release}/' in task['source']['match']
-    assert f'/{release}/' in task['source']['drug_molecule']
+    assert task['source'] == {
+        'match': f'input/literature/{release}/match',
+        'drug_molecule': f'input/literature/{release}/drug_molecule',
+    }
     assert task['destination'] == {'moa': 'gs://clinical_staging/literature'}
-    assert set(task['source']) == {'match', 'drug_molecule'}

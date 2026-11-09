@@ -1005,14 +1005,15 @@ steps:
   ##################################################################################################
 
   #: MOA_LITERATURE STEP :#########################################################################
-  # Not part of a release. Runs in the `clinical_staging` DAG; reads the published literature match and
+  # Not part of a release. Runs in the `clinical_staging` DAG with release_uri at
+  # gs://clinical_staging/literature/<staging_version>; reads the copies pis makes of the literature match and
   # drug molecules of the input release and publishes a snapshot under gs://clinical_staging/literature
   moa_literature:
     - name: transform moa_literature
       transformer: clinical_mira.moa_literature
       source:
-        match: gs://open-targets-data-releases/26.09/intermediate/literature/match
-        drug_molecule: gs://open-targets-data-releases/26.09/output/drug_molecule
+        match: input/literature/26.09/match
+        drug_molecule: input/literature/26.09/drug_molecule
       destination:
         moa: gs://clinical_staging/literature
       settings:
@@ -1024,7 +1025,6 @@ steps:
         min_seeded_share: 0.69
         max_compute: 4500
         shard_size: 5000
-        billing_project: open-targets-eu-dev
   ##################################################################################################
 
   #: CLINICAL_MINING_MODELS STEP :#################################################################

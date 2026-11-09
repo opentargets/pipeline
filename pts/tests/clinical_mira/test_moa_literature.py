@@ -7,9 +7,10 @@ from typing import Any
 import polars as pl
 import pytest
 from otter.config.model import Config
+from pydantic import ValidationError
 
 from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
-from pts.transformers.clinical_mira.moa import literature, schemas
+from pts.transformers.clinical_mira.moa import schemas
 from pts.transformers.clinical_mira.moa.literature_staging import import_run_id, parse_output
 from pts.transformers.clinical_mira.moa_literature import (
     ComputeTooLarge,
@@ -456,24 +457,13 @@ def test_match_without_gene_mentions_is_staged(tmp_path: Path) -> None:
     assert _rows(tmp_path) == [('CHEMBL1', 'KRAS'), ('CHEMBL1', 'MEK'), ('CHEMBL2', 'COX')]
 
 
-def test_billing_project_bills_the_match_and_drug_molecule_reads(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[tuple[str, dict]] = []
-    real = literature.fsspec.core.url_to_fs
-
-    def url_to_fs(url: str, **options: Any) -> Any:
-        calls.append((url, options))
-        return real(url)
-
-    monkeypatch.setattr(literature.fsspec.core, 'url_to_fs', url_to_fs)
-
-    _stage(tmp_path, FakeBatches(), billing_project='my-project')
-
-    billed = {'requester_pays': True, 'project': 'my-project'}
-    inputs = tmp_path / 'inputs' / 'work'
-    assert (str(inputs / 'match'), billed) in calls
-    assert (str(inputs / 'drug_molecule'), billed) in calls
+def test_settings_have_no_billing_project() -> None:
+    with pytest.raises(ValidationError, match='billing_project'):
+        MoaLiteratureSettings.model_validate({
+            'store_uri': 's',
+            'input_release': '26.09',
+            'billing_project': 'my-project',
+        })
 
 
 def test_entry_point_reads_source_and_writes_destination(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

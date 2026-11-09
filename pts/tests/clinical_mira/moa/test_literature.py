@@ -175,7 +175,7 @@ def test_sentence_pass_skips_written_files(tmp_path: Path):
     write_match(match_dir / 'part-0002-x.snappy.parquet', 'second')
     scratch = tmp_path / 'scratch'
 
-    cd_dir, gp_dir = sentence_pass(str(match_dir), PARENTS, 2, scratch, None)
+    cd_dir, gp_dir = sentence_pass(str(match_dir), PARENTS, 2, scratch)
     assert sorted(p.name for p in cd_dir.glob('*.parquet')) == [
         'part-0001-x.snappy.parquet',
         'part-0002-x.snappy.parquet',
@@ -186,13 +186,49 @@ def test_sentence_pass_skips_written_files(tmp_path: Path):
     marker = cd_dir / 'part-0001-x.snappy.parquet'
     marker.write_bytes(b'sentinel')
     write_match(match_dir / 'part-0001-x.snappy.parquet', 'changed')
-    sentence_pass(str(match_dir), PARENTS, 2, scratch, None)
+    sentence_pass(str(match_dir), PARENTS, 2, scratch)
     assert marker.read_bytes() == b'sentinel'
 
 
 def test_sentence_pass_rejects_a_match_uri_without_parquet_files(tmp_path: Path):
     with pytest.raises(ValueError, match='no parquet files found under'):
-        sentence_pass(str(tmp_path / 'missing'), PARENTS, 1, tmp_path / 'scratch', None)
+        sentence_pass(str(tmp_path / 'missing'), PARENTS, 1, tmp_path / 'scratch')
+
+
+def _record_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, list[str]]]:
+    reads: list[tuple[object, list[str]]] = []
+    real = pl.read_parquet
+
+    def read_parquet(source, *args, columns=None, **kwargs):
+        reads.append((source, columns))
+        return real(source, *args, columns=columns, **kwargs)
+
+    monkeypatch.setattr(literature.pl, 'read_parquet', read_parquet)
+    return reads
+
+
+def test_sentence_pass_hands_polars_the_uri_of_each_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    match_dir = tmp_path / 'match'
+    match_dir.mkdir()
+    write_match(match_dir / 'part-0001.parquet', 'first')
+    write_match(match_dir / 'part-0002.parquet', 'second')
+    reads = _record_reads(monkeypatch)
+
+    sentence_pass(str(match_dir), PARENTS, 1, tmp_path / 'scratch')
+
+    assert sorted(reads) == [
+        (str(match_dir / 'part-0001.parquet'), literature.MATCH_COLUMNS),
+        (str(match_dir / 'part-0002.parquet'), literature.MATCH_COLUMNS),
+    ]
+
+
+def test_read_parquet_dir_hands_polars_the_uri_of_each_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    pl.DataFrame({'id': ['a'], 'name': ['x']}).write_parquet(tmp_path / 'part-0.parquet')
+    reads = _record_reads(monkeypatch)
+
+    read_parquet_dir(str(tmp_path), ['id'])
+
+    assert reads == [(str(tmp_path / 'part-0.parquet'), ['id'])]
 
 
 SENTENCE_SCHEMA = {

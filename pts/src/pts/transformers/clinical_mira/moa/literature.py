@@ -9,9 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import fsspec
 import polars as pl
 from loguru import logger
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.clinical_mira import CATEGORY_RANKS_STR, ClinicalStageCategory
 
@@ -105,26 +105,24 @@ def _atomic_write(df: pl.DataFrame, path: Path) -> None:
     tmp.rename(path)
 
 
-def _parquet_files(uri: str, storage_options: dict[str, Any] | None) -> tuple[Any, list[str]]:
-    """The fsspec filesystem serving ``uri`` and the sorted ``*.parquet`` files directly under it.
+def _parquet_files(uri: str) -> list[str]:
+    """The sorted ``*.parquet`` files directly under ``uri``.
 
     Raises:
         ValueError: If ``uri`` holds no parquet files.
     """
-    fs, root = fsspec.core.url_to_fs(uri, **(storage_options or {}))
-    files = sorted(fs.glob(root.rstrip('/') + '/*.parquet'))
+    files = sorted(StorageHandle(uri).glob('*.parquet'))
     if not files:
         raise ValueError(f'no parquet files found under {uri}')
-    return fs, files
+    return files
 
 
-def read_parquet_dir(uri: str, columns: list[str], storage_options: dict[str, Any] | None = None) -> pl.DataFrame:
+def read_parquet_dir(uri: str, columns: list[str]) -> pl.DataFrame:
     """Read ``columns`` of every parquet file of a directory into one frame, in file name order.
 
     Args:
         uri: Directory (local or ``gs://``) holding ``*.parquet`` files.
         columns: The columns to read.
-        storage_options: Options of the fsspec filesystem serving ``uri``, as in ``sentence_pass``.
 
     Returns:
         The rows of every file.
@@ -132,21 +130,10 @@ def read_parquet_dir(uri: str, columns: list[str], storage_options: dict[str, An
     Raises:
         ValueError: If ``uri`` holds no parquet files.
     """
-    fs, files = _parquet_files(uri, storage_options)
-    frames = []
-    for path in files:
-        with fs.open(path, 'rb') as handle:
-            frames.append(pl.read_parquet(handle, columns=columns))
-    return pl.concat(frames)
+    return pl.concat([pl.read_parquet(path, columns=columns) for path in _parquet_files(uri)])
 
 
-def sentence_pass(
-    match_uri: str,
-    parents: pl.DataFrame,
-    workers: int,
-    scratch: Path,
-    storage_options: dict[str, Any] | None = None,
-) -> tuple[Path, Path]:
+def sentence_pass(match_uri: str, parents: pl.DataFrame, workers: int, scratch: Path) -> tuple[Path, Path]:
     """Run ``pass_file`` over every parquet file of a literature match directory.
 
     Each file is read with the ``MATCH_COLUMNS`` columns only and written to
@@ -158,8 +145,6 @@ def sentence_pass(
         parents: Frame with ``id`` and ``parent``, from ``clinical_parents``.
         workers: Number of files processed concurrently.
         scratch: Local directory receiving the outputs.
-        storage_options: Options of the fsspec filesystem serving ``match_uri``, for example
-            ``{'requester_pays': True, 'project': ...}`` on GCS.
 
     Returns:
         The ``cd`` and ``gp`` directories.
@@ -167,7 +152,7 @@ def sentence_pass(
     Raises:
         ValueError: If ``match_uri`` holds no parquet files.
     """
-    fs, files = _parquet_files(match_uri, storage_options)
+    files = _parquet_files(match_uri)
     cd_dir, gp_dir = scratch / 'cd', scratch / 'gp'
     cd_dir.mkdir(parents=True, exist_ok=True)
     gp_dir.mkdir(parents=True, exist_ok=True)
@@ -178,8 +163,7 @@ def sentence_pass(
         if cd_out.exists() and gp_out.exists():
             return
         started = time.time()
-        with fs.open(path, 'rb') as handle:
-            match = pl.read_parquet(handle, columns=MATCH_COLUMNS)
+        match = pl.read_parquet(path, columns=MATCH_COLUMNS)
         cd, gp = pass_file(match, parents)
         _atomic_write(gp, gp_out)
         _atomic_write(cd, cd_out)

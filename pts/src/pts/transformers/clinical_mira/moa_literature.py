@@ -70,8 +70,6 @@ class MoaLiteratureSettings(BaseModel):
     """The lowest share of the current drugs the imported seed must cover, or the run aborts before computing."""
     max_compute: int | None = None
     """The most drugs the run may compute, or None for no limit. More aborts the run before any batch."""
-    billing_project: str | None = None
-    """The project billed for reading the requester-pays match and drug molecules, or None to read them unbilled."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
     """Name of the environment variable holding the Claude workspace id."""
 
@@ -179,13 +177,10 @@ def stage_moa_literature(
         raise ValueError(msg)
     system_prompt = schemas.literature_system_prompt()
     scratch = config.work_path / 'moa_literature' / settings.input_release
-    storage_options = (
-        {'requester_pays': True, 'project': settings.billing_project} if settings.billing_project else None
-    )
 
-    molecules = literature.read_parquet_dir(drug_molecule, MOLECULE_COLUMNS, storage_options)
+    molecules = literature.read_parquet_dir(drug_molecule, MOLECULE_COLUMNS)
     parents = literature.clinical_parents(molecules)
-    cd_dir, gp_dir = literature.sentence_pass(match, parents, settings.workers, scratch, storage_options)
+    cd_dir, gp_dir = literature.sentence_pass(match, parents, settings.workers, scratch)
     sentences = literature.join_genes(cd_dir, gp_dir)
     picked = literature.select_sentences(sentences)
     requests = literature.requests(picked, molecules.select(parent='id', name='name'))
