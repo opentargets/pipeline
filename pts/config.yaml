@@ -1501,11 +1501,17 @@ steps:
         baseline_expression: output/baseline_expression
       destination: output/biosample_enrichment
       settings:
-        # GTEx tissues are the panel the method was benchmarked on; other panels in
-        # baseline_expression (tabula_sapiens tissue/celltype, DICE celltype) are a line each
+        # every baseline_expression panel with specificity scores; GTEx tissues are the panel
+        # the method was benchmarked on
         panels:
           - datasourceId: gtex
             biosampleType: tissue
+          - datasourceId: tabula_sapiens
+            biosampleType: tissue
+          - datasourceId: tabula_sapiens
+            biosampleType: celltype
+          - datasourceId: DICE
+            biosampleType: celltype
         pool_by_disease: true
         standard_errors: region
         region_window: 1000000
