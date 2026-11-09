@@ -93,6 +93,9 @@ class MatchMapped(Dataset):
     def _identify_valid_ids(df: DataFrame, trusted_sources: list[str]) -> DataFrame:
         """Mark ids as valid based on certain criteria.
 
+        An ambiguous mapping (`isAmbiguousMapping`) is never valid by these criteria; it can only be
+        disambiguated by `_resolve_ambiguous_mappings`. A null flag does not count as unambiguous.
+
         Args:
             df (DataFrame): DataFrame containing id and source information.
             trusted_sources (list[str]): List of trusted sources.
@@ -100,6 +103,7 @@ class MatchMapped(Dataset):
         Returns:
             DataFrame: DataFrame where valid ids and their reasons are indicated.
         """
+        is_unambiguous = f.col('isAmbiguousMapping') == False  # noqa: E712 (spark Column comparison)
         return (
             df
             .withColumn('validReasons', f.lit(None))
@@ -108,7 +112,7 @@ class MatchMapped(Dataset):
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(f.array_distinct('entityIds.entityId')) == 1,
+                    (f.size(f.array_distinct('entityIds.entityId')) == 1) & is_unambiguous,
                     IdValidReason.ONLY_ID
                 )
             )
@@ -117,12 +121,14 @@ class MatchMapped(Dataset):
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(
-                        f.array_except(
-                            f.col('entityIds.entitySource'),
-                            f.array(*[f.lit(x) for x in trusted_sources])
-                        )
-                    ) == 0,
+                    (
+                        f.size(
+                            f.array_except(
+                                f.col('entityIds.entitySource'),
+                                f.array(*[f.lit(x) for x in trusted_sources])
+                            )
+                        ) == 0
+                    ) & is_unambiguous,
                     IdValidReason.ID_FROM_TRUSTED_SOURCE
                 )
             )

@@ -100,18 +100,39 @@ class TestMatchMapped:
             spark,
             [
                 # single id for the label
-                {'pmid': '1', 'entityIds': [Row(entityId='E1', entitySource='syn')], 'mappedId': 'E1'},
+                {
+                    'pmid': '1',
+                    'entityIds': [Row(entityId='E1', entitySource='syn')],
+                    'mappedId': 'E1',
+                    'isAmbiguousMapping': False,
+                },
                 # two ids, all from a trusted source
                 {
                     'pmid': '2',
                     'entityIds': [Row(entityId='E1', entitySource='name'), Row(entityId='E2', entitySource='name')],
                     'mappedId': 'E1',
+                    'isAmbiguousMapping': False,
                 },
                 # two ids, one from an untrusted source
                 {
                     'pmid': '3',
                     'entityIds': [Row(entityId='E1', entitySource='name'), Row(entityId='E2', entitySource='syn')],
                     'mappedId': 'E1',
+                    'isAmbiguousMapping': False,
+                },
+                # an ambiguous mapping meets neither criterion, with a single id
+                {
+                    'pmid': '4',
+                    'entityIds': [Row(entityId='E1', entitySource='syn')],
+                    'mappedId': 'E1',
+                    'isAmbiguousMapping': True,
+                },
+                # nor with every id from a trusted source
+                {
+                    'pmid': '5',
+                    'entityIds': [Row(entityId='E1', entitySource='name')],
+                    'mappedId': 'E1',
+                    'isAmbiguousMapping': True,
                 },
             ],
         )
@@ -119,7 +140,9 @@ class TestMatchMapped:
         assert result['1']['validReasons'] == [IdValidReason.ONLY_ID.value]
         assert result['2']['validReasons'] == [IdValidReason.ID_FROM_TRUSTED_SOURCE.value]
         assert result['3']['validReasons'] == []
-        assert [result[k]['isValid'] for k in ('1', '2', '3')] == [True, True, False]
+        assert result['4']['validReasons'] == []
+        assert result['5']['validReasons'] == []
+        assert [result[k]['isValid'] for k in ('1', '2', '3', '4', '5')] == [True, True, False, False, False]
 
     def test_disambiguate_uses_ids_validated_elsewhere_in_the_publication(self, spark):
         ambiguous = [Row(entityId='E1', entitySource='syn'), Row(entityId='E2', entitySource='syn')]
@@ -128,14 +151,18 @@ class TestMatchMapped:
             [
                 # an unambiguous mention validates E1 for pmid 1
                 {'pmid': '1', 'label': 'gene one', 'entityIds': [Row(entityId='E1', entitySource='syn')],
-                 'mappedId': 'E1', 'isMapped': True},
+                 'mappedId': 'E1', 'isMapped': True, 'isAmbiguousMapping': False},
                 # an ambiguous mention, exploded into one row per candidate id
-                {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E1', 'isMapped': True},
-                {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E2', 'isMapped': True},
+                {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E1', 'isMapped': True,
+                 'isAmbiguousMapping': False},
+                {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E2', 'isMapped': True,
+                 'isAmbiguousMapping': False},
                 # the same ambiguous mention in a publication with no validating mention
-                {'pmid': '2', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E1', 'isMapped': True},
+                {'pmid': '2', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E1', 'isMapped': True,
+                 'isAmbiguousMapping': False},
                 # unmapped rows are dropped
-                {'pmid': '1', 'label': 'nothing', 'entityIds': [], 'mappedId': None, 'isMapped': False},
+                {'pmid': '1', 'label': 'nothing', 'entityIds': [], 'mappedId': None, 'isMapped': False,
+                 'isAmbiguousMapping': False},
             ],
         )
         result = {
@@ -147,6 +174,34 @@ class TestMatchMapped:
             ('1', 'G1', 'E1'): (True, [IdValidReason.DISAMBIGUATED.value]),
             ('1', 'G1', 'E2'): (False, []),
             ('2', 'G1', 'E1'): (False, []),
+        }
+
+    def test_disambiguate_validates_ambiguous_mappings_only_from_elsewhere_in_the_publication(self, spark):
+        cf = [Row(entityId='E1', entitySource='name')]
+        df = _mapped_df(
+            spark,
+            [
+                # an unambiguous mention validates E1 for pmid 1
+                {'pmid': '1', 'label': 'cystic fibrosis', 'entityIds': cf, 'mappedId': 'E1', 'isMapped': True,
+                 'isAmbiguousMapping': False},
+                # an ambiguous mapping, single id from a trusted source, so only disambiguation can validate it
+                {'pmid': '1', 'label': 'CF', 'entityIds': cf, 'mappedId': 'E1', 'isMapped': True,
+                 'isAmbiguousMapping': True},
+                {'pmid': '2', 'label': 'CF', 'entityIds': cf, 'mappedId': 'E1', 'isMapped': True,
+                 'isAmbiguousMapping': True},
+            ],
+        )
+        result = {
+            (r['pmid'], r['label']): (r['isValid'], r['validReasons'])
+            for r in MatchMapped(df).disambiguate(trusted_sources=['name']).df.collect()
+        }
+        assert result == {
+            ('1', 'cystic fibrosis'): (
+                True,
+                [IdValidReason.ONLY_ID.value, IdValidReason.ID_FROM_TRUSTED_SOURCE.value],
+            ),
+            ('1', 'CF'): (True, [IdValidReason.DISAMBIGUATED.value]),
+            ('2', 'CF'): (False, []),
         }
 
     def test_generate_target_disease_cooccurrences(self, spark):
