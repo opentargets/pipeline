@@ -10,7 +10,7 @@ from otter.config.yaml import parse_yaml
 from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings
-from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
+from pts.transformers.credible_set.validation import ValidationSettings
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
@@ -141,7 +141,7 @@ def test_validation_excludes_the_agreed_flags() -> None:
         CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS,
         CredibleSetFlag.MISSING_STUDY,
         CredibleSetFlag.REDUNDANT_PICS_TOP_HIT,
-        CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID,
+        CredibleSetFlag.DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES,
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
         CredibleSetFlag.EXPLAINED_BY_SUSIE,
         CredibleSetFlag.COMPOSITE_FLAG,
@@ -163,19 +163,27 @@ def test_validation_excludes_the_agreed_flags() -> None:
     }
 
 
-def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() -> None:
+def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip(validate_source) -> None:
     settings = _validation_settings()
     sets = pl.LazyFrame(
         {
             'id': ['clumped', 'abnormal'],
+            'studyId': ['s', 's'],
             'chromosome': ['1', '1'],
+            'locusStart': [100, 200],
+            'locusEnd': [100, 200],
             'leadVariantId': ['1_100_A_T', '1_200_A_T'],
+            'fineMappingMethod': ['PICS', 'PICS'],
             'qualityControls': [[CredibleSetFlag.WINDOW_CLUMPED.value], []],
         },
         schema={
             'id': pl.String,
+            'studyId': pl.String,
             'chromosome': pl.String,
+            'locusStart': pl.Int32,
+            'locusEnd': pl.Int32,
             'leadVariantId': pl.String,
+            'fineMappingMethod': pl.String,
             'qualityControls': pl.List(pl.String),
         },
     )
@@ -187,8 +195,7 @@ def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() 
         },
         schema={'credibleSetId': pl.String, 'variantId': pl.String, 'qualityControls': pl.List(pl.String)},
     )
-    no_cross_set_flags = pl.LazyFrame(schema=cross_set_flags_schema)
-    valid_set, valid_variant, excluded_set, excluded_variant = validate(sets, variants, no_cross_set_flags, settings)
+    valid_set, valid_variant, excluded_set, excluded_variant = validate_source(sets, variants, settings)
     assert valid_set.collect()['id'].to_list() == ['abnormal']
     assert excluded_set.collect()['id'].to_list() == ['clumped']
     assert valid_variant.collect()['credibleSetId'].to_list() == ['abnormal']

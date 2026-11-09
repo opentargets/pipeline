@@ -14,8 +14,7 @@ from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.source_dataset import read_source_dataset
-from pts.transformers.credible_set.variant_id import variant_chromosome, variant_position
-from pts.transformers.credible_set.variant_qc import CREDIBLE_SET_ID_PATTERN
+from pts.transformers.credible_set.variant_id import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
 from pts.transformers.study import QualityFlag as StudyQualityFlag
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
@@ -52,12 +51,12 @@ def flag_invalid_cs_id(frame: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def flag_invalid_chromosome(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag credible sets whose `chromosome` is not one of `Chromosome` (1 to 22, X, Y, XY, MT).
+    """Flag credible sets whose `chromosome` is not one of `Chromosome` (1 to 22, X, Y, MT).
 
     Examples:
         >>> credible_set = pl.LazyFrame({'chromosome': ['1', 'XY', '23', 'chr1'], 'qualityControls': [[]] * 4})
         >>> flag_invalid_chromosome(credible_set).collect()['qualityControls'].list.len().to_list()
-        [0, 0, 1, 1]
+        [0, 1, 1, 1]
     """
     invalid = ~pl.col('chromosome').is_in([chromosome.value for chromosome in Chromosome])
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_CHROMOSOME)

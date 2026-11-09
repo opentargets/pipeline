@@ -1,4 +1,4 @@
-"""Duplicated credible set ids: decided among the sets that pass the other checks, keeping the smallest copy."""
+"""Duplicated credible set ids: within a source every copy leaves; across sources the smallest valid copy is kept."""
 
 from pathlib import Path
 from typing import Any
@@ -11,7 +11,8 @@ from pts.schemas.credible_set import credible_set_schema, credible_set_variant_s
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.validation import validation
 
-DUPLICATED = CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID.value
+DUPLICATED = CredibleSetFlag.DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES.value
+WITHIN = CredibleSetFlag.DUPLICATED_CREDIBLE_SET_ID.value
 EXCLUDED = CredibleSetVariantFlag.CREDIBLE_SET_EXCLUDED.value
 DUP_ID = 'd' * 32
 
@@ -65,7 +66,7 @@ def _validate(
     validation(
         source={'credible_set': set_paths, 'credible_set_variant': variant_paths},
         destination={name: str(out / name) for name in names},
-        settings={'cs_invalid_qc_reasons': ['IN_MHC', 'DUPLICATED_STUDYLOCUS_ID'], **settings},
+        settings={'cs_invalid_qc_reasons': ['IN_MHC', 'DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES'], **settings},
         config=Mock(spec=Config, work_path=str(tmp_path), release_uri=None),
     )
     return {name: pl.read_parquet(out / name / '*.parquet') for name in names}
@@ -126,9 +127,21 @@ def test_without_the_flag_in_the_exclusion_list_every_copy_stays_and_the_others_
     assert written['excluded_set'].height == 0
 
 
-def test_copies_within_one_source_keep_one_and_its_variants(tmp_path: Path) -> None:
+def test_copies_within_one_source_all_leave_with_every_variant_of_the_id(tmp_path: Path) -> None:
+    """The variants of two sets under one id cannot be told apart, so no copy can be kept."""
     written = _validate(tmp_path, {'a': ([_set(DUP_ID, 'first'), _set(DUP_ID, 'second')], _variants(DUP_ID, 2))})
-    assert written['valid_set'].height == 1
-    assert written['excluded_set']['qualityControls'].to_list() == [[DUPLICATED]]
-    assert written['valid_variant'].height == 2
-    assert written['excluded_variant'].height == 0
+    assert written['valid_set'].height == 0
+    assert written['excluded_set']['qualityControls'].to_list() == [[WITHIN], [WITHIN]]
+    assert written['valid_variant'].height == 0
+    assert written['excluded_variant']['qualityControls'].to_list() == [[EXCLUDED], [EXCLUDED]]
+
+
+def test_copies_within_one_source_leave_even_without_an_exclusion_list(tmp_path: Path) -> None:
+    """Excluding them is structural: no setting can keep a copy whose variants are not its own."""
+    written = _validate(
+        tmp_path,
+        {'a': ([_set(DUP_ID, 'first'), _set(DUP_ID, 'second')], _variants(DUP_ID, 2))},
+        cs_invalid_qc_reasons=[],
+    )
+    assert written['valid_set'].height == 0
+    assert written['valid_variant'].height == 0

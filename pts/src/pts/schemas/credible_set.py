@@ -22,6 +22,7 @@ credible_set_schema = pl.Schema({
     'purityMinR2': pl.Float64(),
     'qualityControls': pl.List(pl.String()),
 })
+"""The CredibleSet schema: one row per credible set, keyed by `id`."""
 
 validated_credible_set_schema = pl.Schema({
     **credible_set_schema,
@@ -53,6 +54,13 @@ credible_set_variant_schema = pl.Schema({
     'rescaledDirection': pl.Int8(),
     'qualityControls': pl.List(pl.String()),
 })
+"""The CredibleSetVariant schema: one row per variant of a credible set, keyed by `credibleSetId` and `variantId`."""
+
+cross_set_flags_schema = pl.Schema({
+    'id': pl.String(),
+    'qualityControls': pl.List(pl.String()),
+})
+"""One row per credible set flagged by the cross-set QC: its identifier and its cross-set flags."""
 
 credible_set_required = ('id', 'studyId', 'chromosome', 'locusStart', 'locusEnd', 'leadVariantId', 'fineMappingMethod')
 """The CredibleSet columns that must not be null: the id and the columns it is hashed from."""

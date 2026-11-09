@@ -60,7 +60,9 @@ def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, cre
     """Deduplicated variants from the four evidence sources, sorted by coordinate.
 
     The kept rsID is the smallest real one, with '.' for a variant that has none. The credible
-    set variants are the validated CredibleSetVariant rows, which hold every lead and member.
+    set variants are the validated CredibleSetVariant rows, which hold every lead and member; a
+    variant has one row per credible set it is in, so their distinct identifiers are taken before
+    they are split into VCF columns.
 
     Raises:
         ValueError: If the credible set variants have no `variantId` column, as a CredibleSet
@@ -74,7 +76,7 @@ def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, cre
         as_vcf_df(scan_dataset(uniprot_variants, format='ndjson', infer_schema_length=None)),
         as_vcf_df(scan_dataset(eva, format='ndjson', infer_schema_length=None)),
         as_vcf_df(scan_dataset(pharmacogenomics)),
-        as_vcf_df(credible_set_variants),
+        as_vcf_df(credible_set_variants.select('variantId').unique()),
     ]
     return (
         pl

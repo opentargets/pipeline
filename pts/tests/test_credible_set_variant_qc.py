@@ -15,7 +15,6 @@ from pts.transformers.credible_set.variant_qc import (
     flag_incomplete_stats,
     flag_invalid_cs_id,
     flag_missing_pvalue,
-    flag_missing_sample_size,
     flag_variants,
 )
 
@@ -167,12 +166,6 @@ def test_missing_pvalue(mantissa: float | None, exponent: int | None, missing: b
     assert _carries(frame, CredibleSetVariantFlag.MISSING_PVALUE) is missing
 
 
-@pytest.mark.parametrize(('sample_size', 'missing'), [(None, True), (1000, False)])
-def test_missing_sample_size(sample_size: int | None, missing: bool) -> None:
-    frame = flag_missing_sample_size(_row(sampleSize=sample_size))
-    assert _carries(frame, CredibleSetVariantFlag.MISSING_SAMPLE_SIZE) is missing
-
-
 def test_variant_qc_adds_the_metadata_flags() -> None:
     frame = flag_variants(_row(reportedBeta=0.2, conditionalBeta=-0.1), coverage=0.95, pip_tolerance=1e-4).collect()
     assert set(frame['qualityControls'].item()) == {
@@ -180,7 +173,6 @@ def test_variant_qc_adds_the_metadata_flags() -> None:
         CredibleSetVariantFlag.INCOMPLETE_REPORTED_STATS,
         CredibleSetVariantFlag.INCOMPLETE_CONDITIONAL_STATS,
         CredibleSetVariantFlag.MISSING_PVALUE,
-        CredibleSetVariantFlag.MISSING_SAMPLE_SIZE,
     }
 
 

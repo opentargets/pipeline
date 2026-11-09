@@ -148,7 +148,7 @@ def test_credible_set_annotation_runs_after_the_variant_index(monkeypatch, ppp):
     monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
     config = UnifiedPipelineConfig()
     assert 'pts_credible_set_annotation' in config.steps('pts_')
-    assert config.step_definition('pts_credible_set_annotation')['depends_on'] == ['pts_credible_set', 'pts_variant']
+    assert config.step_definition('pts_credible_set_annotation')['depends_on'] == ['pts_variant']
     assert 'pts_credible_set' in config.step_definition('pts_variant')['depends_on']
     assert config.step_definition('gentropy_colocalisation')['depends_on'] == ['pts_credible_set_annotation']
     [annotation] = config.pts.config['steps']['credible_set_annotation']

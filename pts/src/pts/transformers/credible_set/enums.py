@@ -22,8 +22,8 @@ class FinemappingMethod(StrEnum):
 class Chromosome(StrEnum):
     """Chromosomes a credible set or a variant may lie on, in genome order.
 
-    Unlike `utils.ensembl.CANONICAL_CHROMOSOMES`, which lists the Ensembl chromosomes, this
-    includes XY, the pseudoautosomal region.
+    These are the Ensembl canonical chromosomes, which the genes and the gnomAD variants that
+    credible sets are joined to lie on. There is no XY: a pseudoautosomal variant is on X or Y.
     """
 
     CHR_1 = '1'
@@ -50,7 +50,6 @@ class Chromosome(StrEnum):
     CHR_22 = '22'
     CHR_X = 'X'
     CHR_Y = 'Y'
-    CHR_XY = 'XY'
     CHR_MT = 'MT'
 
 

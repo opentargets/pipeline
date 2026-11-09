@@ -3,12 +3,9 @@
 import polars as pl
 import pytest
 
-from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
+from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema, cross_set_flags_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
-from pts.transformers.credible_set.validation import (
-    cross_set_flags_schema,
-    flag_across_sets,
-)
+from pts.transformers.credible_set.validation import ValidationSettings, flag_across_sets
 
 TOP_HIT = CredibleSetFlag.TOP_HIT.value
 EXCEEDS = CredibleSetVariantFlag.EXCEEDS_COVERAGE_95.value
@@ -39,7 +36,7 @@ def _variants(*rows: tuple[str, str, list[str]]) -> pl.LazyFrame:
 
 def _flags(sets: pl.LazyFrame, variants: pl.LazyFrame | None = None) -> dict[str, set[str]]:
     variants = variants if variants is not None else _variants()
-    table = flag_across_sets(sets, variants).collect()
+    table = flag_across_sets(sets, variants, sets).collect()
     assert table.schema == cross_set_flags_schema
     return {row['id']: set(row['qualityControls']) for row in table.iter_rows(named=True)}
 
@@ -132,3 +129,35 @@ def test_a_set_gets_every_cross_set_flag_that_applies() -> None:
         CredibleSetFlag.REDUNDANT_PICS_TOP_HIT,
         CredibleSetFlag.EXPLAINED_BY_SUSIE,
     }
+
+
+# Only the sets that survive their own flags explain another.
+
+INCONSISTENT = CredibleSetFlag.INCONSISTENCY_FLAG.value
+
+
+def _valid_ids(validate_source, sets: pl.LazyFrame, variants: pl.LazyFrame, flag: str) -> list[str]:
+    settings = ValidationSettings(cs_invalid_qc_reasons=[flag, 'INCONSISTENCY_FLAG'])
+    valid_set, _, _, _ = validate_source(sets, variants, settings)
+    return sorted(valid_set.collect()['id'])
+
+
+def test_a_susie_set_excluded_by_its_own_flag_explains_no_other_set(validate_source) -> None:
+    sets = _sets(_pics('pics', leadVariantId='1_150_A_T'), _susie('susie', 100, 200, qualityControls=[INCONSISTENT]))
+    variants = _variants(('pics', '1_150_A_T', []), ('susie', '1_100_A_T', []))
+    assert _valid_ids(validate_source, sets, variants, 'EXPLAINED_BY_SUSIE') == ['pics']
+
+
+def test_a_summary_statistics_pics_set_excluded_by_its_own_flag_makes_no_top_hit_redundant(validate_source) -> None:
+    sets = _sets(
+        _pics('top', qualityControls=[TOP_HIT]),
+        _pics('sumstats', leadVariantId='1_200_A_T', qualityControls=[INCONSISTENT]),
+    )
+    variants = _variants(('top', '1_100_A_T', []), ('sumstats', '1_200_A_T', []))
+    assert _valid_ids(validate_source, sets, variants, 'REDUNDANT_PICS_TOP_HIT') == ['top']
+
+
+def test_a_surviving_susie_set_still_explains_a_pics_set(validate_source) -> None:
+    sets = _sets(_pics('pics', leadVariantId='1_150_A_T'), _susie('susie', 100, 200))
+    variants = _variants(('pics', '1_150_A_T', []), ('susie', '1_100_A_T', []))
+    assert _valid_ids(validate_source, sets, variants, 'EXPLAINED_BY_SUSIE') == ['susie']

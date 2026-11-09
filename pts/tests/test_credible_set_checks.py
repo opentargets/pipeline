@@ -12,10 +12,8 @@ from pts.transformers.credible_set.set_qc import flag_in_mhc
 from pts.transformers.credible_set.validation import (
     ValidationSettings,
     ValidationSource,
-    cross_set_flags_schema,
     pair_sources,
     type_valid_sets,
-    validate,
 )
 from pts.transformers.credible_set.variant_qc import flag_invalid_variant_id
 
@@ -33,7 +31,7 @@ def _flagged(frame: pl.LazyFrame, flag: str) -> bool:
         ('1_100_a_T', True),
         ('23_100_A_T', True),
         ('14_KI270846v1_alt_497149_C_T', True),
-        ('XY_5_ACGT_A', False),
+        ('XY_5_ACGT_A', True),
         ('1_100_A_T', False),
         ('22_100_A_T', False),
     ],
@@ -104,18 +102,27 @@ def test_typing_valid_sets_rejects_a_finemapping_method_outside_the_enum() -> No
         type_valid_sets(sets).collect()
 
 
-def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed() -> None:
+def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed(validate_source) -> None:
+    """A curated top hit of a study that also has a PICS set from summary statistics is redundant."""
     sets = pl.LazyFrame(
         {
             'id': ['top_hit', 'clean'],
+            'studyId': ['s', 's'],
             'chromosome': ['1', '1'],
+            'locusStart': [1, 2],
+            'locusEnd': [1, 2],
             'leadVariantId': ['1_1_A_T', '1_2_A_T'],
+            'fineMappingMethod': ['PICS', 'PICS'],
             'qualityControls': [[CredibleSetFlag.TOP_HIT.value], []],
         },
         schema={
             'id': pl.String,
+            'studyId': pl.String,
             'chromosome': pl.String,
+            'locusStart': pl.Int32,
+            'locusEnd': pl.Int32,
             'leadVariantId': pl.String,
+            'fineMappingMethod': pl.String,
             'qualityControls': pl.List(pl.String),
         },
     )
@@ -123,12 +130,8 @@ def test_a_cross_set_flag_reaches_its_set_and_excludes_it_when_listed() -> None:
         {'credibleSetId': ['top_hit', 'clean'], 'variantId': ['1_1_A_T', '1_2_A_T'], 'qualityControls': [[], []]},
         schema={'credibleSetId': pl.String, 'variantId': pl.String, 'qualityControls': pl.List(pl.String)},
     )
-    cross_set_flags = pl.LazyFrame(
-        {'id': ['top_hit'], 'qualityControls': [[CredibleSetFlag.REDUNDANT_PICS_TOP_HIT.value]]},
-        schema=cross_set_flags_schema,
-    )
     settings = ValidationSettings(cs_invalid_qc_reasons=['REDUNDANT_PICS_TOP_HIT'])
-    valid_set, _, excluded_set, excluded_variant = validate(sets, variants, cross_set_flags, settings)
+    valid_set, _, excluded_set, excluded_variant = validate_source(sets, variants, settings)
 
     assert valid_set.collect()['id'].to_list() == ['clean']
     excluded = excluded_set.collect()

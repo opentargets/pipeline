@@ -2,6 +2,7 @@
 
 from pts.schemas.study import StudyType
 from pts.transformers.credible_set.enums import Chromosome, FinemappingMethod, KnownGenomicRegion
+from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 
 
 def test_finemapping_methods_match_gentropy() -> None:
@@ -9,14 +10,9 @@ def test_finemapping_methods_match_gentropy() -> None:
     assert FinemappingMethod.susie() == (FinemappingMethod.SUSIE, FinemappingMethod.SUSIE_INF)
 
 
-def test_chromosomes_are_listed_in_genome_order() -> None:
-    assert [chromosome.value for chromosome in Chromosome] == [
-        *(str(number) for number in range(1, 23)),
-        'X',
-        'Y',
-        'XY',
-        'MT',
-    ]
+def test_chromosomes_are_the_ensembl_canonical_chromosomes_in_genome_order() -> None:
+    """The genes and variants credible sets are joined to lie on these, so there is no XY."""
+    assert [chromosome.value for chromosome in Chromosome] == CANONICAL_CHROMOSOMES
 
 
 def test_mhc_matches_gentropy() -> None:

@@ -28,7 +28,7 @@ pis_version: "26.12.0rc21"
 pts_version: "26.12.0rc35"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
-gentropy_version: "4.0.0-rc.1"
+gentropy_version: "4.0.0-rc.3"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
 # (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
@@ -510,7 +510,6 @@ steps:
       - pts_study
   pts_credible_set_annotation:
     depends_on:
-      - pts_credible_set
       - pts_variant
   gentropy_colocalisation:
     num_partitions: 200
@@ -519,7 +518,6 @@ steps:
   gentropy_l2g_feature_matrix:
     depends_on:
       - gentropy_colocalisation
-      - pts_variant
       - pts_enhancer_to_gene
       - pts_interaction
   gentropy_l2g_effector_gene_list:

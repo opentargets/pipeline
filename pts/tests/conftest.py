@@ -7,10 +7,18 @@
 # ordering hold for the whole suite whatever the collection order.
 import xgboost  # noqa: F401  # isort: skip
 
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import Mock
+
+import polars as pl
 import pytest
+from otter.config.model import Config
 from pyspark.sql import SparkSession
 
 from pts.pyspark.common.session import Session
+from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
+from pts.transformers.credible_set.validation import ValidationSettings, validation
 
 
 @pytest.fixture(scope='session')
@@ -67,3 +75,41 @@ def ansi(spark: SparkSession, request: pytest.FixtureRequest):
         yield request.param == 'true'
     finally:
         spark.conf.set('spark.sql.ansi.enabled', previous)
+
+
+@pytest.fixture
+def validate_source(tmp_path: Path) -> Callable[..., tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]]:
+    """Validate one source's QC'd sets and variants with the credible set validation task.
+
+    The frames are written as parquet in the layout the task reads, with every column of their
+    schema; the returned callable gives the valid sets, valid variants, excluded sets and excluded
+    variants it wrote.
+    """
+
+    def validate(
+        credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFrame, settings: ValidationSettings
+    ) -> tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]:
+        source = {}
+        for name, frame, schema in [
+            ('credible_set', credible_set, credible_set_schema),
+            ('credible_set_variant', credible_set_variant, credible_set_variant_schema),
+        ]:
+            path = tmp_path / 'qc/gwas/source' / name
+            path.mkdir(parents=True)
+            pl.concat([pl.LazyFrame(schema=schema), frame], how='diagonal_relaxed').collect().write_parquet(
+                path / 'part-0.parquet'
+            )
+            source[name] = [str(path)]
+        output = ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant')
+        validation(
+            source=source,
+            destination={name: str(tmp_path / 'out' / name) for name in output},
+            settings=settings.model_dump(),
+            config=Mock(spec=Config, work_path=str(tmp_path), release_uri=None),
+        )
+        valid_set, valid_variant, excluded_set, excluded_variant = (
+            pl.scan_parquet(tmp_path / 'out' / name / '*.parquet') for name in output
+        )
+        return valid_set, valid_variant, excluded_set, excluded_variant
+
+    return validate

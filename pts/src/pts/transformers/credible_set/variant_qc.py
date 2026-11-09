@@ -10,18 +10,16 @@ from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.credible_set import credible_set_variant_required, credible_set_variant_schema
-from pts.transformers.credible_set.enums import Chromosome
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
 from pts.transformers.credible_set.source_dataset import read_source_dataset
-from pts.transformers.credible_set.variant_id import variant_alternate_allele, variant_reference_allele
+from pts.transformers.credible_set.variant_id import (
+    CREDIBLE_SET_ID_PATTERN,
+    VARIANT_ID_PATTERN,
+    variant_alternate_allele,
+    variant_reference_allele,
+)
 from pts.transformers.utils.dataset import sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows
-
-#: A credible set identifier: a 32-character lowercase md5 hex digest.
-CREDIBLE_SET_ID_PATTERN = r'^[0-9a-f]{32}$'
-
-#: A variant identifier on a canonical chromosome, with a positive position and nucleotide alleles.
-VARIANT_ID_PATTERN = rf'^(?:{"|".join(chromosome.value for chromosome in Chromosome)})_[1-9][0-9]*_[ACGT]+_[ACGT]+$'
 
 
 class VariantQcSource(BaseModel):
@@ -78,7 +76,7 @@ def flag_invalid_variant_id(frame: pl.LazyFrame) -> pl.LazyFrame:
         ... })
         >>> flagged = flag_invalid_variant_id(credible_set_variant).collect()
         >>> flagged.filter(pl.col('qualityControls').list.len() > 0)['variantId'].to_list()
-        ['1_100_A_A', '23_100_A_T', '14_KI270846v1_alt_497149_C_T']
+        ['XY_5_ACGT_A', '1_100_A_A', '23_100_A_T', '14_KI270846v1_alt_497149_C_T']
     """
     variant_id = pl.col('variantId')
     same_allele = variant_reference_allele(variant_id) == variant_alternate_allele(variant_id)
@@ -208,11 +206,6 @@ def flag_missing_pvalue(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, missing, CredibleSetVariantFlag.MISSING_PVALUE)
 
 
-def flag_missing_sample_size(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag variants without a sample size; metadata only, as the rescaled effect size uses the study `nSamples`."""
-    return flag_rows(frame, pl.col('sampleSize').is_null(), CredibleSetVariantFlag.MISSING_SAMPLE_SIZE)
-
-
 def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) -> pl.LazyFrame:
     """Add every variant QC flag; the coverage cut runs before the PIP check, which uses it."""
     return (
@@ -225,7 +218,6 @@ def flag_variants(frame: pl.LazyFrame, coverage: float, pip_tolerance: float) ->
         .pipe(flag_effect_direction_mismatch)
         .pipe(flag_incomplete_stats)
         .pipe(flag_missing_pvalue)
-        .pipe(flag_missing_sample_size)
     )
 
 
