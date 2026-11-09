@@ -51,8 +51,8 @@
   },
   {
     "id": "studyLocusId",
-    "description": "Identifier of the Open Targets Study Locus",
-    "foreign_key": "credible_set/studyLocusId"
+    "description": "Identifier of the Open Targets credible set",
+    "foreign_key": "credible_set/id"
   },
   {
     "id": "targetFromSourceId",

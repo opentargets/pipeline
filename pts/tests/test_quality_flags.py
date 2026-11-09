@@ -6,7 +6,13 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
+from pts.transformers.utils.quality_flags import (
+    flag_matching_ids,
+    flag_rows,
+    has_excluded_flag,
+    resolve_flag_names,
+    valid_rows,
+)
 
 
 class Flag(StrEnum):
@@ -129,3 +135,11 @@ def test_resolve_flag_names_keeps_members_whose_value_names_another_member():
         Clash.FIRST,
         'second reason',
     ]
+
+
+def test_flag_matching_ids_flags_the_listed_ids_and_keeps_rows_order_and_columns():
+    frame = pl.LazyFrame({'id': ['c', 'a', 'b', 'a'], 'qualityControls': [[], [], [], []]})
+    ids = pl.LazyFrame({'id': ['a', 'a', 'z']})
+    flagged = flag_matching_ids(frame, 'id', ids, Flag.INVALID).collect()
+    assert flagged.columns == ['id', 'qualityControls']
+    assert flagged.rows() == [('c', []), ('a', [Flag.INVALID.value]), ('b', []), ('a', [Flag.INVALID.value])]

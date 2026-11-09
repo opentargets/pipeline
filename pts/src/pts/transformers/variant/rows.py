@@ -56,17 +56,27 @@ def as_vcf_df(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, credible_set: str) -> pl.LazyFrame:
+def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, credible_set_variant: str) -> pl.LazyFrame:
     """Deduplicated variants from the four evidence sources, sorted by coordinate.
 
-    The kept rsID is the smallest real one, with '.' for a variant that has none.
+    The kept rsID is the smallest real one, with '.' for a variant that has none. The credible
+    set variants are the validated CredibleSetVariant rows, which hold every lead and member; a
+    variant has one row per credible set it is in, so their distinct identifiers are taken before
+    they are split into VCF columns.
+
+    Raises:
+        ValueError: If the credible set variants have no `variantId` column, as a CredibleSet
+            dataset given in their place does not.
     """
     logger.info('Reading variant evidence')
+    credible_set_variants = scan_dataset(credible_set_variant)
+    if 'variantId' not in credible_set_variants.collect_schema():
+        raise ValueError(f'{credible_set_variant} has no variantId column: expected the credible set variants')
     frames = [
         as_vcf_df(scan_dataset(uniprot_variants, format='ndjson', infer_schema_length=None)),
         as_vcf_df(scan_dataset(eva, format='ndjson', infer_schema_length=None)),
         as_vcf_df(scan_dataset(pharmacogenomics)),
-        as_vcf_df(scan_dataset(credible_set)),
+        as_vcf_df(credible_set_variants.select('variantId').unique()),
     ]
     return (
         pl

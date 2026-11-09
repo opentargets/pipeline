@@ -2021,7 +2021,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.12.0rc36"
+version = "26.12.0rc43"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
@@ -2030,7 +2030,6 @@ dependencies = [
     { name = "obonet" },
     { name = "openpyxl" },
     { name = "opentargets-otter" },
-    { name = "pandas" },
     { name = "pdfplumber" },
     { name = "pixeltable-pgserver" },
     { name = "polars", extra = ["connectorx"] },
@@ -2038,12 +2037,14 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pybigwig" },
     { name = "pydantic" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
 baseline-expression = [
     { name = "cellex" },
     { name = "gcsfs" },
+    { name = "pandas" },
     { name = "scanpy" },
 ]
 l2g = [
@@ -2074,6 +2075,7 @@ spark = [
     { name = "pyspark" },
 ]
 test = [
+    { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "pytest-split" },
@@ -2093,7 +2095,7 @@ requires-dist = [
     { name = "openai", marker = "extra == 'llm'", specifier = ">=3.26.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
-    { name = "pandas", specifier = ">=3.0.6" },
+    { name = "pandas", marker = "extra == 'baseline-expression'", specifier = ">=3.0.6" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pixeltable-pgserver", specifier = ">=0.6,<0.7" },
     { name = "polars", extras = ["connectorx"], specifier = ">=1.41.2" },
@@ -2103,6 +2105,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "scanpy", marker = "extra == 'baseline-expression'", specifier = ">=1.10.0" },
     { name = "scikit-learn", marker = "extra == 'l2g'", specifier = ">=1.7.0" },
+    { name = "scipy", specifier = ">=1.18.1" },
     { name = "shap", marker = "extra == 'l2g'", specifier = ">=0.51.0" },
     { name = "skops", marker = "extra == 'l2g'", specifier = ">=0.11.0" },
     { name = "torch", marker = "extra == 'nlp'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cpu" },
@@ -2119,6 +2122,7 @@ dev = [
 ]
 spark = [{ name = "pyspark", specifier = ">=4.1,<4.2" }]
 test = [
+    { name = "pandas", specifier = ">=3.0.6" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-mock", specifier = ">=3.15.1" },
     { name = "pytest-split", specifier = ">=0.11.0" },
