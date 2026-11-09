@@ -24,9 +24,10 @@ def test_moa_literature_settings_validate() -> None:
 
 
 def test_moa_literature_caps_compute_and_shards() -> None:
-    """The step refuses to compute more than 3000 drugs and writes shards of 5000."""
+    """The step refuses to compute more than 4500 drugs or seed under 60% of them, and writes shards of 5000."""
     settings = MoaLiteratureSettings(**_task()['settings'])
     assert settings.max_compute == 4500
+    assert settings.min_seeded_share == 0.60
     assert settings.shard_size == 5000
 
 
