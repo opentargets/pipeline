@@ -26,8 +26,11 @@ class ClinicalStagingConfig:
     does — load each application's own config and point its ``release_uri`` at
     the run's destination — for the steps this pipeline needs.
 
-    Every step belongs to a source, ``aact``, ``clinical_mining`` or ``literature``, and writes
-    under ``gs://clinical_staging/<source>/<version>``.
+    Every step belongs to a source, ``aact``, ``clinical_mining`` or ``literature``, and its release
+    URI is ``gs://clinical_staging/<source>/<version>``. Every step writes its outputs there except
+    ``pts_moa_literature``, which publishes its snapshot to
+    ``gs://clinical_staging/literature/<input_release>/moa_literature/<tag>``, ``input_release`` being
+    the published release it reads.
     """
 
     def __init__(self) -> None:

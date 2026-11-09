@@ -18,7 +18,7 @@ disk_size: 150
 # Dependency graph
 # ----------------
 # Follows same standards as in unified_pipeline. `source` says which version
-# directory the step reads and writes: `aact` or `clinical_mining`.
+# directory the step reads and writes: `aact`, `clinical_mining` or `literature`.
 steps:
   pis_aact:
     source: aact

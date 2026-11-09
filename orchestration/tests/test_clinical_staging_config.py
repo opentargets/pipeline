@@ -9,6 +9,7 @@ import yaml
 from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
 
 PIS_CONFIG = Path(__file__).parents[2] / 'pis' / 'config.yaml'
+PTS_CONFIG = Path(__file__).parents[2] / 'pts' / 'config.yaml'
 
 FAKE_TAGS = {
     'extraction_tag': 'eeee5555-p44444444',
@@ -187,4 +188,5 @@ def test_moa_literature_snapshot_lands_under_the_literature_root(config: Clinica
     """The destination is the literature root, so the snapshot is gs://clinical_staging/literature/<release>/..."""
     step = config.step_config('pts_moa_literature')['steps']['moa_literature'][0]
     assert step['destination'] == {'moa': 'gs://clinical_staging/literature'}
-    assert step['settings']['input_release'] == '26.09'
+    shipped = yaml.safe_load(PTS_CONFIG.read_text())['steps']['moa_literature'][0]['settings']['input_release']
+    assert step['settings']['input_release'] == shipped

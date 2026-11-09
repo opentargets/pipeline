@@ -27,7 +27,7 @@ file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction}/  # record stores, shared across versions
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,moa,moa_literature}/  # record stores, shared across versions
 gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
 gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
 gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
@@ -36,14 +36,17 @@ gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.par
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<staging_version>/{drug_entities,disease_entities}/<tag>/
+gs://clinical_staging/literature/<input_release>/moa_literature/<tag>/  # data.parquet + drugs.parquet + metadata.json
 ```
 
 ## The DAG
 
 Each step is named `{stage}_{step}`, where the stage is the application that
-runs it, and belongs to a `source` (`aact` or `clinical_mining`). The source
-gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
-and its version. Each step runs on its own short-lived GCE VM.
+runs it, and belongs to a `source` (`aact`, `clinical_mining` or `literature`).
+The source gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
+and its version. `pts_moa_literature` publishes its snapshot under the
+published release it reads instead,
+`gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`. Each step runs on its own short-lived GCE VM.
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
