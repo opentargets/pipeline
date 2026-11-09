@@ -1011,6 +1011,26 @@ steps:
         min_seeded_share: 0.5
   ##################################################################################################
 
+  #: MOA_LITERATURE STEP :#########################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG; reads the published literature match and
+  # drug molecules of the input release and publishes a snapshot under gs://clinical_staging/literature
+  moa_literature:
+    - name: transform moa_literature
+      transformer: clinical_mira.moa_literature
+      source:
+        match: gs://open-targets-data-releases/26.09/intermediate/literature/match
+        drug_molecule: gs://open-targets-data-releases/26.09/output/drug_molecule
+      destination:
+        moa: gs://clinical_staging/literature
+      settings:
+        store_uri: gs://clinical_staging/store
+        input_release: '26.09'
+        import_experiment_cache: gs://clinical_staging/store/moa_literature/seed/moa_literature_seed-2026-11-09.jsonl
+        import_for_tag: claude-opus-5-5-p15139b69
+        min_seeded_share: 0.69
+        billing_project: open-targets-eu-dev
+  ##################################################################################################
+
   #: CLINICAL_MINING_MODELS STEP :#################################################################
   # Not part of a release. Runs with release_uri pointed at
   # gs://clinical_staging/clinical_mining/${staging_version}; the record stores sit outside it

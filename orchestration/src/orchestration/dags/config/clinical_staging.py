@@ -26,7 +26,7 @@ class ClinicalStagingConfig:
     does — load each application's own config and point its ``release_uri`` at
     the run's destination — for the steps this pipeline needs.
 
-    Every step belongs to a source, ``aact`` or ``clinical_mining``, and writes
+    Every step belongs to a source, ``aact``, ``clinical_mining`` or ``literature``, and writes
     under ``gs://clinical_staging/<source>/<version>``.
     """
 
@@ -48,7 +48,11 @@ class ClinicalStagingConfig:
         self.boot_disk_size: int = conf.get('boot_disk_size')
         """Boot disk size in GB. Sized for the PIS and PTS container images."""
 
-        self.versions = {'aact': self.staging_version, 'clinical_mining': self.staging_version}
+        self.versions = {
+            'aact': self.staging_version,
+            'clinical_mining': self.staging_version,
+            'literature': self.staging_version,
+        }
         """The version of each source."""
 
         pis_path = config_path.parents[4] / 'pis' / 'config.yaml'
@@ -91,7 +95,7 @@ class ClinicalStagingConfig:
         """Return where a source writes: ``<bucket>/<source>/<version>``.
 
         Args:
-            source: ``aact`` or ``clinical_mining``.
+            source: ``aact``, ``clinical_mining`` or ``literature``.
 
         Returns:
             str: The version directory of the source.

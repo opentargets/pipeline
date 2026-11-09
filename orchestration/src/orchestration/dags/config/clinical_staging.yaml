@@ -62,3 +62,13 @@ steps:
       - pis_clinical_mining
       - pts_aact_trial_models
     machine_type: 'n2d-standard-16'
+
+  # Extracts the mechanisms of action the literature states for each clinical drug with Claude. Reads
+  # published releases only; its snapshot lands under gs://clinical_staging/literature/<release>.
+  pts_moa_literature:
+    source: literature
+    machine_type: 'n2d-highmem-32'
+    execution_timeout_hours: 30
+    container_env:
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: wrkspc_01PEuYsbEifFUZBttcpwP49Q
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: open-targets-eu-dev

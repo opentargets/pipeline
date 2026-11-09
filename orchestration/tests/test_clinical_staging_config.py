@@ -43,6 +43,7 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
         'pts_aact_moa',
         'pis_clinical_mining',
         'pts_clinical_mining_models',
+        'pts_moa_literature',
     ]
     assert config.step_definition('pts_aact_trial_extraction')['depends_on'] == ['pis_aact']
     assert config.step_definition('pts_aact_trial_models')['depends_on'] == ['pts_aact_trial_extraction']
@@ -57,6 +58,7 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
     """Each step writes under its source's version directory and is pinned to that version."""
     aact = f'gs://clinical_staging/aact/{config.staging_version}'
     mining = f'gs://clinical_staging/clinical_mining/{config.staging_version}'
+    literature = f'gs://clinical_staging/literature/{config.staging_version}'
     for step_name, uri in [
         ('pis_aact', aact),
         ('pts_aact_trial_extraction', aact),
@@ -64,6 +66,7 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
         ('pts_aact_moa', aact),
         ('pis_clinical_mining', mining),
         ('pts_clinical_mining_models', mining),
+        ('pts_moa_literature', literature),
     ]:
         assert config.release_uri(step_name) == uri
         assert config.step_config(step_name)['release_uri'] == uri
@@ -126,7 +129,7 @@ def test_step_execution_timeout_is_read_from_the_step(config: ClinicalStagingCon
     """Only a step that declares ``execution_timeout_hours`` has a timeout."""
     assert config.execution_timeout_for('pts_aact_moa') == timedelta(hours=30)
     for step_name in config.steps():
-        if step_name != 'pts_aact_moa':
+        if step_name not in ('pts_aact_moa', 'pts_moa_literature'):
             assert config.execution_timeout_for(step_name) is None
 
 
@@ -158,3 +161,27 @@ def test_aact_moa_step_config(config: ClinicalStagingConfig) -> None:
     assert uploaded['release_uri'] == f'gs://clinical_staging/aact/{config.staging_version}'
     assert config.machine_type_for('pts_aact_moa') == 'n1-highmem-8'
     assert not config.step_definition('pts_aact_moa').get('gce_secret_files')
+
+
+def test_moa_literature_step_has_timeout_and_env(config: ClinicalStagingConfig) -> None:
+    """moa_literature runs on a large machine with the aact_moa timeout and Claude workspace."""
+    assert config.execution_timeout_for('pts_moa_literature') == timedelta(hours=30)
+    assert config.machine_type_for('pts_moa_literature') == 'n2d-highmem-32'
+    assert config.step_env_vars('pts_moa_literature') == config.step_env_vars('pts_aact_moa') | {
+        'PTS_STEP': 'moa_literature'
+    }
+    assert list(config.step_config('pts_moa_literature')['steps']) == ['moa_literature']
+
+
+def test_moa_literature_has_no_staging_dependencies(config: ClinicalStagingConfig) -> None:
+    """moa_literature reads published releases, so it waits for no other step and none waits for it."""
+    assert not config.step_definition('pts_moa_literature').get('depends_on')
+    for step_name in config.steps():
+        assert 'pts_moa_literature' not in (config.step_definition(step_name).get('depends_on') or [])
+
+
+def test_moa_literature_snapshot_lands_under_the_literature_root(config: ClinicalStagingConfig) -> None:
+    """The destination is the literature root, so the snapshot is gs://clinical_staging/literature/<release>/..."""
+    step = config.step_config('pts_moa_literature')['steps']['moa_literature'][0]
+    assert step['destination'] == {'moa': 'gs://clinical_staging/literature'}
+    assert step['settings']['input_release'] == '26.09'

@@ -102,3 +102,17 @@ def test_drug_mechanism_of_action_follows_its_aact_inference(dag_bag: DagBag) ->
     moa_run = dag.get_task('pts_drug_mechanism_of_action.run_pts_drug_mechanism_of_action')
     assert aact_end.task_id in moa_run.get_flat_relative_ids(upstream=True)
     dag.topological_sort()
+
+
+def test_moa_literature_runs_alone_with_its_timeout_and_env(dag_bag: DagBag) -> None:
+    """moa_literature has no upstream step, runs with its timeout and the Claude workspace, and gates nothing."""
+    dag = dag_bag.dags['clinical_staging']
+    start = dag.get_task('pts_moa_literature.upload_config_pts_moa_literature')
+    assert not start.upstream_task_ids
+    run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_moa_literature.run_pts_moa_literature'))
+    assert run.execution_timeout == timedelta(hours=30)
+    assert run.container_env is not None
+    assert run.container_env['PTS_STEP'] == 'moa_literature'
+    assert run.container_env['ANTHROPIC_GOOGLE_CLOUD_PROJECT'] == 'open-targets-eu-dev'
+    assert run.machine_type == 'n2d-highmem-32'
+    assert not dag.get_task('pts_moa_literature.end_pts_moa_literature').downstream_task_ids

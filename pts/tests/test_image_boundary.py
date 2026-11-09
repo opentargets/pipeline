@@ -9,7 +9,13 @@ import yaml
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
 
 FORBIDDEN = ('torch', 'transformers', 'openai', 'pyspark')
-STAGING_STEPS = frozenset({'aact_moa', 'aact_trial_extraction', 'aact_trial_models', 'clinical_mining_models'})
+STAGING_STEPS = frozenset({
+    'aact_moa',
+    'moa_literature',
+    'aact_trial_extraction',
+    'aact_trial_models',
+    'clinical_mining_models',
+})
 
 BLOCK_AND_IMPORT = """
 import importlib
