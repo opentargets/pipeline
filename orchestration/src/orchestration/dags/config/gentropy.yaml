@@ -32,3 +32,45 @@ steps:
       # OUTPUTS
       step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
 
+  l2g_effector_gene_list:
+    params:
+      step: effector_gene_list
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Keeps the top tier of every curated source and ClinVar pathogenic calls with stated criteria.
+      step.rare_variant_score_threshold: 0.91
+      # INPUTS
+      # Rare-variant evidence, one path per datasource; filtered on step.rare_variant_score_threshold.
+      step.rare_variant_evidence_paths:
+        - '{{release_uri}}/output/evidence_eva'
+        - '{{release_uri}}/output/evidence_genomics_england'
+        - '{{release_uri}}/output/evidence_clingen'
+        - '{{release_uri}}/output/evidence_gene2phenotype'
+        - '{{release_uri}}/output/evidence_orphanet'
+        - '{{release_uri}}/output/evidence_uniprot_variants'
+        - '{{release_uri}}/output/evidence_uniprot_literature'
+      step.clinical_evidence_path: '{{release_uri}}/output/evidence_clinical_precedence'
+      # Legacy OTG gold standard curation with remapped disease ids; pis_l2g stages it.
+      step.gold_standard_path: '{{release_uri}}/input/l2g/otg_gold_standard.json'
+      # OUTPUTS
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+
+  l2g_training_set:
+    params:
+      step: training_set
+      step.session.write_mode: overwrite
+      step.session.output_partitions: 1
+      # Matches the old training set.
+      step.interaction_score_threshold: 0.8
+      # Keep only credible sets flagged REPLICATED by pts_credible_set_annotation. Required for production.
+      step.apply_replication_filter: true
+      # INPUTS
+      step.feature_matrix_path: '{{release_uri}}/intermediate/l2g_feature_matrix'
+      # Validated credible sets; the training set keeps the ones flagged REPLICATED.
+      step.credible_set_path: '{{release_uri}}/output/credible_set'
+      step.study_index_path: '{{release_uri}}/output/study'
+      step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+      step.interaction_path: '{{release_uri}}/output/interaction'
+      # OUTPUTS
+      step.training_set_path: '{{release_uri}}/intermediate/l2g_training_set'
+

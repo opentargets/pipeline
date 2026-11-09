@@ -1,4 +1,13 @@
-"""Read the credible sets or credible set variants of one source, as the credible set stages expect them."""
+"""What the credible set stages read: a staged source, and the study of a credible set.
+
+A staged source is one source's credible sets or credible set variants, as PIS stages them.
+`read_source_dataset` reads one under the contract every stage relies on: the stage's schema,
+nothing null that keys a row, and quality flags as lists. A source that breaks it stops the
+stage before any check runs, rather than having its rows flagged for what is a staging bug.
+
+The annotation rules join a credible set to its study, and a QTL study to its gene:
+`study_of_set` and `qtl_genes` are those two joins, so every rule makes them the same way.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +15,7 @@ from collections.abc import Sequence
 
 import polars as pl
 
+from pts.schemas.study import StudyType
 from pts.transformers.utils.dataset import scan_dataset
 
 
@@ -29,3 +39,14 @@ def read_source_dataset(path: str, schema: pl.Schema, required: Sequence[str]) -
         msg = f'{path}: required columns have nulls: {missing}'
         raise ValueError(msg)
     return frame
+
+
+def study_of_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
+    """The `studyId` of each credible set, keyed by `credibleSetId` for a join to its variants."""
+    return credible_set.select(pl.col('id').alias('credibleSetId'), 'studyId')
+
+
+def qtl_genes(study: pl.LazyFrame) -> pl.LazyFrame:
+    """The `geneId` of each QTL study that has one."""
+    qtl = (pl.col('studyType') != StudyType.GWAS.value) & pl.col('geneId').is_not_null()
+    return study.filter(qtl).select('studyId', 'geneId')

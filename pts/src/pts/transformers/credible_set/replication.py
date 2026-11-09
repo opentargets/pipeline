@@ -1,8 +1,15 @@
 """The REPLICATED rule: credible sets whose lead is reported on one of their traits by two independent reports.
 
-A report is one row of `REPORT_COLUMNS`: a credible set, its lead, a trait it reports the lead on,
-and the evidence that tells independent reports apart. Each kind of set builds its own reports, and
-one rule, `independently_reported_ids`, applies to all of them.
+A lead found once may be chance; found again on the same trait by an independent study, it is
+replicated. A report is one row of `_REPORT_COLUMNS`: a credible set, its lead, a trait it reports
+the lead on, and the evidence that tells independent reports apart.
+
+`replicated_sets` builds the reports of each kind of set, then applies one rule to all of them
+(`_independently_reported_ids`):
+
+- a GWAS set reports its lead on each of its study's traits (`_gwas_traits`), and two reports are
+  independent when they come from different publications, cohorts or populations;
+- a QTL set reports its lead on its study's gene, and every QTL study is independent of another.
 """
 
 from __future__ import annotations
@@ -10,28 +17,79 @@ from __future__ import annotations
 import polars as pl
 
 from pts.schemas.study import StudyType
-from pts.transformers.credible_set.study_lookup import qtl_genes
+from pts.transformers.credible_set.source import qtl_genes
 from pts.transformers.disease.coalescing import MEASUREMENT
 
-REPORT_COLUMNS = ('id', 'leadVariantId', 'trait', 'evidence')
+_REPORT_COLUMNS = ('id', 'leadVariantId', 'trait', 'evidence')
 """The columns of a report: the credible set, its lead, the trait and the evidence of the report."""
 
-MIN_INDEPENDENT_REPORTS = 2
+
+_MIN_INDEPENDENT_REPORTS = 2
 """The number of independent reports of a lead on a trait that make it replicated."""
 
 
-def measurement_term(disease: pl.LazyFrame) -> pl.LazyFrame:
-    """The `id` of the disease index terms filed under the measurement therapeutic area.
+def replicated_sets(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids of the GWAS and QTL sets whose lead is reported on one of their traits by independent reports.
+
+    The reports are those of `_gwas_reports` and `_qtl_reports`, and the rule is
+    `_independently_reported_ids`.
 
     Examples:
-        >>> disease = pl.LazyFrame({'id': ['bmi', 'ra'], 'therapeuticAreas': [[MEASUREMENT], ['EFO_area']]})
-        >>> measurement_term(disease).collect()['id'].to_list()
-        ['bmi']
+        >>> credible_set = pl.LazyFrame({
+        ...     'id': ['a', 'b', 'c'],
+        ...     'studyId': ['s1', 's2', 's3'],
+        ...     'leadVariantId': ['1_1_A_T'] * 3,
+        ... })
+        >>> study = pl.LazyFrame({
+        ...     'studyId': ['s1', 's2', 's3'],
+        ...     'studyType': ['gwas'] * 3,
+        ...     'diseaseIds': [['ra'], ['ra'], ['ibd']],
+        ...     'geneId': [None] * 3,
+        ...     'pubmedId': ['p1', 'p2', 'p3'],
+        ...     'cohorts': [None] * 3,
+        ...     'ldPopulationStructure': [None] * 3,
+        ... })
+        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
+        >>> replicated_sets(credible_set, study, disease).sort('id').collect()['id'].to_list()
+        ['a', 'b']
     """
-    return disease.filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT)).select('id').unique()
+    gwas = credible_set.pipe(_gwas_reports, study, disease).pipe(_independently_reported_ids)
+    qtl = credible_set.pipe(_qtl_reports, study).pipe(_independently_reported_ids)
+    return pl.concat([gwas, qtl]).unique()
 
 
-def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
+def _gwas_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
+    """The reports of the GWAS sets: one per set and trait of `_gwas_traits`.
+
+    The evidence is the study's cohorts, publication and populations, so studies sharing all
+    three are one report.
+
+    Examples:
+        >>> credible_set = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g1', 'g2'], 'leadVariantId': ['1_1_A_T'] * 2})
+        >>> study = pl.LazyFrame({
+        ...     'studyId': ['g1', 'g2'],
+        ...     'studyType': ['gwas', 'gwas'],
+        ...     'diseaseIds': [['ra'], ['ra']],
+        ...     'pubmedId': ['p', 'p'],
+        ...     'cohorts': [['UKB'], ['UKB']],
+        ...     'ldPopulationStructure': [None, None],
+        ... })
+        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
+        >>> report = _gwas_reports(credible_set, study, disease).collect()
+        >>> report['evidence'].n_unique()
+        1
+    """
+    evidence = study.select('studyId', pl.struct('cohorts', 'pubmedId', 'ldPopulationStructure').alias('evidence'))
+    return (
+        credible_set
+        .select('id', 'studyId', 'leadVariantId')
+        .join(_gwas_traits(study, disease), on='studyId')
+        .join(evidence, on='studyId')
+        .select(_REPORT_COLUMNS)
+    )
+
+
+def _gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     """The traits a GWAS study replicates on, from the kind of its `diseaseIds` terms.
 
     - A study with at least one disease term has one trait: its sorted disease terms. Its
@@ -75,7 +133,7 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
         ...         [],
         ...     ],
         ... })
-        >>> trait = gwas_traits(study, disease).group_by('studyId').agg(pl.col('trait').sort())
+        >>> trait = _gwas_traits(study, disease).group_by('studyId').agg(pl.col('trait').sort())
         >>> by_study = study.select('studyId').join(trait, on='studyId', how='left', maintain_order='left')
         >>> for study_id, study_trait in by_study.collect().rows():
         ...     print(f'{study_id}: {study_trait or []}')
@@ -88,7 +146,7 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
         many diseases, many measurements: [['ibd', 'ra']]
         empty list: []
     """
-    is_measurement = measurement_term(disease).select(pl.col('id').alias('term'), pl.lit(True).alias('is_measurement'))
+    is_measurement = _measurement_term(disease).select(pl.col('id').alias('term'), pl.lit(True).alias('is_measurement'))
     term_by_study = (
         study
         .filter(pl.col('studyType') == StudyType.GWAS.value)
@@ -100,7 +158,7 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
         .group_by('studyId')
         .agg(
             pl.col('term').filter(pl.col('is_measurement').is_null()).sort().alias('disease_term'),
-            pl.col('term').filter(pl.col('is_measurement')).alias('measurement_term'),
+            pl.col('term').filter(pl.col('is_measurement')).alias('_measurement_term'),
         )
     )
     has_disease = pl.col('disease_term').list.len() > 0
@@ -108,44 +166,24 @@ def gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     measurement_trait = (
         term_by_study
         .filter(~has_disease)
-        .explode('measurement_term')
-        .select('studyId', pl.concat_list('measurement_term').alias('trait'))
+        .explode('_measurement_term')
+        .select('studyId', pl.concat_list('_measurement_term').alias('trait'))
     )
     return pl.concat([disease_trait, measurement_trait])
 
 
-def gwas_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
-    """The reports of the GWAS sets: one per set and trait of `gwas_traits`.
-
-    The evidence is the study's cohorts, publication and populations, so studies sharing all
-    three are one report.
+def _measurement_term(disease: pl.LazyFrame) -> pl.LazyFrame:
+    """The `id` of the disease index terms filed under the measurement therapeutic area.
 
     Examples:
-        >>> credible_set = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['g1', 'g2'], 'leadVariantId': ['1_1_A_T'] * 2})
-        >>> study = pl.LazyFrame({
-        ...     'studyId': ['g1', 'g2'],
-        ...     'studyType': ['gwas', 'gwas'],
-        ...     'diseaseIds': [['ra'], ['ra']],
-        ...     'pubmedId': ['p', 'p'],
-        ...     'cohorts': [['UKB'], ['UKB']],
-        ...     'ldPopulationStructure': [None, None],
-        ... })
-        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
-        >>> report = gwas_reports(credible_set, study, disease).collect()
-        >>> report['evidence'].n_unique()
-        1
+        >>> disease = pl.LazyFrame({'id': ['bmi', 'ra'], 'therapeuticAreas': [[MEASUREMENT], ['EFO_area']]})
+        >>> _measurement_term(disease).collect()['id'].to_list()
+        ['bmi']
     """
-    evidence = study.select('studyId', pl.struct('cohorts', 'pubmedId', 'ldPopulationStructure').alias('evidence'))
-    return (
-        credible_set
-        .select('id', 'studyId', 'leadVariantId')
-        .join(gwas_traits(study, disease), on='studyId')
-        .join(evidence, on='studyId')
-        .select(REPORT_COLUMNS)
-    )
+    return disease.filter(pl.col('therapeuticAreas').list.contains(MEASUREMENT)).select('id').unique()
 
 
-def qtl_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
+def _qtl_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     """The reports of the QTL sets of a study with a `geneId`: one per set, on that gene.
 
     The evidence is the credible set itself, so two sets of one study are two reports.
@@ -153,7 +191,7 @@ def qtl_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame
     Examples:
         >>> credible_set = pl.LazyFrame({'id': ['a', 'b'], 'studyId': ['q', 'q'], 'leadVariantId': ['1_1_A_T'] * 2})
         >>> study = pl.LazyFrame({'studyId': ['q'], 'studyType': ['eqtl'], 'geneId': ['ENSG1']})
-        >>> qtl_reports(credible_set, study).sort('id').collect().rows()
+        >>> _qtl_reports(credible_set, study).sort('id').collect().rows()
         [('a', '1_1_A_T', 'ENSG1', 'a'), ('b', '1_1_A_T', 'ENSG1', 'b')]
     """
     return (
@@ -161,12 +199,12 @@ def qtl_reports(credible_set: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame
         .select('id', 'studyId', 'leadVariantId')
         .join(qtl_genes(study), on='studyId')
         .select('id', 'leadVariantId', pl.col('geneId').alias('trait'), pl.col('id').alias('evidence'))
-        .select(REPORT_COLUMNS)
+        .select(_REPORT_COLUMNS)
     )
 
 
-def independently_reported_ids(report: pl.LazyFrame) -> pl.LazyFrame:
-    """The ids of the reports whose lead and trait have `MIN_INDEPENDENT_REPORTS` or more distinct evidence values.
+def _independently_reported_ids(report: pl.LazyFrame) -> pl.LazyFrame:
+    """The ids of the reports whose lead and trait have `_MIN_INDEPENDENT_REPORTS` or more distinct evidence values.
 
     Examples:
         >>> report = pl.LazyFrame({
@@ -175,38 +213,8 @@ def independently_reported_ids(report: pl.LazyFrame) -> pl.LazyFrame:
         ...     'trait': ['ra', 'ra', 'ibd'],
         ...     'evidence': ['p1', 'p2', 'p3'],
         ... })
-        >>> independently_reported_ids(report).sort('id').collect()['id'].to_list()
+        >>> _independently_reported_ids(report).sort('id').collect()['id'].to_list()
         ['a', 'b']
     """
     independent_report_count = pl.col('evidence').n_unique().over('leadVariantId', 'trait')
-    return report.filter(independent_report_count >= MIN_INDEPENDENT_REPORTS).select('id')
-
-
-def replicated_sets(credible_set: pl.LazyFrame, study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
-    """The ids of the GWAS and QTL sets whose lead is reported on one of their traits by independent reports.
-
-    The reports are those of `gwas_reports` and `qtl_reports`, and the rule is
-    `independently_reported_ids`.
-
-    Examples:
-        >>> credible_set = pl.LazyFrame({
-        ...     'id': ['a', 'b', 'c'],
-        ...     'studyId': ['s1', 's2', 's3'],
-        ...     'leadVariantId': ['1_1_A_T'] * 3,
-        ... })
-        >>> study = pl.LazyFrame({
-        ...     'studyId': ['s1', 's2', 's3'],
-        ...     'studyType': ['gwas'] * 3,
-        ...     'diseaseIds': [['ra'], ['ra'], ['ibd']],
-        ...     'geneId': [None] * 3,
-        ...     'pubmedId': ['p1', 'p2', 'p3'],
-        ...     'cohorts': [None] * 3,
-        ...     'ldPopulationStructure': [None] * 3,
-        ... })
-        >>> disease = pl.LazyFrame({'id': ['ra'], 'therapeuticAreas': [['EFO_area']]})
-        >>> replicated_sets(credible_set, study, disease).sort('id').collect()['id'].to_list()
-        ['a', 'b']
-    """
-    gwas = credible_set.pipe(gwas_reports, study, disease).pipe(independently_reported_ids)
-    qtl = credible_set.pipe(qtl_reports, study).pipe(independently_reported_ids)
-    return pl.concat([gwas, qtl]).unique()
+    return report.filter(independent_report_count >= _MIN_INDEPENDENT_REPORTS).select('id')

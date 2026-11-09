@@ -1,11 +1,28 @@
-"""The confidence class of a credible set, from its fine-mapping method and its LD and top hit flags."""
+"""The confidence of a credible set: how it was fine-mapped, and with which LD.
+
+A credible set fine-mapped by SuSiE on the study's own LD is the most trustworthy, one fine-mapped
+by PICS from a curated top hit the least. The class is a small integer, so the published sets
+order and filter on it directly.
+"""
 
 from __future__ import annotations
 
+from enum import IntEnum
+
 import polars as pl
 
-from pts.transformers.credible_set.enums import FinemappingMethod
-from pts.transformers.credible_set.flags import CredibleSetConfidenceClasses, CredibleSetFlag
+from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.credible_set.vocabulary import FinemappingMethod
+
+
+class CredibleSetConfidence(IntEnum):
+    """Confidence of a credible set, from its fine-mapping method and LD reference; higher is better."""
+
+    FINEMAPPED_IN_SAMPLE_LD = 4
+    FINEMAPPED_OUT_OF_SAMPLE_LD = 3
+    PICSED_SUMMARY_STATS = 2
+    PICSED_TOP_HIT = 1
+    UNKNOWN = 0
 
 
 def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -34,13 +51,13 @@ def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
     confidence = (
         pl
         .when(susie & ~quality_control.list.contains(CredibleSetFlag.OUT_OF_SAMPLE_LD.value))
-        .then(CredibleSetConfidenceClasses.FINEMAPPED_IN_SAMPLE_LD.value)
+        .then(CredibleSetConfidence.FINEMAPPED_IN_SAMPLE_LD.value)
         .when(susie)
-        .then(CredibleSetConfidenceClasses.FINEMAPPED_OUT_OF_SAMPLE_LD.value)
+        .then(CredibleSetConfidence.FINEMAPPED_OUT_OF_SAMPLE_LD.value)
         .when(pics & ~quality_control.list.contains(CredibleSetFlag.TOP_HIT.value))
-        .then(CredibleSetConfidenceClasses.PICSED_SUMMARY_STATS.value)
+        .then(CredibleSetConfidence.PICSED_SUMMARY_STATS.value)
         .when(pics)
-        .then(CredibleSetConfidenceClasses.PICSED_TOP_HIT.value)
-        .otherwise(CredibleSetConfidenceClasses.UNKNOWN.value)
+        .then(CredibleSetConfidence.PICSED_TOP_HIT.value)
+        .otherwise(CredibleSetConfidence.UNKNOWN.value)
     )
     return frame.with_columns(confidence.cast(pl.Int8).alias('confidence'))

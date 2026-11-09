@@ -9,6 +9,7 @@ from pts.transformers.vep_view import (
     process_l2g,
     process_study,
 )
+from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
 
 class TestProcessBiosample:
@@ -98,22 +99,32 @@ class TestProcessCredibleSet:
     @pytest.fixture
     def credible_set(self) -> tuple[pl.LazyFrame, pl.LazyFrame]:
         """One credible set with two variants; the lead is the first one."""
-        credible_set = pl.LazyFrame({
-            'id': ['cs1'],
-            'studyId': ['study1'],
-            'leadVariantId': ['1_100_A_T'],
-            'fineMappingMethod': ['SuSiE'],
+        credible_set = published_credible_set({
+            'id': 'cs1',
+            'studyId': 'study1',
+            'leadVariantId': '1_100_A_T',
+            'fineMappingMethod': 'SuSiE',
         })
-        credible_set_variant = pl.LazyFrame({
-            'credibleSetId': ['cs1', 'cs1'],
-            'variantId': ['1_100_A_T', '1_200_C_G'],
-            'pValueMantissa': [5.0, 1.0],
-            'pValueExponent': [-8, -5],
-            'reportedBeta': [0.1, 0.05],
-            'conditionalBeta': [0.09, None],
-            'posteriorProbability': [0.8, 0.2],
-        })
-        return credible_set, credible_set_variant
+        credible_set_variant = published_credible_set_variant(
+            {
+                'credibleSetId': 'cs1',
+                'variantId': '1_100_A_T',
+                'pValueMantissa': 5.0,
+                'pValueExponent': -8,
+                'reportedBeta': 0.1,
+                'conditionalBeta': 0.09,
+                'posteriorProbability': 0.8,
+            },
+            {
+                'credibleSetId': 'cs1',
+                'variantId': '1_200_C_G',
+                'pValueMantissa': 1.0,
+                'pValueExponent': -5,
+                'reportedBeta': 0.05,
+                'posteriorProbability': 0.2,
+            },
+        )
+        return credible_set.lazy(), credible_set_variant.lazy()
 
     def test_lead_variant_is_flagged(self, credible_set: tuple[pl.LazyFrame, pl.LazyFrame]) -> None:
         """The tag variant matching the locus lead variantId must have isLead=True."""

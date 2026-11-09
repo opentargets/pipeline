@@ -17,6 +17,7 @@ from pts.transformers.coding_variant import (
     process_target_index,
     process_variants,
 )
+from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
 VE = pl.Struct({'method': pl.String, 'score': pl.Float32})
 TC = pl.Struct({
@@ -132,18 +133,33 @@ def world() -> dict[str, pl.DataFrame]:
         schema=GWAS,
         orient='row',
     )
-    credible_set = pl.DataFrame(
-        {
-            'id': ['SL1', 'SL2', 'SL3', 'SL4', 'SL5', 'SL6'],
-            'studyType': ['gwas', 'gwas', 'eqtl', 'pqtl', 'sqtl', None],
-        },
-        schema={'id': pl.String, 'studyType': pl.String},
+    credible_set = published_credible_set(
+        *(
+            {'id': set_id, 'studyType': study_type}
+            for set_id, study_type in [
+                ('SL1', 'gwas'),
+                ('SL2', 'gwas'),
+                ('SL3', 'eqtl'),
+                ('SL4', 'pqtl'),
+                ('SL5', 'sqtl'),
+                ('SL6', None),
+            ]
+        )
     )
     # SL4 and SL5 have no variants
-    credible_set_variant = pl.DataFrame(
-        [('SL1', 'V1'), ('SL1', 'V9'), ('SL2', 'V1'), ('SL3', 'V7'), ('SL3', 'V7'), ('SL3', 'V1'), ('SL6', 'V3')],
-        schema={'credibleSetId': pl.String, 'variantId': pl.String},
-        orient='row',
+    credible_set_variant = published_credible_set_variant(
+        *(
+            {'credibleSetId': set_id, 'variantId': variant_id}
+            for set_id, variant_id in [
+                ('SL1', 'V1'),
+                ('SL1', 'V9'),
+                ('SL2', 'V1'),
+                ('SL3', 'V7'),
+                ('SL3', 'V7'),
+                ('SL3', 'V1'),
+                ('SL6', 'V3'),
+            ]
+        )
     )
     return {
         'variant': variant,

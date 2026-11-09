@@ -1,15 +1,72 @@
-"""The effect allele frequency of credible set variants, from the source or from gnomAD."""
+"""The effect allele frequency of credible set variants: the study's own, or else gnomAD's.
+
+Rescaling an effect needs the frequency of its allele in the study's samples. A source that reports
+it is taken as it is; otherwise the frequency comes from gnomAD, weighted over the populations of
+the study. `effect_allele_frequency` sets it, and flags where it came from, or that it is missing.
+"""
 
 from __future__ import annotations
 
 import polars as pl
 
 from pts.transformers.credible_set.flags import CredibleSetVariantFlag
-from pts.transformers.credible_set.study_lookup import study_of_set
+from pts.transformers.credible_set.source import study_of_set
 from pts.transformers.utils.quality_flags import flag_rows
 
 
-def gnomad_frequencies(
+def effect_allele_frequency(
+    credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame, variant_index: pl.LazyFrame
+) -> pl.LazyFrame:
+    """Set `effectAlleleFrequency` from the source, otherwise from gnomAD, and flag its origin.
+
+    A source frequency is valid when it is in [0, 1] and is not NaN. Every row gets exactly one of:
+
+    - `EAF_FROM_SOURCE`: the valid source frequency is kept;
+    - `EAF_FROM_GNOMAD`: the sample-weighted gnomAD frequency of `_gnomad_frequencies`;
+    - `MISSING_EAF`: neither, and the frequency is null.
+
+    An invalid source frequency also gets `INVALID_EAF`. The rows and their order are unchanged.
+
+    Examples:
+        >>> credible_set_variant = pl.LazyFrame(
+        ...     {'credibleSetId': ['cs'] * 3, 'variantId': ['v'] * 3, 'effectAlleleFrequency': [0.3, 1.4, None]},
+        ...     schema_overrides={'effectAlleleFrequency': pl.Float32},
+        ... ).with_columns(pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'))
+        >>> credible_set = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
+        >>> nfe = {'ldPopulation': 'nfe', 'relativeSampleSize': 1.0}
+        >>> study = pl.LazyFrame({'studyId': ['s'], 'ldPopulationStructure': [[nfe]]})
+        >>> nfe_adj = {'populationName': 'nfe_adj', 'alleleFrequency': 0.2}
+        >>> index = pl.LazyFrame({'variantId': ['v'], 'alleleFrequencies': [[nfe_adj]]})
+        >>> result = effect_allele_frequency(credible_set_variant, credible_set, study, index).collect()
+        >>> eafs = pl.col('effectAlleleFrequency').cast(pl.Float64).round(2)
+        >>> for eaf, quality_control in result.select(eafs, 'qualityControls').rows():
+        ...     print(eaf, [CredibleSetVariantFlag(flag).name for flag in quality_control])
+        0.3 ['EAF_FROM_SOURCE']
+        0.2 ['INVALID_EAF', 'EAF_FROM_GNOMAD']
+        0.2 ['EAF_FROM_GNOMAD']
+    """
+    eaf = pl.col('effectAlleleFrequency')
+    valid = (eaf.is_between(0, 1) & eaf.is_not_nan()).fill_null(False)
+    gnomad = _gnomad_frequencies(credible_set_variant.filter(~valid), credible_set, study, variant_index)
+    # the source frequency is replaced below, so its validity is kept for the flags
+    source_valid, source_invalid, from_gnomad = pl.col('_source_valid'), pl.col('_source_invalid'), pl.col('_gnomad')
+    return (
+        credible_set_variant
+        .with_columns(valid.alias('_source_valid'), (eaf.is_not_null() & ~valid).alias('_source_invalid'))
+        .join(study_of_set(credible_set), on='credibleSetId', how='left', maintain_order='left')
+        .join(gnomad, on=['studyId', 'variantId'], how='left', maintain_order='left')
+        .pipe(flag_rows, source_invalid, CredibleSetVariantFlag.INVALID_EAF)
+        .pipe(flag_rows, source_valid, CredibleSetVariantFlag.EAF_FROM_SOURCE)
+        .pipe(flag_rows, ~source_valid & from_gnomad.is_not_null(), CredibleSetVariantFlag.EAF_FROM_GNOMAD)
+        .pipe(flag_rows, ~source_valid & from_gnomad.is_null(), CredibleSetVariantFlag.MISSING_EAF)
+        .with_columns(
+            pl.when(source_valid).then(eaf).otherwise(from_gnomad).cast(pl.Float32).alias('effectAlleleFrequency')
+        )
+        .select(credible_set_variant.collect_schema().names())
+    )
+
+
+def _gnomad_frequencies(
     credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame, variant_index: pl.LazyFrame
 ) -> pl.LazyFrame:
     """The sample-weighted gnomAD frequency of each (studyId, variantId) of `credible_set_variant`.
@@ -40,7 +97,7 @@ def gnomad_frequencies(
         ...         [{'populationName': 'nfe_adj', 'alleleFrequency': 0.3}],
         ...     ],
         ... })
-        >>> frequency = gnomad_frequencies(credible_set_variant, credible_set, study, index)
+        >>> frequency = _gnomad_frequencies(credible_set_variant, credible_set, study, index)
         >>> frequency.with_columns(pl.col('_gnomad').round(4)).sort('variantId').collect().rows()
         [('s', 'v', 0.25), ('s', 'w', None)]
     """
@@ -78,56 +135,4 @@ def gnomad_frequencies(
         .join(frequency, on=['variantId', 'populationName'], how='left')
         .group_by('studyId', 'variantId')
         .agg(pl.when(missing).then(None).when(single).then(af.first()).otherwise(weighted).alias('_gnomad'))
-    )
-
-
-def effect_allele_frequency(
-    credible_set_variant: pl.LazyFrame, credible_set: pl.LazyFrame, study: pl.LazyFrame, variant_index: pl.LazyFrame
-) -> pl.LazyFrame:
-    """Set `effectAlleleFrequency` from the source, otherwise from gnomAD, and flag its origin.
-
-    A source frequency is valid when it is in [0, 1] and is not NaN. Every row gets exactly one of:
-
-    - `EAF_FROM_SOURCE`: the valid source frequency is kept;
-    - `EAF_FROM_GNOMAD`: the sample-weighted gnomAD frequency of `gnomad_frequencies`;
-    - `MISSING_EAF`: neither, and the frequency is null.
-
-    An invalid source frequency also gets `INVALID_EAF`. The rows and their order are unchanged.
-
-    Examples:
-        >>> credible_set_variant = pl.LazyFrame(
-        ...     {'credibleSetId': ['cs'] * 3, 'variantId': ['v'] * 3, 'effectAlleleFrequency': [0.3, 1.4, None]},
-        ...     schema_overrides={'effectAlleleFrequency': pl.Float32},
-        ... ).with_columns(pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'))
-        >>> credible_set = pl.LazyFrame({'id': ['cs'], 'studyId': ['s']})
-        >>> nfe = {'ldPopulation': 'nfe', 'relativeSampleSize': 1.0}
-        >>> study = pl.LazyFrame({'studyId': ['s'], 'ldPopulationStructure': [[nfe]]})
-        >>> nfe_adj = {'populationName': 'nfe_adj', 'alleleFrequency': 0.2}
-        >>> index = pl.LazyFrame({'variantId': ['v'], 'alleleFrequencies': [[nfe_adj]]})
-        >>> result = effect_allele_frequency(credible_set_variant, credible_set, study, index).collect()
-        >>> eafs = pl.col('effectAlleleFrequency').cast(pl.Float64).round(2)
-        >>> for eaf, quality_control in result.select(eafs, 'qualityControls').rows():
-        ...     print(eaf, [CredibleSetVariantFlag(flag).name for flag in quality_control])
-        0.3 ['EAF_FROM_SOURCE']
-        0.2 ['INVALID_EAF', 'EAF_FROM_GNOMAD']
-        0.2 ['EAF_FROM_GNOMAD']
-    """
-    eaf = pl.col('effectAlleleFrequency')
-    valid = (eaf.is_between(0, 1) & eaf.is_not_nan()).fill_null(False)
-    gnomad = gnomad_frequencies(credible_set_variant.filter(~valid), credible_set, study, variant_index)
-    # the source frequency is replaced below, so its validity is kept for the flags
-    source_valid, source_invalid, from_gnomad = pl.col('_source_valid'), pl.col('_source_invalid'), pl.col('_gnomad')
-    return (
-        credible_set_variant
-        .with_columns(valid.alias('_source_valid'), (eaf.is_not_null() & ~valid).alias('_source_invalid'))
-        .join(study_of_set(credible_set), on='credibleSetId', how='left', maintain_order='left')
-        .join(gnomad, on=['studyId', 'variantId'], how='left', maintain_order='left')
-        .pipe(flag_rows, source_invalid, CredibleSetVariantFlag.INVALID_EAF)
-        .pipe(flag_rows, source_valid, CredibleSetVariantFlag.EAF_FROM_SOURCE)
-        .pipe(flag_rows, ~source_valid & from_gnomad.is_not_null(), CredibleSetVariantFlag.EAF_FROM_GNOMAD)
-        .pipe(flag_rows, ~source_valid & from_gnomad.is_null(), CredibleSetVariantFlag.MISSING_EAF)
-        .with_columns(
-            pl.when(source_valid).then(eaf).otherwise(from_gnomad).cast(pl.Float32).alias('effectAlleleFrequency')
-        )
-        .select(credible_set_variant.collect_schema().names())
     )

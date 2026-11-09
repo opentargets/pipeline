@@ -12,7 +12,7 @@ from pts.schemas.credible_set import (
     credible_set_variant_required,
     credible_set_variant_schema,
 )
-from pts.transformers.credible_set.source_dataset import read_source_dataset
+from pts.transformers.credible_set.source import read_source_dataset
 
 CREDIBLE_SET = {
     'id': '0' * 32,

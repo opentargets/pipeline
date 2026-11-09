@@ -7,11 +7,11 @@ import polars as pl
 import pytest
 from otter.config.yaml import parse_yaml
 
-from pts.transformers.credible_set.enums import FinemappingMethod
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings
-from pts.transformers.credible_set.validation import ValidationSettings, cross_set_flags_schema, validate
+from pts.transformers.credible_set.validation import ValidationSettings
 from pts.transformers.credible_set.variant_qc import VariantQcSettings
+from pts.transformers.credible_set.vocabulary import FinemappingMethod
 
 CONFIG_PATH = Path(__file__).parents[1] / 'config.yaml'
 """The config file that ships in the image, not a fixture."""
@@ -141,7 +141,7 @@ def test_validation_excludes_the_agreed_flags() -> None:
         CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS,
         CredibleSetFlag.MISSING_STUDY,
         CredibleSetFlag.REDUNDANT_PICS_TOP_HIT,
-        CredibleSetFlag.DUPLICATED_STUDYLOCUS_ID,
+        CredibleSetFlag.DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES,
         CredibleSetFlag.INVALID_FINEMAPPING_METHOD,
         CredibleSetFlag.EXPLAINED_BY_SUSIE,
         CredibleSetFlag.COMPOSITE_FLAG,
@@ -163,19 +163,27 @@ def test_validation_excludes_the_agreed_flags() -> None:
     }
 
 
-def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() -> None:
+def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip(validate_source) -> None:
     settings = _validation_settings()
     sets = pl.LazyFrame(
         {
             'id': ['clumped', 'abnormal'],
+            'studyId': ['s', 's'],
             'chromosome': ['1', '1'],
+            'locusStart': [100, 200],
+            'locusEnd': [100, 200],
             'leadVariantId': ['1_100_A_T', '1_200_A_T'],
+            'fineMappingMethod': ['PICS', 'PICS'],
             'qualityControls': [[CredibleSetFlag.WINDOW_CLUMPED.value], []],
         },
         schema={
             'id': pl.String,
+            'studyId': pl.String,
             'chromosome': pl.String,
+            'locusStart': pl.Int32,
+            'locusEnd': pl.Int32,
             'leadVariantId': pl.String,
+            'fineMappingMethod': pl.String,
             'qualityControls': pl.List(pl.String),
         },
     )
@@ -187,8 +195,7 @@ def test_configured_validation_excludes_window_clumped_and_keeps_abnormal_pip() 
         },
         schema={'credibleSetId': pl.String, 'variantId': pl.String, 'qualityControls': pl.List(pl.String)},
     )
-    no_cross_set_flags = pl.LazyFrame(schema=cross_set_flags_schema)
-    valid_set, valid_variant, excluded_set, excluded_variant = validate(sets, variants, no_cross_set_flags, settings)
+    valid_set, valid_variant, excluded_set, excluded_variant = validate_source(sets, variants, settings)
     assert valid_set.collect()['id'].to_list() == ['abnormal']
     assert excluded_set.collect()['id'].to_list() == ['clumped']
     assert valid_variant.collect()['credibleSetId'].to_list() == ['abnormal']
@@ -224,3 +231,56 @@ def test_the_variant_views_read_the_published_credible_sets_and_their_variants(s
     [view] = [spec for spec in parse_yaml(CONFIG_PATH)['steps'][step] if spec['name'] == task]
     assert view['source']['credible_set'] == 'output/credible_set'
     assert view['source']['credible_set_variant'] == 'output/credible_set_variant'
+
+
+CREDIBLE_SET_DATASETS = {
+    'intermediate/validated/credible_set',
+    'intermediate/validated/credible_set_variant',
+    'output/credible_set',
+    'output/credible_set_variant',
+}
+"""The credible sets and their variants as validation and annotation write them."""
+
+CONSUMER_TEST = {
+    'variant': 'test_variant_rows.py',
+    'credible_set.annotation': 'test_credible_set_stages.py',
+    'coding_variant': 'test_coding_variant.py',
+    'l2g_train': 'test_l2g_train.py',
+    'l2g_predict': 'test_l2g_predict.py',
+    'evidence.gwas_credible_sets': 'evidence/test_gwas_credible_sets.py',
+    'vep_view': 'test_vep_view.py',
+    'search': 'test_search_entrypoint.py',
+}
+"""The tests of every task that reads `CREDIBLE_SET_DATASETS`, which build their inputs as the producers write them."""
+
+
+def _paths(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return set().union(*(_paths(item) for item in value))
+    return set()
+
+
+def _consumers() -> set[str]:
+    """The transformers of every task in the config that reads `CREDIBLE_SET_DATASETS`."""
+    return {
+        spec['transformer']
+        for tasks in parse_yaml(CONFIG_PATH)['steps'].values()
+        for task in tasks
+        for spec in [task, *task.get('do', [])]
+        if 'transformer' in spec and _paths(spec.get('source')) & CREDIBLE_SET_DATASETS
+    }
+
+
+def test_every_task_reading_the_credible_sets_has_a_contract_test() -> None:
+    """A new reader of the credible sets fails here until its tests are listed in `CONSUMER_TEST`."""
+    assert _consumers() == set(CONSUMER_TEST)
+
+
+@pytest.mark.parametrize('consumer', sorted(CONSUMER_TEST))
+def test_the_tests_of_a_credible_set_reader_build_its_input_as_the_producers_write_it(consumer: str) -> None:
+    test_module = Path(__file__).parent / CONSUMER_TEST[consumer]
+    assert 'tests.credible_set_fixtures import' in test_module.read_text(), consumer

@@ -1,8 +1,13 @@
-"""Quality flags and confidence classes of the CredibleSet and CredibleSetVariant datasets."""
+"""The quality flags of credible sets and of their variants.
+
+Every stage only adds flags, and each flag says one thing about a row. Whether a flag excludes the
+row is decided in validation, by the lists of its settings, so a flag can stay information on the
+published data or become a reason to exclude, without changing the check that raises it.
+"""
 
 from __future__ import annotations
 
-from enum import IntEnum, StrEnum
+from enum import StrEnum
 
 
 class CredibleSetFlag(StrEnum):
@@ -26,10 +31,11 @@ class CredibleSetFlag(StrEnum):
     MISSING_STUDY = 'Study not found in the study index'
     TOP_HIT_AND_SUMMARY_STATS = 'Curated top hit is flagged because summary statistics are available for study'
     IN_MHC = 'MHC region'
-    INVALID_CHROMOSOME = 'Chromosome not in 1:22, X, Y, XY or MT'
+    INVALID_CHROMOSOME = 'Chromosome not in 1:22, X, Y or MT'
     REDUNDANT_PICS_TOP_HIT = 'PICS results from summary statistics available for this same study'
     EXPLAINED_BY_SUSIE = 'Study locus in region explained by a SuSiE credible set'
-    DUPLICATED_STUDYLOCUS_ID = 'Non-unique study locus identifier'
+    DUPLICATED_CREDIBLE_SET_ID = 'Credible set identifier repeated within its source'
+    DUPLICATED_CREDIBLE_SET_ID_ACROSS_SOURCES = 'Credible set identifier also in another source, whose copy is kept'
     INVALID_VARIANT_IN_SET = 'Credible set has a variant with an excluding quality flag'
     INVALID_CS_ID = 'Credible set identifier is not a 32-character hexadecimal md5'
     LEAD_CHROMOSOME_MISMATCH = 'Chromosome of the lead variant differs from the credible set chromosome'
@@ -62,16 +68,5 @@ class CredibleSetVariantFlag(StrEnum):
     INCOMPLETE_REPORTED_STATS = 'Only one of the reported beta and standard error is present'
     INCOMPLETE_CONDITIONAL_STATS = 'Only one of the conditional beta and standard error is present'
     MISSING_PVALUE = 'P-value mantissa or exponent is missing'
-    MISSING_SAMPLE_SIZE = 'Sample size is missing'
     ORPHAN_VARIANT = 'Credible set of the variant is not among the credible sets of its source'
     VARIANT_CHROMOSOME_MISMATCH = 'Chromosome of the variant differs from the credible set chromosome'
-
-
-class CredibleSetConfidenceClasses(IntEnum):
-    """Confidence of a credible set, from its fine-mapping method and LD reference."""
-
-    FINEMAPPED_IN_SAMPLE_LD = 4
-    FINEMAPPED_OUT_OF_SAMPLE_LD = 3
-    PICSED_SUMMARY_STATS = 2
-    PICSED_TOP_HIT = 1
-    UNKNOWN = 0

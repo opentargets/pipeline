@@ -16,7 +16,7 @@
 #   gs://open-targets-pipeline-runs/<run_name>
 #
 # Promotion to a final release location happens after the run and outside this DAG.
-run_name: "sz/platform-2612-3"
+run_name: "sz/platform-2612-4"
 
 # Pipeline package versions
 #
@@ -28,8 +28,7 @@ pis_version: "26.12.0rc26.dev2.run-credible-set-v4-coloc.a7a0adc"
 pts_version: "26.12.0rc39.dev5.run-credible-set-v4-coloc.3236c1c"
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
-# 4.0.0-rc.2 reads the credible sets as CredibleSet and CredibleSetVariant.
-gentropy_version: "4.0.0-rc.2"
+gentropy_version: "4.0.0-rc.3"
 
 # Boot images, pinned per release. Full Dataproc subminor versions
 # (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
@@ -521,7 +520,6 @@ steps:
       - pts_study
   pts_credible_set_annotation:
     depends_on:
-      - pts_credible_set
       - pts_variant
   gentropy_colocalisation:
     num_partitions: 200

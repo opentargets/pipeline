@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from pts.transformers.credible_set.flags import CredibleSetFlag
-from pts.transformers.credible_set.replication import gwas_traits, replicated_sets
+from pts.transformers.credible_set.replication import replicated_sets
 from pts.transformers.disease.coalescing import MEASUREMENT
 
 
@@ -49,7 +49,9 @@ def _gwas(study_id: str, diseases: list[str], pubmed: str | None = None, **value
     }
 
 
-def _replicated(studies: list[dict[str, Any]], sets: list[tuple[str, str, str]] | None = None) -> set[str]:
+def _replicated(
+    studies: list[dict[str, Any]], sets: list[tuple[str, str, str]] | None = None, disease: pl.LazyFrame = DISEASES
+) -> set[str]:
     """The ids of the replicated sets of (id, studyId, leadVariantId), by default one set per study on LEAD."""
     sets = sets or [(f'cs_{study["studyId"]}', study['studyId'], LEAD) for study in studies]
     frame = _sets(*({'id': i, 'studyId': s, 'leadVariantId': v} for i, s, v in sets))
@@ -65,7 +67,7 @@ def _replicated(studies: list[dict[str, Any]], sets: list[tuple[str, str, str]] 
             'geneId': pl.String,
         },
     )
-    return _ids(replicated_sets(frame, study_frame, DISEASES))
+    return _ids(replicated_sets(frame, study_frame, disease))
 
 
 def test_independent_gwas_studies_of_one_disease_and_lead_replicate() -> None:
@@ -141,8 +143,9 @@ TRAIT_TERMS = pl.LazyFrame({
 def test_the_traits_of_a_gwas_study_depend_on_the_kind_of_its_terms(
     disease_ids: list[str], traits: list[list[str]]
 ) -> None:
-    study = pl.LazyFrame(
-        {'studyId': ['s'], 'studyType': ['gwas'], 'diseaseIds': [disease_ids]},
-        schema={'studyId': pl.String, 'studyType': pl.String, 'diseaseIds': pl.List(pl.String)},
-    )
-    assert sorted(gwas_traits(study, TRAIT_TERMS).collect()['trait'].to_list()) == traits
+    """A study replicates another exactly on their shared traits, so a study of one trait tells whether it is one."""
+    for trait in traits:
+        assert _replicated([_gwas('s', disease_ids), _gwas('t', trait)], disease=TRAIT_TERMS) == {'cs_s', 'cs_t'}, trait
+    for term in ['bmi', 'height', 'ibd', 'ra']:
+        replicated = _replicated([_gwas('s', disease_ids), _gwas('t', [term])], disease=TRAIT_TERMS)
+        assert bool(replicated) is ([term] in traits), term
