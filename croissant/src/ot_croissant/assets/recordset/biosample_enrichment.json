@@ -22,7 +22,7 @@
   },
   {
     "id": "diseaseId",
-    "description": "Identifier of the disease or phenotype associated with the study",
+    "description": "Identifier of the disease or phenotype tested for biosample enrichment",
     "foreign_key": "disease/id"
   },
   {
@@ -30,16 +30,12 @@
     "description": "Method used to estimate biosample enrichment"
   },
   {
-    "id": "ldAncestry",
-    "description": "Ancestry of the linkage disequilibrium reference population used for enrichment"
-  },
-  {
     "id": "pValue",
     "description": "P-value for the biosample enrichment"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study tested for biosample enrichment",
+    "description": "Identifier of the GWAS tested for biosample enrichment",
     "foreign_key": "study/studyId"
   }
 ]
