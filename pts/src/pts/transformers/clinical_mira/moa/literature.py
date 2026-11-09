@@ -1,7 +1,9 @@
-"""Selection constants and the sentence pass for the literature mechanism extraction."""
+"""Selection constants, the sentence pass and the deterministic selection for the literature mechanism extraction."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -177,3 +179,166 @@ def join_genes(cd_dir: Path, gp_dir: Path) -> pl.DataFrame:
         .agg(genes=pl.col('gene').unique().sort())
     )
     return cd.join(gp, on=['pub', 'h'], how='left').collect(engine='streaming')
+
+
+def select_sentences(sentences: pl.DataFrame) -> pl.DataFrame:
+    """Pick the sentences that represent each drug, deterministically.
+
+    Texts are stripped and kept when their length lies between ``MIN_CHARS`` and ``MAX_CHARS``.
+    A text repeated within a drug keeps its best row (cue, then gene, then section rank, newer
+    year, then ``pub``, ``h`` and ``label``). Sentences are tiered (0 cue and gene, 1 cue,
+    2 gene, 3 neither), ranked inside each tier and spread across publications, and the first
+    ``PER_DRUG`` per drug are kept. The result does not depend on the input row order.
+
+    Args:
+        sentences: Output of ``join_genes``.
+
+    Returns:
+        The input columns plus ``gene``, ``tier``, ``nth_in_pub`` and ``doc`` (``pmid<id>``, else the
+        lowercased PMC id), ordered by drug and then by selection rank.
+    """
+    deduped = (
+        sentences
+        .with_columns(gene=pl.col('genes').is_not_null(), text=pl.col('text').str.strip_chars())
+        .filter(pl.col('text').str.len_chars().is_between(MIN_CHARS, MAX_CHARS))
+        .sort(
+            'parent',
+            'text',
+            'cue',
+            'gene',
+            'srank',
+            'year',
+            'pub',
+            'h',
+            'label',
+            'mappedId',
+            'section',
+            'pmid',
+            'pmcid',
+            descending=[False, False, True, True, False, True, False, False, False, False, False, False, False],
+        )
+        .unique(['parent', 'text'], keep='first', maintain_order=True)
+    )
+    tier = (
+        pl
+        .when(pl.col('cue') & pl.col('gene'))
+        .then(0)
+        .when(pl.col('cue'))
+        .then(1)
+        .when(pl.col('gene'))
+        .then(2)
+        .otherwise(3)
+    )
+    spread = ['parent', 'tier', 'nth_in_pub', 'srank', 'year', 'pub', 'h']
+    return (
+        deduped
+        .with_columns(tier=tier)
+        .sort(
+            'parent',
+            'tier',
+            'srank',
+            'year',
+            'h',
+            'pub',
+            'text',
+            descending=[False, False, False, True, False, False, False],
+            maintain_order=True,
+        )
+        .with_columns(nth_in_pub=pl.int_range(pl.len()).over('parent', 'pub', 'tier'))
+        .sort(spread, descending=[False, False, False, False, True, False, False], maintain_order=True)
+        .filter(pl.int_range(pl.len()).over('parent') < PER_DRUG)
+        .with_columns(
+            doc=pl
+            .when(pl.col('pmid').is_not_null())
+            .then('pmid' + pl.col('pmid'))
+            .otherwise(pl.col('pmcid').str.to_lowercase())
+        )
+    )
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def content_key(parent: str, sentences: list[dict[str, Any]]) -> str:
+    """Key a drug's request by its selected sentences alone.
+
+    Args:
+        parent: Parent molecule id.
+        sentences: Dicts with ``doc`` and ``sha256``, in any order.
+
+    Returns:
+        ``parent|`` followed by the SHA-256 hex digest of ``json.dumps`` (default separators) of
+        the sorted ``[doc, sha256]`` pairs.
+    """
+    pairs = sorted([s['doc'], s['sha256']] for s in sentences)
+    return f'{parent}|{_sha256(json.dumps(pairs))}'
+
+
+def requests(picked: pl.DataFrame, names: pl.DataFrame) -> pl.DataFrame:
+    """Build the extraction request of each drug from its selected sentences.
+
+    Within a document the sentences keep the order of ``picked`` after a stable sort by section
+    rank. Documents are ordered by id. Drugs whose parent is missing from ``names`` are dropped.
+
+    Args:
+        picked: Output of ``select_sentences``.
+        names: Frame with ``parent`` and ``name``.
+
+    Returns:
+        Frame with ``parent``, ``name``, ``request``, ``content_key``, ``sentences`` (list of
+        ``{doc, sha256, cue}`` sorted by ``(doc, sha256)``) and ``docs`` (list of ``{doc, text}``,
+        the drug's sentences from that document joined by newline), ordered by ``parent``.
+    """
+    docs = (
+        picked
+        .sort('parent', 'doc', 'srank', maintain_order=True)
+        .group_by('parent', 'doc', maintain_order=True)
+        .agg(pl.col('year').first(), sentences=pl.col('text'), labels=pl.col('label').unique())
+        .with_columns(
+            text=pl.col('sentences').list.join('\n'),
+            prompt='Trial ID: '
+            + pl.col('doc')
+            + '\nPublication year: '
+            + pl.col('year').cast(pl.String)
+            + '\nSentences:\n'
+            + pl.col('sentences').list.join('\n'),
+        )
+    )
+    drugs = docs.group_by('parent', maintain_order=True).agg(
+        text=pl.col('prompt').str.join('\n---\n'),
+        labels=pl.col('labels').list.explode(keep_nulls=False, empty_as_null=False).unique().sort(),
+        docs=pl.struct('doc', 'text'),
+    )
+    named = drugs.join(names.select('parent', name=pl.col('name').str.to_lowercase()), on='parent')
+    if named.height < drugs.height:
+        logger.info(f'{drugs.height - named.height} drugs without a name get no request')
+    sentences = (
+        picked
+        .select(
+            'parent',
+            'doc',
+            'cue',
+            sha256=pl.col('text').map_elements(_sha256, return_dtype=pl.String),
+        )
+        .sort('parent', 'doc', 'sha256')
+        .group_by('parent', maintain_order=True)
+        .agg(sentences=pl.struct('doc', 'sha256', 'cue'))
+    )
+    out = (
+        named
+        .join(sentences, on='parent')
+        .with_columns(
+            request='Drug: '
+            + pl.col('name')
+            + '\nNames of the drug in these sentences: '
+            + pl.col('labels').list.join(', ')
+            + '\n\n'
+            + pl.col('text')
+        )
+        .sort('parent')
+    )
+    keys = [content_key(p, s) for p, s in zip(out['parent'], out['sentences'].to_list(), strict=True)]
+    return out.with_columns(content_key=pl.Series(keys, dtype=pl.String)).select(
+        'parent', 'name', 'request', 'content_key', 'sentences', 'docs'
+    )
