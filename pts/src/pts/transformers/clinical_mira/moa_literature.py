@@ -37,6 +37,10 @@ MOLECULE_COLUMNS = ['id', 'parentId', 'maximumClinicalStage', 'name']
 """Columns read from the drug molecules."""
 
 
+class ComputeTooLarge(Exception):  # noqa: N818
+    """Raised when more drugs are left to compute than ``max_compute`` allows."""
+
+
 class MoaLiteratureSettings(BaseModel):
     """Settings for the moa_literature transformer."""
 
@@ -57,9 +61,15 @@ class MoaLiteratureSettings(BaseModel):
     import_experiment_cache: str | None = None
     """The experiment's seed jsonl to import into the store, once, before computing."""
     import_for_tag: str | None = None
-    """The MOA_LITERATURE tag the seed was computed for. The seed is imported only while it is the current tag."""
+    """The MOA_LITERATURE tag the seed was computed for, or None to not import it. Any other tag than the
+        current one is an error."""
+    import_for_release: str | None = None
+    """The input release the seed is imported for. The seed is imported, and its coverage checked, only
+        when this is ``input_release``."""
     min_seeded_share: float = 0.69
     """The lowest share of the current drugs the imported seed must cover, or the run aborts before computing."""
+    max_compute: int | None = None
+    """The most drugs the run may compute, or None for no limit. More aborts the run before any batch."""
     billing_project: str | None = None
     """The project billed for reading the requester-pays match and drug molecules, or None to read them unbilled."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
@@ -156,10 +166,17 @@ def stage_moa_literature(
         dropped by the quote check, and whether a snapshot was published.
 
     Raises:
-        SeedTooSmall: If the seed is imported for the current tag and its import run covers less than
-            ``min_seeded_share`` of the drug requests.
+        ValueError: If ``import_for_tag`` is set and is not the current tag.
+        SeedTooSmall: If the seed is imported for the current tag and ``input_release`` and it, or its
+            import run, covers less than ``min_seeded_share`` of the drug requests.
+        ComputeTooLarge: If more drug requests than ``max_compute`` have no ``ok`` record at the current
+            tag after carry-forward.
         ComputeAborted: If there are drugs to compute, no client is given and the workspace id variable is unset.
     """
+    tag = MOA_LITERATURE.tag()
+    if settings.import_for_tag is not None and settings.import_for_tag != tag:
+        msg = f'import_for_tag {settings.import_for_tag} is not the current tag {tag}; update or unset it'
+        raise ValueError(msg)
     system_prompt = schemas.literature_system_prompt()
     scratch = config.work_path / 'moa_literature' / settings.input_release
     storage_options = (
@@ -176,18 +193,27 @@ def stage_moa_literature(
     logger.info(f'{sentences.height} sentences of {n_drugs} drugs, {picked.height} picked, {requests.height} requests')
 
     store_uri = f'{settings.store_uri.rstrip("/")}/{MOA_LITERATURE.name}'
-    tag = MOA_LITERATURE.tag()
     run_id = new_run_id(settings.input_release)
 
     seeded = 0
-    importing = settings.import_experiment_cache is not None and settings.import_for_tag == tag
+    importing = (
+        settings.import_experiment_cache is not None
+        and settings.import_for_tag == tag
+        and settings.import_for_release == settings.input_release
+    )
     if settings.import_experiment_cache is not None and not importing:
         logger.info(
-            f'not importing {settings.import_experiment_cache}: computed for {settings.import_for_tag}, not {tag}'
+            f'not importing {settings.import_experiment_cache}: for tag {settings.import_for_tag} and release '
+            f'{settings.import_for_release}, not {tag} and {settings.input_release}'
         )
     if importing:
         seeded = literature_staging.import_experiment_cache(
-            settings.import_experiment_cache, requests, system_prompt, store_uri, config
+            settings.import_experiment_cache,
+            requests,
+            system_prompt,
+            store_uri,
+            config,
+            min_share=settings.min_seeded_share,
         )
         logger.info(f'imported {seeded} seed records into {store_uri}')
 
@@ -206,12 +232,20 @@ def stage_moa_literature(
             )
             raise SeedTooSmall(msg)
 
+    done = set(records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag))['text'].to_list())
     carried = 0
     if MOA_LITERATURE.params['carry_forward']:
         carried_records = literature_staging.carry_forward(requests, records, tag, f'{run_id}-carry')
         if carried_records.height:
             write_run(carried_records, store_uri, f'{run_id}-carry', config, pl.String())
         carried = carried_records.height
+        done |= set(carried_records['text'].to_list())
+
+    if settings.max_compute is not None:
+        pending = len(set(requests['content_key'].to_list()) - done)
+        if pending > settings.max_compute:
+            msg = f'{pending} drugs to compute, more than max_compute {settings.max_compute}'
+            raise ComputeTooLarge(msg)
 
     compute = literature_staging.literature_compute(
         requests,

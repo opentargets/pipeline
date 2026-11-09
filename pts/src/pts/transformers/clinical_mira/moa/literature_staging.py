@@ -12,6 +12,7 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import ValidationError
 
+from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
 from pts.transformers.clinical_mira.moa import llm, schemas
 from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
@@ -139,12 +140,14 @@ def import_experiment_cache(
     system_prompt: str,
     store_uri: str,
     config: Config,
+    min_share: float = 0.0,
 ) -> int:
     """Import the experiment's seed into the record store, once.
 
     The import is the run :py:func:`import_run_id`. A seed row becomes an ``ok`` record whose text
     is its ``content_key`` when that key equals the content key of the current request for its
     ``parent`` and its ``prompt_sha256`` is the sha256 of ``system_prompt``; other rows are skipped.
+    Nothing is written when the matched rows cover less than ``min_share`` of the requests.
 
     Args:
         cache_uri: The seed, a jsonl of ``content_key``, ``parent``, ``response``, ``usage``,
@@ -153,11 +156,13 @@ def import_experiment_cache(
         system_prompt: The extraction prompt of the current requests.
         store_uri: Root of the store, an absolute URI.
         config: The otter config, used to resolve storage.
+        min_share: The lowest share of the requests the matched seed rows must cover.
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
 
     Raises:
+        SeedTooSmall: If the matched seed rows cover less than ``min_share`` of the requests.
         ValueError: If an imported response is not a ``MoaExtraction``, or imported seed rows share a
             content key.
     """
@@ -207,6 +212,12 @@ def import_experiment_cache(
             f'{len(rows)} of {len(seed)} seed rows match a current request in {cache_uri}; '
             f'{other_prompt} skipped for another prompt, {no_request} without a current request'
         )
+        if len(rows) < min_share * requests.height:
+            msg = (
+                f'{cache_uri} covers {len(rows)} of {requests.height} drugs, below the minimum share {min_share}; '
+                f'{run_id} not written'
+            )
+            raise SeedTooSmall(msg)
         return pl.DataFrame(rows, schema=record_schema(pl.String()))
 
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())

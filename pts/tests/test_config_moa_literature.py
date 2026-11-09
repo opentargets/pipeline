@@ -15,10 +15,19 @@ def _task() -> dict:
 
 
 def test_moa_literature_settings_validate() -> None:
-    """The settings are accepted by the model and the seed is for the current tag."""
+    """The settings are accepted by the model, a seed tag is the current tag and a seed release names a seed."""
     settings = MoaLiteratureSettings(**_task()['settings'])
-    assert settings.import_for_tag == MOA_LITERATURE.tag()
-    assert settings.import_experiment_cache is not None
+    if settings.import_for_tag is not None:
+        assert settings.import_for_tag == MOA_LITERATURE.tag()
+    if settings.import_for_release is not None:
+        assert settings.import_experiment_cache is not None
+
+
+def test_moa_literature_caps_compute_and_shards() -> None:
+    """The step refuses to compute more than 3000 drugs and writes shards of 5000."""
+    settings = MoaLiteratureSettings(**_task()['settings'])
+    assert settings.max_compute == 3000
+    assert settings.shard_size == 5000
 
 
 def test_moa_literature_reads_the_input_release() -> None:

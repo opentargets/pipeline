@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from loguru import logger
 
+from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.moa import literature, literature_staging, llm, schemas
 from pts.transformers.clinical_mira.moa.literature_staging import (
     carry_forward,
@@ -16,7 +17,7 @@ from pts.transformers.clinical_mira.moa.literature_staging import (
     parse_output,
     record_output,
 )
-from pts.transformers.clinical_mira.record_store import read_records, record_schema, text_sha256
+from pts.transformers.clinical_mira.record_store import read_records, record_schema, run_exists, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA_LITERATURE
 
 PROMPT = 'You extract mechanisms from sentences.'
@@ -147,6 +148,17 @@ def test_import_is_idempotent(tmp_path: Path) -> None:
 
     assert import_experiment_cache(seed, current, PROMPT, store, cast(Any, None)) == 1
     assert import_experiment_cache(seed, current, PROMPT, store, cast(Any, None)) == 0
+
+
+def test_import_below_min_share_raises_and_writes_no_run(tmp_path: Path) -> None:
+    current, seed = _import_inputs(tmp_path)
+    store = str(tmp_path / 'store')
+
+    with pytest.raises(SeedTooSmall, match='1 of 3'):
+        import_experiment_cache(seed, current, PROMPT, store, cast(Any, None), min_share=0.5)
+
+    assert not run_exists(store, import_run_id(), cast(Any, None))
+    assert import_experiment_cache(seed, current, PROMPT, store, cast(Any, None), min_share=0.3) == 1
 
 
 def test_import_rejects_duplicate_content_keys(tmp_path: Path) -> None:

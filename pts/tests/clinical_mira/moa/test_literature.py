@@ -494,3 +494,17 @@ def test_sentences_of_a_doc_keep_picked_order_on_a_section_rank_tie():
     assert (
         out['docs'][0][0]['text'] == 'zzz cue sentence of the publication ok\naaa plain sentence of the publication ok'
     )
+
+
+def test_sentence_hash_is_pinned():
+    """The tie-break hash of three fixed sentences is unchanged.
+
+    Selection orders sentences by ``pl.col('text').hash(seed=HASH_SEED)``, which polars does not keep
+    stable across versions. If this fails after a polars upgrade, the selection of drugs may change:
+    bump ``logic_version`` of ``MOA_LITERATURE`` and re-plan the next run (drugs to compute, seed
+    coverage) before updating the expected values.
+    """
+    texts = ['Sotorasib is a selective KRAS G12C inhibitor.', 'Aspirin inhibits COX-1 and COX-2.', '']
+    hashed = pl.DataFrame({'text': texts}).select(h=pl.col('text').hash(seed=literature.HASH_SEED))['h']
+    assert literature.HASH_SEED == 7
+    assert hashed.to_list() == [3710146281297193471, 15559522047434505348, 7189315173487520619]

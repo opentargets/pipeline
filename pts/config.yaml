@@ -1020,7 +1020,10 @@ steps:
         input_release: '26.09'
         import_experiment_cache: gs://clinical_staging/store/moa_literature/seed/moa_literature_seed-2026-11-09.jsonl
         import_for_tag: claude-opus-5-5-p15139b69
+        import_for_release: '26.09'
         min_seeded_share: 0.69
+        max_compute: 3000
+        shard_size: 5000
         billing_project: open-targets-eu-dev
   ##################################################################################################
 

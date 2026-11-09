@@ -10,13 +10,19 @@ from otter.config.model import Config
 
 from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.moa import literature, schemas
-from pts.transformers.clinical_mira.moa.literature_staging import parse_output
+from pts.transformers.clinical_mira.moa.literature_staging import import_run_id, parse_output
 from pts.transformers.clinical_mira.moa_literature import (
+    ComputeTooLarge,
     MoaLiteratureSettings,
     moa_literature,
     stage_moa_literature,
 )
-from pts.transformers.clinical_mira.record_store import ComputeAborted, SnapshotConflictError, read_records
+from pts.transformers.clinical_mira.record_store import (
+    ComputeAborted,
+    SnapshotConflictError,
+    read_records,
+    run_exists,
+)
 from pts.transformers.clinical_mira.staged_outputs import METADATA_KEYS, MOA_LITERATURE
 
 TAG = MOA_LITERATURE.tag()
@@ -217,7 +223,14 @@ def test_first_run_imports_seed_and_computes_the_rest(tmp_path: Path) -> None:
     seed = _seed(tmp_path, {'CHEMBL1'})
     batches = FakeBatches()
 
-    stats = _stage(tmp_path, batches, import_experiment_cache=str(seed), import_for_tag=TAG, min_seeded_share=0.5)
+    stats = _stage(
+        tmp_path,
+        batches,
+        import_experiment_cache=str(seed),
+        import_for_tag=TAG,
+        import_for_release='26.09',
+        min_seeded_share=0.5,
+    )
 
     assert stats == {
         'drugs': 2,
@@ -302,9 +315,106 @@ def test_seed_below_share_raises(tmp_path: Path) -> None:
     batches = FakeBatches()
 
     with pytest.raises(SeedTooSmall, match='1 of 2'):
-        _stage(tmp_path, batches, import_experiment_cache=str(seed), import_for_tag=TAG, min_seeded_share=0.6)
+        _stage(
+            tmp_path,
+            batches,
+            import_experiment_cache=str(seed),
+            import_for_tag=TAG,
+            import_for_release='26.09',
+            min_seeded_share=0.6,
+        )
 
     assert batches.created == []
+
+
+def test_seed_below_share_writes_no_import_and_an_adequate_seed_imports_on_rerun(tmp_path: Path) -> None:
+    store = str(tmp_path / 'store' / MOA_LITERATURE.name)
+    seed = _seed(tmp_path, {'CHEMBL1'})
+    settings = {'import_for_tag': TAG, 'import_for_release': '26.09', 'min_seeded_share': 0.6}
+
+    with pytest.raises(SeedTooSmall):
+        _stage(tmp_path, FakeBatches(), import_experiment_cache=str(seed), **settings)
+
+    assert not run_exists(store, import_run_id(), _config(tmp_path))
+    seed = _seed(tmp_path, {'CHEMBL1', 'CHEMBL2'})
+    batches = FakeBatches()
+
+    stats = _stage(tmp_path, batches, import_experiment_cache=str(seed), **settings)
+
+    assert (stats['seeded'], stats['computed']) == (2, 0)
+    assert batches.created == []
+
+
+def test_next_release_with_the_import_settings_left_in_place_neither_imports_nor_gates(tmp_path: Path) -> None:
+    store = str(tmp_path / 'store' / MOA_LITERATURE.name)
+    seed = _seed(tmp_path, {'CHEMBL1'})
+    settings = {
+        'import_experiment_cache': str(seed),
+        'import_for_tag': TAG,
+        'import_for_release': '26.09',
+        'min_seeded_share': 0.5,
+    }
+    _stage(tmp_path, FakeBatches(), **settings)
+    imported = read_records(store, _config(tmp_path), pl.String()).filter(pl.col('run_id') == import_run_id()).height
+    added = [
+        *SENTENCES,
+        ('CHEMBL1', 'sotorasib', '4', 'Sotorasib binds the switch pocket of the mutant protein.'),
+        ('CHEMBL2', 'aspirinx', '5', 'Aspirinx blocks prostaglandin synthesis in the tissue.'),
+    ]
+    batches = FakeBatches()
+
+    stats = _stage(tmp_path, batches, sentences=added, release='26.12', work='work2', **settings)
+
+    assert stats['seeded'] == 0
+    assert stats['computed'] == 2
+    assert sorted(batches.drugs) == ['aspirinx', 'sotorasib']
+    after = read_records(store, _config(tmp_path), pl.String()).filter(pl.col('run_id') == import_run_id()).height
+    assert after == imported
+
+
+def test_import_for_another_tag_raises_before_compute(tmp_path: Path) -> None:
+    seed = _seed(tmp_path, {'CHEMBL1', 'CHEMBL2'})
+    batches = FakeBatches()
+
+    with pytest.raises(ValueError, match='claude-opus-5-5-pdeadbeef'):
+        _stage(
+            tmp_path,
+            batches,
+            import_experiment_cache=str(seed),
+            import_for_tag='claude-opus-5-5-pdeadbeef',
+            import_for_release='26.09',
+        )
+
+    assert batches.created == []
+    assert not _snapshot(tmp_path).exists()
+
+
+def test_more_drugs_to_compute_than_max_compute_raises_before_any_batch(tmp_path: Path) -> None:
+    batches = FakeBatches()
+
+    with pytest.raises(ComputeTooLarge, match='2 drugs to compute, more than max_compute 1'):
+        _stage(tmp_path, batches, max_compute=1)
+
+    assert batches.created == []
+    assert not _snapshot(tmp_path).exists()
+
+
+def test_max_compute_counts_only_drugs_without_a_record(tmp_path: Path) -> None:
+    seed = _seed(tmp_path, {'CHEMBL1'})
+    batches = FakeBatches()
+
+    stats = _stage(
+        tmp_path,
+        batches,
+        import_experiment_cache=str(seed),
+        import_for_tag=TAG,
+        import_for_release='26.09',
+        min_seeded_share=0.5,
+        max_compute=1,
+    )
+
+    assert stats['computed'] == 1
+    assert batches.drugs == ['aspirinx']
 
 
 def test_snapshot_is_write_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
