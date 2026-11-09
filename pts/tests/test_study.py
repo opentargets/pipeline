@@ -91,10 +91,20 @@ def studies_frame(rows, schema=source_schema):
 
 @pytest.mark.parametrize(
     ('study_type', 'flagged'),
-    [('gwas', False), ('eqtl', False), ('customqtl', False), ('GWAS', True), ('other', True), (None, True)],
+    [
+        ('gwas', False),
+        ('eqtl', False),
+        ('sctuqtl', False),
+        ('customqtl', True),
+        ('ccqtl', True),
+        ('pQTL', True),
+        ('GWAS', True),
+        ('other', True),
+        (None, True),
+    ],
 )
 def test_validate_study_type(study_type, flagged):
-    """Only gwas and types ending in qtl are supported, including null rejection."""
+    """Only the StudyType values, as in gentropy, are supported, including null rejection."""
     result = validate_study_type(studies_frame([{'studyId': 's', 'studyType': study_type}]))
     assert isinstance(result, pl.LazyFrame)
     assert result.collect()['qualityControls'].to_list() == [[QualityFlag.UNKNOWN_STUDY_TYPE] if flagged else []]
@@ -540,3 +550,42 @@ def test_validators_accept_inputs_without_derived_columns():
 
     row = result.collect().row(0, named=True)
     assert (row['diseaseIds'], row['backgroundDiseaseIds'], row['biosampleId']) == (['a'], ['c'], 'known')
+
+
+def test_validators_replace_derived_columns_carried_by_the_source():
+    """A v4 study index carries diseaseIds, backgroundDiseaseIds and biosampleId; the validators replace them."""
+    studies = pl.concat(
+        [
+            studies_frame([
+                {
+                    'studyId': 'gwas',
+                    'studyType': 'gwas',
+                    'traitFromSourceMappedIds': ['old'],
+                    'backgroundTraitFromSourceMappedIds': ['background'],
+                }
+            ]),
+            pl.LazyFrame(
+                {
+                    'studyId': ['qtl'],
+                    'studyType': ['eqtl'],
+                    'biosampleFromSourceId': ['known'],
+                    'diseaseIds': [['stale']],
+                    'backgroundDiseaseIds': [['stale']],
+                    'biosampleId': ['stale'],
+                },
+            ),
+        ],
+        how='diagonal_relaxed',
+    )
+    lookup = pl.DataFrame({'efo': ['old', 'background'], 'diseaseId': ['a', 'c']}).lazy()
+
+    result = validate_biosample(validate_disease(studies, lookup), pl.DataFrame({'biosampleId': ['known']}).lazy())
+
+    rows = {row['studyId']: row for row in result.collect().iter_rows(named=True)}
+    assert not [name for name in result.collect_schema().names() if name.endswith('_right')]
+    assert (rows['gwas']['diseaseIds'], rows['gwas']['backgroundDiseaseIds'], rows['gwas']['qualityControls']) == (
+        ['a'],
+        ['c'],
+        [],
+    )
+    assert (rows['qtl']['diseaseIds'], rows['qtl']['biosampleId'], rows['qtl']['qualityControls']) == ([], 'known', [])

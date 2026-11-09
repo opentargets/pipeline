@@ -15,7 +15,8 @@ class VariantSource(BaseModel):
     uniprot_variants: str
     eva: str
     pharmacogenomics: str
-    credible_set: str
+    credible_set_variant: str
+    """The validated credible set variants, every lead and member of every valid set."""
     fasta: str
     """The gzip GRCh38 primary assembly FASTA."""
     gff3: str

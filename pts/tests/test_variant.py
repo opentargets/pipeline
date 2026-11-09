@@ -829,8 +829,8 @@ def _row_sources(directory: Path, variants: list[tuple[str, str | None]]) -> dic
         with gzip.open(sources[name], 'wt') as stream:
             stream.write(first)
     sources['pharmacogenomics'] = str(directory / 'pharmacogenomics')
-    sources['credible_set'] = str(directory / 'credible_set')
-    for name, frame in [('pharmacogenomics', variants[:1]), ('credible_set', variants)]:
+    sources['credible_set_variant'] = str(directory / 'credible_set_variant')
+    for name, frame in [('pharmacogenomics', variants[:1]), ('credible_set_variant', variants)]:
         Path(sources[name]).mkdir()
         pl.DataFrame(frame, schema={'variantId': pl.String, 'variantRsId': pl.String}, orient='row').write_parquet(
             Path(sources[name]) / 'part.parquet'
@@ -903,7 +903,7 @@ def test_variant_end_to_end_with_fake_fastvep(end_to_end):
         str(rows / 'uniprot_variants.json.gz'),
         str(rows / 'eva.json.gz'),
         str(rows / 'pharmacogenomics'),
-        str(rows / 'credible_set'),
+        str(rows / 'credible_set_variant'),
     ).collect()
     assert index.schema == variant_schema
     assert index.height == collected.height == 52
