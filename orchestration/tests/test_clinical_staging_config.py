@@ -190,3 +190,13 @@ def test_moa_literature_snapshot_lands_under_the_literature_root(config: Clinica
     assert step['destination'] == {'moa': 'gs://clinical_staging/literature'}
     shipped = yaml.safe_load(PTS_CONFIG.read_text())['steps']['moa_literature'][0]['settings']['input_release']
     assert step['settings']['input_release'] == shipped
+
+
+def test_service_account_is_declared_by_the_llm_steps_only(config: ClinicalStagingConfig) -> None:
+    account = 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
+    llm_steps = {'pts_aact_moa', 'pts_moa_literature'}
+    for step_name in llm_steps:
+        assert config.service_account_for(step_name) == account
+    for step_name in config.steps():
+        if step_name not in llm_steps:
+            assert config.service_account_for(step_name) is None, step_name

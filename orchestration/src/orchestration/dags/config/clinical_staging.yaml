@@ -48,6 +48,7 @@ steps:
       - pts_aact_trial_extraction
     machine_type: 'n1-highmem-8'
     execution_timeout_hours: 30
+    service_account: clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com
     container_env:
       ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: wrkspc_01PEuYsbEifFUZBttcpwP49Q
       ANTHROPIC_GOOGLE_CLOUD_PROJECT: open-targets-eu-dev
@@ -69,6 +70,7 @@ steps:
     source: literature
     machine_type: 'n2d-highmem-32'
     execution_timeout_hours: 30
+    service_account: clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com
     container_env:
       ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: wrkspc_01PEuYsbEifFUZBttcpwP49Q
       ANTHROPIC_GOOGLE_CLOUD_PROJECT: open-targets-eu-dev

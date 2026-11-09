@@ -118,3 +118,14 @@ def test_moa_literature_runs_alone_with_its_timeout_and_env(dag_bag: DagBag) -> 
     assert run.container_env['ANTHROPIC_GOOGLE_CLOUD_PROJECT'] == 'open-targets-eu-dev'
     assert run.machine_type == 'n2d-highmem-32'
     assert not dag.get_task('pts_moa_literature.end_pts_moa_literature').downstream_task_ids
+
+
+def test_only_the_llm_steps_carry_a_vm_service_account(dag_bag: DagBag) -> None:
+    """The two LLM tasks attach the dedicated account; every other VM task keeps the default."""
+    account = 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
+    llm_runs = {'pts_aact_moa.run_pts_aact_moa', 'pts_moa_literature.run_pts_moa_literature'}
+    dag = dag_bag.dags['clinical_staging']
+    runs = [t for t in dag.tasks if isinstance(t, ComputeEngineRunContainerizedWorkloadSensor)]
+    assert len(runs) > 2
+    for task in runs:
+        assert task.vm_service_account == (account if task.task_id in llm_runs else None), task.task_id

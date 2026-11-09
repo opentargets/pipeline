@@ -160,6 +160,17 @@ class ClinicalStagingConfig:
         hours = self.step_definition(step_name).get('execution_timeout_hours')
         return timedelta(hours=hours) if hours is not None else None
 
+    def service_account_for(self, step_name: str) -> str | None:
+        """Return the service account a step's VM runs as.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            str | None: The step's ``service_account``, or None if it declares none.
+        """
+        return self.step_definition(step_name).get('service_account')
+
     def step_config(self, step_name: str) -> dict[str, Any]:
         """Return the configuration to upload for a step.
 

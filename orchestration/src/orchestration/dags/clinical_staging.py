@@ -94,6 +94,7 @@ with DAG(
                 machine_type=config.machine_type_for(step_name),
                 boot_disk_size_gb=config.boot_disk_size,
                 work_disk_size_gb=config.disk_size,
+                vm_service_account=config.service_account_for(step_name),
                 deferrable=True,
                 execution_timeout=config.execution_timeout_for(step_name),
             )
