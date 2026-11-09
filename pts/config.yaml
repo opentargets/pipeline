@@ -917,6 +917,9 @@ steps:
       destination:
         output: output/drug_molecule
         excluded: excluded/drug_molecule_failed_report
+      settings:
+        invalid_clinical_report_qc:
+          - PHASE_IV_NOT_APPROVED
   ##################################################################################################
 
   #: AACT_TRIAL_EXTRACTION STEP :##################################################################
