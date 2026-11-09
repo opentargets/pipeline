@@ -10,6 +10,9 @@ from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
 
 PIS_CONFIG = Path(__file__).parents[2] / 'pis' / 'config.yaml'
 PTS_CONFIG = Path(__file__).parents[2] / 'pts' / 'config.yaml'
+STAGING_CONFIG = (
+    Path(__file__).parents[1] / 'src' / 'orchestration' / 'dags' / 'config' / 'clinical_staging.yaml'
+)
 
 FAKE_TAGS = {
     'extraction_tag': 'eeee5555-p44444444',
@@ -95,6 +98,15 @@ def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> Non
     assert config.machine_type_for('pts_aact_trial_extraction') == 'n1-highmem-8'
     assert config.machine_type_for('pis_aact') == config.machine_type
     assert config.machine_type_for('pis_clinical_mining') == config.machine_type
+
+
+def test_pts_steps_run_the_nlp_image(config: ClinicalStagingConfig) -> None:
+    """Staging pts steps run pts-nlp, the image with the nlp and llm extras; pis steps run pis."""
+    registry = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
+    pts_version = yaml.safe_load(STAGING_CONFIG.read_text())['pts_version']
+    for step in ('pts_aact_moa', 'pts_moa_literature', 'pts_aact_trial_extraction'):
+        assert config.step_image(step) == f'{registry}/pts-nlp:{pts_version}'
+    assert config.step_image('pis_aact').startswith(f'{registry}/pis:')
 
 
 def test_release_copy_paths_use_the_pinned_tags() -> None:

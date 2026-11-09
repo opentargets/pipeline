@@ -87,7 +87,7 @@ class ClinicalStagingConfig:
         registry = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
         self.images = {
             'pis': f'{registry}/pis:{conf.get("pis_version")}',
-            'pts': f'{registry}/pts:{conf.get("pts_version")}',
+            'pts': f'{registry}/pts-nlp:{conf.get("pts_version")}',
         }
         """The image and tag used to run each stage's steps."""
 
