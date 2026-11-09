@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.transformers.clinical_mira.moa import literature, literature_staging, llm, schemas
 from pts.transformers.clinical_mira.moa.literature_staging import (
@@ -146,6 +147,110 @@ def test_import_is_idempotent(tmp_path: Path) -> None:
 
     assert import_experiment_cache(seed, current, PROMPT, store, cast(Any, None)) == 1
     assert import_experiment_cache(seed, current, PROMPT, store, cast(Any, None)) == 0
+
+
+def test_import_rejects_duplicate_content_keys(tmp_path: Path) -> None:
+    sentences = _sentences(('pmid1', 'matched sentence', True))
+    current = _requests({'CHEMBL1': sentences})
+    key = literature.content_key('CHEMBL1', sentences)
+    seed = _write_seed(tmp_path / 'seed.jsonl', [_seed_row('CHEMBL1', key), _seed_row('CHEMBL1', key)])
+
+    with pytest.raises(ValueError, match=r'CHEMBL1\|'):
+        import_experiment_cache(seed, current, PROMPT, str(tmp_path / 'store'), cast(Any, None))
+
+
+def test_import_rejects_a_malformed_seed_response(tmp_path: Path) -> None:
+    sentences = _sentences(('pmid1', 'matched sentence', True))
+    current = _requests({'CHEMBL1': sentences})
+    row = _seed_row('CHEMBL1', literature.content_key('CHEMBL1', sentences)) | {'response': {'mechanisms': 'x'}}
+    seed = _write_seed(tmp_path / 'seed.jsonl', [row])
+
+    with pytest.raises(ValueError, match='CHEMBL1'):
+        import_experiment_cache(seed, current, PROMPT, str(tmp_path / 'store'), cast(Any, None))
+
+
+def test_import_logs_seed_rows_without_a_current_request(tmp_path: Path) -> None:
+    current, _ = _import_inputs(tmp_path)
+    absent = _sentences(('pmid9', 'absent sentence', True))
+    seed = _write_seed(tmp_path / 'seed.jsonl', [_seed_row('CHEMBL9', literature.content_key('CHEMBL9', absent))])
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level='INFO')
+    try:
+        assert import_experiment_cache(seed, current, PROMPT, str(tmp_path / 'store'), cast(Any, None)) == 0
+    finally:
+        logger.remove(sink)
+
+    assert any('1 without a current request' in m for m in messages)
+
+
+SENTENCE_INPUT = {
+    'parent': pl.String,
+    'mappedId': pl.String,
+    'pub': pl.String,
+    'pmid': pl.String,
+    'pmcid': pl.String,
+    'section': pl.String,
+    'year': pl.Int64,
+    'label': pl.String,
+    'text': pl.String,
+    'h': pl.UInt64,
+    'cue': pl.Boolean,
+    'srank': pl.Int8,
+    'genes': pl.List(pl.String),
+}
+NAMES = pl.DataFrame({'parent': ['CHEMBL1'], 'name': ['Aspirin']})
+
+
+def _real_requests(*items: tuple[str, str, bool]) -> pl.DataFrame:
+    """:py:func:`literature.requests` of CHEMBL1 sentences ``(pmid, text, cue)``."""
+    rows = [
+        {
+            'parent': 'CHEMBL1',
+            'mappedId': 'CHEMBL1',
+            'pub': pmid,
+            'pmid': pmid,
+            'pmcid': None,
+            'section': 'abstract',
+            'year': 2020,
+            'label': 'Aspirin',
+            'text': text,
+            'h': i,
+            'cue': cue,
+            'srank': 1,
+            'genes': None,
+        }
+        for i, (pmid, text, cue) in enumerate(items)
+    ]
+    return literature.requests(literature.select_sentences(pl.DataFrame(rows, schema=SENTENCE_INPUT)), NAMES)
+
+
+def test_import_and_carry_forward_accept_real_requests(tmp_path: Path) -> None:
+    kept = ('1', 'aspirin is an inhibitor of cyclooxygenase enzymes', True)
+    first = _real_requests(kept)
+    assert first.schema == _requests({'CHEMBL1': _sentences(('pmid1', 'x', True))}).schema
+    store = str(tmp_path / 'store')
+    seed = _write_seed(tmp_path / 'seed.jsonl', [_seed_row('CHEMBL1', first['content_key'][0])])
+
+    assert import_experiment_cache(seed, first, PROMPT, store, cast(Any, None)) == 1
+    imported = read_records(store, cast(Any, None), output_dtype=pl.String())
+    assert parse_output(imported['output'][0])['sentences'] == first['sentences'].to_list()[0]
+
+    second = _real_requests(kept, ('2', 'aspirin was given to patients after surgery', False))
+    previous = imported.with_columns(run_id=pl.lit('r0'))
+    out = carry_forward(second, previous, MOA_LITERATURE.tag(), 'run1')
+
+    assert out['text'].to_list() == second['content_key'].to_list()
+    assert parse_output(out['output'][0])['carried_from'] == first['content_key'][0]
+
+
+def test_carry_forward_breaks_computed_at_ties_by_run_id() -> None:
+    current = _requests({'CHEMBL1': _sentences(KEPT, QUIET)})
+    later = _record('CHEMBL1', _sentences(KEPT), 'k-b', EXTRACTION, 1, run_id='rb')
+    earlier = _record('CHEMBL1', _sentences(KEPT), 'k-a', EXTRACTION, 1, run_id='ra')
+
+    for records in (pl.concat([later, earlier]), pl.concat([earlier, later])):
+        out = carry_forward(current, records, MOA_LITERATURE.tag(), 'run1')
+        assert parse_output(out['output'][0])['carried_from'] == 'k-b'
 
 
 def _record(

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
+from pydantic import ValidationError
 
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
 from pts.transformers.clinical_mira.moa import llm, schemas
@@ -68,8 +70,9 @@ def carry_forward(requests: pl.DataFrame, records: pl.DataFrame, tag: str, run_i
 
     A drug is carried when its ``content_key`` has no ``ok`` record at ``tag``, an ``ok`` record at
     ``tag`` outside the import run :py:func:`import_run_id` exists for its parent, no sentence of the
-    current selection missing from the latest such record (by ``doc`` and ``sha256``) has ``cue``,
-    and every document of that record that its evidence cites is still in the selection.
+    current selection missing (by ``doc`` and ``sha256``) from the latest such record, by
+    ``computed_at`` then ``run_id``, has ``cue``, and every document of that record that its
+    evidence cites is still in the selection.
 
     Args:
         requests: Output of :py:func:`literature.requests`.
@@ -85,7 +88,9 @@ def carry_forward(requests: pl.DataFrame, records: pl.DataFrame, tag: str, run_i
     ok = records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag))
     done = set(ok['text'].to_list())
     latest: dict[str, dict] = {}
-    for record in ok.filter(pl.col('run_id') != import_run_id()).sort('computed_at', maintain_order=True).to_dicts():
+    for record in (
+        ok.filter(pl.col('run_id') != import_run_id()).sort('computed_at', 'run_id', maintain_order=True).to_dicts()
+    ):
         parsed = parse_output(record['output'])
         latest[parsed['parent']] = {**parsed, 'content_key': record['text']}
 
@@ -151,6 +156,10 @@ def import_experiment_cache(
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
+
+    Raises:
+        ValueError: If an imported response is not a ``MoaExtraction``, or imported seed rows share a
+            content key.
     """
     run_id = import_run_id()
     prompt_sha = prompt_sha256(system_prompt)
@@ -160,29 +169,43 @@ def import_experiment_cache(
         current = {row['parent']: row for row in requests.select('parent', 'content_key', 'sentences').to_dicts()}
         rows = []
         other_prompt = 0
+        no_request = 0
         for row in seed:
             if row.get('prompt_sha256') != prompt_sha:
                 other_prompt += 1
                 continue
             drug = current.get(row['parent'])
-            if drug is None or drug['content_key'] != row['content_key']:
+            if drug is None:
+                no_request += 1
                 continue
+            if drug['content_key'] != row['content_key']:
+                continue
+            try:
+                extraction = schemas.MoaExtraction.model_validate(row['response']).model_dump(
+                    mode='json', by_alias=True
+                )
+            except ValidationError as error:
+                raise ValueError(f'seed response of {row["parent"]} is not a MoaExtraction: {error}') from error
             rows.append({
                 'text_sha256': text_sha256(drug['content_key']),
                 'text': drug['content_key'],
                 'model': MOA_LITERATURE.name,
                 'model_revision': MOA_LITERATURE.tag(),
                 'output': record_output(
-                    drug['parent'], drug['sentences'], row['response'], row.get('usage'), None, prompt_sha
+                    drug['parent'], drug['sentences'], extraction, row.get('usage'), None, prompt_sha
                 ),
                 'status': 'ok',
                 'error': None,
                 'computed_at': IMPORT_COMPUTED_AT,
                 'run_id': run_id,
             })
+        counts = Counter(str(row['text']) for row in rows)
+        duplicated = sorted(key for key, n in counts.items() if n > 1)
+        if duplicated:
+            raise ValueError(f'seed rows share content keys: {", ".join(duplicated)}')
         logger.info(
             f'{len(rows)} of {len(seed)} seed rows match a current request in {cache_uri}; '
-            f'{other_prompt} skipped for another prompt'
+            f'{other_prompt} skipped for another prompt, {no_request} without a current request'
         )
         return pl.DataFrame(rows, schema=record_schema(pl.String()))
 
