@@ -595,7 +595,7 @@ wheels = [
 
 [[package]]
 name = "ot-croissant"
-version = "26.12.0rc9"
+version = "26.12.0rc10"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
