@@ -319,7 +319,8 @@ def cmd_qc(_run: Path, args: argparse.Namespace) -> None:
         _exclude_stages(args.exclude_stages),
         args.min_scorable,
     )
-    logger.info(f'qc: {go}')
+    for line in go.splitlines():
+        logger.info(f'qc: {line}')
 
 
 def _snapshot(path: str) -> pl.DataFrame:

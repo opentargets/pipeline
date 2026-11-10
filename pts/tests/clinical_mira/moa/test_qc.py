@@ -135,6 +135,83 @@ def _first_line(out):
     return (out / 'qc.md').read_text().splitlines()[0]
 
 
+def _source_line(out, source):
+    lines = (out / 'qc.md').read_text().splitlines()
+    return next(line for line in lines if line.startswith(f'{source} '))
+
+
+def _scored(rows):
+    """Scored candidates of ``(source, phase_group, correct)`` rows."""
+    return pl.DataFrame(
+        rows, schema={'source': pl.String, 'phase_group': pl.String, 'correct': pl.Boolean}, orient='row'
+    )
+
+
+def test_source_verdicts_judge_each_source_on_its_own_early_phase_candidates():
+    scored = _scored(
+        [('aact', 'early', True)] * 30
+        + [('literature', 'early', True)] * 20
+        + [('literature', 'early', False)] * 10
+        + [('literature', 'late', True)] * 100
+    )
+    verdicts = qc.source_verdicts(scored, 30)
+    assert list(verdicts) == ['aact', 'literature']
+    assert verdicts['aact'].line.startswith('aact GO: early-phase strict target precision 1.000 (30/30;')
+    assert verdicts['literature'].line.startswith('literature NO-GO: early-phase strict target precision 0.667 (20/30;')
+
+
+def test_pooled_precision_would_hide_a_failing_source():
+    scored = _scored(
+        [('aact', 'early', True)] * 300 + [('literature', 'early', True)] * 25 + [('literature', 'early', False)] * 5
+    )
+    assert qc.verdict(scored, 30).startswith('GO')
+    assert qc.overall_verdict(qc.source_verdicts(scored, 30)).startswith('NO-GO')
+
+
+def test_source_verdicts_show_a_source_without_scorable_candidates():
+    verdicts = qc.source_verdicts(_scored([('aact', 'early', True)] * 30), 30)
+    assert verdicts['literature'].label == 'UNSCORED'
+    assert verdicts['literature'].line.startswith('literature UNSCORED')
+
+
+def test_source_verdicts_include_a_source_outside_the_known_ones():
+    verdicts = qc.source_verdicts(_scored([('patents', 'early', True)]), 30)
+    assert list(verdicts) == ['aact', 'literature', 'patents']
+    assert verdicts['patents'].line.startswith('patents INCONCLUSIVE')
+
+
+@pytest.mark.parametrize(
+    ('labels', 'expected'),
+    [
+        ({'aact': 'GO', 'literature': 'GO'}, 'GO'),
+        ({'aact': 'GO', 'literature': 'NO-GO'}, 'NO-GO'),
+        ({'aact': 'NO-GO', 'literature': 'INCONCLUSIVE'}, 'NO-GO'),
+        ({'aact': 'GO', 'literature': 'INCONCLUSIVE'}, 'GO'),
+        ({'aact': 'GO', 'literature': 'UNSCORED'}, 'GO'),
+        ({'aact': 'INCONCLUSIVE', 'literature': 'UNSCORED'}, 'INCONCLUSIVE'),
+        ({'aact': 'UNSCORED', 'literature': 'UNSCORED'}, 'UNSCORED'),
+    ],
+)
+def test_overall_verdict_is_go_only_when_every_decisive_source_is_go(labels, expected):
+    verdicts = {source: qc.Verdict(label, f'{source} {label}: details.') for source, label in labels.items()}
+    line = qc.overall_verdict(verdicts)
+    assert line.split(':')[0] == expected
+    for source, label in labels.items():
+        assert f'{source} {label}' in line
+
+
+def test_qc_md_shows_the_overall_line_then_one_line_per_source(tmp_path):
+    moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
+    candidates = [_candidate('CHEMBL1', ['ENSG1'], stage='PHASE_2')] * 30 + [
+        _candidate('CHEMBL1', ['ENSG9'], stage='PHASE_2', source='literature')
+    ] * 30
+    out = _qc(tmp_path, moa, candidates, options=['--exclude-stages', 'aact:APPROVAL', 'literature:APPROVAL'])
+    lines = (out / 'qc.md').read_text().splitlines()
+    assert lines[0].startswith('NO-GO: overall')
+    assert lines[1].startswith('aact GO')
+    assert lines[2].startswith('literature NO-GO')
+
+
 def test_qc_no_go_below_090_with_enough_scorable_rows(tmp_path):
     moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
     candidates = [_candidate('CHEMBL1', ['ENSG9'], stage='PHASE_2')] * 30
@@ -151,7 +228,8 @@ def test_qc_inconclusive_below_min_scorable(tmp_path):
     moa = [(['CHEMBL1'], ['ENSG1'], 'manual')]
     out = _qc(tmp_path, moa, [_candidate('CHEMBL1', ['ENSG1'], stage='PHASE_2')] * 29)
     assert _first_line(out).startswith('INCONCLUSIVE')
-    assert '29/29' in _first_line(out)
+    assert _source_line(out, 'aact').startswith('aact INCONCLUSIVE')
+    assert '29/29' in _source_line(out, 'aact')
 
 
 def test_qc_min_scorable_is_an_option(tmp_path):

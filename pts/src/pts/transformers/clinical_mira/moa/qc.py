@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import polars as pl
 
 from pts.transformers.clinical_mira.moa.benchmark import phase_group, wilson
 from pts.transformers.clinical_mira.moa.report import GO_PRECISION, markdown_table
-from pts.transformers.drug_mechanism_of_action_candidates import stage_excluded
+from pts.transformers.drug_mechanism_of_action_candidates import SOURCE_AACT, SOURCE_LITERATURE, stage_excluded
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 PAIR = ['targetId', 'diseaseId']
+SOURCES = (SOURCE_AACT, SOURCE_LITERATURE)
 
 
 def read_dataset(root: Path, name: str, columns: list[str] | None = None) -> pl.DataFrame:
@@ -99,26 +100,65 @@ def precision_table(scored: pl.DataFrame, by: str) -> pl.DataFrame:
     )
 
 
-def verdict(scored: pl.DataFrame, min_scorable: int) -> str:
-    """Return the go line from the early-phase strict precision.
+class Verdict(NamedTuple):
+    """A go label, ``GO``, ``NO-GO``, ``INCONCLUSIVE`` or ``UNSCORED``, and the line reporting it."""
 
-    ``GO`` or ``NO-GO`` when at least ``min_scorable`` early-phase candidates are scorable,
-    ``INCONCLUSIVE`` when fewer are, ``UNSCORED`` when none is.
-    """
+    label: str
+    line: str
+
+
+def _verdict(scored: pl.DataFrame, min_scorable: int) -> Verdict:
     early = scored.filter(pl.col('phase_group') == 'early')
     if early.is_empty():
-        return 'UNSCORED: no early-phase candidate has a ChEMBL mechanism to be scored against.'
+        return Verdict('UNSCORED', 'UNSCORED: no early-phase candidate has a ChEMBL mechanism to be scored against.')
     correct, n = int(early['correct'].sum()), early.height
     low, high = wilson(correct, n)
     if n < min_scorable:
         label = 'INCONCLUSIVE'
     else:
         label = 'GO' if correct / n >= GO_PRECISION else 'NO-GO'
-    return (
+    return Verdict(
+        label,
         f'{label}: early-phase strict target precision {correct / n:.3f} ({correct}/{n}; '
         f'Wilson 95% {low:.3f} to {high:.3f}) against a bar of {GO_PRECISION:.2f} '
-        f'with at least {min_scorable} scorable.'
+        f'with at least {min_scorable} scorable.',
     )
+
+
+def verdict(scored: pl.DataFrame, min_scorable: int) -> str:
+    """Return the go line from the early-phase strict precision of ``scored`` as a whole.
+
+    ``GO`` or ``NO-GO`` when at least ``min_scorable`` early-phase candidates are scorable,
+    ``INCONCLUSIVE`` when fewer are, ``UNSCORED`` when none is.
+    """
+    return _verdict(scored, min_scorable).line
+
+
+def source_verdicts(scored: pl.DataFrame, min_scorable: int) -> dict[str, Verdict]:
+    """Return the verdict of each source on its own scored candidates, by the rule of :py:func:`verdict`.
+
+    The sources are ``aact`` and ``literature``, then any other source of ``scored`` in name order.
+    Each line starts with its source.
+    """
+    others = sorted(set(scored['source'].to_list()) - set(SOURCES))
+    verdicts = {}
+    for source in [*SOURCES, *others]:
+        label, line = _verdict(scored.filter(pl.col('source') == source), min_scorable)
+        verdicts[source] = Verdict(label, f'{source} {line}')
+    return verdicts
+
+
+def overall_verdict(verdicts: dict[str, Verdict]) -> str:
+    """Return the overall go line of the per-source verdicts.
+
+    ``NO-GO`` when any source is ``NO-GO``, else ``GO`` when any source is ``GO``; a source
+    ``INCONCLUSIVE`` or ``UNSCORED`` does not block. Without a ``GO`` or ``NO-GO`` source it is
+    ``INCONCLUSIVE`` when any source is, else ``UNSCORED``.
+    """
+    labels = {v.label for v in verdicts.values()}
+    label = next(candidate for candidate in ('NO-GO', 'GO', 'INCONCLUSIVE', 'UNSCORED') if candidate in labels)
+    sources = ', '.join(f'{source} {v.label}' for source, v in verdicts.items())
+    return f'{label}: overall, GO only if every source with enough scorable early-phase candidates is GO ({sources}).'
 
 
 def new_evidence_pairs(release: pl.DataFrame, without: pl.DataFrame) -> pl.DataFrame:
@@ -134,13 +174,14 @@ def run_qc(
     exclude_stages: dict[str, list[str]],
     min_scorable: int,
 ) -> str:
-    """Write ``qc.md`` and ``new_evidence_pairs.csv`` to ``out``; return the go line."""
+    """Write ``qc.md`` and ``new_evidence_pairs.csv`` to ``out``; return the overall go line then one per source."""
     out.mkdir(parents=True, exist_ok=True)
     moa = read_dataset(release, 'output/drug_mechanism_of_action', ['chemblIds', 'targets', 'curation'])
     candidates = read_dataset(release, 'intermediate/drug_mechanism_of_action_candidates')
     released = release_filter(candidates, min_confidence, exclude_stages)
     scored = score_candidates(released, moa)
-    go = verdict(scored, min_scorable)
+    per_source = source_verdicts(scored, min_scorable)
+    go = '\n'.join([overall_verdict(per_source), *(v.line for v in per_source.values())])
 
     precedence = {
         'release': read_dataset(release, 'output/evidence_clinical_precedence', PAIR),
