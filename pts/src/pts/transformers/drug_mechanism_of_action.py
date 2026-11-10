@@ -267,9 +267,9 @@ def merge_inferred(
     doc ids of all of them give its references, classified by ``DOC_KINDS``: NCT ids as
     ``ClinicalTrials``, ``pmid<digits>`` as ``PubMed``, ``pmc<digits>`` and ``pmidPMC<digits>`` as
     ``PMC`` and ``pmidPPR<digits>`` as ``EuropePMC``, the prefixes in any case. Other doc ids are
-    counted in a warning and not referenced. A row left with no reference is not published. Of
-    the referenced rows of one drug whose gene sets overlap, only the higher-confidence one is
-    published, see :py:func:`_drop_overlapping`.
+    counted in a warning and not referenced. A row left with no reference is not published. A
+    referenced row whose genes are all among those of a higher-ranked referenced row of the same
+    drug is not published, see :py:func:`_drop_contained`.
 
     Args:
         chembl_rows: Output of ``process_mechanism_of_action``.
@@ -302,11 +302,11 @@ def merge_inferred(
     if unreferenced:
         logger.warning(f'{unreferenced} candidates not published: they have no reference')
     referenced = published.filter(pl.col('_references').list.len() > 0)
-    kept = _drop_overlapping(referenced)
+    kept = _drop_contained(referenced)
     if kept.height < referenced.height:
         logger.info(
             f'{referenced.height - kept.height} inferred rows not published: '
-            'their genes overlap a higher-confidence row of the same drug'
+            'their genes are a subset of a higher-ranked row of the same drug'
         )
     appended = kept.select(
         'chemblIds',
@@ -321,12 +321,13 @@ def merge_inferred(
     return pl.concat([chembl_rows, appended]), report
 
 
-def _drop_overlapping(published: pl.DataFrame) -> pl.DataFrame:
-    """Keep, of each drug's rows, those whose genes share none with a row ranked above them.
+def _drop_contained(published: pl.DataFrame) -> pl.DataFrame:
+    """Keep, of each drug's rows, those whose genes are not a subset of a row ranked above them.
 
     A drug's rows are ranked by confidence, then by number of doc ids, both descending, then by
-    their sorted genes joined as a string. A row is kept when its genes are disjoint from those of
-    every row kept before it. The kept rows stay in their input order.
+    their sorted genes joined as a string. A row is dropped when its genes are a subset of those
+    of any row ranked before it; rows that only partly overlap are kept. The kept rows stay in
+    their input order.
     """
     ranked = (
         published
@@ -337,15 +338,14 @@ def _drop_overlapping(published: pl.DataFrame) -> pl.DataFrame:
         )
         .sort('parentChemblId', 'confidence', '_n_docs', '_targets_key', descending=[False, True, True, False])
     )
-    taken: dict[str, set[str]] = {}
+    above: dict[str, list[set[str]]] = {}
     kept = []
     for row, parent, targets in ranked.select('_row', 'parentChemblId', 'targets').iter_rows():
         genes = set(targets or [])
-        drug_genes = taken.setdefault(parent, set())
-        if genes & drug_genes:
-            continue
-        drug_genes |= genes
-        kept.append(row)
+        ranked_above = above.setdefault(parent, [])
+        if not any(genes <= other for other in ranked_above):
+            kept.append(row)
+        ranked_above.append(genes)
     return published.with_row_index('_row').filter(pl.col('_row').is_in(kept)).drop('_row')
 
 

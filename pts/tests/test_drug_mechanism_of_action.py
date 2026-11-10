@@ -841,22 +841,39 @@ class TestMergeInferred:
     def inferred(merged: pl.DataFrame, chembl: pl.DataFrame) -> list[tuple[str, list[str]]]:
         return sorted(merged.slice(chembl.height).select('mechanismOfAction', 'targets').rows())
 
-    def test_an_overlapping_lower_confidence_row_is_dropped(self, chembl: pl.DataFrame) -> None:
+    def test_a_lower_confidence_row_contained_in_a_higher_one_is_dropped(self, chembl: pl.DataFrame) -> None:
         messages: list[str] = []
         handler = logger.add(lambda message: messages.append(message.record['message']))
         try:
             merged, report = self.merge(
                 chembl,
-                candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='strong'),
-                paper(confidence=0.85, targets=['ENSG2', 'ENSG3'], mechanismOfAction='weak'),
+                candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='broad'),
+                paper(confidence=0.85, targets=['ENSG1'], mechanismOfAction='narrow'),
             )
         finally:
             logger.remove(handler)
-        assert self.inferred(merged, chembl) == [('strong', ['ENSG1', 'ENSG2'])]
+        assert self.inferred(merged, chembl) == [('broad', ['ENSG1', 'ENSG2'])]
         row = merged.tail(1).to_dicts()[0]
         assert [r['source'] for r in row['references']] == ['ClinicalTrials']
-        assert sorted(report['mechanismOfAction'].to_list()) == ['strong', 'weak']
-        assert any(m.startswith('1 inferred rows not published') and 'overlap' in m for m in messages), messages
+        assert sorted(report['mechanismOfAction'].to_list()) == ['broad', 'narrow']
+        assert any(m.startswith('1 inferred rows not published') and 'subset' in m for m in messages), messages
+
+    def test_partially_overlapping_rows_are_both_kept(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='a'),
+            paper(confidence=0.85, targets=['ENSG2', 'ENSG3'], mechanismOfAction='b'),
+        )
+        assert self.inferred(merged, chembl) == [('a', ['ENSG1', 'ENSG2']), ('b', ['ENSG2', 'ENSG3'])]
+
+    def test_a_narrower_higher_row_does_not_drop_a_broader_lower_one(self, chembl: pl.DataFrame) -> None:
+        broad = ['ENSG1', 'ENSG2', 'ENSG3', 'ENSG4', 'ENSG5']
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.95, targets=['ENSG1'], mechanismOfAction='MC1R'),
+            paper(confidence=0.85, targets=broad, mechanismOfAction='MC1R-MC5R'),
+        )
+        assert self.inferred(merged, chembl) == [('MC1R', ['ENSG1']), ('MC1R-MC5R', broad)]
 
     def test_disjoint_rows_of_one_drug_are_both_kept(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
@@ -866,10 +883,10 @@ class TestMergeInferred:
         )
         assert self.inferred(merged, chembl) == [('a', ['ENSG1']), ('b', ['ENSG2'])]
 
-    def test_overlapping_rows_of_different_drugs_are_both_kept(self, chembl: pl.DataFrame) -> None:
+    def test_contained_rows_of_different_drugs_are_both_kept(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
             chembl,
-            candidate(confidence=0.95, targets=['ENSG1'], mechanismOfAction='a'),
+            candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='a'),
             candidate(
                 parentChemblId='CHEMBL91',
                 chemblIds=['CHEMBL91'],
@@ -878,35 +895,44 @@ class TestMergeInferred:
                 mechanismOfAction='b',
             ),
         )
-        assert self.inferred(merged, chembl) == [('a', ['ENSG1']), ('b', ['ENSG1'])]
+        assert self.inferred(merged, chembl) == [('a', ['ENSG1', 'ENSG2']), ('b', ['ENSG1'])]
 
-    def test_an_overlap_chain_keeps_the_ends_and_drops_the_middle(self, chembl: pl.DataFrame) -> None:
+    def test_a_chain_drops_only_the_contained_rows(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
             chembl,
-            paper(confidence=0.85, targets=['ENSG3', 'ENSG4'], mechanismOfAction='C'),
-            candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='A'),
-            paper(confidence=0.9, targets=['ENSG2', 'ENSG3'], mechanismOfAction='B'),
+            paper(confidence=0.8, docIds=['pmid4'], targets=['ENSG4'], mechanismOfAction='D'),
+            paper(confidence=0.85, docIds=['pmid3'], targets=['ENSG3', 'ENSG4'], mechanismOfAction='C'),
+            candidate(confidence=0.95, targets=['ENSG1', 'ENSG2', 'ENSG3'], mechanismOfAction='A'),
+            paper(confidence=0.9, docIds=['pmid2'], targets=['ENSG2', 'ENSG3'], mechanismOfAction='B'),
         )
-        assert self.inferred(merged, chembl) == [('A', ['ENSG1', 'ENSG2']), ('C', ['ENSG3', 'ENSG4'])]
+        assert self.inferred(merged, chembl) == [('A', ['ENSG1', 'ENSG2', 'ENSG3']), ('C', ['ENSG3', 'ENSG4'])]
 
-    def test_a_row_without_a_reference_does_not_drop_an_overlapping_row(self, chembl: pl.DataFrame) -> None:
+    def test_a_row_without_a_reference_does_not_drop_a_contained_row(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
             chembl,
-            paper(confidence=0.95, docIds=['doi10.1/x'], targets=['ENSG1'], mechanismOfAction='unreferenced'),
-            candidate(confidence=0.85, targets=['ENSG1', 'ENSG2'], mechanismOfAction='referenced'),
+            paper(confidence=0.95, docIds=['doi10.1/x'], targets=['ENSG1', 'ENSG2'], mechanismOfAction='unreferenced'),
+            candidate(confidence=0.85, targets=['ENSG1'], mechanismOfAction='referenced'),
         )
-        assert self.inferred(merged, chembl) == [('referenced', ['ENSG1', 'ENSG2'])]
+        assert self.inferred(merged, chembl) == [('referenced', ['ENSG1'])]
 
-    def test_an_equal_confidence_overlap_is_resolved_the_same_way_under_shuffle(self, chembl: pl.DataFrame) -> None:
+    def test_an_equal_confidence_containment_is_resolved_the_same_way_under_shuffle(self, chembl: pl.DataFrame) -> None:
         rows = [
-            candidate(confidence=0.9, docIds=['NCT01'], targets=['ENSG1', 'ENSG2'], mechanismOfAction='one doc'),
-            paper(confidence=0.9, docIds=['pmid1', 'pmid2'], targets=['ENSG2', 'ENSG3'], mechanismOfAction='two docs'),
-            paper(confidence=0.9, docIds=['pmid5', 'pmid6'], targets=['ENSG3', 'ENSG4'], mechanismOfAction='later key'),
-            candidate(confidence=0.9, docIds=['NCT07'], targets=['ENSG7', 'ENSG8'], mechanismOfAction='alone'),
-            paper(confidence=0.9, docIds=['pmid8'], targets=['ENSG8', 'ENSG9'], mechanismOfAction='key ENSG8'),
+            paper(
+                confidence=0.9, docIds=['pmid1', 'pmid2'], targets=['ENSG1', 'ENSG2'], mechanismOfAction='wide two docs'
+            ),
+            paper(confidence=0.9, docIds=['pmid3'], targets=['ENSG1'], mechanismOfAction='narrow one doc'),
+            paper(confidence=0.9, docIds=['pmid5', 'pmid6'], targets=['ENSG5'], mechanismOfAction='narrow two docs'),
+            paper(confidence=0.9, docIds=['pmid7'], targets=['ENSG5', 'ENSG6'], mechanismOfAction='wide one doc'),
+            paper(confidence=0.9, docIds=['pmid8'], targets=['ENSG3', 'ENSG4'], mechanismOfAction='wide key'),
+            paper(confidence=0.9, docIds=['pmid9'], targets=['ENSG4'], mechanismOfAction='narrow later key'),
         ]
-        expected = [('alone', ['ENSG7', 'ENSG8']), ('two docs', ['ENSG2', 'ENSG3'])]
-        for seed in range(6):
+        expected = [
+            ('narrow two docs', ['ENSG5']),
+            ('wide key', ['ENSG3', 'ENSG4']),
+            ('wide one doc', ['ENSG5', 'ENSG6']),
+            ('wide two docs', ['ENSG1', 'ENSG2']),
+        ]
+        for seed in range(8):
             shuffled = rows[:]
             random.Random(seed).shuffle(shuffled)
             merged, _ = self.merge(chembl, *shuffled)
