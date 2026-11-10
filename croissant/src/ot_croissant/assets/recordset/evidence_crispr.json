@@ -68,7 +68,7 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship; the Project Score priority score divided by 100"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; the Project Score priority score divided by 100, with a floor of 0.415"
   },
   {
     "id": "targetFromSource",

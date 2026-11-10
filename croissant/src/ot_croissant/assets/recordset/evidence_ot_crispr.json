@@ -67,7 +67,7 @@
   },
   {
     "id": "resourceScore",
-    "description": "Smallest of the significance values (e.g. MAGeCK FDR or p-value) of the target used to select hits in the study"
+    "description": "Smallest of the values of the study's filter columns (usually MAGeCK FDR or p-value, but study-specific) of the target used to select hits in the study"
   },
   {
     "id": "score",

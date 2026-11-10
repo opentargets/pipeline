@@ -25,7 +25,7 @@
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "OMIM or MONDO identifier extracted from the Genomics England PanelApp phenotype"
+    "description": "OMIM, Orphanet, HPO or MONDO identifier extracted from the Genomics England PanelApp phenotype"
   },
   {
     "id": "diseaseFromSourceMappedId",

@@ -59,7 +59,7 @@
   },
   {
     "id": "diseaseModelAssociatedModelPhenotypes",
-    "description": "Phenotypes observed in the mouse model matched to the human disease phenotypes by PhenoDigm"
+    "description": "Phenotypes observed in the mouse model (all annotated model phenotypes, not only those matched to the human disease)"
   },
   {
     "id": "diseaseModelAssociatedModelPhenotypes/id",

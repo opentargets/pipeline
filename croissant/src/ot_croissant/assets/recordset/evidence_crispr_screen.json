@@ -47,11 +47,11 @@
   },
   {
     "id": "literature",
-    "description": "PubMed identifier of the publication describing the CRISPRbrain screen"
+    "description": "PubMed or Europe PMC preprint identifier of the publication describing the CRISPRbrain screen"
   },
   {
     "id": "phenotypicConsequenceScore",
-    "description": "Phenotype score of the target in the CRISPRbrain screen: the effect of the target perturbation on the screened phenotype, as computed by the CRISPRbrain analysis pipeline (e.g. a z-score against non-targeting controls for MAGeCK-iNC screens). Positive for positive hits, negative for negative hits"
+    "description": "Phenotype score of the target in the CRISPRbrain screen, computed with the MAGeCK-iNC pipeline and, as described for most screens, standardised against negative-control quasi-genes. Positive for positive hits, negative for negative hits"
   },
   {
     "id": "projectId",
