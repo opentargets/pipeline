@@ -39,6 +39,9 @@ scratchpad:
   drug_entities_tag: b57181cea10a3943c35cf31bb375ff9217886730+8cd97116de5fdc911817166df8cb41a022874b10-pbd6d0afb
   disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
   extraction_tag: 82af315af627-pfd3cdab9
+  moa_tag: claude-opus-5-5-p4e6708cf
+  moa_literature_tag: claude-opus-5-5-p15139b69
+  moa_literature_input_release: '26.09'
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
@@ -308,6 +311,24 @@ steps:
           destination: input/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
+  #: MOA_LITERATURE STEP :#########################################################################
+  # Copies the literature match and drug molecules of the published release moa_literature reads
+  # out of the requester-pays release bucket. The staging DAG runs this with release_uri at
+  # gs://clinical_staging/literature/${staging_version}.
+  moa_literature:
+    - name: copy_many literature match
+      sources: gs://open-targets-data-releases/${moa_literature_input_release}/intermediate/literature/match/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/literature/${moa_literature_input_release}/match
+
+    - name: copy_many literature drug molecule
+      sources: gs://open-targets-data-releases/${moa_literature_input_release}/output/drug_molecule/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/literature/${moa_literature_input_release}/drug_molecule
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
   # Everything is copied from gs://clinical_staging, written by the staging DAG. The tags in the
   # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
@@ -321,6 +342,18 @@ steps:
         - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/data.parquet
         - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/metadata.json
       destination: input/clinical_report/aact_trial_extraction
+
+    - name: copy_many aact moa
+      sources:
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/metadata.json
+      destination: input/drug_mechanism_of_action/aact_moa
+
+    - name: copy_many literature moa
+      sources:
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/data.parquet
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/metadata.json
+      destination: input/drug_mechanism_of_action/literature_moa
 
     - name: copy ttd
       source: gs://clinical_staging/clinical_mining/${staging_version}/input/ttd.txt
