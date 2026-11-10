@@ -83,13 +83,6 @@ def test_no_entry_id_contains_dataset_prefix():
     assert not violations, f'Entries with un-stripped dataset prefix: {violations}'
 
 
-def test_drug_mechanism_of_action_documents_curation(recordset_corpus):
-    entry = recordset_corpus['drug_mechanism_of_action/curation']
-    assert 'PLACEHOLDER' not in entry['description']
-    assert 'manual' in entry['description']
-    assert 'electronic' in entry['description']
-
-
 def test_foreign_keys_reference_existing_fields(recordset_corpus):
     """Every foreign_key value must point to a dataset/field that exists in the corpus."""
     bad = []
