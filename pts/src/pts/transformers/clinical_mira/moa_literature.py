@@ -16,16 +16,11 @@ import polars as pl
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from pts.transformers.clinical_mira.aact_moa import (
-    SNAPSHOT_COLUMNS,
-    SeedTooSmall,
-    _exists,
-    _guarded,
-    _write_parquet,
-)
+from pts.transformers.clinical_mira.aact_moa import SNAPSHOT_COLUMNS, _exists, _guarded, _write_parquet
 from pts.transformers.clinical_mira.moa import literature, literature_staging, quotes, schemas
 from pts.transformers.clinical_mira.record_store import map_texts, new_run_id, publish_snapshot, read_records, write_run
 from pts.transformers.clinical_mira.staged_outputs import MOA_LITERATURE
+from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -35,10 +30,6 @@ LITERATURE_SNAPSHOT_COLUMNS = ['drugId', 'docIds'] + [c for c in SNAPSHOT_COLUMN
 
 MOLECULE_COLUMNS = ['id', 'parentId', 'maximumClinicalStage', 'name']
 """Columns read from the drug molecules."""
-
-
-class ComputeTooLarge(Exception):  # noqa: N818
-    """Raised when more drugs are left to compute than ``max_compute`` allows."""
 
 
 class MoaLiteratureSettings(BaseModel):

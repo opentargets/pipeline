@@ -29,6 +29,7 @@ from pts.transformers.clinical_mira.record_store import (
     write_run,
 )
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA
+from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,10 +55,6 @@ SNAPSHOT_COLUMNS = [
 """Columns of the published mechanisms."""
 
 
-class SeedTooSmall(Exception):  # noqa: N818
-    """Raised when the imported experiment cache covers too few of the current pools."""
-
-
 class AactMoaSettings(BaseModel):
     """Settings for the aact_moa transformer."""
 
@@ -75,9 +72,15 @@ class AactMoaSettings(BaseModel):
     import_experiment_cache: str | None = None
     """The experiment's jsonl result cache to import into the store, once, before computing."""
     import_for_tag: str | None = None
-    """The MOA tag the cache was computed for. The cache is imported only while it is the current tag."""
+    """The MOA tag the cache was computed for, or None to not import it. Any other tag than the current one is
+        an error."""
+    import_for_snapshot: str | None = None
+    """The AACT version the cache is imported for. The cache is imported, and its coverage checked, only when
+        this is ``snapshot``."""
     min_seeded_share: float = 0.5
     """The lowest share of the current pools the imported cache must cover, or the run aborts before computing."""
+    max_compute: int | None = None
+    """The most pools the run may compute, or None for no limit. More aborts the run before any batch."""
     workspace_id_env: str = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
     """Name of the environment variable holding the Claude workspace id."""
 
@@ -169,10 +172,17 @@ def stage_moa(
         kept and dropped by the quote check, and whether a snapshot was published.
 
     Raises:
-        SeedTooSmall: If the experiment cache is imported for the current tag and its import run covers less
-            than ``min_seeded_share`` of the pools.
+        ValueError: If ``import_for_tag`` is set and is not the current tag.
+        SeedTooSmall: If the experiment cache is imported for the current tag and ``snapshot`` and it, or its
+            import run, covers less than ``min_seeded_share`` of the pools.
+        ComputeTooLarge: If more pools than ``max_compute`` have no ``ok`` record at the current tag after
+            carry-forward.
         ComputeAborted: If there are pools to compute, no client is given and the workspace id variable is unset.
     """
+    tag = MOA.tag()
+    if settings.import_for_tag is not None and settings.import_for_tag != tag:
+        msg = f'import_for_tag {settings.import_for_tag} is not the current tag {tag}; update or unset it'
+        raise ValueError(msg)
     system_prompt = schemas.load_prompt('extract')
     extraction_tag = EXTRACTION.release_tag()
     extracted = EXTRACTION.read(f'{extraction_dir.rstrip("/")}/{extraction_tag}')
@@ -184,18 +194,28 @@ def stage_moa(
     logger.info(f'texts {counts}, {trials.height} single-drug trials, {pools.height} pools')
 
     store_uri = f'{settings.store_uri.rstrip("/")}/{MOA.name}'
-    tag = MOA.tag()
     run_id = new_run_id(settings.snapshot)
 
     seeded = 0
-    importing = settings.import_experiment_cache is not None and settings.import_for_tag == tag
+    importing = (
+        settings.import_experiment_cache is not None
+        and settings.import_for_tag == tag
+        and settings.import_for_snapshot == settings.snapshot
+    )
     if settings.import_experiment_cache is not None and not importing:
         logger.info(
-            f'not importing {settings.import_experiment_cache}: computed for {settings.import_for_tag}, not {tag}'
+            f'not importing {settings.import_experiment_cache}: for tag {settings.import_for_tag} and snapshot '
+            f'{settings.import_for_snapshot}, not {tag} and {settings.snapshot}'
         )
     if importing:
         seeded = staging.import_experiment_cache(
-            settings.import_experiment_cache, pools, listed, system_prompt, store_uri, config
+            settings.import_experiment_cache,
+            pools,
+            listed,
+            system_prompt,
+            store_uri,
+            config,
+            min_share=settings.min_seeded_share,
         )
         logger.info(f'imported {seeded} cached pools into {store_uri}')
 
@@ -214,12 +234,20 @@ def stage_moa(
             )
             raise SeedTooSmall(msg)
 
+    done = set(records.filter((pl.col('status') == 'ok') & (pl.col('model_revision') == tag))['text'].to_list())
     carried = 0
     if MOA.params['carry_forward']:
         carried_records = staging.carry_forward(listed, texts, records, tag, f'{run_id}-carry')
         if carried_records.height:
             write_run(carried_records, store_uri, f'{run_id}-carry', config, pl.String())
         carried = carried_records.height
+        done |= set(carried_records['text'].to_list())
+
+    if settings.max_compute is not None:
+        pending = len(set(pools['content_key'].to_list()) - done)
+        if pending > settings.max_compute:
+            msg = f'{pending} pools to compute, more than max_compute {settings.max_compute}'
+            raise ComputeTooLarge(msg)
 
     compute = staging.moa_compute(
         pools,

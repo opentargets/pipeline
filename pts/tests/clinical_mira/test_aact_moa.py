@@ -9,12 +9,15 @@ import pytest
 import yaml
 from otter.config.model import Config
 
+from pts.transformers.clinical_mira import aact_moa as aact_moa_module
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
-from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, SeedTooSmall, aact_moa, stage_moa
+from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, aact_moa, stage_moa
 from pts.transformers.clinical_mira.moa import schemas
-from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records
+from pts.transformers.clinical_mira.moa.staging import import_run_id
+from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, run_exists
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA, schema_digest
+from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
 
 EXTRACTION_TAG = EXTRACTION.release_tag()
 KRAS_QUOTE = 'Sotorasib is a selective KRAS G12C inhibitor'
@@ -308,6 +311,7 @@ def test_cache_of_an_earlier_run_seeds_the_store_once(monkeypatch: pytest.Monkey
         work='other_work',
         import_experiment_cache=str(cache),
         import_for_tag=MOA.tag(),
+        import_for_snapshot='v1',
     )
 
     assert batches.created == []
@@ -345,18 +349,29 @@ def test_entry_point_reads_source_and_writes_destination(monkeypatch: pytest.Mon
     assert called['settings'] == AactMoaSettings(store_uri='s', snapshot='v1')
 
 
-def test_config_imports_the_seed_for_the_current_tag_only() -> None:
+def test_config_imports_no_seed_and_caps_compute() -> None:
     config = yaml.safe_load((Path(__file__).parents[2] / 'config.yaml').read_text())
     settings = AactMoaSettings.model_validate(config['steps']['aact_moa'][0]['settings'])
 
-    assert settings.import_for_tag == MOA.tag()
-    assert settings.min_seeded_share == 0.5
+    assert settings.import_experiment_cache is None
+    assert settings.import_for_tag is None
+    assert settings.import_for_snapshot is None
+    assert settings.max_compute == 5000
 
 
 def _seed_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, world: dict[str, tuple[str, str, str]]) -> Path:
     """Compute ``world`` in a separate store and return the result cache it leaves."""
     _stage(monkeypatch, tmp_path / 'seed', FakeBatches(), world=world, work='seed_work')
     return tmp_path / 'seed' / 'seed_work' / 'moa_cache.jsonl'
+
+
+def _seed_settings(cache: Path, snapshot: str = 'v1', **settings: Any) -> dict[str, Any]:
+    return {
+        'import_experiment_cache': str(cache),
+        'import_for_tag': MOA.tag(),
+        'import_for_snapshot': snapshot,
+        **settings,
+    }
 
 
 def test_a_seed_covering_too_few_pools_aborts_before_any_compute(
@@ -366,54 +381,134 @@ def test_a_seed_covering_too_few_pools_aborts_before_any_compute(
     batches = FakeBatches()
 
     with pytest.raises(SeedTooSmall, match='1 of 2'):
-        _stage(
-            monkeypatch,
-            tmp_path,
-            batches,
-            import_experiment_cache=str(cache),
-            import_for_tag=MOA.tag(),
-            min_seeded_share=0.6,
-        )
+        _stage(monkeypatch, tmp_path, batches, **_seed_settings(cache, min_seeded_share=0.6))
 
+    assert batches.created == []
+
+
+def test_a_seed_below_share_writes_no_import_and_an_adequate_seed_imports_on_rerun(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = str(tmp_path / 'store' / MOA.name)
+    small = _seed_cache(monkeypatch, tmp_path / 'small', {k: v for k, v in WORLD.items() if k != 'nct3'})
+
+    with pytest.raises(SeedTooSmall, match='not written'):
+        _stage(monkeypatch, tmp_path, FakeBatches(), **_seed_settings(small, min_seeded_share=0.6))
+
+    assert not run_exists(store, import_run_id(), _config(tmp_path))
+    full = _seed_cache(monkeypatch, tmp_path / 'full', WORLD)
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, **_seed_settings(full, min_seeded_share=0.6))
+
+    assert (stats['seeded'], stats['computed']) == (2, 0)
     assert batches.created == []
 
 
 def test_an_existing_import_covering_too_few_pools_aborts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cache = _seed_cache(monkeypatch, tmp_path, {k: v for k, v in WORLD.items() if k != 'nct3'})
-    seed = {'import_experiment_cache': str(cache), 'import_for_tag': MOA.tag()}
-    _stage(monkeypatch, tmp_path, FakeBatches(), min_seeded_share=0.0, **seed)
+    _stage(monkeypatch, tmp_path, FakeBatches(), **_seed_settings(cache, min_seeded_share=0.0))
     batches = FakeBatches()
 
     with pytest.raises(SeedTooSmall, match='1 of 2'):
-        _stage(monkeypatch, tmp_path, batches, snapshot='v2', min_seeded_share=0.6, **seed)
+        _stage(monkeypatch, tmp_path, batches, snapshot='v2', **_seed_settings(cache, 'v2', min_seeded_share=0.6))
 
     assert batches.created == []
 
 
 def test_a_rerun_after_a_full_import_does_not_abort(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cache = _seed_cache(monkeypatch, tmp_path, WORLD)
-    seed = {'import_experiment_cache': str(cache), 'import_for_tag': MOA.tag()}
-    _stage(monkeypatch, tmp_path, FakeBatches(), **seed)
+    _stage(monkeypatch, tmp_path, FakeBatches(), **_seed_settings(cache))
     batches = FakeBatches()
 
-    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **seed)
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **_seed_settings(cache, 'v2'))
 
     assert batches.created == []
     assert (stats['seeded'], stats['computed']) == (0, 0)
 
 
-def test_a_seed_for_another_tag_is_not_imported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_later_snapshot_with_the_seed_settings_left_in_place_neither_imports_nor_gates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = str(tmp_path / 'store' / MOA.name)
+    cache = _seed_cache(monkeypatch, tmp_path, {k: v for k, v in WORLD.items() if k != 'nct3'})
+    _stage(monkeypatch, tmp_path, FakeBatches(), **_seed_settings(cache, min_seeded_share=0.5))
+    imported = read_records(store, _config(tmp_path), pl.String()).filter(pl.col('run_id') == import_run_id()).height
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **_seed_settings(cache, min_seeded_share=0.9))
+
+    assert stats['seeded'] == 0
+    assert batches.created == []
+    after = read_records(store, _config(tmp_path), pl.String()).filter(pl.col('run_id') == import_run_id()).height
+    assert after == imported
+
+
+def test_a_later_snapshot_with_the_seed_settings_left_in_place_does_not_import_a_fresh_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cache = _seed_cache(monkeypatch, tmp_path, WORLD)
     batches = FakeBatches()
 
-    stats = _stage(
-        monkeypatch, tmp_path, batches, import_experiment_cache=str(cache), import_for_tag='claude-opus-5-5-pold'
-    )
+    stats = _stage(monkeypatch, tmp_path, batches, snapshot='v2', **_seed_settings(cache, min_seeded_share=0.9))
 
     assert stats['seeded'] == 0
     assert stats['computed'] == 2
-    assert sorted(batches.drugs) == ['aspirinx', 'sotorasib']
-    assert not list((tmp_path / 'store' / MOA.name / 'runs').glob('import-*'))
+    assert not run_exists(str(tmp_path / 'store' / MOA.name), import_run_id(), _config(tmp_path))
+
+
+def test_import_for_another_tag_raises_before_reading_inputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def unread(*args: Any) -> None:
+        raise AssertionError('inputs read')
+
+    monkeypatch.setattr(aact_moa_module, 'EXTRACTION', SimpleNamespace(release_tag=unread, read=unread))
+    monkeypatch.setattr(aact_moa_module.pooling, 'trial_texts', unread)
+    settings = AactMoaSettings(
+        store_uri=str(tmp_path / 'store'),
+        snapshot='v1',
+        import_experiment_cache=str(tmp_path / 'cache.jsonl'),
+        import_for_tag='claude-opus-5-5-pold',
+        import_for_snapshot='v1',
+    )
+
+    with pytest.raises(ValueError, match='import_for_tag claude-opus-5-5-pold is not the current tag'):
+        stage_moa(
+            'a.zip', str(tmp_path / 'e'), str(tmp_path / 'e'), settings, _config(tmp_path), _client(FakeBatches())
+        )
+
+    assert not (tmp_path / 'store').exists()
+
+
+def test_more_pools_to_compute_than_max_compute_raises_before_any_batch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    batches = FakeBatches()
+
+    with pytest.raises(ComputeTooLarge, match='2 pools to compute, more than max_compute 1'):
+        _stage(monkeypatch, tmp_path, batches, max_compute=1)
+
+    assert batches.created == []
+    assert not _snapshot(tmp_path).exists()
+
+
+def test_max_compute_counts_only_pools_without_an_ok_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cache = _seed_cache(monkeypatch, tmp_path, {k: v for k, v in WORLD.items() if k != 'nct3'})
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, max_compute=1, **_seed_settings(cache, min_seeded_share=0.5))
+
+    assert stats['computed'] == 1
+    assert batches.drugs == ['aspirinx']
+
+
+def test_max_compute_counts_carried_pools_as_done(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, FakeBatches())
+    edited = {**WORLD, 'nct1': ('sotorasib', 'Sotorasib in NSCLC patients.', 'Adults with NSCLC.')}
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, world=edited, snapshot='v2', max_compute=0)
+
+    assert (stats['carried'], stats['computed']) == (1, 0)
 
 
 def test_batch_state_is_named_by_snapshot_and_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

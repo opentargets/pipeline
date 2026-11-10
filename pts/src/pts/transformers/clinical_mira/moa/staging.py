@@ -16,6 +16,7 @@ from pts.transformers.clinical_mira.moa import llm, pooling, schemas
 from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
 from pts.transformers.clinical_mira.record_store import import_run, record_schema, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA
+from pts.transformers.clinical_mira.staging_errors import SeedTooSmall
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -187,12 +188,14 @@ def import_experiment_cache(
     system_prompt: str,
     store_uri: str,
     config: Config,
+    min_share: float = 0.0,
 ) -> int:
     """Import the experiment's result cache into the record store, once.
 
     The import is the run ``import-moa-experiment-<digest>``. A cached result becomes an
     ``ok`` record whose text is the content key of the pool it was computed for, matched by
     the experiment's cache key of the pool text, ``system_prompt`` and the extraction schema.
+    Nothing is written when the matched results cover less than ``min_share`` of the pools.
 
     Args:
         cache_uri: The experiment's jsonl cache, a path or URI.
@@ -201,9 +204,13 @@ def import_experiment_cache(
         system_prompt: The prompt the cache was computed with.
         store_uri: Root of the store, an absolute URI.
         config: The otter config, used to resolve storage.
+        min_share: The lowest share of the pools the matched results must cover.
 
     Returns:
         int: The number of records written, 0 if the import run already exists.
+
+    Raises:
+        SeedTooSmall: If the matched results cover less than ``min_share`` of the pools.
     """
     run_id = import_run_id()
 
@@ -236,6 +243,12 @@ def import_experiment_cache(
                 'run_id': run_id,
             })
         logger.info(f'{len(rows)} of {pools.height} pools found in {cache_uri}')
+        if len(rows) < min_share * pools.height:
+            msg = (
+                f'{cache_uri} covers {len(rows)} of {pools.height} pools, below the minimum share {min_share}; '
+                f'{run_id} not written'
+            )
+            raise SeedTooSmall(msg)
         return pl.DataFrame(rows, schema=record_schema(pl.String()))
 
     return import_run(records, store_uri, run_id, config, output_dtype=pl.String())

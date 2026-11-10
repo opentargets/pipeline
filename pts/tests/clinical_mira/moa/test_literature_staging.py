@@ -8,7 +8,6 @@ import polars as pl
 import pytest
 from loguru import logger
 
-from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.moa import literature, literature_staging, llm, schemas
 from pts.transformers.clinical_mira.moa.literature_staging import (
     carry_forward,
@@ -19,6 +18,7 @@ from pts.transformers.clinical_mira.moa.literature_staging import (
 )
 from pts.transformers.clinical_mira.record_store import read_records, record_schema, run_exists, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA_LITERATURE
+from pts.transformers.clinical_mira.staging_errors import SeedTooSmall
 
 PROMPT = 'You extract mechanisms from sentences.'
 EXTRACTION = {'drugName': 'x', 'notStated': True, 'mechanisms': []}

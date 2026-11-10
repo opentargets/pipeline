@@ -9,11 +9,9 @@ import pytest
 from otter.config.model import Config
 from pydantic import ValidationError
 
-from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.moa import schemas
 from pts.transformers.clinical_mira.moa.literature_staging import import_run_id, parse_output
 from pts.transformers.clinical_mira.moa_literature import (
-    ComputeTooLarge,
     MoaLiteratureSettings,
     moa_literature,
     stage_moa_literature,
@@ -25,6 +23,7 @@ from pts.transformers.clinical_mira.record_store import (
     run_exists,
 )
 from pts.transformers.clinical_mira.staged_outputs import METADATA_KEYS, MOA_LITERATURE
+from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
 
 TAG = MOA_LITERATURE.tag()
 KRAS_QUOTE = 'Sotorasib is a selective KRAS G12C inhibitor'

@@ -12,13 +12,13 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import ValidationError
 
-from pts.transformers.clinical_mira.aact_moa import SeedTooSmall
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
 from pts.transformers.clinical_mira.moa import llm, schemas
 from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
 from pts.transformers.clinical_mira.moa.staging import prompt_sha256
 from pts.transformers.clinical_mira.record_store import import_run, record_schema, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA_LITERATURE
+from pts.transformers.clinical_mira.staging_errors import SeedTooSmall
 
 if TYPE_CHECKING:
     from collections.abc import Callable
