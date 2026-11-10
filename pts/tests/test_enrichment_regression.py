@@ -52,11 +52,14 @@ def test_per_gene_sandwich_matches_statsmodels_hc0(data) -> None:
         assert se[unit, biosample] == pytest.approx(expected)
 
 
-def test_region_sandwich_matches_statsmodels_cluster_without_small_sample_correction(data) -> None:
-    # more units than one internal batch, so batch boundaries are covered
-    assert N_UNITS > regression._CLUSTER_BATCH
-    se = _fit(data, 'region', regression.Clusters.from_labels(data['labels'])).standard_error
-    for unit, biosample in [(0, 1), (regression._CLUSTER_BATCH, 2), (N_UNITS - 1, 3)]:
+def test_region_sandwich_matches_statsmodels_cluster_without_small_sample_correction(data, monkeypatch) -> None:
+    # 64 units per internal pass, fewer than N_UNITS, so pass boundaries are covered
+    clusters = regression.Clusters.from_labels(data['labels'])
+    batch = 64
+    monkeypatch.setattr(regression, '_CLUSTER_PASS_BYTES', batch * 8 * clusters.count * data['x'].shape[1])
+    assert batch < N_UNITS
+    se = _fit(data, 'region', clusters).standard_error
+    for unit, biosample in [(0, 1), (batch, 2), (N_UNITS - 1, 3)]:
         expected = _full_fit(
             data, unit, biosample, cov_type='cluster', cov_kwds={'groups': data['labels'], 'use_correction': False}
         ).bse[0]

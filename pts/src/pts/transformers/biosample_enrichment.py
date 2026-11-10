@@ -8,7 +8,7 @@ The regression itself is in `pts.transformers.enrichment.regression`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -19,18 +19,53 @@ from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
-BiosampleType = Literal['tissue', 'celltype']
+BiosampleType = Literal['tissue', 'celltype', 'tissue_celltype']
 
-_BIOSAMPLE_COLUMNS: dict[str, tuple[str, str]] = {
-    # biosample type -> (column carrying the id, column that must be null)
-    'tissue': ('tissueBiosampleId', 'celltypeBiosampleId'),
-    'celltype': ('celltypeBiosampleId', 'tissueBiosampleId'),
-}
+_BIOSAMPLE_TYPES: tuple[BiosampleType, ...] = ('tissue', 'celltype', 'tissue_celltype')
 
-_SOURCE_COLUMNS: dict[str, str] = {
-    'tissue': 'tissueBiosampleFromSource',
-    'celltype': 'celltypeBiosampleFromSource',
-}
+_PAIR_SEPARATOR = '|'
+"""Joins a pair's tissue and cell type ids into one column name of the specificity matrix."""
+
+
+@dataclass(frozen=True)
+class _PanelColumns:
+    """How a panel's biosamples are read from the baseline expression dataset.
+
+    `key` names a biosample within the panel: a column of the specificity matrix. `biosample` and
+    `tissue` are the released `biosampleId` and `tissueBiosampleId`.
+    """
+
+    rows: pl.Expr
+    key: pl.Expr
+    biosample: pl.Expr
+    tissue: pl.Expr
+    source: pl.Expr
+
+
+def _panel_columns(biosample_type: BiosampleType) -> _PanelColumns:
+    tissue, celltype = pl.col('tissueBiosampleId'), pl.col('celltypeBiosampleId')
+    no_tissue = pl.lit(None, pl.String)
+    if biosample_type == 'tissue':
+        return _PanelColumns(
+            tissue.is_not_null() & celltype.is_null(), tissue, tissue, no_tissue, pl.col('tissueBiosampleFromSource')
+        )
+    if biosample_type == 'celltype':
+        return _PanelColumns(
+            celltype.is_not_null() & tissue.is_null(),
+            celltype,
+            celltype,
+            no_tissue,
+            pl.col('celltypeBiosampleFromSource'),
+        )
+    # a cell type profiled in one tissue: reported as the cell type, with the tissue alongside
+    return _PanelColumns(
+        tissue.is_not_null() & celltype.is_not_null(),
+        pl.concat_str(tissue, celltype, separator=_PAIR_SEPARATOR),
+        celltype,
+        tissue,
+        pl.concat_str(pl.col('tissueBiosampleFromSource'), pl.col('celltypeBiosampleFromSource'), separator=' | '),
+    )
+
 
 ENRICHMENT_APPROACH = 'l2g_regression'
 """Value of `enrichmentApproach` for this method."""
@@ -39,6 +74,7 @@ OUTPUT_SCHEMA = pl.Schema({
     'diseaseId': pl.String,
     'studyId': pl.String,
     'biosampleId': pl.String,
+    'tissueBiosampleId': pl.String,
     'biosampleDataset': pl.String,
     'biosampleFromSource': pl.String,
     'enrichmentApproach': pl.String,
@@ -49,7 +85,9 @@ OUTPUT_SCHEMA = pl.Schema({
 """Release schema, as in the croissant `biosample_enrichment` record set.
 
 Exactly one of `studyId` and `diseaseId` is set: `studyId` for a single study, `diseaseId` for
-the studies of one disease pooled together.
+the studies of one disease pooled together. `tissueBiosampleId` is set only for a tissue x cell
+type panel, where `biosampleId` is the cell type and `tissueBiosampleId` the tissue it was
+profiled in.
 """
 
 _STATISTICS_SCHEMA = {name: OUTPUT_SCHEMA[name] for name in ('biosampleId', 'beta', 'betaError', 'pValue')}
@@ -76,12 +114,12 @@ class Panel:
             The panel.
 
         Raises:
-            ValueError: if `biosampleType` is not `tissue` or `celltype`.
+            ValueError: if `biosampleType` is not `tissue`, `celltype` or `tissue_celltype`.
         """
         kind = entry['biosampleType']
-        if kind not in _BIOSAMPLE_COLUMNS:
-            raise ValueError(f'biosampleType must be one of {sorted(_BIOSAMPLE_COLUMNS)}, got {kind!r}')
-        return cls(datasource_id=entry['datasourceId'], biosample_type=cast(BiosampleType, kind))
+        if kind not in _BIOSAMPLE_TYPES:
+            raise ValueError(f'biosampleType must be one of {list(_BIOSAMPLE_TYPES)}, got {kind!r}')
+        return cls(datasource_id=entry['datasourceId'], biosample_type=kind)
 
 
 def gene_covariates(target: pl.LazyFrame, density_window: int) -> pl.DataFrame:
@@ -191,22 +229,23 @@ def specificity_matrix(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.Da
         panel: the panel to read.
 
     Returns:
-        `geneId` and then one Float64 column per biosample id, sorted. Missing values are null.
+        `geneId` and then one Float64 column per biosample, sorted. A column is named by the
+        biosample id or, for a tissue x cell type panel, `<tissue id>|<cell type id>`. Missing
+        values are null.
 
     Raises:
         ValueError: if the panel has no specificity scores.
     """
-    id_column, null_column = _BIOSAMPLE_COLUMNS[panel.biosample_type]
+    columns = _panel_columns(panel.biosample_type)
     long = (
         baseline_expression
         .filter(
             pl.col('datasourceId') == panel.datasource_id,
-            pl.col(id_column).is_not_null(),
-            pl.col(null_column).is_null(),
+            columns.rows,
             pl.col('specificity_score').is_not_null(),
         )
         # a gene and biosample repeat when several source ids map to one target, with equal scores
-        .group_by(pl.col('targetId').alias('geneId'), pl.col(id_column).alias('biosampleId'))
+        .group_by(pl.col('targetId').alias('geneId'), columns.key.alias('biosampleId'))
         .agg(pl.col('specificity_score').max().cast(pl.Float64))
         .collect()
     )
@@ -218,27 +257,30 @@ def specificity_matrix(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.Da
 
 
 def biosample_sources(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.DataFrame:
-    """The source name of each biosample in a panel.
+    """The released ids and source name of each biosample in a panel.
 
     Args:
         baseline_expression: the baseline expression dataset.
         panel: the panel to read.
 
     Returns:
-        `biosampleId` and `biosampleFromSource`, one row per biosample. When several source
-        biosamples map to one id, their names are sorted and joined with `; `.
+        `biosampleKey` (the biosample's column in `specificity_matrix`), `biosampleId`,
+        `tissueBiosampleId` and `biosampleFromSource`, one row per biosample. When several source
+        biosamples map to one id, their names are sorted and joined with `; `. A tissue x cell type
+        pair's source name is `<tissue> | <cell type>`.
     """
-    id_column, null_column = _BIOSAMPLE_COLUMNS[panel.biosample_type]
+    columns = _panel_columns(panel.biosample_type)
     sources = (
         baseline_expression
-        .filter(
-            pl.col('datasourceId') == panel.datasource_id,
-            pl.col(id_column).is_not_null(),
-            pl.col(null_column).is_null(),
+        .filter(pl.col('datasourceId') == panel.datasource_id, columns.rows)
+        .select(
+            columns.key.alias('biosampleKey'),
+            columns.biosample.alias('biosampleId'),
+            columns.tissue.alias('tissueBiosampleId'),
+            columns.source.alias('source'),
         )
-        .select(pl.col(id_column).alias('biosampleId'), pl.col(_SOURCE_COLUMNS[panel.biosample_type]).alias('source'))
         .unique()
-        .group_by('biosampleId')
+        .group_by('biosampleKey', 'biosampleId', 'tissueBiosampleId')
         .agg(pl.col('source').drop_nulls().sort().str.join('; ').alias('biosampleFromSource'))
         .with_columns(pl.col('biosampleFromSource').replace('', None))
         .collect()
@@ -405,7 +447,10 @@ def biosample_enrichment(
         results.append(
             fitted
             .join(labels, on='unitId')
-            .join(biosample_sources(baseline_expression, panel), on='biosampleId', how='left')
+            # the fit names each biosample by its specificity matrix column
+            .rename({'biosampleId': 'biosampleKey'})
+            .join(biosample_sources(baseline_expression, panel), on='biosampleKey', how='left')
+            .drop('biosampleKey')
             .with_columns(
                 pl.lit(panel.datasource_id).alias('biosampleDataset'),
                 pl.lit(ENRICHMENT_APPROACH).alias('enrichmentApproach'),
@@ -415,7 +460,7 @@ def biosample_enrichment(
         pl
         .concat(results, how='diagonal_relaxed')
         .select([pl.col(name).cast(dtype) for name, dtype in OUTPUT_SCHEMA.items()])
-        .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', nulls_last=True)
+        .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', 'tissueBiosampleId', nulls_last=True)
     )
     write_dataset(output, destination)
     logger.info(f'wrote {output.height} rows')

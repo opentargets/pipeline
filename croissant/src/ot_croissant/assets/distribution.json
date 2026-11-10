@@ -77,6 +77,7 @@
       "diseaseId",
       "studyId",
       "biosampleId",
+      "tissueBiosampleId",
       "biosampleDataset"
     ],
     "tags": [

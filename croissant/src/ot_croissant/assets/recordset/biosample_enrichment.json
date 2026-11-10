@@ -37,5 +37,10 @@
     "id": "studyId",
     "description": "Identifier of the GWAS tested for biosample enrichment",
     "foreign_key": "study/studyId"
+  },
+  {
+    "id": "tissueBiosampleId",
+    "description": "Ontology identifier of the tissue the cell type was profiled in, for tissue x cell type biosamples; null otherwise",
+    "foreign_key": "biosample/biosampleId"
   }
 ]

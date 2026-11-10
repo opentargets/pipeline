@@ -21,9 +21,10 @@ from typing import Literal
 
 import numpy as np
 
-_CLUSTER_BATCH = 64
-"""Units per pass when summing scores by cluster. Each pass holds a clusters x batch x biosamples
-array: about 80 MB for 3,000 clusters and 50 biosamples."""
+_CLUSTER_PASS_BYTES = 128 * 2**20
+"""Memory for one pass when summing scores by cluster. A pass holds a few clusters x units x
+biosamples arrays, so the units per pass shrink as the panel grows: about 100 for 3,000 clusters
+and 50 GTEx tissues, about 5 for 1,100 Tabula Sapiens tissue x cell type pairs."""
 
 _NO_VARIANCE = 1e-10
 """Residual sum of squares, relative to the predictor's own, below which it counts as zero."""
@@ -213,8 +214,9 @@ class Design:
         n_clusters, n_biosamples, p = self._xq.shape
         xq = self._xq.reshape(n_clusters * n_biosamples, p)
         noise = np.empty_like(beta0)
-        for start in range(0, y.shape[1], _CLUSTER_BATCH):
-            stop = min(start + _CLUSTER_BATCH, y.shape[1])
+        batch = max(1, _CLUSTER_PASS_BYTES // (8 * n_clusters * n_biosamples))
+        for start in range(0, y.shape[1], batch):
+            stop = min(start + batch, y.shape[1])
             genes, units = np.nonzero(y[:, start:stop])
             scores = np.zeros((n_clusters, stop - start, n_biosamples))
             # A unit's L2G is almost all zeros, so this sums over only its few scored genes, never

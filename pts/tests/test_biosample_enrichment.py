@@ -19,6 +19,11 @@ from tests.credible_set_fixtures import published_credible_set
 
 N_GENES = 400
 TISSUES = ['UBERON_A', 'UBERON_B', 'UBERON_HOT', 'UBERON_C', 'UBERON_D']
+CELLTYPES = ['CL_1', 'CL_2', 'CL_3']
+TABULA_PANELS = [
+    {'datasourceId': 'tabula_sapiens', 'biosampleType': 'celltype'},
+    {'datasourceId': 'tabula_sapiens', 'biosampleType': 'tissue_celltype'},
+]
 
 
 def _target(n: int = N_GENES) -> pl.DataFrame:
@@ -76,6 +81,35 @@ def _baseline_expression(genes: list[str], rng: np.random.Generator) -> tuple[pl
     ]
     # a repeated gene and tissue, as several source ids mapping to one target produce
     rows.append(rows[0])
+    # tabula_sapiens: cell types on their own, and CL_1 profiled in every tissue, each pair with its
+    # tissue's specificity, so UBERON_HOT|CL_1 carries the planted signal
+    cell_specificity = rng.beta(0.3, 3.0, size=(len(genes), len(CELLTYPES)))
+    rows += [
+        {
+            'targetId': gene,
+            'datasourceId': 'tabula_sapiens',
+            'tissueBiosampleId': None,
+            'celltypeBiosampleId': celltype,
+            'tissueBiosampleFromSource': None,
+            'celltypeBiosampleFromSource': f'{celltype} cell',
+            'specificity_score': float(cell_specificity[g, c]),
+        }
+        for g, gene in enumerate(genes)
+        for c, celltype in enumerate(CELLTYPES)
+    ]
+    rows += [
+        {
+            'targetId': gene,
+            'datasourceId': 'tabula_sapiens',
+            'tissueBiosampleId': tissue,
+            'celltypeBiosampleId': 'CL_1',
+            'tissueBiosampleFromSource': f'{tissue} organ',
+            'celltypeBiosampleFromSource': 'CL_1 cell',
+            'specificity_score': float(specificity[g, t]),
+        }
+        for g, gene in enumerate(genes)
+        for t, tissue in enumerate(TISSUES)
+    ]
     return pl.DataFrame(rows, infer_schema_length=None), specificity
 
 
@@ -162,10 +196,34 @@ def test_only_gwas_studies_with_a_scored_gene_in_the_universe_get_rows(workspace
 
 
 def test_rows_are_unique_on_the_key(workspace) -> None:
+    panels = [{'datasourceId': 'gtex', 'biosampleType': 'tissue'}, *TABULA_PANELS]
     for settings in ({}, {'pool_by_disease': True}):
         workspace['out'] += '_x'
-        out = _run(workspace, **settings)
-        assert not out.select('diseaseId', 'studyId', 'biosampleId', 'biosampleDataset').is_duplicated().any()
+        out = _run(workspace, panels=panels, **settings)
+        key = out.select('diseaseId', 'studyId', 'biosampleId', 'tissueBiosampleId', 'biosampleDataset')
+        assert not key.is_duplicated().any()
+
+
+def test_tissue_celltype_pairs_report_the_cell_type_and_its_tissue(workspace) -> None:
+    out = _run(workspace, panels=TABULA_PANELS)
+    pairs = out.filter(pl.col('tissueBiosampleId').is_not_null())
+    assert pairs['biosampleDataset'].unique().to_list() == ['tabula_sapiens']
+    assert sorted(pairs.filter(pl.col('studyId') == 'GCST_HOT')['tissueBiosampleId']) == sorted(TISSUES)
+    assert pairs['biosampleId'].unique().to_list() == ['CL_1']
+    assert pairs['biosampleFromSource'].to_list() == [f'{t} organ | CL_1 cell' for t in pairs['tissueBiosampleId']]
+    # the cell type panel's rows have no tissue, so CL_1 on its own is a separate row
+    cells = out.filter(pl.col('tissueBiosampleId').is_null(), pl.col('studyId') == 'GCST_HOT')
+    assert sorted(cells['biosampleId']) == CELLTYPES
+
+
+def test_the_planted_tissue_celltype_pair_gets_the_top_p(workspace) -> None:
+    hot = _run(workspace, panels=TABULA_PANELS[1:]).filter(pl.col('studyId') == 'GCST_HOT').sort('pValue')
+    assert hot.row(0, named=True)['tissueBiosampleId'] == 'UBERON_HOT'
+    # a pair with its tissue's specificity gives exactly that tissue's fit
+    workspace['out'] += '_gtex'
+    gtex = _run(workspace).filter(pl.col('studyId') == 'GCST_HOT').sort('biosampleId')
+    np.testing.assert_allclose(hot.sort('tissueBiosampleId')['beta'].to_numpy(), gtex['beta'].to_numpy())
+    np.testing.assert_allclose(hot.sort('tissueBiosampleId')['pValue'].to_numpy(), gtex['pValue'].to_numpy())
 
 
 def test_pooling_reports_one_disease_once(workspace) -> None:
@@ -225,8 +283,24 @@ def test_several_source_biosamples_are_joined() -> None:
         },
         schema_overrides={'celltypeBiosampleId': pl.String, 'celltypeBiosampleFromSource': pl.String},
     )
-    sources = dict(biosample_sources(expression.lazy(), Panel('gtex', 'tissue')).iter_rows())
-    assert sources == {'U1': 'Skin a; Skin b', 'U2': 'Liver'}
+    sources = biosample_sources(expression.lazy(), Panel('gtex', 'tissue'))
+    assert dict(sources.select('biosampleId', 'biosampleFromSource').iter_rows()) == {
+        'U1': 'Skin a; Skin b',
+        'U2': 'Liver',
+    }
+
+
+def test_specificity_matrix_names_a_pair_by_its_tissue_and_cell_type(workspace) -> None:
+    expression = pl.scan_parquet(f'{workspace["baseline_expression"]}/*.parquet')
+    matrix = specificity_matrix(expression, Panel('tabula_sapiens', 'tissue_celltype'))
+    assert matrix.columns == ['geneId', *sorted(f'{t}|CL_1' for t in TISSUES)]
+    # the gtex panel's lone UBERON_A x CL_1 row belongs to another datasource
+    assert matrix.height == N_GENES - 10
+
+
+def test_the_tissue_panel_has_no_tissue_context(workspace) -> None:
+    out = _run(workspace)
+    assert out['tissueBiosampleId'].null_count() == out.height
 
 
 def test_an_empty_panel_is_an_error(workspace) -> None:
