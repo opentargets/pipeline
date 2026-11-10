@@ -836,6 +836,54 @@ class TestMergeInferred:
         assert [(r['source'], r['ids']) for r in references] == [('PubMed', ['3', '22']), ('PMC', ['PMC10', 'PMC9'])]
         assert references[0]['urls'] == ['http://europepmc.org/abstract/MED/3', 'http://europepmc.org/abstract/MED/22']
 
+    def test_literature_doc_ids_are_classified_by_what_follows_the_prefix(self, chembl: pl.DataFrame) -> None:
+        messages: list[str] = []
+        handler = logger.add(lambda message: messages.append(message.record['message']))
+        try:
+            merged, _ = self.merge(
+                chembl,
+                paper(docIds=['NCT05', 'pmidAGR123', 'pmc777', 'pmidppr540062', 'pmidPMC777', 'pmid12345']),
+            )
+        finally:
+            logger.remove(handler)
+        assert merged.tail(1)['references'].to_list() == [
+            [
+                {'source': 'ClinicalTrials', 'ids': ['NCT05'], 'urls': ['https://clinicaltrials.gov/study/NCT05']},
+                {'source': 'PubMed', 'ids': ['12345'], 'urls': ['http://europepmc.org/abstract/MED/12345']},
+                {'source': 'PMC', 'ids': ['PMC777'], 'urls': ['http://europepmc.org/article/PMC/PMC777']},
+                {
+                    'source': 'EuropePMC',
+                    'ids': ['PPR540062'],
+                    'urls': ['https://europepmc.org/article/PPR/PPR540062'],
+                },
+            ]
+        ]
+        assert any(m.startswith('1 doc ids') and 'not referenced' in m for m in messages), messages
+
+    @pytest.mark.parametrize(
+        ('doc_id', 'source', 'ids'),
+        [
+            ('pmid12345', 'PubMed', ['12345']),
+            ('pmidppr540062', 'EuropePMC', ['PPR540062']),
+            ('pmidPPR540062', 'EuropePMC', ['PPR540062']),
+            ('pmidPMC777', 'PMC', ['PMC777']),
+            ('pmidpmc777', 'PMC', ['PMC777']),
+            ('pmc777', 'PMC', ['PMC777']),
+            ('PMC777', 'PMC', ['PMC777']),
+        ],
+    )
+    def test_one_literature_doc_id_gives_one_reference(
+        self, chembl: pl.DataFrame, doc_id: str, source: str, ids: list[str]
+    ) -> None:
+        merged, _ = self.merge(chembl, paper(docIds=[doc_id], quoteDocId=doc_id))
+        references = merged.tail(1)['references'].to_list()[0]
+        assert [(r['source'], r['ids']) for r in references] == [(source, ids)]
+
+    @pytest.mark.parametrize('doc_id', ['pmidAGR123', 'pmid12a', 'pmidPMC', 'pmcPPR1', 'pmid'])
+    def test_a_literature_doc_id_of_no_known_kind_is_not_published(self, chembl: pl.DataFrame, doc_id: str) -> None:
+        merged, _ = self.merge(chembl, paper(docIds=[doc_id], quoteDocId=doc_id))
+        assert merged.equals(chembl)
+
     def test_a_candidate_without_a_known_doc_id_is_not_published(self, chembl: pl.DataFrame) -> None:
         messages: list[str] = []
         handler = logger.add(lambda message: messages.append(message.record['message']))

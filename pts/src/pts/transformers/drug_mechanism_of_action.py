@@ -58,6 +58,15 @@ PUBMED_SOURCE = 'PubMed'
 PUBMED_URL = 'http://europepmc.org/abstract/MED/'
 PMC_SOURCE = 'PMC'
 PMC_URL = 'http://europepmc.org/article/PMC/'
+PREPRINT_SOURCE = 'EuropePMC'
+PREPRINT_URL = 'https://europepmc.org/article/PPR/'
+DOC_KINDS = [
+    (CLINICAL_TRIALS_SOURCE, CLINICAL_TRIALS_URL, r'^(NCT.*)$', ''),
+    (PUBMED_SOURCE, PUBMED_URL, r'(?i)^pmid(\d+)$', ''),
+    (PMC_SOURCE, PMC_URL, r'(?i)^(?:pmid)?pmc(\d+)$', 'PMC'),
+    (PREPRINT_SOURCE, PREPRINT_URL, r'(?i)^pmidppr(\d+)$', 'PPR'),
+]
+"""Each kind of doc id: its reference source and url, the pattern whose group is its id, and the id's prefix."""
 
 
 def drug_mechanism_of_action(
@@ -255,8 +264,10 @@ def merge_inferred(
     A candidate is published when its drug has no ChEMBL mechanism (``new_moa``), its confidence
     is at least ``release_min_confidence`` and its stage is not excluded for its source. Of the
     published candidates of one drug and gene set, the most confident gives the row, and the
-    doc ids of all of them give its references: NCT ids as ``ClinicalTrials``, ``pmid…`` ids as
-    ``PubMed`` and ``pmc…`` ids as ``PMC``. A row left with no reference is not published.
+    doc ids of all of them give its references, classified by ``DOC_KINDS``: NCT ids as
+    ``ClinicalTrials``, ``pmid<digits>`` as ``PubMed``, ``pmc<digits>`` and ``pmidPMC<digits>`` as
+    ``PMC`` and ``pmidPPR<digits>`` as ``EuropePMC``, the prefixes in any case. Other doc ids are
+    counted in a warning and not referenced. A row left with no reference is not published.
 
     Args:
         chembl_rows: Output of ``process_mechanism_of_action``.
@@ -368,25 +379,25 @@ def _most_confident(candidates: pl.DataFrame, *, by_source: bool) -> pl.DataFram
 
 
 def _is_known_doc(doc_id: pl.Expr) -> pl.Expr:
-    """Whether a doc id is an NCT, ``pmid…`` or ``pmc…`` id."""
-    return doc_id.str.starts_with('NCT') | doc_id.str.starts_with('pmid') | doc_id.str.starts_with('pmc')
+    """Whether a doc id is of one of the ``DOC_KINDS``."""
+    return pl.any_horizontal(doc_id.str.contains(pattern) for _, _, pattern, _ in DOC_KINDS)
 
 
 def _references(doc_ids: pl.Expr) -> pl.Expr:
-    """One reference per kind of doc id present, ``ClinicalTrials``, then ``PubMed``, then ``PMC``.
+    """One reference per kind of doc id present, in ``DOC_KINDS`` order.
 
     PubMed ids sort by length, then as strings, which orders them as numbers; the others sort as strings.
     """
 
-    def reference(source: str, url: str, prefix: str, transform: pl.Expr, numeric: bool = False) -> pl.Expr:
+    def reference(source: str, url: str, pattern: str, prefix: str) -> pl.Expr:
         ids = (
             doc_ids.list
-            .eval(pl.element().filter(pl.element().str.starts_with(prefix)))
-            .list.eval(transform)
+            .eval(pl.element().str.extract(pattern, 1).drop_nulls())
+            .list.eval(pl.lit(prefix) + pl.element())
             .list.unique()
             .list.sort()
         )
-        if numeric:
+        if source == PUBMED_SOURCE:
             ids = ids.list.eval(pl.element().sort_by(pl.element().str.len_chars(), maintain_order=True))
         return pl.struct(
             pl.lit(source).alias('source'),
@@ -394,12 +405,9 @@ def _references(doc_ids: pl.Expr) -> pl.Expr:
             ids.list.eval(pl.lit(url) + pl.element()).alias('urls'),
         )
 
-    element = pl.element()
-    return pl.concat_list(
-        reference(CLINICAL_TRIALS_SOURCE, CLINICAL_TRIALS_URL, 'NCT', element),
-        reference(PUBMED_SOURCE, PUBMED_URL, 'pmid', element.str.strip_prefix('pmid'), numeric=True),
-        reference(PMC_SOURCE, PMC_URL, 'pmc', element.str.to_uppercase()),
-    ).list.eval(pl.element().filter(pl.element().struct.field('ids').list.len() > 0))
+    return pl.concat_list(reference(*kind) for kind in DOC_KINDS).list.eval(
+        pl.element().filter(pl.element().struct.field('ids').list.len() > 0)
+    )
 
 
 def _with_target_chembl_id(mechanism: pl.DataFrame, target_dictionary: pl.DataFrame) -> pl.DataFrame:
