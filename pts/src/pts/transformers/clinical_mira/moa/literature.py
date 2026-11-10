@@ -73,7 +73,8 @@ def pass_file(match: pl.DataFrame, parents: pl.DataFrame) -> tuple[pl.DataFrame,
 
     Returns:
         ``(cd, gp)``. ``cd`` holds the valid drug mentions of clinical parents, at most
-        ``PER_FILE_CAP`` per parent, cue sentences first, then by section rank and hash, with the
+        ``PER_FILE_CAP`` per parent, cue sentences first, then by section rank and hash, then by
+        the other ``CD_COLUMNS`` so the rows kept do not depend on the input order, with the
         ``CD_COLUMNS`` columns. ``gp`` holds the distinct ``pub``, ``h``, ``gene`` of valid gene mentions.
     """
     t = match.filter(pl.col('isValid') & pl.col('type').is_in(['CD', 'GP'])).with_columns(
@@ -92,7 +93,21 @@ def pass_file(match: pl.DataFrame, parents: pl.DataFrame) -> tuple[pl.DataFrame,
             .list.first()
             .replace_strict(SECTION_RANK, default=9, return_dtype=pl.Int8),
         )
-        .sort('parent', pl.col('cue'), 'srank', 'h', descending=[False, True, False, False])
+        .sort(
+            'parent',
+            'cue',
+            'srank',
+            'h',
+            'pub',
+            'mappedId',
+            'label',
+            'section',
+            'text',
+            'pmid',
+            'pmcid',
+            'year',
+            descending=[False, True, *[False] * 10],
+        )
         .filter(pl.int_range(pl.len()).over('parent') < PER_FILE_CAP)
         .select(CD_COLUMNS)
     )

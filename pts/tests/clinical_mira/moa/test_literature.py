@@ -79,6 +79,27 @@ def test_pass_file_caps_rows_per_parent_preferring_cue_then_section():
     assert not cd['cue'][1]
 
 
+def test_pass_file_cap_is_independent_of_input_order():
+    rows = [
+        match_row(
+            text='the same sentence in every publication',
+            pmid=f'{i:04d}',
+            mappedId='CHEMBL1' if i % 2 else 'CHEMBL1S',
+            label=f'label {i % 3}',
+            section='abstract' if i % 5 else 'abstract,x',
+        )
+        for i in range(450)
+    ]
+    expected, _ = pass_file(match_frame(rows), PARENTS)
+    assert expected.height == 300
+    assert expected['h'].n_unique() == 1
+    for seed in range(5):
+        shuffled = rows[:]
+        random.Random(seed).shuffle(shuffled)
+        cd, _ = pass_file(match_frame(shuffled), PARENTS)
+        assert cd.equals(expected)
+
+
 def test_pass_file_orders_by_section_rank_within_cue():
     rows = [
         match_row(text='in results', section='results'),
