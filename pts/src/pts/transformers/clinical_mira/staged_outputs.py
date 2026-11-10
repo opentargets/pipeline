@@ -332,7 +332,7 @@ class MoaOutput:
         }
 
     def read(self, uri: str) -> pl.DataFrame:
-        """The snapshot ``uri``.
+        """The ``data.parquet`` of the snapshot ``uri``; other parquet files beside it are not read.
 
         Raises:
             ValueError: if its metadata lacks a key, is of another kind, or its tag is not ``tag()``.
@@ -342,7 +342,7 @@ class MoaOutput:
             raise ValueError(f'snapshot {self.name} is of kind {metadata["kind"]!r}, not {self.name!r}')
         if metadata['tag'] != self.tag():
             raise ValueError(f'snapshot {self.name} has tag {metadata["tag"]!r}, this code expects {self.tag()!r}')
-        return scan_dataset(uri).collect()
+        return scan_dataset(f'{uri.rstrip("/")}/data.parquet').collect()
 
 
 STOP_REASONS = StagedOutput(

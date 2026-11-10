@@ -35,6 +35,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     MOA,
     MOA_LITERATURE,
     STOP_REASONS,
+    MoaOutput,
     StagedOutput,
     schema_digest,
 )
@@ -415,6 +416,14 @@ def test_moa_metadata_names_the_extraction_tag() -> None:
 
 def test_moa_read_accepts_its_own_metadata(tmp_path: Path) -> None:
     assert MOA.read(moa_snapshot(tmp_path, 'moa')).to_dict(as_series=False) == {'id': ['NCT1']}
+
+
+@pytest.mark.parametrize(('kind', 'sidecar'), [(MOA, 'pools.parquet'), (MOA_LITERATURE, 'drugs.parquet')])
+def test_moa_read_ignores_a_sidecar_parquet_next_to_the_data(tmp_path: Path, kind: MoaOutput, sidecar: str) -> None:
+    uri = snapshot(tmp_path, 'moa', pl.DataFrame({'id': ['NCT1']}), {**kind.metadata('abc'), 'kind': kind.name})
+    pl.DataFrame({'drug_name': ['x'], 'n_trials': [3]}).write_parquet(f'{uri}/{sidecar}')
+
+    assert kind.read(uri).to_dict(as_series=False) == {'id': ['NCT1']}
 
 
 def test_moa_read_rejects_another_kind(tmp_path: Path) -> None:
