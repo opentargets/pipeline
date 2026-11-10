@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.target.lists import tag, union
+from pts.transformers.target.lists import union
 from pts.transformers.utils.ensembl import (
     CANONICAL_CHROMOSOMES,
     CoreDump,
@@ -13,6 +13,7 @@ from pts.transformers.utils.ensembl import (
     transcripts,
     translation_xrefs,
 )
+from pts.transformers.utils.lists import tag
 
 TEC = '[Tt][Ee][Cc]'
 
@@ -37,10 +38,11 @@ def ensembl_genes(
         rnacentral: `pts.transformers.utils.ensembl.transcript_rnacentral`.
 
     Returns:
-        [id, biotype, approvedName, genomicLocation, approvedSymbol, proteinIds, signalP, rnaCentral,
-        canonicalTranscript]. `rnaCentral` holds the accessions of the canonical transcript, as one
-        gene's isoforms can have hundreds; `[]` when there are none.
+        [id, biotype, approvedName, genomicLocation, approvedSymbol, proteinIds, signalP, rnacentral,
+        canonicalTranscript]. `rnacentral` holds the accessions of the canonical transcript, null
+        when there are none or `canonicalTranscript` is.
     """
+    same_chromosome = pl.col('canonicalTranscript').struct.field('chromosome') == pl.col('chromosome')
     proteins = (
         transcripts
         .select('geneId', 'translationId')
@@ -93,10 +95,7 @@ def ensembl_genes(
                 tag(pl.col('ensembl_PRO'), 'id', 'ensembl_PRO'),
             ).alias('proteinIds'),
             tag(pl.col('signalp'), 'id', 'signalP').alias('signalP'),
-            tag(pl.col('rnacentral').fill_null([]), 'id', 'RNAcentral').alias('rnaCentral'),
-            pl
-            .when(pl.col('canonicalTranscript').struct.field('chromosome') == pl.col('chromosome'))
-            .then(pl.col('canonicalTranscript'))
-            .alias('canonicalTranscript'),
+            tag(pl.when(same_chromosome).then(pl.col('rnacentral')), 'id', 'RNAcentral').alias('rnacentral'),
+            pl.when(same_chromosome).then(pl.col('canonicalTranscript')).alias('canonicalTranscript'),
         )
     )

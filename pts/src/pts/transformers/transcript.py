@@ -3,9 +3,6 @@
 Produces a per-transcript index from the Ensembl core database: coordinates, exons and flags from the
 `transcript`, `exon` and `transcript_attrib` tables, UniProt and AlphaFold identifiers from each
 translation's xrefs and protein features, and each transcript's own cross references.
-
-An identifier an application relies on gets its own column. `dbXrefs` is for those that are only
-shown as links, so adding one needs no schema change.
 """
 
 from __future__ import annotations
@@ -19,6 +16,7 @@ from otter.config.model import Config
 from pts.schemas.transcript import transcript as transcript_schema
 from pts.transformers.utils import ensembl
 from pts.transformers.utils.dataset import write_dataset
+from pts.transformers.utils.lists import tag
 
 #: Attribute code, label and value of each static flag, in output order.
 _STATIC_FLAGS = [
@@ -90,10 +88,7 @@ def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame, rnacentral
             _non_empty('uniprot_trembl').alias('uniprotTremblIds'),
             _non_empty('uniprot_isoform').alias('uniprotIsoformIds'),
             _non_empty('alphafold').alias('alphafoldIds'),
-            pl
-            .col('rnacentral')
-            .list.eval(pl.struct(pl.element().alias('id'), pl.lit('RNAcentral').alias('source')))
-            .alias('dbXrefs'),
+            tag(pl.col('rnacentral'), 'id', 'RNAcentral').alias('dbXrefs'),
             _codes(pl.col('attributes')).list.contains('is_canonical').alias('isEnsemblCanonical'),
             'chromosome',
             'start',

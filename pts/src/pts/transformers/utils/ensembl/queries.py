@@ -23,6 +23,8 @@ _UNIPROT_DBS = {
 }
 
 _RNACENTRAL_DB = 'RNAcentral'
+#: Appended to RNAcentral accessions, as a human sequence is identified in interaction data.
+_RNACENTRAL_HUMAN_SUFFIX = '_9606'
 
 #: `analysis.logic_name` of the protein features whose `hit_name` is reported.
 _FEATURE_ANALYSES = ['alphafold', 'signalp']
@@ -250,7 +252,7 @@ def translation_xrefs(dump: CoreDump) -> pl.DataFrame:
 
 
 def transcript_rnacentral(dump: CoreDump) -> pl.DataFrame:
-    """RNAcentral accessions of the transcripts of `transcripts`.
+    """RNAcentral accessions of the transcripts of `transcripts`, suffixed with the human taxon (`URS…_9606`).
 
     Returns:
         One row per transcript with any accession, sorted by `transcriptId`, with the columns of
@@ -265,7 +267,7 @@ def transcript_rnacentral(dump: CoreDump) -> pl.DataFrame:
         .join(dump.scan('xref', schema.XREF), on='xref_id', how='inner')
         .join(external_db, on='external_db_id', how='inner')
         .join(transcript, left_on='ensembl_id', right_on='transcript_id', how='inner')
-        .select('transcriptId', pl.col('dbprimary_acc').alias('rnacentral'))
+        .select('transcriptId', (pl.col('dbprimary_acc') + _RNACENTRAL_HUMAN_SUFFIX).alias('rnacentral'))
         .unique()
         .sort('transcriptId', 'rnacentral')
         .group_by('transcriptId', maintain_order=True)

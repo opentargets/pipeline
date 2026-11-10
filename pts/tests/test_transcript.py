@@ -276,9 +276,9 @@ def test_empty_xref_arrays_are_null() -> None:
 
 
 def test_rnacentral_is_a_db_xref_of_its_transcript() -> None:
-    result = build([tx('ENST1'), tx('ENST2')], rnacentral_rows=[('ENST1', ['URS0000000001'])])
+    result = build([tx('ENST1'), tx('ENST2')], rnacentral_rows=[('ENST1', ['URS0000000001_9606'])])
     assert result.select('transcriptId', 'dbXrefs').rows() == [
-        ('ENST1', [{'id': 'URS0000000001', 'source': 'RNAcentral'}]),
+        ('ENST1', [{'id': 'URS0000000001_9606', 'source': 'RNAcentral'}]),
         ('ENST2', None),
     ]
 
@@ -317,12 +317,14 @@ def test_multi_chunk_input_matches_single_chunk() -> None:
         tx('ENST3', 'ENSG3', translation_id='ENSP3'),
     ]
     xref_rows = [xref('ENST1', 'ENSP1', uniprot_swissprot=['P1']), xref('ENST3', 'ENSP3', alphafold=['AF-P3-F1'])]
-    rna = rnacentral([('ENST2', ['URS0000000001'])])
-    single = build_transcripts(txs(rows), xrefs(xref_rows), rna)
+    rna_rows = [('ENST1', ['URS0000000001_9606']), ('ENST2', ['URS0000000002_9606'])]
+    single = build_transcripts(txs(rows), xrefs(xref_rows), rnacentral(rna_rows))
     chunked_tx = pl.concat([txs(rows[:1]), txs(rows[1:])], rechunk=False)
     chunked_xref = pl.concat([xrefs(xref_rows[:1]), xrefs(xref_rows[1:])], rechunk=False)
+    chunked_rna = pl.concat([rnacentral(rna_rows[:1]), rnacentral(rna_rows[1:])], rechunk=False)
     assert chunked_tx.n_chunks() == 2
-    assert build_transcripts(chunked_tx, chunked_xref, rna).equals(single)
+    assert chunked_rna.n_chunks() == 2
+    assert build_transcripts(chunked_tx, chunked_xref, chunked_rna).equals(single)
 
 
 # end to end, on a core dump
@@ -644,7 +646,7 @@ def test_transcript_end_to_end(tmp_path: Path) -> None:
             'uniprotTremblIds': None,
             'uniprotIsoformIds': None,
             'alphafoldIds': None,
-            'dbXrefs': [{'id': 'URS000044DFF6', 'source': 'RNAcentral'}],
+            'dbXrefs': [{'id': 'URS000044DFF6_9606', 'source': 'RNAcentral'}],
             'isEnsemblCanonical': True,
             'chromosome': 'MT',
             'start': 648,

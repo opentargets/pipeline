@@ -58,11 +58,11 @@ def test_signalp_is_tagged() -> None:
 
 
 def test_rnacentral_comes_from_the_canonical_transcript() -> None:
-    assert _by_id()['ENSG00000000003']['rnaCentral'] == [{'id': 'URS0000000010', 'source': 'RNAcentral'}]
+    assert _by_id()['ENSG00000000003']['rnacentral'] == [{'id': 'URS0000000010_9606', 'source': 'RNAcentral'}]
 
 
 def test_rnacentral_on_a_non_canonical_transcript_is_ignored() -> None:
-    assert _by_id()['ENSG00000141510']['rnaCentral'] == []
+    assert _by_id()['ENSG00000141510']['rnacentral'] is None
 
 
 def test_canonical_transcript_carries_its_own_coordinates() -> None:
@@ -85,6 +85,7 @@ def test_canonical_transcript_on_another_chromosome_is_dropped() -> None:
     )
     gene = {r['id']: r for r in ensembl_genes(GENES, transcripts, XREFS, RNACENTRAL).to_dicts()}['ENSG00000000002']
     assert gene['canonicalTranscript'] is None
+    assert gene['rnacentral'] is None
 
 
 def test_genomic_location_dtype() -> None:
@@ -97,7 +98,7 @@ def test_genomic_location_dtype() -> None:
 
 
 def test_matches_the_spark_output() -> None:
-    built = _built().drop('rnaCentral')  # added after the spark port
+    built = _built().drop('rnacentral')  # added after the spark port
     assert rows(built, 'id', ('proteinIds', 'signalP'), empty_as_null=('signalP',)) == SPARK_ROWS
 
 

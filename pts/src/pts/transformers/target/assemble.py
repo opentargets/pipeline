@@ -216,7 +216,7 @@ def assemble(
         .join(by_gene, on='id', how='left', maintain_order='left')
         .with_columns(
             union(pl.col('proteinIds'), pl.col('pid')).alias('proteinIds'),
-            union(pl.col('hgncId'), pl.col('dbXrefs'), pl.col('signalP'), pl.col('rnaCentral')).alias('dbXrefs'),
+            union(pl.col('hgncId'), pl.col('dbXrefs'), pl.col('signalP'), pl.col('rnacentral')).alias('dbXrefs'),
             union(pl.col('symbolSynonyms'), pl.col('hgncSymbolSynonyms')).alias('symbolSynonyms'),
             union(pl.col('nameSynonyms'), pl.col('hgncNameSynonyms')).alias('nameSynonyms'),
             union(pl.col('hgncObsoleteSymbols')).alias('obsoleteSymbols'),

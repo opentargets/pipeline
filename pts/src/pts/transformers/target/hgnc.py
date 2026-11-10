@@ -8,7 +8,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.target import HGNC_DOC
-from pts.transformers.target.lists import tag
+from pts.transformers.utils.lists import tag
 
 
 def read_hgnc(path: str) -> pl.DataFrame:

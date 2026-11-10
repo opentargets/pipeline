@@ -100,7 +100,7 @@ ENSEMBL = pl.DataFrame(
         'canonicalTranscript': CANONICAL_TRANSCRIPT,
     },
     orient='row',
-).with_columns(pl.lit([], dtype=pl.List(ID_SOURCE)).alias('rnaCentral'))
+).with_columns(pl.lit(None, dtype=pl.List(ID_SOURCE)).alias('rnacentral'))
 HGNC = pl.DataFrame(
     [
         (
@@ -407,10 +407,10 @@ def test_uniprot_only_reaches_genes_through_hgnc() -> None:
 
 
 def test_rnacentral_ids_join_the_xrefs() -> None:
-    xref = _ids(('URS0000000010', 'RNAcentral'))
-    rna_schema = {'id': pl.String, 'rnaCentral': pl.List(ID_SOURCE)}
-    rna = pl.DataFrame({'id': [NOHGNC], 'rnaCentral': [xref]}, schema=rna_schema)
-    ensembl = ENSEMBL.drop('rnaCentral').join(rna, on='id', how='left', maintain_order='left')
+    xref = _ids(('URS0000000010_9606', 'RNAcentral'))
+    rna_schema = {'id': pl.String, 'rnacentral': pl.List(ID_SOURCE)}
+    rna = pl.DataFrame({'id': [NOHGNC], 'rnacentral': [xref]}, schema=rna_schema)
+    ensembl = ENSEMBL.drop('rnacentral').join(rna, on='id', how='left', maintain_order='left')
     result = assemble(
         ensembl, HGNC, GO_FRAME, HALLMARKS_FRAME, UNIPROT, PROTEIN_CLASS, HPA, CONSTRAINT_FRAME, NCBI, REACTOME
     )

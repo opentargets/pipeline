@@ -325,10 +325,10 @@ def test_transcript_rnacentral_is_unique_and_sorted(dump: CoreDump) -> None:
     frame = transcript_rnacentral(dump)
     assert frame.schema == schema.transcript_rnacentral
     assert frame.to_dicts() == [
-        {'transcriptId': 'ENST01', 'rnacentral': ['URS0000000003']},
-        {'transcriptId': 'ENST03', 'rnacentral': ['URS0000000001', 'URS0000000002']},
+        {'transcriptId': 'ENST01', 'rnacentral': ['URS0000000003_9606']},
+        {'transcriptId': 'ENST03', 'rnacentral': ['URS0000000001_9606', 'URS0000000002_9606']},
     ]
 
 
 def test_transcript_rnacentral_ignores_scaffold_genes_and_other_object_types(dump: CoreDump) -> None:
-    assert 'URS0000000004' not in transcript_rnacentral(dump)['rnacentral'].explode().to_list()
+    assert 'URS0000000004_9606' not in transcript_rnacentral(dump)['rnacentral'].explode().to_list()

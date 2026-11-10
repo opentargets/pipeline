@@ -11,8 +11,9 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.target import UNIPROT_ENTRY
-from pts.transformers.target.lists import tag, union
+from pts.transformers.target.lists import union
 from pts.transformers.utils.dataset import scan_dataset
+from pts.transformers.utils.lists import tag
 
 _DB_INTEREST = {'ChEMBL', 'DrugBank', 'PDB', 'Ensembl', 'GO', 'InterPro', 'Reactome'}
 
