@@ -22,6 +22,7 @@ import polars as pl
 from pts.schemas.credible_set import FinemappingMethod, cross_set_flags_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.identifier import variant_position
+from pts.transformers.utils.quality_flags import flag_rows
 
 _TOP_HIT = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
 """A curated top hit."""
@@ -90,28 +91,19 @@ def flag_across_sets(
 
 
 def add_cross_set_flags(credible_set: pl.LazyFrame, cross_set_flag: pl.LazyFrame) -> pl.LazyFrame:
-    """Append the cross-set flags of each set to its `qualityControls`; other sets are unchanged.
+    """Append the cross-set flags of each set to its `qualityControls`.
 
     A flag is added only to the sets its rule applies to (`_FLAGGED_ROW`), so the copy of an id in
     another source does not take a flag meant for this one: a summary statistics set that shares
-    its id with a curated top hit does not become a redundant top hit.
+    its id with a curated top hit does not become a redundant top hit. The flags are added in turn,
+    so a rule that reads `qualityControls` sees the cross-set flags added before it.
     """
     set_flag = cross_set_flag.select('id', pl.col('qualityControls').alias('_cross_set_flags'))
-    no_flag = pl.lit([], dtype=pl.List(pl.String))
-    listed = pl.col('_cross_set_flags').fill_null(no_flag)
-    added = pl.concat_list([
-        pl.when(listed.list.contains(flag.value) & applies).then(pl.lit([flag.value])).otherwise(no_flag)
-        for flag, applies in _FLAGGED_ROW.items()
-    ])
-    merged = pl.concat_list(pl.col('qualityControls'), added).list.unique().list.sort()
-    return (
-        credible_set
-        .join(set_flag, on='id', how='left')
-        .with_columns(
-            pl.when(added.list.len() > 0).then(merged).otherwise(pl.col('qualityControls')).alias('qualityControls')
-        )
-        .drop('_cross_set_flags')
-    )
+    listed = pl.col('_cross_set_flags').fill_null(pl.lit([], dtype=pl.List(pl.String)))
+    flagged = credible_set.join(set_flag, on='id', how='left')
+    for flag, applies in _FLAGGED_ROW.items():
+        flagged = flag_rows(flagged, listed.list.contains(flag.value) & applies, flag)
+    return flagged.drop('_cross_set_flags')
 
 
 def _redundant_pics_top_hits(credible_set: pl.LazyFrame, explaining_set: pl.LazyFrame) -> pl.LazyFrame:

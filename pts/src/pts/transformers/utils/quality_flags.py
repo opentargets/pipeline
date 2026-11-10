@@ -2,10 +2,12 @@
 
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, overload
 
 import polars as pl
 from loguru import logger
+
+QC_COLUMN = 'qualityControls'
 
 
 class ValidationResult(NamedTuple):
@@ -17,7 +19,7 @@ class ValidationResult(NamedTuple):
 
 def _quality_controls() -> pl.Expr:
     # An all-empty QC column can be typed List(Null), which set operations reject.
-    return pl.col('qualityControls').cast(pl.List(pl.String)).fill_null([])
+    return pl.col(QC_COLUMN).cast(pl.List(pl.String)).fill_null([])
 
 
 def has_excluded_flag(invalid_flags: Sequence[StrEnum]) -> pl.Expr:
@@ -33,22 +35,23 @@ def valid_rows(frame: pl.LazyFrame, invalid_flags: Sequence[StrEnum]) -> Validat
     return ValidationResult(valid=frame.filter(~invalid), invalid=frame.filter(invalid))
 
 
-def flag_rows(frame: pl.LazyFrame, condition: pl.Expr, flag: StrEnum) -> pl.LazyFrame:
+@overload
+def flag_rows(frame: pl.DataFrame, condition: pl.Expr, flag: StrEnum) -> pl.DataFrame: ...
+@overload
+def flag_rows(frame: pl.LazyFrame, condition: pl.Expr, flag: StrEnum) -> pl.LazyFrame: ...
+def flag_rows(frame: pl.DataFrame | pl.LazyFrame, condition: pl.Expr, flag: StrEnum) -> pl.DataFrame | pl.LazyFrame:
     """Append `flag` to `qualityControls` where `condition` is true, keeping flags unique and sorted.
 
-    A missing `qualityControls` column is added, and null lists become empty. Rows where
-    `condition` is null are left unflagged.
+    Eager and lazy frames come back as the same kind. A missing `qualityControls` column is
+    added, and null lists become empty on both branches, so every row stays countable as valid
+    or invalid. Rows where `condition` is null are left unflagged. Null elements sort last, as
+    Spark's `array_sort` does.
     """
-    if 'qualityControls' not in frame.collect_schema():
-        frame = frame.with_columns(pl.lit([], dtype=pl.List(pl.String)).alias('qualityControls'))
+    if QC_COLUMN not in frame.collect_schema():
+        frame = frame.with_columns(pl.lit([], dtype=pl.List(pl.String)).alias(QC_COLUMN))
     qc = _quality_controls()
-    return frame.with_columns(
-        pl
-        .when(condition)
-        .then(pl.concat_list(qc, pl.lit([flag.value])).list.unique().list.sort())
-        .otherwise(qc)
-        .alias('qualityControls')
-    )
+    appended = pl.concat_list(qc, pl.lit([flag.value])).list.unique().list.sort(nulls_last=True)
+    return frame.with_columns(pl.when(condition).then(appended).otherwise(qc).alias(QC_COLUMN))
 
 
 def flag_matching_ids(frame: pl.LazyFrame, key: str, ids: pl.LazyFrame, flag: StrEnum) -> pl.LazyFrame:
@@ -74,39 +77,3 @@ def resolve_flag_names(flags: type[StrEnum], value: Any) -> Any:
             for item in value
         ]
     return value
-
-
-def update_quality_flag(
-    df: pl.DataFrame,
-    flag_condition: pl.Expr,
-    flag_text: str,
-) -> pl.DataFrame:
-    """Update the qualityControls column in a Polars DataFrame based on a flag condition.
-
-    Args:
-        df: The input Polars DataFrame
-        flag_condition: A Polars expression that evaluates to a boolean
-        flag_text: The text to add to the qualityControls list if the condition is met
-
-    Returns:
-        A new Polars DataFrame with updated qualityControls column
-    """
-    # First ensure qualityControls column exists
-    if 'qualityControls' not in df.columns:
-        df = df.with_columns(pl.lit(None, dtype=pl.List(pl.String)).alias('qualityControls'))
-
-    return df.with_columns(
-        pl
-        .when(flag_condition)
-        .then(
-            pl
-            .concat_list([
-                pl.col('qualityControls').fill_null([]),
-                pl.lit(flag_text).implode(),
-            ])
-            .list.unique()
-            .list.sort()
-        )
-        .otherwise(pl.col('qualityControls'))
-        .alias('qualityControls')
-    )
