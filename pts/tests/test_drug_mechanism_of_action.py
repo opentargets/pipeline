@@ -258,7 +258,7 @@ class TestTargetLookup:
         )
         return {r['targetName']: r['targets'] for r in result.to_dicts()}
 
-    def test_only_swissprot_and_trembl_accessions_resolve(self, tables: dict) -> None:
+    def test_only_uniprot_accessions_resolve(self, tables: dict) -> None:
         gene_df = pl.DataFrame(
             {
                 'id': ['ENSG1', 'ENSG2', 'ENSG3'],
@@ -270,7 +270,8 @@ class TestTargetLookup:
             },
             schema={'id': pl.String, 'proteinIds': pl.List(PROTEIN_ID)},
         )
-        assert self._targets(tables, gene_df) == {'Target Twenty': [], 'Target TwentyOne': []}
+        # P100 is labelled obsolete, as target.proteinIds labels every accession of an entry
+        assert self._targets(tables, gene_df) == {'Target Twenty': ['ENSG1'], 'Target TwentyOne': []}
 
     def test_a_target_named_by_gene_id_resolves(self, tables: dict) -> None:
         sequences = tables['component_sequences'].with_columns(pl.col('accession').replace({'P300': 'ENSG3'}))
