@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.target.lists import flatten_distinct, tag, union
+from pts.transformers.target.lists import flatten_distinct, union
 from pts.transformers.utils.dataset import scan_dataset
+from pts.transformers.utils.lists import tag
 
 SYNONYM_COLUMNS = ['synonyms', 'symbolSynonyms', 'nameSynonyms']
 

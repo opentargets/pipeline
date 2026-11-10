@@ -1,3 +1,13 @@
+FROM scratch AS fastvep-amd64
+ADD --checksum=sha256:eb96abe28c71f32c2d0ecce9cf340d90e7a3acb9148cacb3a30e123ba0afcea0 \
+  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0-rc.1/fastVEP-v0.5.0-rc.1-x86_64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
+
+FROM scratch AS fastvep-arm64
+ADD --checksum=sha256:c5026bc058cd76247035169bd3bb619370d7cf4431d2587981ab8ec3c0cbba36 \
+  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0-rc.1/fastVEP-v0.5.0-rc.1-aarch64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
+
+FROM fastvep-${TARGETARCH} AS fastvep
+
 FROM python:3.12-slim-trixie@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS base
 COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /uvx /bin/
 
@@ -9,7 +19,9 @@ RUN apt-get update && \
   fi && \
   rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/opentargets/pipeline/fastvep:9d84be0c14952243b4c34ffc6f3c179ae77d66ee@sha256:f47e0f1d3f734e4478471d84e40a111ffb859c9a00938852c1dcd1db03bde801 /fastvep /usr/local/bin/fastvep
+RUN --mount=type=bind,from=fastvep,target=/fastvep \
+  tar -xzf /fastvep/fastvep.tar.gz -C /usr/local/bin --strip-components=1 --wildcards '*/fastvep' && \
+  fastvep --version
 
 # pixeltable-pgserver runs postgres under a non-root account when it detects
 # uid 0, and creates that account with useradd from PostgresServer.__init__ --

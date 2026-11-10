@@ -2,12 +2,12 @@
 
 Since the shared writer landed, a transformer destination is a *directory* of parquet
 parts rather than a file. Where the destination names a dataset -- it ends in something
-like ``homo_sapiens.parquet`` or ``${uuid}.parquet`` -- the parent then holds only
+like ``homo_sapiens.parquet`` -- the parent then holds only
 subdirectories, and a consumer reading that parent finds no parquet at all.
 
 The failure is silent at config time and cryptic at runtime: gentropy reported
-``Parquet file is empty`` on ``intermediate/target/ensembl``, and pts_openfda reported
-``UNABLE_TO_INFER_SCHEMA`` on ``intermediate/openfda``. Neither message names the path
+``Parquet file is empty`` on ``intermediate/target/ensembl``, and the former openfda step reported
+``UNABLE_TO_INFER_SCHEMA`` on ``intermediate/openfda`` (a step since replaced). Neither message names the path
 layout. This test makes the mismatch visible in the config instead.
 
 Reading the destination itself is fine, and so is globbing the parent -- spark reads a
@@ -55,9 +55,8 @@ def _sources(node: Any, found: list[str]) -> None:
             _sources(value, found)
 
 
-def test_no_consumer_reads_the_parent_of_a_named_dataset() -> None:
-    """Read the dataset, or glob the parent -- never the bare parent."""
-    config = yaml.safe_load(CONFIG_PATH.read_text())
+def _offenders(config: dict[str, Any]) -> list[str]:
+    """List every source that is the bare parent of a named transformer destination."""
     steps = config.get('steps') or {}
 
     # a destination that names a dataset makes its parent a directory of directories
@@ -71,17 +70,40 @@ def test_no_consumer_reads_the_parent_of_a_named_dataset() -> None:
                 continue
             named_parents[destination.rsplit('/', 1)[0]] = f'{step_name} -> {destination}'
 
-    assert named_parents, 'expected some transformer destinations to name a dataset'
-
     sources: list[str] = []
     _sources(config, sources)
 
-    offenders = [
-        f'{source!r} is the parent of {named_parents[source]}'
-        for source in set(sources)
-        if source in named_parents
-    ]
+    return sorted(
+        f'{source!r} is the parent of {named_parents[source]}' for source in set(sources) if source in named_parents
+    )
+
+
+def test_no_consumer_reads_the_parent_of_a_named_dataset() -> None:
+    """Read the dataset, or glob the parent -- never the bare parent."""
+    offenders = _offenders(yaml.safe_load(CONFIG_PATH.read_text()))
     assert not offenders, (
         'a source reads the bare parent of a named dataset, so it will find only '
-        'subdirectories: ' + '; '.join(sorted(offenders))
+        'subdirectories: ' + '; '.join(offenders)
     )
+
+
+def _config(consumer_source: str) -> dict[str, Any]:
+    return {
+        'steps': {
+            'producer': [
+                {'name': 'make x', 'transformer': 'x', 'source': 'input/x', 'destination': 'intermediate/x/y.parquet'}
+            ],
+            'consumer': [{'name': 'read x', 'pyspark': 'z', 'source': consumer_source, 'destination': 'output/z'}],
+        }
+    }
+
+
+def test_the_bare_parent_of_a_named_destination_is_flagged() -> None:
+    assert _offenders(_config('intermediate/x')) == [
+        "'intermediate/x' is the parent of producer -> intermediate/x/y.parquet"
+    ]
+
+
+def test_a_glob_of_the_parent_or_the_destination_itself_is_not_flagged() -> None:
+    assert _offenders(_config('intermediate/x/*.parquet')) == []
+    assert _offenders(_config('intermediate/x/y.parquet')) == []
