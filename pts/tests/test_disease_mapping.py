@@ -81,8 +81,8 @@ def test_include_ambiguous_mappings_flags_and_keeps_them() -> None:
     assert out.columns == ['label', 'isAmbiguousMapping', 'ids']
     assert out.select('isAmbiguousMapping', 'ids').rows() == [
         (True, ['EFO_0000253', 'MONDO_0004976']),
-        # ambiguous once trimmed, but its spaces put the raw label on the term track, as in OnToma
-        (True, None),
+        # ambiguous once trimmed, and on the symbol track of its trimmed form, unlike OnToma
+        (True, ['EFO_0000253', 'MONDO_0004976']),
         (False, None),
         (True, None),
         (False, ['MONDO_0009061']),

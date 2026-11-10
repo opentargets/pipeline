@@ -6,6 +6,10 @@ The raw tables are the output of OnToma's `OpenTargetsDisease.as_label_lut` and 
 (nulls last). `LUT` is the parquet that `OnToma(spark, [those five tables])` writes, read back,
 with `entityIds` sorted and the rows sorted on kind, type and label. The `STEP_*` tables come from the
 same `OnToma` call on the tables built from the fixtures with one single-row curation per source.
+
+One deliberate edit to OnToma's output: the padded disease synonym ' ALS ' is on the symbol track
+of its trimmed form (normalised 'als'), where OnToma put the raw label on the term track
+(normalised 'al'). The polars tables decide the track on the trimmed label.
 """
 
 # ruff: noqa: RUF001
@@ -24,7 +28,7 @@ DISEASE_LABEL = [
     ('EFO_0000002', 'ΟΔΟΣ syndrome', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
     ('EFO_0000002', 'ﬁbrosis', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
     ('MONDO_0000001', '\tfibrosis\t', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
-    ('MONDO_0000001', 'ALS', 0.996, 'term', 'related_synonym', 'DS', 'label'),
+    ('MONDO_0000001', 'ALS', 0.996, 'symbol', 'related_synonym', 'DS', 'label'),
     ('MONDO_0000001', 'CF', 0.996, 'symbol', 'related_synonym', 'DS', 'label'),
     ('MONDO_0000001', 'CF', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
     ('MONDO_0000001', 'Cystic fibrosis', 1.0, 'term', 'name', 'DS', 'label'),
@@ -203,7 +207,7 @@ LUT = [
     ('label', 'DS', '3', [{'entityId': 'MONDO_0000001', 'entitySource': 'ot_curation'}]),
     ('label', 'DS', 'a', [{'entityId': 'MONDO_0000001', 'entitySource': 'ot_curation'}]),
     ('label', 'DS', 'abcdefghij', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
-    ('label', 'DS', 'al', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
+    ('label', 'DS', 'als', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
     ('label', 'DS', 'and', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'athalassemia', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'brosi', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
@@ -256,7 +260,7 @@ LUT = [
 
 STEP_DISEASE_LABEL = [
     ('label', 'DS', 'abcdefghij', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
-    ('label', 'DS', 'al', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
+    ('label', 'DS', 'als', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
     ('label', 'DS', 'and', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'athalassemia', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'brosi', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
@@ -344,7 +348,7 @@ STEP_LITERATURE = [
     ('label', 'CD', 'y', [{'entityId': 'CHEMBL1', 'entitySource': 'trade_name_component'}]),
     ('label', 'CD', 'z', [{'entityId': 'CHEMBL1', 'entitySource': 'trade_name_component'}]),
     ('label', 'DS', 'abcdefghij', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
-    ('label', 'DS', 'al', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
+    ('label', 'DS', 'als', [{'entityId': 'MONDO_0000001', 'entitySource': 'related_synonym'}]),
     ('label', 'DS', 'and', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'athalassemia', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),
     ('label', 'DS', 'brosi', [{'entityId': 'EFO_0000002', 'entitySource': 'exact_synonym'}]),

@@ -27,6 +27,10 @@ by default, map to null, so the default output differs from OnToma's for those l
 include_ambiguous_mappings=True the identifiers are OnToma's and an isAmbiguousMapping column
 flags the ambiguous rows.
 
+Not from OnToma either: a label's NLP pipeline track is decided on the trimmed label, here and in
+the lookup tables, where OnToma decides it on the raw one. A label padded with spaces, such as
+' ALS ', takes the track of its trimmed form instead of the term track.
+
 Diffed against `OnToma.map_entities` on spark with lookup tables built by OnToma from the disease
 index: 162,085 query rows covering names, synonyms, cross references and perturbed copies of
 them, mapped as labels and as ids, with a type column of mixed and null types and with both
@@ -100,8 +104,12 @@ def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
         query
         .with_columns(
             alternative_translations(spark_trim(entity)).alias(w.label),
-            # decided on the raw label, before trimming, translating or cleaning
-            pl.when(entity_type == 'CD').then(pl.lit('symbol')).otherwise(determine_track(entity)).alias(w.track),
+            # decided on the trimmed label, before translating or cleaning
+            pl
+            .when(entity_type == 'CD')
+            .then(pl.lit('symbol'))
+            .otherwise(determine_track(spark_trim(entity)))
+            .alias(w.track),
         )
         .explode(w.label)
         .with_columns(

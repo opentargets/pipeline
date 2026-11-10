@@ -118,7 +118,8 @@ def _label_lut(entities: pl.DataFrame, entity_type: str) -> pl.DataFrame:
 def disease_label_lut(disease: pl.DataFrame) -> pl.DataFrame:
     """`OpenTargetsDisease.as_label_lut`: disease names and synonyms, each in both translations."""
     entities = _entities(disease, DISEASE_LABELS)
-    return _label_lut(entities.with_columns(nlpPipelineTrack=determine_track(pl.col('entityLabel'))), 'DS')
+    track = determine_track(spark_trim(pl.col('entityLabel')))
+    return _label_lut(entities.with_columns(nlpPipelineTrack=track), 'DS')
 
 
 def disease_id_lut(disease: pl.DataFrame) -> pl.DataFrame:
