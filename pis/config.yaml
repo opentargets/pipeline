@@ -54,6 +54,7 @@ scratchpad:
   reactome_version: '2026-01-19-v95'
   clinpgx_version: '2026-07-24'
   string_version: '12.5'
+  intact_version: '2026-11-10'
   aopwiki_version: '2023-01-20'
   toxcast_version: '2021-08-17'
   hpa_subcellular_version: '2021-08-19'
@@ -767,7 +768,7 @@ steps:
       destination: input/interaction/HUMAN_9606_idmapping.dat.gz
 
     - name: copy intact interactors
-      source: https://ftp.ebi.ac.uk/pub/databases/intact/various/ot_graphdb/current/data/interactor_pair_interactions.json
+      source: https://ftp.ebi.ac.uk/pub/databases/intact/various/ot_graphdb/${intact_version}/data/interactor_pair_interactions.json
       destination: input/interaction/intact-interactors.json
 
     - name: copy rna central
