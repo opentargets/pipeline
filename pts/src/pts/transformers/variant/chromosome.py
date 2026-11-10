@@ -45,6 +45,7 @@ from pts.transformers.variant.prepared import (
     PreparedChunk,
     write_complete,
 )
+from pts.transformers.variant.timing import timed
 from pts.transformers.variant.vep.colocated import add_colocated
 from pts.transformers.variant.vep.fastvep import run_fastvep, write_vcf
 from pts.transformers.variant.vep.records import CHUNK_BYTES, chunk_frames, iter_records, unannotated_frames
@@ -153,14 +154,18 @@ def run_chromosome(prepared: PreparedChromosome, reference: FastvepReference) ->
         return chunks, False
     prepared.fastvep_directory().mkdir(parents=True)
     vcf = prepared.fastvep_vcf()
-    write_vcf(frame, vcf, sequence)
+    with timed(f'Writing the VCF of chromosome {chromosome}'):
+        write_vcf(frame, vcf, sequence)
     logger.info('Running fastVEP on {} variants of chromosome {}', frame.height, chromosome)
-    output = run_fastvep(
-        vcf, reference.gff3, reference.plain_fasta, prepared.fastvep_json(), reference.threads, reference.binary
-    )
+    with timed(f'fastVEP on chromosome {chromosome}'):
+        output = run_fastvep(
+            vcf, reference.gff3, reference.plain_fasta, prepared.fastvep_json(), reference.threads, reference.binary
+        )
     vcf.unlink()
+    logger.info('fastVEP output of chromosome {}: {} bytes', chromosome, output.stat().st_size)
     try:
-        split_records(output, frame.height, prepared)
+        with timed(f'Splitting the fastVEP records of chromosome {chromosome}'):
+            split_records(output, frame.height, prepared)
     finally:
         output.unlink()
     return chunks, True
@@ -168,7 +173,8 @@ def run_chromosome(prepared: PreparedChromosome, reference: FastvepReference) ->
 
 def prepare_chromosome(prepared: PreparedChromosome, sources: PreparationSources) -> None:
     """Write what every chunk of the chromosome reads, once, by `PreparedChromosome.write`."""
-    prepared.write(sources)
+    with timed(f'Preparing chromosome {prepared.chromosome}'):
+        prepared.write(sources)
 
 
 def _merged(index: pl.DataFrame, inputs: PreparedChunk, batch_size: int) -> pl.DataFrame:
@@ -226,7 +232,8 @@ def annotate_chunk(prepared: PreparedChromosome, chunk: int, annotated: bool, pa
     """
     inputs = prepared.chunk(chunk, annotated)
     logger.info('Annotating {} variants of chromosome {}, chunk {}', inputs.rows.height, prepared.chromosome, chunk)
-    index = annotate_inputs(inputs, prepared.settings)
+    with timed(f'Annotating chromosome {prepared.chromosome}, chunk {chunk}'):
+        index = annotate_inputs(inputs, prepared.settings)
     if annotated:
         prepared.release(chunk)
     return write_complete(index, part)

@@ -20,7 +20,6 @@ FLAGS = [
     '--distance',
     '500000',
     '--symbol',
-    '--hgvs',
     '--canonical',
     '--output-format',
     'json',
