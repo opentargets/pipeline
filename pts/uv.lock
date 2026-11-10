@@ -2056,7 +2056,6 @@ l2g = [
 ]
 llm = [
     { name = "anthropic", extra = ["google-cloud"] },
-    { name = "gcsfs" },
     { name = "openai" },
 ]
 nlp = [
@@ -2086,7 +2085,6 @@ requires-dist = [
     { name = "anthropic", extras = ["google-cloud"], marker = "extra == 'llm'", specifier = ">=2.5.0" },
     { name = "cellex", marker = "extra == 'baseline-expression'", git = "https://github.com/perslab/CELLEX?rev=119c7ca" },
     { name = "gcsfs", marker = "extra == 'baseline-expression'", specifier = ">=2026.2.0" },
-    { name = "gcsfs", marker = "extra == 'llm'", specifier = ">=2026.2.0" },
     { name = "huggingface-hub", marker = "extra == 'nlp'", specifier = ">=2.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "networkx", specifier = ">=3.6.1" },
