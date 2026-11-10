@@ -4,29 +4,45 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.transformers.target.lists import tag, union
-from pts.transformers.utils.ensembl import CANONICAL_CHROMOSOMES, CoreDump, genes, transcripts, translation_xrefs
+from pts.transformers.target.lists import union
+from pts.transformers.utils.ensembl import (
+    CANONICAL_CHROMOSOMES,
+    CoreDump,
+    genes,
+    transcript_rnacentral,
+    transcripts,
+    translation_xrefs,
+)
+from pts.transformers.utils.lists import tag
 
 TEC = '[Tt][Ee][Cc]'
 
 
 def build_ensembl(dump: CoreDump) -> pl.DataFrame:
     """Ensembl genes from the core database dump."""
-    return ensembl_genes(genes(dump), transcripts(dump), translation_xrefs(dump))
+    return ensembl_genes(genes(dump), transcripts(dump), translation_xrefs(dump), transcript_rnacentral(dump))
 
 
-def ensembl_genes(genes: pl.DataFrame, transcripts: pl.DataFrame, translation_xrefs: pl.DataFrame) -> pl.DataFrame:
+def ensembl_genes(
+    genes: pl.DataFrame,
+    transcripts: pl.DataFrame,
+    translation_xrefs: pl.DataFrame,
+    rnacentral: pl.DataFrame,
+) -> pl.DataFrame:
     """One row per gene.
 
     Args:
         genes: `pts.transformers.utils.ensembl.genes`.
         transcripts: `pts.transformers.utils.ensembl.transcripts`.
         translation_xrefs: `pts.transformers.utils.ensembl.translation_xrefs`.
+        rnacentral: `pts.transformers.utils.ensembl.transcript_rnacentral`.
 
     Returns:
-        [id, biotype, approvedName, genomicLocation, approvedSymbol, proteinIds, signalP,
-        canonicalTranscript].
+        [id, biotype, approvedName, genomicLocation, approvedSymbol, proteinIds, signalP, rnacentral,
+        canonicalTranscript]. `rnacentral` holds the accessions of the canonical transcript, null
+        when there are none or `canonicalTranscript` is.
     """
+    same_chromosome = pl.col('canonicalTranscript').struct.field('chromosome') == pl.col('chromosome')
     proteins = (
         transcripts
         .select('geneId', 'translationId')
@@ -65,6 +81,7 @@ def ensembl_genes(genes: pl.DataFrame, transcripts: pl.DataFrame, translation_xr
         .sort('id', maintain_order=True)
         .unique(subset='id', keep='first', maintain_order=True)
         .join(canonical, on=['id', 'canonicalTranscriptId'], how='left', maintain_order='left')
+        .join(rnacentral, left_on='canonicalTranscriptId', right_on='transcriptId', how='left', maintain_order='left')
         .rechunk()
         .select(
             'id',
@@ -78,9 +95,7 @@ def ensembl_genes(genes: pl.DataFrame, transcripts: pl.DataFrame, translation_xr
                 tag(pl.col('ensembl_PRO'), 'id', 'ensembl_PRO'),
             ).alias('proteinIds'),
             tag(pl.col('signalp'), 'id', 'signalP').alias('signalP'),
-            pl
-            .when(pl.col('canonicalTranscript').struct.field('chromosome') == pl.col('chromosome'))
-            .then(pl.col('canonicalTranscript'))
-            .alias('canonicalTranscript'),
+            tag(pl.when(same_chromosome).then(pl.col('rnacentral')), 'id', 'RNAcentral').alias('rnacentral'),
+            pl.when(same_chromosome).then(pl.col('canonicalTranscript')).alias('canonicalTranscript'),
         )
     )
