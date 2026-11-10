@@ -1,5 +1,6 @@
 """Tests for drug_mechanism_of_action, which reads the raw ChEMBL tables straight from the dump."""
 
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -835,6 +836,81 @@ class TestMergeInferred:
         references = merged.tail(1)['references'].to_list()[0]
         assert [(r['source'], r['ids']) for r in references] == [('PubMed', ['3', '22']), ('PMC', ['PMC10', 'PMC9'])]
         assert references[0]['urls'] == ['http://europepmc.org/abstract/MED/3', 'http://europepmc.org/abstract/MED/22']
+
+    @staticmethod
+    def inferred(merged: pl.DataFrame, chembl: pl.DataFrame) -> list[tuple[str, list[str]]]:
+        return sorted(merged.slice(chembl.height).select('mechanismOfAction', 'targets').rows())
+
+    def test_an_overlapping_lower_confidence_row_is_dropped(self, chembl: pl.DataFrame) -> None:
+        messages: list[str] = []
+        handler = logger.add(lambda message: messages.append(message.record['message']))
+        try:
+            merged, report = self.merge(
+                chembl,
+                candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='strong'),
+                paper(confidence=0.85, targets=['ENSG2', 'ENSG3'], mechanismOfAction='weak'),
+            )
+        finally:
+            logger.remove(handler)
+        assert self.inferred(merged, chembl) == [('strong', ['ENSG1', 'ENSG2'])]
+        row = merged.tail(1).to_dicts()[0]
+        assert [r['source'] for r in row['references']] == ['ClinicalTrials']
+        assert sorted(report['mechanismOfAction'].to_list()) == ['strong', 'weak']
+        assert any(m.startswith('1 inferred rows not published') and 'overlap' in m for m in messages), messages
+
+    def test_disjoint_rows_of_one_drug_are_both_kept(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.95, targets=['ENSG1'], mechanismOfAction='a'),
+            paper(confidence=0.85, targets=['ENSG2'], mechanismOfAction='b'),
+        )
+        assert self.inferred(merged, chembl) == [('a', ['ENSG1']), ('b', ['ENSG2'])]
+
+    def test_overlapping_rows_of_different_drugs_are_both_kept(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            candidate(confidence=0.95, targets=['ENSG1'], mechanismOfAction='a'),
+            candidate(
+                parentChemblId='CHEMBL91',
+                chemblIds=['CHEMBL91'],
+                confidence=0.85,
+                targets=['ENSG1'],
+                mechanismOfAction='b',
+            ),
+        )
+        assert self.inferred(merged, chembl) == [('a', ['ENSG1']), ('b', ['ENSG1'])]
+
+    def test_an_overlap_chain_keeps_the_ends_and_drops_the_middle(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            paper(confidence=0.85, targets=['ENSG3', 'ENSG4'], mechanismOfAction='C'),
+            candidate(confidence=0.95, targets=['ENSG1', 'ENSG2'], mechanismOfAction='A'),
+            paper(confidence=0.9, targets=['ENSG2', 'ENSG3'], mechanismOfAction='B'),
+        )
+        assert self.inferred(merged, chembl) == [('A', ['ENSG1', 'ENSG2']), ('C', ['ENSG3', 'ENSG4'])]
+
+    def test_a_row_without_a_reference_does_not_drop_an_overlapping_row(self, chembl: pl.DataFrame) -> None:
+        merged, _ = self.merge(
+            chembl,
+            paper(confidence=0.95, docIds=['doi10.1/x'], targets=['ENSG1'], mechanismOfAction='unreferenced'),
+            candidate(confidence=0.85, targets=['ENSG1', 'ENSG2'], mechanismOfAction='referenced'),
+        )
+        assert self.inferred(merged, chembl) == [('referenced', ['ENSG1', 'ENSG2'])]
+
+    def test_an_equal_confidence_overlap_is_resolved_the_same_way_under_shuffle(self, chembl: pl.DataFrame) -> None:
+        rows = [
+            candidate(confidence=0.9, docIds=['NCT01'], targets=['ENSG1', 'ENSG2'], mechanismOfAction='one doc'),
+            paper(confidence=0.9, docIds=['pmid1', 'pmid2'], targets=['ENSG2', 'ENSG3'], mechanismOfAction='two docs'),
+            paper(confidence=0.9, docIds=['pmid5', 'pmid6'], targets=['ENSG3', 'ENSG4'], mechanismOfAction='later key'),
+            candidate(confidence=0.9, docIds=['NCT07'], targets=['ENSG7', 'ENSG8'], mechanismOfAction='alone'),
+            paper(confidence=0.9, docIds=['pmid8'], targets=['ENSG8', 'ENSG9'], mechanismOfAction='key ENSG8'),
+        ]
+        expected = [('alone', ['ENSG7', 'ENSG8']), ('two docs', ['ENSG2', 'ENSG3'])]
+        for seed in range(6):
+            shuffled = rows[:]
+            random.Random(seed).shuffle(shuffled)
+            merged, _ = self.merge(chembl, *shuffled)
+            assert self.inferred(merged, chembl) == expected
 
     def test_literature_doc_ids_are_classified_by_what_follows_the_prefix(self, chembl: pl.DataFrame) -> None:
         messages: list[str] = []
