@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
@@ -63,6 +65,10 @@ DRUG_LABELS = (
 )
 #: Drug cross-reference sources whose ids are labels.
 DRUG_LABEL_CROSSREF_SOURCES = ('DailyMed', 'USAN', 'EMA')
+
+#: Longest acronym, in letters and digits.
+ACRONYM_MAX_LENGTH = 3
+ACRONYM_ALLOWLIST = Path(__file__).with_name('acronym_allowlist.tsv')
 
 #: The columns each builder reads.
 DISEASE_COLUMNS = tuple(dict.fromkeys(['id', *(c for c, *_ in DISEASE_LABELS), *(c for c, *_ in DISEASE_IDS)]))
@@ -252,9 +258,30 @@ def drug_label_lut(drug: pl.DataFrame) -> pl.DataFrame:
     return _label_lut(entities.with_columns(nlpPipelineTrack=pl.lit('symbol')), 'CD')
 
 
-def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
-    """`OnToma(spark, entity_lut_list)`: each normalised label or id with the ids of its top-scored rows."""
+def acronym_key(label: pl.Expr) -> pl.Expr:
+    """The label lowercased, without anything that is not a letter or a digit."""
+    return label.str.to_lowercase().str.replace_all(r'[^\p{L}\p{N}]', '')
+
+
+def is_acronym_label(label: pl.Expr, max_length: int = ACRONYM_MAX_LENGTH) -> pl.Expr:
+    """Whether the trimmed label has no whitespace and `1` to `max_length` letters or digits."""
+    trimmed = label.str.strip_chars()
+    return ~trimmed.str.contains(r'\s') & acronym_key(trimmed).str.len_chars().is_between(1, max_length)
+
+
+def read_acronym_allowlist() -> pl.DataFrame:
+    """The (`acronym`, `diseaseId`) pairs that are not flagged, `acronym` as `acronym_key` gives it."""
+    return pl.read_csv(ACRONYM_ALLOWLIST, separator='\t', schema={'acronym': pl.String, 'diseaseId': pl.String})
+
+
+def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None = None) -> pl.DataFrame:
+    """Each normalised label or id with the ids of its top-scored rows, flagging acronym-only disease mappings."""
     key = list(ENTITY_LUT_KEY)
+    if acronym_allowlist is None:
+        acronym_allowlist = read_acronym_allowlist()
+    listed = acronym_allowlist.select(
+        pl.col('acronym').alias('acronymKey'), pl.col('diseaseId').alias('entityId'), pl.lit(True).alias('listed')
+    ).unique()
     lut = pl.concat(frame.select(RAW_ENTITY_LUT.names()) for frame in raw)
     normalised = (
         lut
@@ -267,14 +294,25 @@ def build_lut(raw: list[pl.DataFrame]) -> pl.DataFrame:
         )
     )
     score = pl.col('entityScore')
+    label_sources = [source for *_, source in DISEASE_LABELS]
+    row_acronym = (
+        (pl.col('entityType') == 'DS')
+        & (pl.col('entityKind') == 'label')
+        & pl.col('entitySource').is_in(label_sources)
+        & is_acronym_label(pl.col('entityLabel'))
+        & pl.col('listed').is_null()
+    )
     return (
         lut
         .join(normalised, on=['entityLabel', 'nlpPipelineTrack'], how='inner')
         .filter(pl.col('entityLabelNormalised').str.len_chars() > 0)
         # rank 1 of dense_rank by score desc; nulls rank last
         .filter(score.eq_missing(score.max().over(key)))
+        .with_columns(acronymKey=acronym_key(pl.col('entityLabel')))
+        .join(listed, on=['acronymKey', 'entityId'], how='left')
+        .with_columns(isAcronym=row_acronym.all().over([*key, 'entityId']))
         .group_by(key)
-        .agg(pl.struct('entityId', 'entitySource').unique().sort().alias('entityIds'))
+        .agg(pl.struct('entityId', 'entitySource', 'isAcronym').unique().sort().alias('entityIds'))
         .select(pl.col(name).cast(dtype) for name, dtype in ENTITY_LUT.items())
         .sort(key)
     )

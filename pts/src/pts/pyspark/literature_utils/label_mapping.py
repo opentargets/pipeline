@@ -15,14 +15,17 @@ if TYPE_CHECKING:
 #: `map_label_batches` output, as a spark DDL.
 MAPPED_LABELS_DDL = (
     'label string, type string, entityLabelNormalised string, '
-    'entityIds array<struct<entityId: string, entitySource: string>>'
+    'entityIds array<struct<entityId: string, entitySource: string, isAcronym: boolean>>'
 )
 
 _MAPPED_LABELS = pa.schema([
     ('label', pa.string()),
     ('type', pa.string()),
     ('entityLabelNormalised', pa.string()),
-    ('entityIds', pa.list_(pa.struct([('entityId', pa.string()), ('entitySource', pa.string())]))),
+    (
+        'entityIds',
+        pa.list_(pa.struct([('entityId', pa.string()), ('entitySource', pa.string()), ('isAcronym', pa.bool_())])),
+    ),
 ])
 
 _LOOKUP_TABLES: dict[str, pl.DataFrame] = {}

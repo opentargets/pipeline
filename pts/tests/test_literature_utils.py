@@ -100,17 +100,23 @@ class TestMatchMapped:
             spark,
             [
                 # single id for the label
-                {'pmid': '1', 'entityIds': [Row(entityId='E1', entitySource='syn')], 'mappedId': 'E1'},
+                {'pmid': '1', 'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=False)], 'mappedId': 'E1'},
                 # two ids, all from a trusted source
                 {
                     'pmid': '2',
-                    'entityIds': [Row(entityId='E1', entitySource='name'), Row(entityId='E2', entitySource='name')],
+                    'entityIds': [
+                        Row(entityId='E1', entitySource='name', isAcronym=False),
+                        Row(entityId='E2', entitySource='name', isAcronym=False),
+                    ],
                     'mappedId': 'E1',
                 },
                 # two ids, one from an untrusted source
                 {
                     'pmid': '3',
-                    'entityIds': [Row(entityId='E1', entitySource='name'), Row(entityId='E2', entitySource='syn')],
+                    'entityIds': [
+                        Row(entityId='E1', entitySource='name', isAcronym=False),
+                        Row(entityId='E2', entitySource='syn', isAcronym=False),
+                    ],
                     'mappedId': 'E1',
                 },
             ],
@@ -122,13 +128,21 @@ class TestMatchMapped:
         assert [result[k]['isValid'] for k in ('1', '2', '3')] == [True, True, False]
 
     def test_disambiguate_uses_ids_validated_elsewhere_in_the_publication(self, spark):
-        ambiguous = [Row(entityId='E1', entitySource='syn'), Row(entityId='E2', entitySource='syn')]
+        ambiguous = [
+            Row(entityId='E1', entitySource='syn', isAcronym=False),
+            Row(entityId='E2', entitySource='syn', isAcronym=False),
+        ]
         df = _mapped_df(
             spark,
             [
                 # an unambiguous mention validates E1 for pmid 1
-                {'pmid': '1', 'label': 'gene one', 'entityIds': [Row(entityId='E1', entitySource='syn')],
-                 'mappedId': 'E1', 'isMapped': True},
+                {
+                    'pmid': '1',
+                    'label': 'gene one',
+                    'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=False)],
+                    'mappedId': 'E1',
+                    'isMapped': True,
+                },
                 # an ambiguous mention, exploded into one row per candidate id
                 {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E1', 'isMapped': True},
                 {'pmid': '1', 'label': 'G1', 'entityIds': ambiguous, 'mappedId': 'E2', 'isMapped': True},
@@ -151,8 +165,16 @@ class TestMatchMapped:
 
     def test_generate_target_disease_cooccurrences(self, spark):
         def mention(type_, label, mapped_id, text='s1', section='abstract'):
-            return {'pmid': '1', 'text': text, 'section': section, 'type': type_, 'label': label,
-                    'mappedId': mapped_id, 'startInSentence': 0, 'endInSentence': 1}
+            return {
+                'pmid': '1',
+                'text': text,
+                'section': section,
+                'type': type_,
+                'label': label,
+                'mappedId': mapped_id,
+                'startInSentence': 0,
+                'endInSentence': 1,
+            }
 
         df = _mapped_df(
             spark,

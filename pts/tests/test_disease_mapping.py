@@ -13,14 +13,14 @@ LUT_SCHEMA = {
     'entityKind': pl.String,
     'entityType': pl.String,
     'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String, 'isAcronym': pl.Boolean})),
 }
 
 
 def _lut(rows: list[tuple[str, str, str, list[tuple[str, str]]]]) -> pl.DataFrame:
     return pl.DataFrame(
         [
-            (kind, type_, label, [{'entityId': i, 'entitySource': s} for i, s in ids])
+            (kind, type_, label, [{'entityId': i, 'entitySource': s, 'isAcronym': False} for i, s in ids])
             for kind, type_, label, ids in rows
         ],
         schema=LUT_SCHEMA,
@@ -99,8 +99,14 @@ def test_include_flags() -> None:
     out = _map(df, include_normalised_entities=True, include_entity_source=True)
     assert out.columns == ['label', 'entityLabelNormalised', 'ids']
     assert sorted(out.select('entityLabelNormalised', 'ids').rows()) == sorted([
-        (normalise_term('Papillon-Lefevre syndrome'), [{'entityId': 'MONDO_0009859', 'entitySource': 'name'}]),
-        (normalise_term('Papillon-Lefèvre syndrome'), [{'entityId': 'EFO_0000001', 'entitySource': 'exact_synonym'}]),
+        (
+            normalise_term('Papillon-Lefevre syndrome'),
+            [{'entityId': 'MONDO_0009859', 'entitySource': 'name', 'isAcronym': False}],
+        ),
+        (
+            normalise_term('Papillon-Lefèvre syndrome'),
+            [{'entityId': 'EFO_0000001', 'entitySource': 'exact_synonym', 'isAcronym': False}],
+        ),
     ])
 
 

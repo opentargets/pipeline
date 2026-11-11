@@ -1,15 +1,18 @@
-"""Tests for the polars port of OnToma's lookup-table builders, checked against OnToma's output on the same fixtures."""
+"""Tests for the polars lookup-table builders, checked against goldens on the shared fixtures."""
 
 import polars as pl
 import pytest
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.ontoma_lut.build import (
+    acronym_key,
     build_lut,
     curation_label_lut,
     disease_id_lut,
     disease_label_lut,
     drug_label_lut,
+    is_acronym_label,
+    read_acronym_allowlist,
     target_label_lut,
 )
 from pts.transformers.utils.disease_mapping import normalise as normalise_module
@@ -24,15 +27,15 @@ from tests.ontoma_lut_spark_rows import (
 )
 
 
-def test_disease_label_lut_matches_ontoma() -> None:
+def test_disease_label_lut_matches_goldens() -> None:
     assert disease_label_lut(DISEASE).rows() == DISEASE_LABEL
 
 
-def test_disease_id_lut_matches_ontoma() -> None:
+def test_disease_id_lut_matches_goldens() -> None:
     assert disease_id_lut(DISEASE).rows() == DISEASE_ID
 
 
-def test_curation_label_lut_matches_ontoma() -> None:
+def test_curation_label_lut_matches_goldens() -> None:
     out = curation_label_lut(CURATION, 'ot_curation', DISEASE)
     assert out.rows() == CURATION_LABEL
     ids = {(label, entity_id) for entity_id, label, *_ in CURATION_LABEL}
@@ -42,12 +45,12 @@ def test_curation_label_lut_matches_ontoma() -> None:
     assert not {label for _, label in ids} & {'two-id label', 'no match', 'unicode word', 'carriage return', '1)'}
 
 
-def test_target_label_lut_matches_ontoma() -> None:
+def test_target_label_lut_matches_goldens() -> None:
     assert target_label_lut(TARGET).rows() == TARGET_LABEL
     assert not {row for row in TARGET_LABEL if row[0] in {'ENSG02', 'ENSG03'}}
 
 
-def test_drug_label_lut_matches_ontoma() -> None:
+def test_drug_label_lut_matches_goldens() -> None:
     assert drug_label_lut(DRUG).rows() == DRUG_LABEL
     labels = {(entity_id, label) for entity_id, label, *_ in DRUG_LABEL}
     assert {('CHEMBL1', 'symkevi'), ('CHEMBL1', 'Trikafta'), ('CHEMBL4', 'ChEMBL4'), ('CHEMBL6', 'CHEMBL6')} <= labels
@@ -182,6 +185,114 @@ def _raw_luts() -> list[pl.DataFrame]:
     ]
 
 
-def test_build_lut_matches_ontoma() -> None:
+def test_build_lut_matches_goldens() -> None:
     assert len(LUT) > 50
     assert build_lut(_raw_luts()).rows() == LUT
+
+
+def _flags(lut: pl.DataFrame, label: str, kind: str = 'label', entity_type: str = 'DS') -> dict[str, bool]:
+    row = lut.filter(
+        (pl.col('entityLabelNormalised') == label)
+        & (pl.col('entityKind') == kind)
+        & (pl.col('entityType') == entity_type)
+    )
+    assert row.height == 1
+    return {i['entityId']: i['isAcronym'] for i in row['entityIds'][0]}
+
+
+def _allowlist(*rows: tuple[str, str]) -> pl.DataFrame:
+    return pl.DataFrame(list(rows), schema={'acronym': pl.String, 'diseaseId': pl.String}, orient='row')
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('CF', True),
+        ('C.F.', True),
+        ('vWD', True),
+        ('CF1', True),
+        ('ΑΣ', True),
+        (' ALS ', True),
+        ('CF 1', False),
+        ('COPD', False),
+        ('MASH', False),
+        ('Cystic fibrosis', False),
+        ('', False),
+    ],
+)
+def test_is_acronym_label(label: str, expected: bool) -> None:
+    assert pl.select(is_acronym_label(pl.lit(label))).item() == expected
+
+
+def test_acronym_key() -> None:
+    assert pl.select(acronym_key(pl.lit('C.F. 1-\u03a3'))).item() == 'cf1\u03c3'
+
+
+def test_acronym_flag_per_id() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_1', 'CF', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_1', 'Cystic fibrosis', 1.0, 'term', 'name', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert _flags(lut, 'cf') == {'MONDO_1': True}
+    assert _flags(lut, 'cysticfibrosi') == {'MONDO_1': False}
+
+
+def test_real_name_on_the_same_key_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(normalise_module, 'normalise', lambda label, track: 'key')
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_1', 'CF', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_1', 'Cee Eff', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert _flags(lut, 'key') == {'MONDO_1': False}
+
+
+def test_curated_labels_never_flagged() -> None:
+    lut = build_lut(
+        [_raw(('MONDO_1', 'AD', 1.0, 'symbol', 'ot_curation', 'DS', 'label'))], acronym_allowlist=_allowlist()
+    )
+    assert _flags(lut, 'ad') == {'MONDO_1': False}
+
+
+def test_non_disease_rows_never_flagged() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('ENSG1', 'TNF', 1.0, 'symbol', 'approved_symbol', 'GP', 'label'),
+                ('CHEMBL1', 'ASA', 1.0, 'symbol', 'name', 'CD', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert _flags(lut, 'tnf', entity_type='GP') == {'ENSG1': False}
+    assert _flags(lut, 'asa', entity_type='CD') == {'CHEMBL1': False}
+
+
+def test_allowlist_unflags_only_the_listed_id() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('EFO_0000764', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_9', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(('hiv', 'EFO_0000764')),
+    )
+    assert _flags(lut, 'hiv') == {'EFO_0000764': False, 'MONDO_9': True}
+
+
+def test_packaged_allowlist_parses() -> None:
+    allowlist = read_acronym_allowlist()
+    assert allowlist.schema == pl.Schema({'acronym': pl.String, 'diseaseId': pl.String})
+    assert allowlist.height > 0
+    assert allowlist.is_duplicated().not_().all()
+    assert allowlist.select(same=pl.col('acronym') == acronym_key(pl.col('acronym')))['same'].all()

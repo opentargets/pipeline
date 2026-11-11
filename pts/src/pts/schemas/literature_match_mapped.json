@@ -135,6 +135,12 @@
                     "type": "string",
                     "nullable": true,
                     "metadata": {}
+                },
+                {
+                    "name": "isAcronym",
+                    "type": "boolean",
+                    "nullable": true,
+                    "metadata": {}
                 }
             ],
             "type": "struct"
