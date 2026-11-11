@@ -1501,9 +1501,7 @@ steps:
         baseline_expression: output/baseline_expression
       destination: output/biosample_enrichment
       settings:
-        # the CELLEX specificity panels the LDSC cell type analysis uses; GTEx tissues are the panel
-        # the method was benchmarked on. Tissue x cell type pairs are reported as the cell type, with
-        # the tissue in tissueBiosampleId.
+        # the CELLEX specificity panels of the LDSC cell type analysis
         panels:
           - datasourceId: gtex
             biosampleType: tissue
@@ -1514,9 +1512,6 @@ steps:
           - datasourceId: tabula_sapiens
             biosampleType: tissue_celltype
         pool_by_disease: true
-        standard_errors: region
-        region_window: 1000000
-        density_window: 1000000
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:

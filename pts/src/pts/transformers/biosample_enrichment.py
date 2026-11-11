@@ -7,17 +7,19 @@ The regression itself is in `pts.transformers.enrichment.regression`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, fields
+from typing import Any, Literal, get_args
 
 import numpy as np
 import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.target import tss_lut
 
 BiosampleType = Literal['tissue', 'celltype', 'tissue_celltype']
 
@@ -70,31 +72,6 @@ def _panel_columns(biosample_type: BiosampleType) -> _PanelColumns:
 ENRICHMENT_APPROACH = 'l2g_regression'
 """Value of `enrichmentApproach` for this method."""
 
-OUTPUT_SCHEMA = pl.Schema({
-    'diseaseId': pl.String,
-    'studyId': pl.String,
-    'biosampleId': pl.String,
-    'tissueBiosampleId': pl.String,
-    'biosampleDataset': pl.String,
-    'biosampleFromSource': pl.String,
-    'enrichmentApproach': pl.String,
-    'beta': pl.Float64,
-    'betaError': pl.Float64,
-    'pValue': pl.Float64,
-})
-"""Release schema, as in the croissant `biosample_enrichment` record set.
-
-Exactly one of `studyId` and `diseaseId` is set: `studyId` for a single study, `diseaseId` for
-the studies of one disease pooled together. `tissueBiosampleId` is set only for a tissue x cell
-type panel, where `biosampleId` is the cell type and `tissueBiosampleId` the tissue it was
-profiled in.
-"""
-
-_STATISTICS_SCHEMA = {name: OUTPUT_SCHEMA[name] for name in ('biosampleId', 'beta', 'betaError', 'pValue')}
-
-_UNIT_BATCH = 512
-"""Units fitted per pass, keeping the genes x units score matrix to about 80 MB."""
-
 
 @dataclass(frozen=True)
 class Panel:
@@ -122,11 +99,59 @@ class Panel:
         return cls(datasource_id=entry['datasourceId'], biosample_type=kind)
 
 
+@dataclass(frozen=True)
+class Settings:
+    """The step's settings, with their defaults."""
+
+    panels: tuple[Panel, ...]
+    pool_by_disease: bool = False
+    """Score the studies of one disease together, each gene at its highest L2G among them."""
+    standard_errors: StandardErrors = 'region'
+    region_window: int = 1_000_000
+    """Width, in base pairs, of the fixed bins `chromosome:floor(tss / region_window)` that
+    `region` standard errors cluster genes by."""
+    density_window: int = 1_000_000
+    """Half-width, in base pairs, of the window around each TSS that gene density counts TSSs in."""
+
+    @classmethod
+    def from_settings(cls, settings: dict[str, Any]) -> Settings:
+        """Read the settings from the step's config.
+
+        Args:
+            settings: `panels`, a list of `{datasourceId, biosampleType}`, and any of the other fields.
+
+        Returns:
+            The settings.
+
+        Raises:
+            ValueError: for an unknown key or `standard_errors` kind, or a `region_window` given
+                with standard errors that do not use it.
+        """
+        unknown = set(settings) - {f.name for f in fields(cls)}
+        if unknown:
+            raise ValueError(f'unknown settings {sorted(unknown)}')
+        standard_errors = settings.get('standard_errors', cls.standard_errors)
+        if standard_errors not in get_args(StandardErrors):
+            raise ValueError(f'unsupported standard_errors {standard_errors!r}')
+        if 'region_window' in settings and standard_errors != 'region':
+            raise ValueError(f'region_window is only used by region standard errors, not {standard_errors!r}')
+        return cls(
+            panels=tuple(Panel.from_settings(entry) for entry in settings['panels']),
+            pool_by_disease=bool(settings.get('pool_by_disease', cls.pool_by_disease)),
+            standard_errors=standard_errors,
+            region_window=int(settings.get('region_window', cls.region_window)),
+            density_window=int(settings.get('density_window', cls.density_window)),
+        )
+
+
 def gene_covariates(target: pl.LazyFrame, density_window: int) -> pl.DataFrame:
     """Gene length, TSS density and position per gene, for every gene with a usable location.
 
     Long genes in gene-poor regions are more often both GWAS hits and tissue specific, so these
     are adjusted for to stop that alone looking like enrichment.
+
+    The TSS is the target's own or, where it has none, the strand-aware end of its location
+    (`tss_lut`).
 
     Args:
         target: the target index, with `id`, `biotype`, `tss` and `genomicLocation`.
@@ -140,12 +165,12 @@ def gene_covariates(target: pl.LazyFrame, density_window: int) -> pl.DataFrame:
         .select(
             pl.col('id').alias('geneId'),
             'biotype',
-            'tss',
             pl.col('genomicLocation').struct.field('chromosome'),
             (pl.col('genomicLocation').struct.field('end') - pl.col('genomicLocation').struct.field('start'))
             .abs()
             .alias('length'),
         )
+        .join(tss_lut(target), on='geneId', how='left')
         .filter(pl.col('length') > 0, pl.col('tss').is_not_null(), pl.col('chromosome').is_not_null())
         .unique('geneId', keep='first')
         .sort('geneId')
@@ -166,8 +191,8 @@ def gene_covariates(target: pl.LazyFrame, density_window: int) -> pl.DataFrame:
     ).drop('length')
 
 
-def gwas_studies(study: pl.LazyFrame, pool_by_disease: bool) -> pl.LazyFrame:
-    """Assign every GWAS study to the unit it is scored in.
+def gwas_studies(study: pl.LazyFrame, pool_by_disease: bool) -> pl.DataFrame:
+    """Assign every GWAS study to the unit it is scored in, and label the unit as it is released.
 
     A unit is the study itself or, when pooling, every study of the same single disease.
     Studies with no disease or with several diseases are not pooled.
@@ -177,23 +202,28 @@ def gwas_studies(study: pl.LazyFrame, pool_by_disease: bool) -> pl.LazyFrame:
         pool_by_disease: pool studies that have the same single disease into one unit.
 
     Returns:
-        `studyId`, `unitId` and `diseaseId`. `diseaseId` is set only for pooled studies.
-        Without pooling, `unitId` is the study id.
+        `studyId`, the unit's `unitId`, and its released `unitDiseaseId` and `unitStudyId`, one row
+        per GWAS study. Exactly one of the two labels is set: the disease of a pooled unit, or the
+        study of a unit of one.
     """
-    gwas = study.filter(pl.col('studyType') == 'gwas').select('studyId', 'diseaseIds')
-    if not pool_by_disease:
-        return gwas.select('studyId', pl.col('studyId').alias('unitId'), pl.lit(None, pl.String).alias('diseaseId'))
     diseases = pl.col('diseaseIds').list.unique()
-    disease_id = pl.when(diseases.list.len() == 1).then(diseases.list.first())
-    return gwas.select('studyId', disease_id.alias('diseaseId')).select(
-        'studyId',
-        # prefixed so a disease can never collide with a study id
-        pl
-        .when(pl.col('diseaseId').is_not_null())
-        .then(pl.lit('disease:') + pl.col('diseaseId'))
-        .otherwise(pl.lit('study:') + pl.col('studyId'))
-        .alias('unitId'),
-        'diseaseId',
+    pooled = pl.when(diseases.list.len() == 1).then(diseases.list.first()) if pool_by_disease else pl.lit(None)
+    members = (
+        study
+        .filter(pl.col('studyType') == 'gwas')
+        .select('studyId', pooled.cast(pl.String).alias('unitDiseaseId'))
+        .with_columns(pl.when(pl.col('unitDiseaseId').is_null()).then(pl.col('studyId')).alias('unitStudyId'))
+        .collect()
+    )
+    units = (
+        members
+        .select('unitDiseaseId', 'unitStudyId')
+        .unique()
+        .sort('unitDiseaseId', 'unitStudyId', nulls_last=True)
+        .with_row_index('unitId')
+    )
+    return members.join(units, on=['unitDiseaseId', 'unitStudyId'], nulls_equal=True).select(
+        'studyId', 'unitId', 'unitDiseaseId', 'unitStudyId'
     )
 
 
@@ -205,7 +235,7 @@ def study_gene_scores(l2g: pl.LazyFrame, credible_set: pl.LazyFrame, units: pl.L
     Args:
         l2g: the L2G predictions.
         credible_set: the credible sets, for the study of each locus.
-        units: `studyId` -> `unitId`, from `gwas_studies`; studies not in it are dropped.
+        units: `studyId` and `unitId`, from `gwas_studies`; studies not in it are dropped.
 
     Returns:
         `studyId`, `unitId`, `geneId` and `score`.
@@ -215,7 +245,7 @@ def study_gene_scores(l2g: pl.LazyFrame, credible_set: pl.LazyFrame, units: pl.L
         l2g
         .select('credibleSetId', 'geneId', 'score')
         .join(sets, on='credibleSetId')
-        .join(units, on='studyId')
+        .join(units.select('studyId', 'unitId'), on='studyId')
         .group_by('studyId', 'unitId', 'geneId')
         .agg(pl.col('score').max())
     )
@@ -291,18 +321,13 @@ def biosample_sources(baseline_expression: pl.LazyFrame, panel: Panel) -> pl.Dat
     return sources
 
 
-def _standardise(values: np.ndarray) -> np.ndarray:
-    spread = values.std(0)
-    return (values - values.mean(0)) / np.where(spread > 0, spread, 1.0)
-
-
 def score_panel(
     scores: pl.DataFrame,
     specificity: pl.DataFrame,
     covariates: pl.DataFrame,
+    settings: Settings,
     *,
-    standard_errors: StandardErrors,
-    region_window: int,
+    max_bytes: int = regression.DEFAULT_MAX_BYTES,
 ) -> pl.DataFrame:
     """Fit every unit against every biosample of one panel.
 
@@ -310,8 +335,8 @@ def score_panel(
         scores: `unitId`, `geneId` and `score`, the highest per unit and gene.
         specificity: the panel, from `specificity_matrix`.
         covariates: per-gene covariates, from `gene_covariates`.
-        standard_errors: `region`, `gene` or `classical`; see `regression.Design`.
-        region_window: window size, in base pairs, for `region` standard errors.
+        settings: for the standard errors and their region window.
+        max_bytes: passed to `regression.enrichment`.
 
     Returns:
         `unitId`, `biosampleId`, `beta`, `betaError` and `pValue`. A unit with no scored gene in
@@ -326,56 +351,42 @@ def score_panel(
         .with_row_index('geneIndex')
     )
     biosamples = [c for c in specificity.columns if c != 'geneId']
-    n_genes = universe.height
-    logger.info(f'{n_genes} genes and {len(biosamples)} biosamples in the universe')
+    logger.info(f'{universe.height} genes and {len(biosamples)} biosamples in the universe')
 
-    x = universe.select(biosamples).fill_null(0.0).to_numpy().astype(np.float64)
-    w = _standardise(universe.select('logLength', 'density').to_numpy().astype(np.float64))
-    # genes in the same window share one association signal, so are counted as one for the error
-    clusters = (
-        regression.Clusters.from_labels(
-            regression.region_labels(universe['chromosome'].to_numpy(), universe['tss'].to_numpy(), region_window)
-        )
-        if standard_errors == 'region'
-        else None
-    )
-    design = regression.Design(np.column_stack([np.ones(n_genes), w]), x, standard_errors, clusters)
-
-    in_universe = (
+    cells = (
         scores
         .join(universe.select('geneId', 'geneIndex'), on='geneId')
         .filter(pl.col('score') > 0)
-        .sort('unitId', 'geneIndex')
+        .with_columns(pl.col('unitId').rank('dense').cast(pl.UInt32).sub(1).alias('unitIndex'))
     )
-    units = in_universe.select('unitId').unique().sort('unitId')
-    unit_index = units.with_row_index('unitIndex').select('unitId', 'unitIndex')
-    cells = in_universe.join(unit_index, on='unitId')
-    logger.info(f'{units.height} units with at least one scored gene')
+    unit_index = cells.select('unitId', 'unitIndex').unique()
+    logger.info(f'{unit_index.height} units with at least one scored gene')
 
-    frames = []
-    for start in range(0, units.height, _UNIT_BATCH):
-        stop = min(start + _UNIT_BATCH, units.height)
-        batch = cells.filter(pl.col('unitIndex').is_between(start, stop - 1))
-        y = np.zeros((n_genes, stop - start))
-        y[batch['geneIndex'].to_numpy(), batch['unitIndex'].to_numpy() - start] = batch['score'].to_numpy()
-        fit = design.fit(y)
-        beta, se = fit.beta, fit.standard_error
-        with np.errstate(divide='ignore', invalid='ignore'):
-            z = beta / se
-        z = np.where(np.isfinite(z), z, np.nan)
-        # one-sided: only enrichment is of interest
-        p = regression.upper_tail_p(z)
-        frames.append(
-            pl.DataFrame({
-                'unitIndex': np.repeat(np.arange(start, stop), len(biosamples)),
-                'biosampleId': np.tile(biosamples, stop - start),
-                'beta': beta.ravel(),
-                'betaError': se.ravel(),
-                'pValue': p.ravel(),
-            }).with_columns(pl.col('unitIndex').cast(pl.UInt32))
-        )
+    results = regression.enrichment(
+        universe.select('logLength', 'density').to_numpy().astype(np.float64),
+        universe.select(biosamples).fill_null(0.0).to_numpy().astype(np.float64),
+        regression.Outcomes(
+            genes=cells['geneIndex'].to_numpy(),
+            units=cells['unitIndex'].to_numpy(),
+            values=cells['score'].to_numpy(),
+            n_units=unit_index.height,
+        ),
+        settings.standard_errors,
+        regression.region_labels(universe['chromosome'].to_numpy(), universe['tss'].to_numpy(), settings.region_window),
+        max_bytes=max_bytes,
+    )
+    frames = [
+        pl.DataFrame({
+            'unitIndex': np.repeat(np.arange(batch.start, batch.start + len(batch.beta)), len(biosamples)),
+            'biosampleId': np.tile(biosamples, len(batch.beta)),
+            'beta': batch.beta.ravel(),
+            'betaError': batch.standard_error.ravel(),
+            'pValue': batch.p_value.ravel(),
+        }).with_columns(pl.col('unitIndex').cast(pl.UInt32))
+        for batch in results
+    ]
     if not frames:
-        return pl.DataFrame(schema={'unitId': pl.String, **_STATISTICS_SCHEMA})
+        return pl.DataFrame(schema={'unitId': pl.UInt32, **biosample_enrichment_statistics_schema})
     return (
         pl
         .concat(frames)
@@ -397,53 +408,29 @@ def biosample_enrichment(
     Args:
         source: paths keyed by l2g_prediction, credible_set, study, target and baseline_expression.
         destination: path of the biosample enrichment dataset.
-        settings: `panels`, a list of `{datasourceId, biosampleType}`; and optionally
-            `pool_by_disease` (default false), `standard_errors` (default `region`),
-            `region_window` and `density_window` (both 1 Mb by default).
+        settings: as `Settings.from_settings` reads them.
         config: unused.
-
-    Raises:
-        ValueError: if `standard_errors` is not one of the supported kinds.
     """
-    panels = [Panel.from_settings(entry) for entry in settings['panels']]
-    pool_by_disease = bool(settings.get('pool_by_disease', False))
-    standard_errors = settings.get('standard_errors', 'region')
-    if standard_errors not in {'region', 'gene', 'classical'}:
-        raise ValueError(f'unsupported standard_errors {standard_errors!r}')
-    region_window = int(settings.get('region_window', 1_000_000))
-    density_window = int(settings.get('density_window', 1_000_000))
-
-    covariates = gene_covariates(scan_dataset(source['target']), density_window)
-    units = gwas_studies(scan_dataset(source['study']), pool_by_disease).collect()
+    options = Settings.from_settings(settings)
+    covariates = gene_covariates(scan_dataset(source['target']), options.density_window)
+    units = gwas_studies(scan_dataset(source['study']), options.pool_by_disease)
     study_scores = study_gene_scores(
         scan_dataset(source['l2g_prediction']), scan_dataset(source['credible_set']), units.lazy()
     ).collect()
     # when pooling, a gene's score for the disease is its highest over the disease's studies
     scores = study_scores.group_by('unitId', 'geneId').agg(pl.col('score').max())
-    # a pooled unit is reported by its disease, a single study by its study id
-    labels = (
-        units
-        .join(study_scores.select('unitId').unique(), on='unitId')
-        .select(
-            'unitId',
-            pl.when(pl.col('diseaseId').is_null()).then(pl.col('studyId')).alias('studyId'),
-            'diseaseId',
-        )
-        .unique('unitId')
+    labels = units.select(
+        'unitId', pl.col('unitDiseaseId').alias('diseaseId'), pl.col('unitStudyId').alias('studyId')
+    ).unique('unitId')
+    logger.info(
+        f'{study_scores["studyId"].n_unique()} studies in {study_scores["unitId"].n_unique()} units with L2G scores'
     )
-    logger.info(f'{study_scores["studyId"].n_unique()} studies in {labels.height} units')
 
     baseline_expression = scan_dataset(source['baseline_expression'])
     results = []
-    for panel in panels:
+    for panel in options.panels:
         logger.info(f'scoring panel {panel}')
-        fitted = score_panel(
-            scores,
-            specificity_matrix(baseline_expression, panel),
-            covariates,
-            standard_errors=standard_errors,
-            region_window=region_window,
-        )
+        fitted = score_panel(scores, specificity_matrix(baseline_expression, panel), covariates, options)
         results.append(
             fitted
             .join(labels, on='unitId')
@@ -459,7 +446,7 @@ def biosample_enrichment(
     output = (
         pl
         .concat(results, how='diagonal_relaxed')
-        .select([pl.col(name).cast(dtype) for name, dtype in OUTPUT_SCHEMA.items()])
+        .select([pl.col(name).cast(dtype) for name, dtype in biosample_enrichment_schema.items()])
         .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', 'tissueBiosampleId', nulls_last=True)
     )
     write_dataset(output, destination)

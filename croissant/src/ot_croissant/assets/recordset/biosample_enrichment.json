@@ -22,7 +22,7 @@
   },
   {
     "id": "diseaseId",
-    "description": "Identifier of the disease or phenotype tested for biosample enrichment",
+    "description": "Identifier of the disease or phenotype tested for biosample enrichment, with its studies pooled; null for a single study, which sets studyId instead",
     "foreign_key": "disease/id"
   },
   {
@@ -35,7 +35,7 @@
   },
   {
     "id": "studyId",
-    "description": "Identifier of the GWAS tested for biosample enrichment",
+    "description": "Identifier of the GWAS tested for biosample enrichment on its own; null for a pooled disease, which sets diseaseId instead",
     "foreign_key": "study/studyId"
   },
   {

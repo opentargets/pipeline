@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 import statsmodels.api as sm
 from scipy.stats import norm, spearmanr
-from statsmodels.stats.multitest import multipletests
 
 from pts.transformers.enrichment import regression
 
@@ -29,8 +28,8 @@ def _full_fit(data: dict[str, np.ndarray], unit: int, biosample: int, **fit_kwar
     return sm.OLS(data['y'][:, unit], design).fit(**fit_kwargs)
 
 
-def _fit(data: dict[str, np.ndarray], standard_errors: str, clusters=None) -> regression.Fit:
-    return regression.Design(data['c'], data['x'], standard_errors, clusters).fit(data['y'])
+def _fit(data: dict[str, np.ndarray], standard_errors: str, clusters=None, **kwargs) -> regression.Fit:
+    return regression.Design(data['c'], data['x'], standard_errors, clusters, **kwargs).fit(data['y'])
 
 
 def test_slopes_match_the_full_model_with_covariates(data) -> None:
@@ -52,13 +51,12 @@ def test_per_gene_sandwich_matches_statsmodels_hc0(data) -> None:
         assert se[unit, biosample] == pytest.approx(expected)
 
 
-def test_region_sandwich_matches_statsmodels_cluster_without_small_sample_correction(data, monkeypatch) -> None:
+def test_region_sandwich_matches_statsmodels_cluster_without_small_sample_correction(data) -> None:
     # 64 units per internal pass, fewer than N_UNITS, so pass boundaries are covered
     clusters = regression.Clusters.from_labels(data['labels'])
     batch = 64
-    monkeypatch.setattr(regression, '_CLUSTER_PASS_BYTES', batch * 8 * clusters.count * data['x'].shape[1])
     assert batch < N_UNITS
-    se = _fit(data, 'region', clusters).standard_error
+    se = _fit(data, 'region', clusters, max_bytes=batch * 8 * clusters.count * data['x'].shape[1]).standard_error
     for unit, biosample in [(0, 1), (batch, 2), (N_UNITS - 1, 3)]:
         expected = _full_fit(
             data, unit, biosample, cov_type='cluster', cov_kwds={'groups': data['labels'], 'use_correction': False}
@@ -118,15 +116,31 @@ def test_upper_tail_p_matches_the_normal_survival_function() -> None:
     assert p[1, 2] > 0  # 1 - cdf(10) would round to exactly 0
 
 
-def test_multiple_testing_matches_statsmodels_per_row_ignoring_nan() -> None:
-    rng = np.random.default_rng(1)
-    p = rng.random((6, 9)) ** 3
-    p[2, [0, 4]] = np.nan
-    q = regression.benjamini_hochberg(p)
-    bonf = regression.bonferroni(p)
-    for row in range(p.shape[0]):
-        finite = np.isfinite(p[row])
-        np.testing.assert_allclose(q[row, finite], multipletests(p[row, finite], method='fdr_bh')[1])
-        np.testing.assert_allclose(bonf[row, finite], multipletests(p[row, finite], method='bonferroni')[1])
-        assert np.isnan(q[row, ~finite]).all()
-        assert np.isnan(bonf[row, ~finite]).all()
+@pytest.mark.parametrize('standard_errors', ['region', 'gene', 'classical'])
+def test_enrichment_batches_units_and_matches_the_design(data, standard_errors) -> None:
+    genes, units = np.nonzero(data['y'])
+    outcomes = regression.Outcomes(genes, units, data['y'][genes, units], N_UNITS)
+    # covariates without an intercept, on their own scale; enrichment adds one and standardises
+    raw = data['c'][:, 1:] * [3.0, 0.01] + 5.0
+    # fewer than N_UNITS units per batch, so batch boundaries are covered
+    max_bytes = 8 * N_GENES * 40
+    batches = list(
+        regression.enrichment(raw, data['x'], outcomes, standard_errors, data['labels'], max_bytes=max_bytes)
+    )
+    assert [b.start for b in batches] == [0, 40, 80, 120]
+    beta = np.vstack([b.beta for b in batches])
+    se = np.vstack([b.standard_error for b in batches])
+    p = np.vstack([b.p_value for b in batches])
+    clusters = regression.Clusters.from_labels(data['labels'])
+    expected = _fit(data, standard_errors, clusters)
+    np.testing.assert_allclose(beta, expected.beta, rtol=1e-10)
+    np.testing.assert_allclose(se, expected.standard_error, rtol=1e-10)
+    np.testing.assert_allclose(p, regression.upper_tail_p(expected.beta / expected.standard_error), rtol=1e-10)
+
+
+def test_standardise_centres_and_scales_columns_and_only_centres_a_constant_one() -> None:
+    values = np.column_stack([np.array([1.0, 2.0, 3.0, 6.0]), np.full(4, 7.0)])
+    out = regression.standardise(values)
+    np.testing.assert_allclose(out.mean(0), 0.0, atol=1e-12)
+    np.testing.assert_allclose(out[:, 0].std(), 1.0)
+    np.testing.assert_array_equal(out[:, 1], 0.0)

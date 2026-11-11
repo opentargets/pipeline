@@ -6,9 +6,10 @@ import numpy as np
 import polars as pl
 import pytest
 
+from pts.schemas.biosample_enrichment import biosample_enrichment_schema
 from pts.transformers.biosample_enrichment import (
-    OUTPUT_SCHEMA,
     Panel,
+    Settings,
     biosample_enrichment,
     biosample_sources,
     gene_covariates,
@@ -171,7 +172,7 @@ def _run(workspace: dict[str, str], **settings) -> pl.DataFrame:
 
 def test_output_has_the_pinned_schema(workspace) -> None:
     out = _run(workspace)
-    assert out.schema == OUTPUT_SCHEMA
+    assert out.schema == biosample_enrichment_schema
 
 
 def test_the_planted_biosample_gets_the_top_p(workspace) -> None:
@@ -309,6 +310,24 @@ def test_an_empty_panel_is_an_error(workspace) -> None:
         specificity_matrix(expression, Panel('gtex', 'celltype'))
 
 
+@pytest.mark.parametrize(
+    ('settings', 'message'),
+    [
+        ({'standard_errors': 'gene', 'region_window': 500_000}, 'region_window'),
+        ({'pool_by_studies': True}, 'unknown settings'),
+    ],
+)
+def test_settings_reject_what_would_be_ignored(settings, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        Settings.from_settings({'panels': [{'datasourceId': 'gtex', 'biosampleType': 'tissue'}], **settings})
+
+
+def test_settings_defaults() -> None:
+    options = Settings.from_settings({'panels': [{'datasourceId': 'gtex', 'biosampleType': 'tissue'}]})
+    assert options == Settings(panels=(Panel('gtex', 'tissue'),))
+    assert (options.standard_errors, options.region_window, options.density_window) == ('region', 1_000_000, 1_000_000)
+
+
 def test_a_panel_needs_a_known_biosample_type() -> None:
     with pytest.raises(ValueError, match='biosampleType'):
         Panel.from_settings({'datasourceId': 'gtex', 'biosampleType': 'organ'})
@@ -334,19 +353,43 @@ def test_gene_covariates_count_tsss_within_the_window() -> None:
     np.testing.assert_allclose(cov['logLength'].to_numpy(), np.log10([1_000, 10, 100, 100]))
 
 
+def test_gene_covariates_fall_back_to_the_stranded_location_for_a_missing_tss() -> None:
+    target = pl.DataFrame(
+        {
+            'id': ['plus', 'minus', 'unstranded'],
+            'biotype': ['protein_coding'] * 3,
+            'tss': [None, None, None],
+            'genomicLocation': [
+                {'chromosome': '1', 'start': 100, 'end': 900, 'strand': 1},
+                {'chromosome': '1', 'start': 2_000, 'end': 5_000, 'strand': -1},
+                {'chromosome': '1', 'start': 7_000, 'end': 8_000, 'strand': 0},
+            ],
+        },
+        schema_overrides={'tss': pl.Int64},
+    )
+    cov = gene_covariates(target.lazy(), density_window=1_000).sort('geneId')
+    assert dict(cov.select('geneId', 'tss').iter_rows()) == {'minus': 5_000, 'plus': 100}
+
+
 def test_gwas_studies_pool_only_single_disease_studies() -> None:
     study = pl.DataFrame({
         'studyId': ['s1', 's2', 's3', 's4', 's5', 'q'],
         'studyType': ['gwas', 'gwas', 'gwas', 'gwas', 'gwas', 'eqtl'],
         'diseaseIds': [['A'], ['A', 'A'], ['A', 'B'], [], None, ['A']],
     })
-    pooled = {r[0]: r[1:] for r in gwas_studies(study.lazy(), pool_by_disease=True).collect().iter_rows()}
-    assert pooled == {
-        's1': ('disease:A', 'A'),
-        's2': ('disease:A', 'A'),
-        's3': ('study:s3', None),
-        's4': ('study:s4', None),
-        's5': ('study:s5', None),
+    pooled = gwas_studies(study.lazy(), pool_by_disease=True)
+    # each study's unit, as it is released: (diseaseId, studyId)
+    assert {r[0]: r[1:] for r in pooled.select('studyId', 'unitDiseaseId', 'unitStudyId').iter_rows()} == {
+        's1': ('A', None),
+        's2': ('A', None),
+        's3': (None, 's3'),
+        's4': (None, 's4'),
+        's5': (None, 's5'),
     }
-    unpooled = {r[0]: r[1:] for r in gwas_studies(study.lazy(), pool_by_disease=False).collect().iter_rows()}
-    assert unpooled == {s: (s, None) for s in ['s1', 's2', 's3', 's4', 's5']}
+    # s1 and s2 are scored together; every other study on its own
+    assert pooled.group_by('unitId').agg('studyId')['studyId'].list.len().sort().to_list() == [1, 1, 1, 2]
+    unpooled = gwas_studies(study.lazy(), pool_by_disease=False)
+    assert {r[0]: r[1:] for r in unpooled.select('studyId', 'unitDiseaseId', 'unitStudyId').iter_rows()} == {
+        s: (None, s) for s in ['s1', 's2', 's3', 's4', 's5']
+    }
+    assert unpooled['unitId'].is_unique().all()

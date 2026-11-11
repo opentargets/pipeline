@@ -84,7 +84,7 @@
       "Genetics",
       "Disease"
     ],
-    "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics"
+    "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics. Every row leaves one or two key columns null: exactly one of diseaseId (a disease's studies pooled) and studyId (a single study) is set, and tissueBiosampleId is set only for tissue x cell type biosamples. The key is unique with nulls compared as equal"
   },
   {
     "id": "clinical_indication",
