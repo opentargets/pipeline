@@ -1,31 +1,31 @@
 [
   {
     "id": "allelicRequirements",
-    "description": "Inheritance patterns"
+    "description": "Genetic model of the burden test (e.g. 'dominant', 'recessive')"
   },
   {
     "id": "ancestry",
-    "description": "Genetic origin of a population"
+    "description": "Ancestry of the population included in the burden analysis"
   },
   {
     "id": "ancestryId",
-    "description": "Identifier of the ancestry in the HANCESTRO ontology [bioregistry:hancestro]"
+    "description": "Identifier of the ancestry of the population included in the burden analysis in the HANCESTRO ontology"
   },
   {
     "id": "beta",
-    "description": "Effect size of numeric traits"
+    "description": "Effect size of the gene burden on a quantitative trait"
   },
   {
     "id": "betaConfidenceIntervalLower",
-    "description": "Lower value of the confidence interval"
+    "description": "Lower value of the confidence interval of the effect size"
   },
   {
     "id": "betaConfidenceIntervalUpper",
-    "description": "Upper value of the confidence interval"
+    "description": "Upper value of the confidence interval of the effect size"
   },
   {
     "id": "cohortId",
-    "description": "Identifier of the studied cohort"
+    "description": "Cohort(s) the burden analysis was run on (e.g. 'UK Biobank 450k', 'Genes & Health')"
   },
   {
     "id": "datasourceId",
@@ -45,11 +45,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Trait or phenotype label as reported by the burden study"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "Trait or phenotype code as reported by the burden study (e.g. FinnGen endpoint, UK Biobank field)"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -71,11 +71,11 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers of the publications describing the burden study"
   },
   {
     "id": "oddsRatio",
-    "description": "Size of effect captured as odds ratio"
+    "description": "Effect size of the gene burden on a binary trait captured as odds ratio"
   },
   {
     "id": "oddsRatioConfidenceIntervalLower",
@@ -87,15 +87,15 @@
   },
   {
     "id": "pValueExponent",
-    "description": "Exponent of the p-value"
+    "description": "Exponent of the p-value of the burden test"
   },
   {
     "id": "pValueMantissa",
-    "description": "Mantissa of the p-value"
+    "description": "Mantissa of the p-value of the burden test"
   },
   {
     "id": "projectId",
-    "description": "The identifer of the project that generated the data"
+    "description": "Project or consortium that generated the burden results (e.g. 'Genebass', 'FinnGen', 'Epi25 collaborative')"
   },
   {
     "id": "publicationDate",
@@ -107,43 +107,43 @@
   },
   {
     "id": "releaseVersion",
-    "description": "Open Targets data release version"
+    "description": "Release version of the source data (e.g. FinnGen 'R12')"
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "P-value of the burden test"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the log10 of the burden test p-value"
   },
   {
     "id": "sex",
-    "description": "Sex of the samples/population included in the analysis"
+    "description": "Sex of the samples included in the burden analysis"
   },
   {
     "id": "statisticalMethod",
-    "description": "Statistical method used to calculate the association"
+    "description": "Identifier of the burden test model, typically encoding the test, the variant mask and the allele frequency threshold (e.g. 'ADD-SKATO_D.0.001')"
   },
   {
     "id": "statisticalMethodOverview",
-    "description": "Overview of the statistical method used to calculate the association"
+    "description": "Description of the burden test, the variant mask and the allele frequency threshold"
   },
   {
     "id": "studyCases",
-    "description": "Number of cases in case-control study"
+    "description": "Number of cases in the burden analysis of a binary trait"
   },
   {
     "id": "studyCasesWithQualifyingVariants",
-    "description": "Number of cases in case-control study that carry at least one allele of the qualifying variant"
+    "description": "Number of cases carrying at least one qualifying variant in the target"
   },
   {
     "id": "studySampleSize",
-    "description": "Sample size of study"
+    "description": "Total number of samples in the burden analysis"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier or gene symbol of the target as reported by the burden study"
   },
   {
     "id": "targetId",
@@ -152,7 +152,7 @@
   },
   {
     "id": "urls",
-    "description": "Reference to linked external resource (e.g. clinical trials, studies, package inserts, reports, etc.)"
+    "description": "Links to the burden result in the source portal (e.g. 'AstraZeneca PheWAS Portal')"
   },
   {
     "id": "urls/niceName",

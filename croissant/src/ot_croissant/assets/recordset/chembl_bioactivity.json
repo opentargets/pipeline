@@ -1,0 +1,106 @@
+[
+  {
+    "id": "actionTypes",
+    "description": "Action types (e.g., INHIBITOR) of the curated mechanisms of action of the drug on this target, from the drug mechanism of action dataset. Empty where the drug has no mechanism of action on it"
+  },
+  {
+    "id": "activityId",
+    "description": "ChEMBL activity identifier of the measurement. With targetId, identifies the row: a measurement on a protein complex has one row per target it is credited to",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "activityOutcome",
+    "description": "Outcome the depositor recorded for the measurement: active, inactive or inconclusive. Recorded mostly for PubChem BioAssay screens, and for a few other datasets (e.g., a proteomics study). A potency fitted to a curve judged inactive or inconclusive still has a pChEMBL value. Empty where no outcome is recorded"
+  },
+  {
+    "id": "assayActionType",
+    "description": "Effect of the molecule on its target in this measurement (e.g., INHIBITOR), as ChEMBL records it on the activity"
+  },
+  {
+    "id": "assayDescription",
+    "description": "ChEMBL description of the assay"
+  },
+  {
+    "id": "assayId",
+    "description": "ChEMBL assay identifier"
+  },
+  {
+    "id": "assayOrganism",
+    "description": "Organism of the protein or system the assay used, where ChEMBL records it (e.g., Rattus norvegicus for a rat homologue)"
+  },
+  {
+    "id": "assayType",
+    "description": "ChEMBL assay type: B (binding), F (functional) or U (unclassified)"
+  },
+  {
+    "id": "complexFlag",
+    "description": "Whether the measurement is credited to more than one target, because the ChEMBL target is a complex or family with no single binding-site gene, or its protein maps to several genes"
+  },
+  {
+    "id": "confidenceScore",
+    "description": "ChEMBL confidence (0-9) in the assignment of the assay to its target: 9, 7 and 5 when the assay used the human protein itself; 8, 6 and 4 when ChEMBL could not confirm that, usually because the assay names no organism, sometimes because it used another species (see assayOrganism). Lower scores (e.g., 2, a subcellular fraction) are rare"
+  },
+  {
+    "id": "docType",
+    "description": "Type of the source document (e.g., PUBLICATION, DATASET)"
+  },
+  {
+    "id": "documentId",
+    "description": "ChEMBL identifier of the source document"
+  },
+  {
+    "id": "drugFromSourceId",
+    "description": "ChEMBL identifier of the tested molecule"
+  },
+  {
+    "id": "drugId",
+    "description": "Open Targets drug identifier of the tested molecule or its parent. Most tested molecules are not drugs or clinical candidates, so most rows have none",
+    "foreign_key": "drug_molecule/id"
+  },
+  {
+    "id": "le",
+    "description": "Ligand efficiency: binding energy per heavy atom (kcal/mol per heavy atom), from ChEMBL. Empty where ChEMBL computes none"
+  },
+  {
+    "id": "lle",
+    "description": "Lipophilic ligand efficiency: pChEMBL value minus the calculated logP (ALogP), from ChEMBL. Empty where ChEMBL computes none"
+  },
+  {
+    "id": "measurementClass",
+    "description": "What the measurement quantifies: affinity (Ki, Kd), inhibition (IC50) or functional_potency (EC50, AC50, XC50, Potency, ED50)"
+  },
+  {
+    "id": "pchemblValue",
+    "description": "Negative base-10 logarithm of the molar half-maximal response, concentration or potency, comparable across measurement types"
+  },
+  {
+    "id": "pubmedId",
+    "description": "PubMed identifier of the source document"
+  },
+  {
+    "id": "standardMeasurementType",
+    "description": "Standardised type of the measurement (e.g., IC50)"
+  },
+  {
+    "id": "standardMeasurementValue",
+    "description": "Standardised value of the measurement, in nM"
+  },
+  {
+    "id": "targetFromSourceId",
+    "description": "ChEMBL target identifier"
+  },
+  {
+    "id": "targetId",
+    "description": "Open Targets target credited with the measurement: the gene of a binding-site component where ChEMBL records one, otherwise every gene of the ChEMBL target",
+    "isPrimaryKey": true,
+    "foreign_key": "target/id"
+  },
+  {
+    "id": "variantFromSource",
+    "description": "Mutation of the target protein used in the assay, as ChEMBL records it (e.g., V600E). Empty for the wild type or where ChEMBL names no mutation"
+  },
+  {
+    "id": "year",
+    "description": "Publication year of the source document"
+  }
+]

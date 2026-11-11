@@ -967,7 +967,38 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         target: output/target
-      destination: output/drug_mechanism_of_action
+        aact: input/drug_mechanism_of_action/aact_moa
+        literature: input/drug_mechanism_of_action/literature_moa
+        clinical_report: output/clinical_report
+        chembl_molecule: intermediate/chembl_molecule
+      destination:
+        output: output/drug_mechanism_of_action
+        candidates: intermediate/drug_mechanism_of_action_candidates
+        chembl_report: intermediate/drug_mechanism_of_action_chembl_report
+      settings:
+        release_min_confidence: 0.80
+        exclude_stages:
+          aact:
+            - APPROVAL
+          literature:
+            - APPROVAL
+        report_min_confidence: 0.70
+        link_share: 0.8
+        class_level_genes: 20
+        suggestion_min_confidence: 0.80
+  ##################################################################################################
+
+  #: CHEMBL_BIOACTIVITY STEP :######################################################################
+  chembl_bioactivity:
+    - name: transform chembl_bioactivity
+      transformer: chembl_bioactivity
+      source:
+        chembl: input/chembl/chembl.tar.gz
+        target: output/target
+        drug_molecule: output/drug_molecule
+        mechanism_of_action: output/drug_mechanism_of_action
+      destination:
+        bioactivity: output/chembl_bioactivity
   ##################################################################################################
 
   #: CHEMBL_MOLECULE STEP :#########################################################################
@@ -1035,6 +1066,46 @@ steps:
       settings:
         store_uri: gs://clinical_staging/store
         snapshot: '{{snapshot}}'
+  ##################################################################################################
+
+  #: AACT_MOA STEP :###############################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG, with
+  # release_uri pointed at gs://clinical_staging/aact/${staging_version}; the record stores sit outside it
+  aact_moa:
+    - name: transform aact_moa
+      transformer: clinical_mira.aact_moa
+      source:
+        aact: input/aact.zip
+        extraction: extraction
+      destination:
+        moa: extraction
+      settings:
+        store_uri: gs://clinical_staging/store
+        snapshot: '{{snapshot}}'
+        max_compute: 5000
+  ##################################################################################################
+
+  #: MOA_LITERATURE STEP :#########################################################################
+  # Not part of a release. Runs in the `clinical_staging` DAG with release_uri at
+  # gs://clinical_staging/literature/<staging_version>; reads the copies pis makes of the literature match and
+  # drug molecules of the input release and publishes a snapshot under gs://clinical_staging/literature
+  moa_literature:
+    - name: transform moa_literature
+      transformer: clinical_mira.moa_literature
+      source:
+        match: input/literature/26.09/match
+        drug_molecule: input/literature/26.09/drug_molecule
+      destination:
+        moa: gs://clinical_staging/literature
+      settings:
+        store_uri: gs://clinical_staging/store
+        input_release: '26.09'
+        import_experiment_cache: gs://clinical_staging/store/moa_literature/seed/moa_literature_seed-2026-11-09.jsonl
+        import_for_tag: claude-opus-5-5-p15139b69
+        import_for_release: '26.09'
+        min_seeded_share: 0.60
+        max_compute: 4500
+        shard_size: 5000
   ##################################################################################################
 
   #: CLINICAL_MINING_MODELS STEP :#################################################################

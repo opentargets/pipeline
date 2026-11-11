@@ -357,33 +357,50 @@ def restored_dump(
 
 
 def _build_select_sql(
-    table: str, schema_name: str, columns: Sequence[str] | None = None, order_by: Sequence[str] | None = None
+    table: str,
+    schema_name: str,
+    columns: Sequence[str] | None = None,
+    order_by: Sequence[str] | None = None,
+    float_columns: Sequence[str] = (),
 ) -> str:
-    """Build the statement that reads one table."""
-    selected = ', '.join(f'"{c}"' for c in columns) if columns else '*'
+    """Build the statement that reads one table, casting ``float_columns`` to ``double precision``."""
+    selected = (
+        ', '.join(f'"{c}"::double precision AS "{c}"' if c in float_columns else f'"{c}"' for c in columns)
+        if columns
+        else '*'
+    )
     sql = f'SELECT DISTINCT {selected} FROM "{schema_name}"."{table}"'  # noqa: S608 trusted caller
     if order_by:
         sql += ' ORDER BY ' + ', '.join(f'"{c}"' for c in order_by)
     return sql
 
 
-def _check_order_by(tables: Mapping[str, Sequence[str] | None], order_by: Mapping[str, Sequence[str]]) -> None:
-    """Reject an ordering that names a table or a column that is not being read.
+def _check_projection(
+    tables: Mapping[str, Sequence[str] | None],
+    by_table: Mapping[str, Sequence[str]],
+    argument: str,
+    *,
+    needs_columns: bool = False,
+) -> None:
+    """Reject an ``argument`` that names a table or a column that is not being read.
 
     ``SELECT DISTINCT`` can only order by expressions in the select list, so a
-    column outside the projection is a postgres error in the middle of the read.
-    Catching it here says which table and column, before anything is restored.
+    column outside the projection is a postgres error in the middle of the read;
+    a cast is written into the select list, so it ``needs_columns`` listed.
+    Catching either here says which table and column, before anything is restored.
     """
-    for table, columns in order_by.items():
+    for table, columns in by_table.items():
         if table not in tables:
-            raise PostgresError(f'order_by names {table}, which is not one of the tables being read: {list(tables)}')
+            raise PostgresError(f'{argument} names {table}, which is not one of the tables being read: {list(tables)}')
         projection = tables[table]
         if projection is None:
+            if needs_columns:
+                raise PostgresError(f'{argument} names {table}, whose columns are not listed: list them')
             continue
         if missing := [c for c in columns if c not in projection]:
             raise PostgresError(
-                f'order_by names {missing} for {table}, which is not in its projection: {list(projection)}. '
-                f'A SELECT DISTINCT can only be ordered by columns it selects.'
+                f'{argument} names {missing} for {table}, which is not in its projection: {list(projection)}. '
+                f'A SELECT DISTINCT can only use columns it selects.'
             )
 
 
@@ -394,6 +411,7 @@ def read_dump_tables(
     schema_name: str,
     archive_member: str = '*.dmp',
     order_by: Mapping[str, Sequence[str]] | None = None,
+    float_columns: Mapping[str, Sequence[str]] | None = None,
     scratch_root: str | Path | None = None,
 ) -> dict[str, pl.DataFrame]:
     """Restore tables from a ``pg_dump`` archive and read each one into polars.
@@ -408,6 +426,10 @@ def read_dump_tables(
         order_by: Table name to the columns to order that table's read by. Needed
             for any table whose row order can reach the output; opt-in, since a
             sort is wasted on reads that do not.
+        float_columns: Table name to the ``numeric`` columns to read as
+            ``double precision``. Needed for an unconstrained ``numeric`` (no
+            declared scale) whose values carry different scales, which polars
+            refuses to read ("decimal scale is not equal to expected scale").
         scratch_root: See :func:`restored_dump`.
 
     Returns:
@@ -418,16 +440,21 @@ def read_dump_tables(
             is otherwise silent — ``pg_restore`` is happy, the query works, and
             the step carries on with no rows — so it is checked here. A caller
             that genuinely expects an empty table wants :func:`restored_dump`.
-            Also if ``order_by`` names a table or a column that is not being read.
+            Also if ``order_by`` or ``float_columns`` names a table or a column
+            that is not being read.
     """
     order_by = order_by or {}
-    _check_order_by(tables, order_by)
+    float_columns = float_columns or {}
+    _check_projection(tables, order_by, 'order_by')
+    _check_projection(tables, float_columns, 'float_columns', needs_columns=True)
 
     with restored_dump(
         source, tables=list(tables), schema_name=schema_name, archive_member=archive_member, scratch_root=scratch_root
     ) as uri:
         frames = {
-            name: pl.read_database_uri(_build_select_sql(name, schema_name, columns, order_by.get(name)), uri)
+            name: pl.read_database_uri(
+                _build_select_sql(name, schema_name, columns, order_by.get(name), float_columns.get(name, ())), uri
+            )
             for name, columns in tables.items()
         }
 

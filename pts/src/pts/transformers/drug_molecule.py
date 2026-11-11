@@ -132,7 +132,7 @@ def process_drug_index(
     Returns:
         Final drug index DataFrame.
     """
-    max_phase = _compute_max_phase_per_drug(clinical_report)
+    max_phase = compute_max_phase_per_drug(clinical_report)
     indications = _process_clinical_report_indications(clinical_report, disease)
 
     # Every chemical probe drug id, for the is_drug filter.
@@ -241,7 +241,7 @@ def _describe() -> pl.Expr:
     )
 
 
-def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
+def compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
     """Compute the overall maximum clinical stage for each drug across all clinical reports.
 
     Explodes the drugs array, maps WITHDRAWAL/PHASE_4 to APPROVAL, ranks stages,

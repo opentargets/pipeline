@@ -1,15 +1,15 @@
 [
   {
     "id": "biomarkerName",
-    "description": "Altered characteristics that influences the disease process"
+    "description": "Name of the biomarker as reported by the Cancer Genome Interpreter (e.g. 'EGFR exon 20 insertions', 'KIT wildtype')"
   },
   {
     "id": "biomarkers",
-    "description": "List of biomarkers"
+    "description": "Genetic alterations and expression changes that define the biomarker"
   },
   {
     "id": "biomarkers/geneExpression",
-    "description": "List of gene expression altering biomarkers"
+    "description": "Gene expression changes (over- or under-expression) that define the biomarker"
   },
   {
     "id": "biomarkers/geneExpression/id",
@@ -17,29 +17,29 @@
   },
   {
     "id": "biomarkers/geneExpression/name",
-    "description": "Raw gene expression annotation from the source"
+    "description": "Gene expression alteration as reported by the Cancer Genome Interpreter"
   },
   {
     "id": "biomarkers/geneticVariation",
-    "description": "List of gene expression altering biomarkers"
+    "description": "Genetic alterations (e.g. mutations, amplifications, deletions, fusions) that define the biomarker"
   },
   {
     "id": "biomarkers/geneticVariation/functionalConsequenceId",
-    "description": "Functional consequene identifier of the variant biomarker [bioregistry:so]",
+    "description": "Sequence ontology (SO) identifier of the alteration type of the biomarker",
     "foreign_key": "so/id"
   },
   {
     "id": "biomarkers/geneticVariation/id",
-    "description": "Variant identifier",
+    "description": "Identifier in CHROM_POS_REF_ALT notation of the biomarker variant, when the alteration is a specific variant",
     "foreign_key": "variant/variantId"
   },
   {
     "id": "biomarkers/geneticVariation/name",
-    "description": "Name of the variant biomarker"
+    "description": "Alteration as reported by the Cancer Genome Interpreter (e.g. 'MET:amp', 'PTEN:del')"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "Evidence level of the biomarker-drug association in the Cancer Genome Interpreter (e.g. 'FDA guidelines', 'NCCN guidelines', 'Early trials', 'Pre-clinical')"
   },
   {
     "id": "datasourceId",
@@ -51,7 +51,7 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Tumour type as reported by the Cancer Genome Interpreter"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -64,16 +64,16 @@
   },
   {
     "id": "drugFromSource",
-    "description": "Drug name/family in resource of origin"
+    "description": "Drug or drug family associated with the biomarker, as reported by the Cancer Genome Interpreter"
   },
   {
     "id": "drugId",
-    "description": "Open Targets drug identifier [bioregistry:chembl]",
+    "description": "Open Targets drug identifier, when the drug reported by the Cancer Genome Interpreter could be mapped",
     "foreign_key": "drug_molecule/id"
   },
   {
     "id": "drugResponse",
-    "description": "Observed patterns of drug response"
+    "description": "Ontology term of the drug response associated with the biomarker (e.g. response to drug, drug resistance, drug toxicity)"
   },
   {
     "id": "evidenceDate",
@@ -86,7 +86,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers supporting the biomarker-drug association"
   },
   {
     "id": "publicationDate",
@@ -98,11 +98,11 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; 1.0 for all Cancer Genome Interpreter biomarkers"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as reported by the Cancer Genome Interpreter"
   },
   {
     "id": "targetId",
@@ -111,7 +111,7 @@
   },
   {
     "id": "urls",
-    "description": "Reference to linked external resource (e.g. clinical trials, studies, package inserts, reports, etc.)"
+    "description": "Links to the guidelines, clinical trials or reports supporting the biomarker-drug association"
   },
   {
     "id": "urls/niceName",

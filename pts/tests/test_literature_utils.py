@@ -190,6 +190,20 @@ class TestEPMCPublication:
         # PMC1 gains its pmid; PMC3 disagrees with the lut and PMC4 is not in it, so both are dropped
         assert sorted(tuple(r) for r in result.collect()) == [('PMC1', '1'), ('PMC2', '2')]
 
+    def test_identify_abstracts_by_pprid(self, spark):
+        abstract = spark.createDataFrame(
+            [('1', None), (None, 'PPR2'), ('PPR3', None), (None, None)],
+            schema='pmid string, pprid string',
+        )
+        result = EPMCPublication._identify_abstracts_by_pprid(abstract)
+        assert result.columns == ['pmid', 'pprid']
+        assert [tuple(r) for r in result.collect()] == [
+            ('1', None),
+            ('PPR2', 'PPR2'),
+            ('PPR3', None),
+            (None, None),
+        ]
+
     def test_merge_abstracts_with_fulltexts(self, spark):
         abstract = spark.createDataFrame([('1', 'abstract'), ('2', 'abstract')], schema='pmid string, kind string')
         fulltext = spark.createDataFrame([('2', 'PMC2', 'fulltext')], schema='pmid string, pmcid string, kind string')

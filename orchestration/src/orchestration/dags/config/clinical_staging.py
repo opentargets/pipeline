@@ -6,6 +6,7 @@ Required to initialise PIS and PTS steps.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,8 +26,11 @@ class ClinicalStagingConfig:
     does — load each application's own config and point its ``release_uri`` at
     the run's destination — for the steps this pipeline needs.
 
-    Every step belongs to a source, ``aact`` or ``clinical_mining``, and writes
-    under ``gs://clinical_staging/<source>/<version>``.
+    Every step belongs to a source, ``aact``, ``clinical_mining`` or ``literature``, and its release
+    URI is ``gs://clinical_staging/<source>/<version>``. Every step writes its outputs there except
+    ``pts_moa_literature``, which publishes its snapshot to
+    ``gs://clinical_staging/literature/<input_release>/moa_literature/<tag>``, ``input_release`` being
+    the published release it reads.
     """
 
     def __init__(self) -> None:
@@ -47,7 +51,11 @@ class ClinicalStagingConfig:
         self.boot_disk_size: int = conf.get('boot_disk_size')
         """Boot disk size in GB. Sized for the PIS and PTS container images."""
 
-        self.versions = {'aact': self.staging_version, 'clinical_mining': self.staging_version}
+        self.versions = {
+            'aact': self.staging_version,
+            'clinical_mining': self.staging_version,
+            'literature': self.staging_version,
+        }
         """The version of each source."""
 
         pis_path = config_path.parents[4] / 'pis' / 'config.yaml'
@@ -79,7 +87,7 @@ class ClinicalStagingConfig:
         registry = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
         self.images = {
             'pis': f'{registry}/pis:{conf.get("pis_version")}',
-            'pts': f'{registry}/pts:{conf.get("pts_version")}',
+            'pts': f'{registry}/pts-nlp:{conf.get("pts_version")}',
         }
         """The image and tag used to run each stage's steps."""
 
@@ -90,7 +98,7 @@ class ClinicalStagingConfig:
         """Return where a source writes: ``<bucket>/<source>/<version>``.
 
         Args:
-            source: ``aact`` or ``clinical_mining``.
+            source: ``aact``, ``clinical_mining`` or ``literature``.
 
         Returns:
             str: The version directory of the source.
@@ -140,6 +148,29 @@ class ClinicalStagingConfig:
         """
         return self.step_definition(step_name).get('machine_type') or self.machine_type
 
+    def execution_timeout_for(self, step_name: str) -> timedelta | None:
+        """Return how long a step may run.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            timedelta | None: The step's ``execution_timeout_hours``, or None if it declares none.
+        """
+        hours = self.step_definition(step_name).get('execution_timeout_hours')
+        return timedelta(hours=hours) if hours is not None else None
+
+    def service_account_for(self, step_name: str) -> str | None:
+        """Return the service account a step's VM runs as.
+
+        Args:
+            step_name: The name of the step, in the form ``{stage}_{step}``.
+
+        Returns:
+            str | None: The step's ``service_account``, or None if it declares none.
+        """
+        return self.step_definition(step_name).get('service_account')
+
     def step_config(self, step_name: str) -> dict[str, Any]:
         """Return the configuration to upload for a step.
 
@@ -174,19 +205,28 @@ class ClinicalStagingConfig:
     def step_env_vars(self, step_name: str) -> dict[str, str]:
         """Return the environment variables a step's container needs.
 
-        Both applications take the same pair, under their own prefix.
+        Both applications take the same pair, under their own prefix. The step's
+        ``container_env`` is added to it.
 
         Args:
             step_name: The name of the step, in the form ``{stage}_{step}``.
 
         Returns:
             dict[str, str]: The environment variables.
+
+        Raises:
+            ValueError: If the step's ``container_env`` redefines the step or config path variable.
         """
         stage, step = step_name.split('_', 1)
-        return {
+        env = {
             f'{stage.upper()}_STEP': step,
             f'{stage.upper()}_CONFIG_PATH': '/config.yaml',
         }
+        extra = self.step_definition(step_name).get('container_env') or {}
+        clash = sorted(env.keys() & extra.keys())
+        if clash:
+            raise ValueError(f'{step_name} container_env redefines {", ".join(clash)}')
+        return {**env, **extra}
 
     def config_uri(self, step_name: str) -> str:
         """Return the URI the config for a step is uploaded to.

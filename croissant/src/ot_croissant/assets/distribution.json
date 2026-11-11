@@ -87,6 +87,15 @@
     "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics. Every row leaves one or two key columns null: exactly one of diseaseId (a disease's studies pooled) and studyId (a single study) is set, and tissueBiosampleId is set only for tissue x cell type biosamples. The key is unique with nulls compared as equal"
   },
   {
+    "id": "chembl_bioactivity",
+    "nice_name": "Drug - ChEMBL bioactivity",
+    "tags": [
+      "Drug",
+      "Target"
+    ],
+    "description": "Bioactivity measurements from ChEMBL 37 with a pChEMBL value: affinity, inhibition and functional potency of molecules against human protein targets, mapped to Ensembl gene identifiers, one row per measurement and target. Measurements from homologue assays are included, flagged by confidenceScore. Targeted protein degradation measurements are not included"
+  },
+  {
     "id": "clinical_indication",
     "nice_name": "Clinical indication",
     "tags": [

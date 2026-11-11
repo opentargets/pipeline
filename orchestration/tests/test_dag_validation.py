@@ -1,5 +1,6 @@
 """Try to parse and validate the DAGs."""
 
+from datetime import timedelta
 from typing import cast
 
 from airflow.models import DagBag
@@ -73,3 +74,60 @@ def test_clinical_report_runs_on_a_vm(dag_bag: DagBag) -> None:
         dag.get_task('pts_clinical_report.run_pts_clinical_report'),
     )
     assert run.machine_type == 'n2d-standard-16'
+
+
+def test_aact_moa_runs_after_the_extraction(dag_bag: DagBag) -> None:
+    """aact_moa waits for the extraction, runs with its timeout and the Claude workspace, and gates nothing else."""
+    dag = dag_bag.dags['clinical_staging']
+    start = dag.get_task('pts_aact_moa.upload_config_pts_aact_moa')
+    assert start.upstream_task_ids == {'pts_aact_trial_extraction.end_pts_aact_trial_extraction'}
+    run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_aact_moa.run_pts_aact_moa'))
+    assert run.execution_timeout == timedelta(hours=30)
+    assert run.container_env is not None
+    assert run.container_env['PTS_STEP'] == 'aact_moa'
+    assert run.container_env['ANTHROPIC_GOOGLE_CLOUD_PROJECT'] == 'open-targets-eu-dev'
+    assert run.machine_type == 'n1-highmem-8'
+    assert not dag.get_task('pts_aact_moa.end_pts_aact_moa').downstream_task_ids
+    other = cast(
+        ComputeEngineRunContainerizedWorkloadSensor,
+        dag.get_task('pts_aact_trial_models.run_pts_aact_trial_models'),
+    )
+    assert other.execution_timeout is None
+
+
+def test_drug_mechanism_of_action_follows_its_candidate_inputs(dag_bag: DagBag) -> None:
+    """drug_mechanism_of_action waits for target, clinical_report and chembl_molecule, and the DAG stays acyclic."""
+    dag = dag_bag.dags['unified_pipeline']
+    moa_run = dag.get_task('pts_drug_mechanism_of_action.run_pts_drug_mechanism_of_action')
+    upstream = moa_run.get_flat_relative_ids(upstream=True)
+    for step in ('pts_target', 'pts_clinical_report', 'pts_chembl_molecule'):
+        assert f'{step}.end_{step}' in upstream
+    assert not any(task_id.startswith('pts_drug_mechanism_of_action_aact') for task_id in dag.task_ids)
+    dag.topological_sort()
+
+
+def test_moa_literature_waits_for_its_copies_with_its_timeout_and_env(dag_bag: DagBag) -> None:
+    """moa_literature waits for the pis copy of its inputs only, runs with its timeout and the Claude workspace,
+    and gates nothing."""
+    dag = dag_bag.dags['clinical_staging']
+    start = dag.get_task('pts_moa_literature.upload_config_pts_moa_literature')
+    assert start.upstream_task_ids == {'pis_moa_literature.end_pis_moa_literature'}
+    assert not dag.get_task('pis_moa_literature.upload_config_pis_moa_literature').upstream_task_ids
+    run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_moa_literature.run_pts_moa_literature'))
+    assert run.execution_timeout == timedelta(hours=30)
+    assert run.container_env is not None
+    assert run.container_env['PTS_STEP'] == 'moa_literature'
+    assert run.container_env['ANTHROPIC_GOOGLE_CLOUD_PROJECT'] == 'open-targets-eu-dev'
+    assert run.machine_type == 'n2d-highmem-32'
+    assert not dag.get_task('pts_moa_literature.end_pts_moa_literature').downstream_task_ids
+
+
+def test_only_the_llm_steps_carry_a_vm_service_account(dag_bag: DagBag) -> None:
+    """The two LLM tasks attach the dedicated account; every other VM task keeps the default."""
+    account = 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
+    llm_runs = {'pts_aact_moa.run_pts_aact_moa', 'pts_moa_literature.run_pts_moa_literature'}
+    dag = dag_bag.dags['clinical_staging']
+    runs = [t for t in dag.tasks if isinstance(t, ComputeEngineRunContainerizedWorkloadSensor)]
+    assert len(runs) > 2
+    for task in runs:
+        assert task.vm_service_account == (account if task.task_id in llm_runs else None), task.task_id
