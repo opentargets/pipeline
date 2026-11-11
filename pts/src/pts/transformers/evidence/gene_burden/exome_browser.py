@@ -32,7 +32,6 @@ class Study:
     disease: str
     disease_id: str
     browser: str
-    literature: list[str] | None = None
 
 
 def read_gene_results(path: str) -> pl.DataFrame:
@@ -101,7 +100,6 @@ def to_evidence(significant: pl.DataFrame, study: Study, release: str) -> pl.Laz
             studyCasesWithQualifyingVariants=pl.col('studyCasesWithQualifyingVariants'),
             statisticalMethod=pl.col('statisticalMethod'),
             statisticalMethodOverview=pl.col('statisticalMethod').replace_strict(METHOD_DESCRIPTIONS),
-            literature=pl.lit(study.literature, dtype=pl.List(pl.String)),
             urls=pl.concat_list(pl.struct(url=url, niceName=pl.lit(f'{study.project_id} browser'))),
         )
         .pipe(to_parsed)
