@@ -486,6 +486,21 @@ steps:
     depends_on:
       - pts_l2g
 
+  # VIDRA (variant-informed dose-response analysis)
+  pts_vidra_input:
+    depends_on:
+      - pts_credible_set_annotation
+      - gentropy_colocalisation
+      - pts_variant
+      - pts_study
+      - pts_target
+      - pts_disease
+      - pts_biosample
+      - pts_evidence_clinvar
+      - pts_ontoma
+      - pis_evidence_gene_burden
+      - pts_vidra_az_exwas
+
   pts_l2g:
     machine_type: n2d-standard-64
     depends_on:

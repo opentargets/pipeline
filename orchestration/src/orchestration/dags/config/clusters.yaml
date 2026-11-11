@@ -90,6 +90,30 @@ clusters:
       - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
     idle_delete_ttl: 1800
 
+  # VIDRA: the Spark steps of the dose-response analysis (pts_vidra_input, pts_vidra_bayes). Sized for
+  # the Bayesian step, which fits one Stan model per gene-disease pair (~170k pairs) and needs local
+  # SSD scratch for Stan's output files; the input step joins the 18 GB colocalisation dataset.
+  pts_vidra:
+    image_version: '{{dataproc_image_version_pts}}'
+    num_masters: 1
+    num_workers: 2
+    autoscaling_policy: otg-etl-25-secondary
+    worker_machine_type: n2d-highmem-16
+    worker_disk_type: 'pd-ssd'
+    master_disk_size: 512
+    worker_disk_size: 256
+    idle_delete_ttl: 3600
+    internal_ip_only: false
+    metadata:
+      PTS_REF: 'pts%40v{{pts_version}}'
+    properties:
+      'spark:spark.sql.adaptive.enabled': 'true'
+      'spark:spark.sql.parquet.compression.codec': 'zstd'
+      'spark:spark.sql.ansi.enabled': 'false'
+      'spark:spark.sql.shuffle.partitions': '2000'
+    init_actions_uris:
+      - '{{pts_init_action_uri}}'
+
   pts_association:
     image_version: '{{dataproc_image_version_pts}}'
     num_masters: 1

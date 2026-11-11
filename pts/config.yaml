@@ -1576,6 +1576,59 @@ steps:
       settings:
         locus_to_gene_threshold: *l2g_threshold
 
+  #: VIDRA INPUT STEP :#############################################################################
+  # VIDRA (variant-informed dose-response analysis): the analysis-ready table of variant observations
+  # per gene and disease that the Bayesian step fits. Reads the platform's genetics outputs, the
+  # variant index for protein-function annotations, EVA for ClinVar, and the AstraZeneca PheWAS Portal
+  # for rare variants (vidra_az_exwas) and gene burden tests (the raw collapsing analyses, not the
+  # p-value-filtered gene burden evidence).
+  vidra_input:
+    - name: pyspark vidra input
+      pyspark: vidra_input
+      source:
+        colocalisation: output/colocalisation
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+        study: output/study
+        variant: output/variant
+        target: output/target
+        disease: output/disease
+        biosample: output/biosample
+        evidence_eva: output/evidence_eva
+        az_exwas: intermediate/vidra/az_exwas
+        az_burden_binary: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-binary
+        az_burden_quantitative: input/evidence/gene_burden/astrazeneca/azphewas-com-470k-phewas-quantitative
+        ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
+      destination: intermediate/vidra/analysis_ready
+      settings:
+        coloc_h4_threshold: 0.7
+        gwas_p_value_threshold: 5.0e-8
+        # QTL study types of a colocalisation and their GqtlLab (0 eQTL, 1 pQTL); sQTL and tuQTL are left
+        # out because the direction of their effect on the gene product is not that of their beta.
+        qtl_study_types:
+          eqtl: 0
+          sceqtl: 0
+          pqtl: 1
+        # QTL studies are kept when their biosample is, or descends from, blood, blood plasma or a
+        # haematopoietic cell (the original pipeline's blood-tissue restriction). Empty keeps every tissue.
+        blood_biosample_ancestors:
+          - UBERON_0000178
+          - UBERON_0001969
+          - CL_0000988
+        burden_collapsing_models:
+          - ptv
+          - ptv5pcnt
+          - ptvraredmg
+        # as_gpnstar = 1 - sigmoid(a + b * llr), llr the GPN-Star calibrated score of the variant index.
+        # Fitted by pts/tools/vidra_gpn_star_calibration.py on sz/platform-2612-4 (2026-11-11): logistic
+        # regression of 58,156 pathogenic / likely pathogenic against 123,902 benign / likely benign
+        # ClinVar missense variants at ClinVar's class balance, AUROC 0.877. Refit when the GPN-Star
+        # scores (pis gpn_star_revision) or ClinVar change.
+        gpn_star:
+          a: -4.9365
+          b: -0.6547
+  ##################################################################################################
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view
