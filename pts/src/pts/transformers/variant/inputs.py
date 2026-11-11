@@ -32,6 +32,7 @@ from pts.transformers.variant.prepared import (
 )
 from pts.transformers.variant.rows import collect_variants
 from pts.transformers.variant.settings import VariantSettings, VariantSource
+from pts.transformers.variant.timing import timed, timed_function
 from pts.transformers.variant.vep.alleles import contig_spans, write_fai
 from pts.transformers.variant.vep.colocated import extract_all_vars
 from pts.transformers.variant.vep.fastvep import build_cache, prepare_gff3
@@ -78,16 +79,17 @@ def amino_acid_projection(path: str, target: Path) -> Path:
 def _reference(sources: VariantSource, binary: str, directory: Path) -> tuple[Path, dict[str, tuple[int, int]], Path]:
     """The FASTA uncompressed with its `.fai`, its `contig_spans`, and the prepared GFF3 with its fastVEP cache."""
     directory.mkdir(parents=True)
-    fasta = _local(sources.fasta, directory)
+    fasta = timed_function('Copying the FASTA', _local)(sources.fasta, directory)
     plain = directory / Path(fasta).name.removesuffix('.gz')
-    with gzip.open(fasta, 'rb') as source, plain.open('wb') as out:
+    with timed('Decompressing the FASTA'), gzip.open(fasta, 'rb') as source, plain.open('wb') as out:
         shutil.copyfileobj(source, out, COPY_BYTES)
     if fasta != sources.fasta:
         Path(fasta).unlink()
-    spans = contig_spans(plain)
-    write_fai(plain, spans)
-    gff3 = prepare_gff3(sources.gff3, directory)
-    build_cache(gff3, plain, binary)
+    with timed('Indexing the FASTA'):
+        spans = contig_spans(plain)
+        write_fai(plain, spans)
+    gff3 = timed_function('Preparing the GFF3', prepare_gff3)(sources.gff3, directory)
+    timed_function('Building the fastVEP cache', build_cache)(gff3, plain, binary)
     return plain, spans, gff3
 
 
@@ -106,9 +108,10 @@ def _sift(sources: VariantSource, core: str, path: Path) -> Path:
 
 def chromosome_rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dict[str, int]]:
     """Each chromosome's rows, sorted by position, written to `directory/<chromosome>.parquet`, and their number."""
-    rows = collect_variants(
-        sources.uniprot_variants, sources.eva, sources.pharmacogenomics, sources.credible_set_variant
-    ).collect(engine='streaming')
+    with timed('Collecting the variant rows'):
+        rows = collect_variants(
+            sources.uniprot_variants, sources.eva, sources.pharmacogenomics, sources.credible_set_variant
+        ).collect(engine='streaming')
     if rows.is_empty():
         raise ValueError('No variant rows found')
     directory.mkdir(parents=True)
@@ -143,28 +146,43 @@ def shared_inputs(
     located = []
     for path in sources.variant_annotations:
         logger.info('Locating variant annotations in {}', path)
-        located.append(annotation_parts_by_chromosome(path))
+        located.append(timed_function(f'Locating {path}', annotation_parts_by_chromosome)(path))
     amino_acids = tuple(
-        amino_acid_projection(path, scratch / 'amino_acids' / f'{number:03d}.parquet')
+        timed_function(f'Projecting {path}', amino_acid_projection)(
+            path, scratch / 'amino_acids' / f'{number:03d}.parquet'
+        )
         for number, path in enumerate(sources.amino_acid_annotations)
     )
     for chromosome in sorted(rows):
         if options.gpn_star is not None and chromosome not in gpn_star and chromosome in STANDARD:
             logger.warning('No GPN-Star scores for chromosome {}', chromosome)
     with ThreadPoolExecutor() as pool:
-        reference = pool.submit(_reference, sources, options.fastvep_binary, scratch / 'reference')
-        all_vars = pool.submit(extract_all_vars, sources.vep_cache, scratch / 'all_vars')
+        reference = pool.submit(
+            timed_function('Preparing the reference', _reference),
+            sources,
+            options.fastvep_binary,
+            scratch / 'reference',
+        )
+        all_vars = pool.submit(
+            timed_function('Extracting the VEP cache all_vars', extract_all_vars),
+            sources.vep_cache,
+            scratch / 'all_vars',
+        )
         alphamissense = pool.submit(
-            partition_alphamissense,
+            timed_function('Partitioning AlphaMissense', partition_alphamissense),
             sources.alphamissense,
             sources.alphamissense_isoforms,
             scratch / 'alphamissense',
             rows,
         )
-        core = pool.submit(_local_directory, sources.core, scratch / 'core')
-        sift = pool.submit(lambda: _sift(sources, core.result(), scratch / 'sift.parquet'))
-        gerp = pool.submit(_local, sources.gerp, scratch / 'gerp')
-        ancestor = pool.submit(_local, sources.ancestor, scratch / 'ancestor')
+        core = pool.submit(timed_function('Copying the core dump', _local_directory), sources.core, scratch / 'core')
+        sift = pool.submit(
+            lambda: timed_function('Building the SIFT matrices', _sift)(
+                sources, core.result(), scratch / 'sift.parquet'
+            )
+        )
+        gerp = pool.submit(timed_function('Copying GERP', _local), sources.gerp, scratch / 'gerp')
+        ancestor = pool.submit(timed_function('Copying the ancestor', _local), sources.ancestor, scratch / 'ancestor')
         plain_fasta, contigs, gff3 = reference.result()
         preparation = PreparationSources(
             ancestor=ancestor.result(),
