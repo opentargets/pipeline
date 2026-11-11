@@ -295,13 +295,13 @@ def test_allowlist_unflags_only_the_listed_id() -> None:
     lut = build_lut(
         [
             _raw(
-                ('EFO_0000764', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_0005109', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
                 ('MONDO_9', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
             )
         ],
-        acronym_allowlist=_allowlist(('hiv', 'EFO_0000764')),
+        acronym_allowlist=_allowlist(('hiv', 'MONDO_0005109')),
     )
-    assert _flags(lut, 'hiv') == {'EFO_0000764': False, 'MONDO_9': True}
+    assert _flags(lut, 'hiv') == {'MONDO_0005109': False, 'MONDO_9': True}
 
 
 def test_packaged_allowlist_parses() -> None:

@@ -23,10 +23,10 @@ def test_acronym_label_not_mapped(tmp_path: Path) -> None:
 
 
 def test_unflagged_short_label_mapped(tmp_path: Path) -> None:
-    lut = _label_lut(tmp_path, 'HIV', 'EFO_0000764', False)
+    lut = _label_lut(tmp_path, 'HIV', 'MONDO_0005109', False)
     evidence = pl.LazyFrame({'diseaseFromSource': ['HIV'], 'diseaseFromSourceId': ['x']})
     out = add_efo_mapping(evidence, lut, id_col_name=None).collect()
-    assert out.rows() == [('HIV', 'x', 'EFO_0000764')]
+    assert out.rows() == [('HIV', 'x', 'MONDO_0005109')]
 
 
 def test_id_mapping_unaffected(tmp_path: Path) -> None:
