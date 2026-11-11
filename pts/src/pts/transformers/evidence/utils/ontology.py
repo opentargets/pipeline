@@ -56,9 +56,10 @@ def add_efo_mapping(
     )
     all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId')).list.n_unique()
     kept_ids = non_acronym_ids(pl.col(label_result))
-    lost = mapped.select((all_ids > kept_ids.list.len().fill_null(0)).sum()).collect().item()
+    labelled = mapped.collect()
+    lost = labelled.select((all_ids > kept_ids.list.len().fill_null(0)).sum()).item()
     logger.info(f'{lost} evidence rows lost disease ids from acronym label mappings')
-    mapped = mapped.with_columns(kept_ids.alias(label_result))
+    mapped = labelled.lazy().with_columns(kept_ids.alias(label_result))
     mapped_ids = pl.col(label_result).fill_null([])
 
     if id_col_name and disease_id_lut_path:
