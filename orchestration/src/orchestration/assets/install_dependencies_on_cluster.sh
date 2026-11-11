@@ -8,6 +8,9 @@ set -x
 
 PTS_REF=$(/usr/share/google/get_metadata_value attributes/PTS_REF)
 readonly PTS_REF
+# Optional: comma-separated pts extras to install as well (clusters.yaml metadata), e.g. `vidra`.
+PTS_EXTRAS=$(/usr/share/google/get_metadata_value attributes/PTS_EXTRAS || true)
+readonly PTS_EXTRAS
 readonly REPO_URI="https://github.com/opentargets/pipeline"
 readonly UV_VERSION="0.12.24"
 DATAPROC_CLUSTER_NAME=$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)
@@ -83,9 +86,15 @@ function main() {
     run_with_retry git -C "${src}" checkout -q FETCH_HEAD
     git -C "${src}" log -1 --format='pts source: %H %s'
 
+    local extras=()
+    local extra
+    for extra in ${PTS_EXTRAS//,/ }; do
+        extras+=(--extra "${extra}")
+    done
+
     # pyspark and py4j come from the image's Spark
     "${python}" -m uv export --quiet --project "${src}/pts" --frozen --no-dev --no-emit-project \
-        --format pylock.toml --no-emit-package pyspark --no-emit-package py4j \
+        --format pylock.toml --no-emit-package pyspark --no-emit-package py4j "${extras[@]}" \
         --output-file "${src}/pylock.toml"
 
     "${python}" -m uv pip uninstall --python "${python}" pts || true

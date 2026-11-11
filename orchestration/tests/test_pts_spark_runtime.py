@@ -50,7 +50,26 @@ def test_pts_clusters_run_the_init_action_uploaded_into_the_run(
     assert config.pts_init_action_uri == f'{config.release_uri}/etc/bin/install_dependencies_on_cluster.sh'
     assert config.pts_init_action_source.is_file(), config.pts_init_action_source
     for name, cluster in pts_clusters.items():
-        assert cluster['init_actions_uris'] == [config.pts_init_action_uri], name
+        assert cluster['init_actions_uris'][0] == config.pts_init_action_uri, name
+        # only the VIDRA cluster runs a second init action, the one that installs CmdStan and the Stan models
+        extra_actions = [config.vidra_init_action_uri] if name == 'pts_vidra' else []
+        assert cluster['init_actions_uris'][1:] == extra_actions, name
+
+
+def test_vidra_cluster_installs_cmdstan_and_the_models(
+    config: UnifiedPipelineConfig, pts_clusters: dict[str, dict]
+) -> None:
+    """pts_vidra gets cmdstanpy through the pts extra and CmdStan with the models through its own init action."""
+    assert config.vidra_init_action_uri == f'{config.release_uri}/etc/bin/install_vidra_stan.sh'
+    assert config.vidra_init_action_source.is_file(), config.vidra_init_action_source
+    vidra = pts_clusters['pts_vidra']
+    assert vidra['metadata']['PTS_EXTRAS'] == 'vidra'
+    assert vidra['metadata']['VIDRA_STAN_URI'].startswith('gs://') and vidra['metadata']['VIDRA_STAN_URI'].endswith(
+        '.tar.gz'
+    )
+    for name, cluster in pts_clusters.items():
+        if name != 'pts_vidra':
+            assert 'PTS_EXTRAS' not in cluster.get('metadata', {}), name
 
 
 def test_pts_clusters_keep_ansi_mode_off(pts_clusters: dict[str, dict]) -> None:
@@ -65,6 +84,10 @@ def test_pts_clusters_load_no_spark_nlp_jar(pts_clusters: dict[str, dict]) -> No
         assert 'spark-nlp' not in cluster['properties'].get('spark:spark.jars', ''), name
 
 
-def test_pts_clusters_install_no_extra(config: UnifiedPipelineConfig) -> None:
-    """torch and the NER models are image-only; the clusters install pts' base dependencies alone."""
-    assert '--extra' not in config.pts_init_action_source.read_text()
+def test_pts_clusters_install_no_extra_by_default(config: UnifiedPipelineConfig) -> None:
+    """torch and the NER models are image-only; a cluster installs pts' base dependencies alone unless its
+    PTS_EXTRAS metadata names extras (pts_vidra: cmdstanpy)."""
+    script = config.pts_init_action_source.read_text()
+    assert script.count('--extra') == 1
+    assert 'extras+=(--extra "${extra}")' in script
+    assert 'for extra in ${PTS_EXTRAS//,/ }; do' in script

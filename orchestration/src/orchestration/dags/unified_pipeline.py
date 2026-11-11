@@ -270,6 +270,22 @@ with DAG(
                 if 'create_cluster' in steps[step_name]:
                     init_action.set_downstream(steps[step_name]['create_cluster'])
 
+        # the VIDRA cluster also installs CmdStan and the compiled Stan models
+        vidra_init_action = UploadFileOperator(
+            task_id='upload_vidra_init_action',
+            project_id=GCP_PROJECT_PLATFORM,
+            src_path=config.vidra_init_action_source,
+            dst_uri=config.vidra_init_action_uri,
+            retries=3,
+            retry_delay=timedelta(minutes=2),
+        )
+        for cluster_name, steps_in_cluster in pts_clusters.items():
+            if not cluster_name.startswith('pts_vidra'):
+                continue
+            for step_name in steps_in_cluster:
+                if 'create_cluster' in steps[step_name]:
+                    vidra_init_action.set_downstream(steps[step_name]['create_cluster'])
+
         # delete a cluster after its steps have run
         for cluster_name, steps_in_cluster in pts_clusters.items():
             x = DeleteClusterOperator(

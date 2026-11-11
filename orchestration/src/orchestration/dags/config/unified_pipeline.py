@@ -110,6 +110,8 @@ class UnifiedPipelineConfig:
                 'dataproc_image_version_gentropy': boot_images['dataproc_image_version_gentropy'],
                 'requester_pays_project_id': GCP_PROJECT_PLATFORM,
                 'pts_init_action_uri': self.pts_init_action_uri,
+                'vidra_init_action_uri': self.vidra_init_action_uri,
+                'vidra_stan_uri': up.get('vidra_stan_uri'),
             },
         )
         """The cluster definitions."""
@@ -158,6 +160,16 @@ class UnifiedPipelineConfig:
     def pts_init_action_uri(self) -> str:
         """GCS URI the DAG uploads the pts init action to, and the pts clusters run it from."""
         return f'{self.release_uri}/etc/bin/install_dependencies_on_cluster.sh'
+
+    @property
+    def vidra_init_action_source(self) -> Path:
+        """Local path of the init action that installs CmdStan and VIDRA's Stan models on the pts_vidra cluster."""
+        return Path(__file__).parents[2] / 'assets' / 'install_vidra_stan.sh'
+
+    @property
+    def vidra_init_action_uri(self) -> str:
+        """GCS URI the DAG uploads the VIDRA init action to, and the pts_vidra cluster runs it from."""
+        return f'{self.release_uri}/etc/bin/install_vidra_stan.sh'
 
     @property
     def is_ppp(self) -> bool:

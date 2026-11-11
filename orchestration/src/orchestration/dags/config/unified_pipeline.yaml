@@ -30,6 +30,11 @@ pts_version: "26.12.0rc45"
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
 gentropy_version: "4.0.0-rc.3"
 
+# VIDRA's CmdStan and compiled Stan models, installed on the pts_vidra cluster. Built and uploaded by
+# pts/tools/build_vidra_stan.sh; the name carries the CmdStan version and the hash of the .stan files,
+# so a model change needs a new tarball and a new uri here.
+vidra_stan_uri: "gs://ot-team/dconsidine/vidra/stan/vidra-stan-2.34.1-e99fddf76d8a.tar.gz"
+
 # Boot images, pinned per release. Full Dataproc subminor versions
 # (https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-version-clusters)
 # and a cos-cloud image name from the cos-133-lts family. gentropy needs 2.2: its hail
@@ -500,6 +505,9 @@ steps:
       - pts_ontoma
       - pis_evidence_gene_burden
       - pts_vidra_az_exwas
+  pts_vidra_bayes:
+    depends_on:
+      - pts_vidra_input
 
   pts_l2g:
     machine_type: n2d-standard-64

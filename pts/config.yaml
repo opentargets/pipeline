@@ -1629,6 +1629,32 @@ steps:
           b: -0.6547
   ##################################################################################################
 
+  #: VIDRA BAYES STEP :#############################################################################
+  # Fits VIDRA's Stan models to every gene-disease pair of the analysis-ready table (CmdStan and the
+  # compiled models come from the pts_vidra cluster's init action, see clusters.yaml) and writes the
+  # dose-response posterior summaries, the VIDRA dataset of the release.
+  vidra_bayes:
+    - name: pyspark vidra bayes
+      pyspark: vidra_bayes
+      source: intermediate/vidra/analysis_ready
+      destination:
+        results: output/vidra
+        stan_inputs: intermediate/vidra/stan_inputs
+        variant_results: intermediate/vidra/variant_posteriors
+      settings:
+        h1: 0.1
+        stan_exe_dir: /opt/vidra/stan
+        cmdstan_dir: /opt/vidra/cmdstan-2.34.1
+        # Debug outputs: the exact rows the models see, and per-variant latent posteriors (a second fit).
+        save_stan_inputs: false
+        save_variant_outputs: false
+        output_partitions: 200
+      properties:
+        # one Stan fit per task; pairs are small, so many tasks per executor
+        spark.executor.cores: '4'
+        spark.task.cpus: '1'
+  ##################################################################################################
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view

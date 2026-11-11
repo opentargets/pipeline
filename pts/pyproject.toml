@@ -38,6 +38,8 @@ llm = [
     "anthropic[google-cloud]>=2.5.0",
     "openai>=3.26.0",
 ]
+# VIDRA's Bayesian step (vidra_bayes), installed on its Dataproc cluster through PTS_EXTRAS
+vidra = ["cmdstanpy>=1.2.4"]
 # image-only: pts clusters do not install it
 # xgboost-cpu has no macos wheels
 l2g = [

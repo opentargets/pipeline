@@ -106,6 +106,10 @@ clusters:
     internal_ip_only: false
     metadata:
       PTS_REF: 'pts%40v{{pts_version}}'
+      # cmdstanpy, through the pts init action
+      PTS_EXTRAS: 'vidra'
+      # CmdStan and the compiled models, through install_vidra_stan.sh
+      VIDRA_STAN_URI: '{{vidra_stan_uri}}'
     properties:
       'spark:spark.sql.adaptive.enabled': 'true'
       'spark:spark.sql.parquet.compression.codec': 'zstd'
@@ -113,6 +117,7 @@ clusters:
       'spark:spark.sql.shuffle.partitions': '2000'
     init_actions_uris:
       - '{{pts_init_action_uri}}'
+      - '{{vidra_init_action_uri}}'
 
   pts_association:
     image_version: '{{dataproc_image_version_pts}}'

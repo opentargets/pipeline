@@ -573,5 +573,13 @@
       "Target"
     ],
     "description": "Gene sets for GO terms, Reactome pathways and ChEMBL target classes. Each set holds the targets annotated to the term or to any of its descendants"
+  },
+  {
+    "id": "vidra",
+    "nice_name": "VIDRA dose-response",
+    "tags": [
+      "Target-Disease"
+    ],
+    "description": "Variant-informed dose-response analysis (VIDRA): for every gene-disease pair, the posterior of the slope of disease risk on protein function across the pair's common, rare, ClinVar and coding variants, from a Bayesian hierarchical model."
   }
 ]

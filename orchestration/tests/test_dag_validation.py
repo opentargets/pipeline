@@ -58,10 +58,16 @@ def test_pts_init_action_is_uploaded_before_every_pts_cluster(dag_bag: DagBag) -
     creates = {t.task_id for t in dag.tasks if t.task_id.startswith('pts_') and '.create_cluster_' in t.task_id}
     assert creates, 'expected pts steps that create a cluster'
     assert upload.downstream_task_ids == creates
+    vidra_upload = cast(UploadFileOperator, dag.get_task('upload_vidra_init_action'))
+    assert str(vidra_upload.src_path).endswith('assets/install_vidra_stan.sh')
+    vidra_creates = {task_id for task_id in creates if '.create_cluster_pts_vidra' in task_id}
+    assert vidra_creates, 'expected the VIDRA steps to create the pts_vidra cluster'
+    assert vidra_upload.downstream_task_ids == vidra_creates
     for task_id in creates:
         cluster_config = cast(dict, cast(CreateClusterOperator, dag.get_task(task_id)).cluster_config)
-        actions = cluster_config['initialization_actions']
-        assert [a['executable_file'] for a in actions] == [str(upload.dst_uri)], task_id
+        actions = [a['executable_file'] for a in cluster_config['initialization_actions']]
+        expected = [str(upload.dst_uri)] + ([str(vidra_upload.dst_uri)] if task_id in vidra_creates else [])
+        assert actions == expected, task_id
 
 
 def test_clinical_report_runs_on_a_vm(dag_bag: DagBag) -> None:
