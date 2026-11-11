@@ -33,9 +33,11 @@ docker run --rm --platform linux/amd64 \
     cd "${PREFIX}"
     curl -sSL "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" | tar xz
     cd "cmdstan-${CMDSTAN_VERSION}"
-    make -j"$(nproc)" build >/dev/null
+    # Precompiled Stan headers take ~3 GB of RAM each: keep the parallelism low for the Docker memory limit.
+    make -j2 build >/dev/null
     cp /stan/VIDRA.stan /stan/VIDRA_single_variant.stan "${PREFIX}/stan/"
-    make -j2 "${PREFIX}/stan/VIDRA" "${PREFIX}/stan/VIDRA_single_variant"
+    make "${PREFIX}/stan/VIDRA"
+    make "${PREFIX}/stan/VIDRA_single_variant"
     rm -f "${PREFIX}"/stan/*.hpp "${PREFIX}"/stan/*.o
     rm -rf examples src/test
     "${PREFIX}/stan/VIDRA" info >/dev/null
