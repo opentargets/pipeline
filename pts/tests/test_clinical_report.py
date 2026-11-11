@@ -717,6 +717,12 @@ def _release_source(
     extraction = _extraction('NCT0001', 'asthma', 'aspirin')
     publish_snapshot(extraction, str(tmp_path / 'extraction'), EXTRACTION.metadata(digest, None), None)
     source['trial_extraction'] = str(tmp_path / 'extraction')
+    (tmp_path / 'stage_downgrades.tsv').write_text('ttdDrugId\tdrugFromSource\tdiseaseFromSource\treason\n')
+    (tmp_path / 'link_corrections.tsv').write_text(
+        'ttdDrugId\tdrugFromSource\tdiseaseFromSource\tdrugId\tdiseaseId\treason\n'
+    )
+    source['ttd_stage_downgrades'] = str(tmp_path / 'stage_downgrades.tsv')
+    source['ttd_link_corrections'] = str(tmp_path / 'link_corrections.tsv')
     return source
 
 
@@ -798,6 +804,16 @@ def test_release_fails_before_restoring_dumps_on_an_aact_drug_snapshot_of_anothe
     with pytest.raises(
         ValueError, match=r'aact_drug_entities extraction_tag expected .*found .*ffffffffffff-pdeadbeef'
     ):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_invalid_ttd_curation(tmp_path: Path) -> None:
+    source = _release_source(tmp_path)
+    Path(source['ttd_stage_downgrades']).write_text(
+        'ttdDrugId\tdrugFromSource\tdiseaseFromSource\treason\nD0B002\tb\tAsthma\ta\nD0B002\tb\tasthma\tb\n'
+    )
+    with pytest.raises(ValueError, match='duplicate'):
         clinical_report_module.clinical_report(source, {}, {}, None)
 
 

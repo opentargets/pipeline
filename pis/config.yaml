@@ -333,7 +333,7 @@ steps:
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#########################################################################
-  # Everything is copied from gs://clinical_staging, written by the staging DAG. The tags in the
+  # Everything but the TTD curation is copied from gs://clinical_staging, written by the staging DAG. The tags in the
   # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
   clinical_report:
     - name: copy aact dump
@@ -397,6 +397,15 @@ steps:
         - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/data.parquet
         - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/metadata.json
       destination: input/clinical_report/mining_disease_entities
+
+    - name: explode ot_curation ttd files
+      foreach:
+        - clinical/ttd/stage_downgrades.tsv
+        - clinical/ttd/link_corrections.tsv
+      do:
+        - name: copy ${each}
+          source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/${each}
+          destination: input/ot_curation/${each}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################

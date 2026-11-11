@@ -1149,6 +1149,8 @@ steps:
         aact_drug_entities: input/clinical_report/aact_drug_entities
         mining_drug_entities: input/clinical_report/mining_drug_entities
         mining_disease_entities: input/clinical_report/mining_disease_entities
+        ttd_stage_downgrades: input/ot_curation/clinical/ttd/stage_downgrades.tsv
+        ttd_link_corrections: input/ot_curation/clinical/ttd/link_corrections.tsv
       destination:
         output: output/clinical_report
   ##################################################################################################
