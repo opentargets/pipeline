@@ -10,6 +10,13 @@ things gentropy does are deliberately absent:
   attach train/test parquets to the model repo.
 * **Weights & Biases.** The metrics it carried are written to `metrics.json` in the release instead,
   versioned with the run that produced them.
+
+Repeated credible sets: every credible set is tagged with its association unit (lead variant plus
+sorted positive genes, as in opentargets/gentropy#1314). Training weights a credible set by
+min(1, sqrt(k / n)) over the n credible sets of its unit (see
+`model.association_unit_weights`). The held-out metrics are reported three ways on every held-out
+credible set: unweighted (`heldOut`, comparable with earlier releases), with the training weights
+(`heldOutUnitWeighted`) and with 1/n, so each association counts once (`heldOutPerAssociation`).
 """
 
 import json
@@ -95,13 +102,16 @@ def l2g_train(
         destination: keys `model`, `background`, `metrics`, `train_split`, `test_split`,
             `split_stats`.
         settings: keys `features_list`, `hyperparameters`, `train_on_full_dataset`,
-            `shap_background_size`, `shap_background_seed`.
+            `shap_background_size`, `shap_background_seed`, and optionally
+            `weight_by_association_unit` (default true) and `association_unit_weight_k` (default 5).
         config: otter config; unused, accepted for interface compatibility.
     """
     features = list(settings.get('features_list') or FEATURES)
     hyperparameters = dict(settings['hyperparameters'])
     background_size = int(settings['shap_background_size'])
     background_seed = int(settings['shap_background_seed'])
+    weight_by_unit = bool(settings.get('weight_by_association_unit', True))
+    unit_k = float(settings.get('association_unit_weight_k', l2g_model.DEFAULT_UNIT_WEIGHT_K))
 
     logger.info('annotating the gold standard with feature-matrix rows')
     annotated = gold_standard.annotate(
@@ -113,9 +123,12 @@ def l2g_train(
 
     predefined = scan_dataset(source['predefined_test']).collect()
     train, test = split.derive_splits(annotated.lazy(), predefined.lazy())
+    lead_variants = scan_dataset(source['credible_set']).select(
+        pl.col('id').alias('credibleSetId'), pl.col('leadVariantId').alias('variantId')
+    )
     # sort on the unique natural key: join order is unspecified and what follows is positional
-    train = train.sort(SORT_KEY)
-    test = test.sort(SORT_KEY)
+    train = split.annotate_association_units(train, lead_variants).sort(SORT_KEY)
+    test = split.annotate_association_units(test, lead_variants).sort(SORT_KEY)
     require_unique_key(train, 'train')
     require_unique_key(test, 'test')
     logger.info(f'split: {train.height} train rows, {test.height} test rows')
@@ -132,22 +145,35 @@ def l2g_train(
     write_dataset(train, destination['train_split'])
     write_dataset(test, destination['test_split'])
 
-    x_train = l2g_model.to_matrix(train, features)
-    y_train = l2g_model.to_labels(train)
-    x_test = l2g_model.to_matrix(test, features)
-    y_test = l2g_model.to_labels(test)
-
     logger.info('fitting the classifier')
-    fitted = l2g_model.fit(x_train, y_train, hyperparameters)
-    held_out = l2g_model.evaluate(fitted, x_test, y_test)
-    logger.info(f'held-out metrics: {held_out}')
+    fitted = l2g_model.fit(
+        l2g_model.to_matrix(train, features),
+        l2g_model.to_labels(train),
+        hyperparameters,
+        l2g_model.association_unit_weights(train, unit_k) if weight_by_unit else None,
+    )
+    x_test, y_test = l2g_model.to_matrix(test, features), l2g_model.to_labels(test)
+    test_ids = test['credibleSetId'].to_list()
+    held_out = l2g_model.evaluate(fitted, x_test, y_test, credible_set_ids=test_ids)
+    held_out_unit = l2g_model.evaluate(
+        fitted, x_test, y_test, l2g_model.association_unit_weights(test, unit_k), credible_set_ids=test_ids
+    )
+    held_out_association = l2g_model.evaluate(
+        fitted, x_test, y_test, l2g_model.association_unit_weights(test, None), credible_set_ids=test_ids
+    )
+    logger.info(f'held-out metrics on {test["credibleSetId"].n_unique()} credible sets: {held_out}')
+    logger.info(f'held-out metrics weighted as in training: {held_out_unit}')
+    logger.info(f'held-out metrics, each association once: {held_out_association}')
 
     # both partitions are sorted
     labelled = pl.concat([train, test], how='vertical')
     if settings.get('train_on_full_dataset'):
         logger.info('refitting on train + held-out for the saved model')
         fitted = l2g_model.fit(
-            l2g_model.to_matrix(labelled, features), l2g_model.to_labels(labelled), hyperparameters
+            l2g_model.to_matrix(labelled, features),
+            l2g_model.to_labels(labelled),
+            hyperparameters,
+            l2g_model.association_unit_weights(labelled, unit_k) if weight_by_unit else None,
         )
 
     background = explain.build_background(labelled, features, background_size, background_seed)
@@ -158,6 +184,10 @@ def l2g_train(
     _write_json(
         {
             'heldOut': held_out,
+            'heldOutUnitWeighted': held_out_unit,
+            'heldOutPerAssociation': held_out_association,
+            'weightByAssociationUnit': weight_by_unit,
+            'associationUnitWeightK': unit_k,
             'featureMissingness': l2g_model.missingness(labelled, features),
             'hyperparameters': hyperparameters,
             'features': features,

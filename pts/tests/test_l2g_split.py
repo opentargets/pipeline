@@ -1,8 +1,16 @@
 """Tests for the train/test split on the genes of the pinned test set."""
 
+import hashlib
+
 import polars as pl
 
-from pts.transformers.l2g.split import count_test_genes, derive_splits, encode_labels, split_stats
+from pts.transformers.l2g.split import (
+    annotate_association_units,
+    count_test_genes,
+    derive_splits,
+    encode_labels,
+    split_stats,
+)
 
 
 def _annotated() -> pl.LazyFrame:
@@ -90,3 +98,71 @@ def test_split_stats_reports_the_gentropy_v4_key_set() -> None:
         'train': {'n_positive': 1, 'n_negative': 0, 'n_unique_loci': 1, 'n_unique_positive_genes': 1},
         'test': {'n_positive': 0, 'n_negative': 1, 'n_unique_loci': 1, 'n_unique_positive_genes': 0},
     }
+
+
+def _leads(*pairs: tuple[str, str | None]) -> pl.LazyFrame:
+    return pl.LazyFrame(
+        {'credibleSetId': [p[0] for p in pairs], 'variantId': [p[1] for p in pairs]},
+        schema={'credibleSetId': pl.String, 'variantId': pl.String},
+    )
+
+
+def test_association_unit_is_the_sha256_of_lead_and_sorted_positive_genes() -> None:
+    """The key hashed is the string gentropy hashes with Spark `sha2(concat_ws(...), 256)`."""
+    partition = pl.DataFrame({
+        'credibleSetId': ['cs1', 'cs1', 'cs1'],
+        'geneId': ['B', 'A', 'C'],
+        'goldStandardSet': [1, 1, 0],
+    })
+    out = annotate_association_units(partition, _leads(('cs1', '1_100_A_G')))
+    assert out['associationUnitId'].unique().to_list() == [hashlib.sha256(b'1_100_A_G|A,B').hexdigest()]
+
+
+def test_negatives_do_not_change_the_unit() -> None:
+    partition = pl.DataFrame({
+        'credibleSetId': ['cs1', 'cs1', 'cs2', 'cs2'],
+        'geneId': ['A', 'B', 'A', 'C'],
+        'goldStandardSet': [1, 0, 1, 0],
+    })
+    out = annotate_association_units(partition, _leads(('cs1', '1_100_A_G'), ('cs2', '1_100_A_G')))
+    assert out['associationUnitId'].n_unique() == 1
+    assert out.height == partition.height
+
+
+def test_a_different_lead_or_positive_set_is_a_different_unit() -> None:
+    partition = pl.DataFrame({
+        'credibleSetId': ['cs1', 'cs2', 'cs3', 'cs3'],
+        'geneId': ['A', 'A', 'A', 'B'],
+        'goldStandardSet': [1, 1, 1, 1],
+    })
+    leads = _leads(('cs1', '1_100_A_G'), ('cs2', '1_200_A_G'), ('cs3', '1_100_A_G'))
+    out = annotate_association_units(partition, leads)
+    assert out['associationUnitId'].n_unique() == 3
+
+
+def test_annotation_keeps_the_partition_row_order() -> None:
+    partition = pl.DataFrame({
+        'credibleSetId': ['cs2', 'cs1', 'cs2', 'cs1'],
+        'geneId': ['A', 'B', 'C', 'D'],
+        'goldStandardSet': [1, 1, 0, 0],
+    })
+    out = annotate_association_units(partition, _leads(('cs1', '1_1_A_G'), ('cs2', '1_2_A_G')))
+    assert out['geneId'].to_list() == ['A', 'B', 'C', 'D']
+
+
+def test_split_stats_count_association_units_when_present() -> None:
+    train = pl.DataFrame({
+        'credibleSetId': ['cs3', 'cs4'],
+        'geneId': ['g3', 'g3'],
+        'goldStandardSet': [1, 1],
+        'associationUnitId': ['u1', 'u1'],
+    })
+    test = pl.DataFrame({
+        'credibleSetId': ['cs1'],
+        'geneId': ['g1'],
+        'goldStandardSet': [1],
+        'associationUnitId': ['u2'],
+    })
+    stats = split_stats(4, 1, train, test)
+    assert stats['train']['n_association_units'] == 1
+    assert stats['test']['n_association_units'] == 1

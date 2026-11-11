@@ -1534,6 +1534,10 @@ steps:
         train_on_full_dataset: true
         shap_background_size: 100
         shap_background_seed: 42
+        # Repeated credible sets of one association unit (lead variant + positive genes) weighted
+        # min(1, sqrt(k / n)): units of up to k credible sets keep full weight.
+        weight_by_association_unit: true
+        association_unit_weight_k: 5
     - name: transform l2g_predict
       requires:
         - transform l2g_train
