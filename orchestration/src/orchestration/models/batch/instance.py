@@ -140,6 +140,10 @@ class AllocationSpec(BaseModel):
     labels: dict[str, str] | None = None
     """Labels to be applied to each instance in the task group."""
 
+    external_ip_address: bool = False
+    """Whether each VM gets an external IP address, the only route to the public internet: the default network has no
+    Cloud NAT. Off by default, as every VM uses an address from the regional quota."""
+
     @model_validator(mode='after')
     def validate_region_or_zone(self) -> AllocationSpec:
         """Validate that either region or zones are specified, but not both.
@@ -195,9 +199,9 @@ class AllocationSpec(BaseModel):
 
     @cached_property
     def network(self) -> batch_v1.AllocationPolicy.NetworkPolicy:
-        """Get the network policy for the batch task: the default network, with no external IP address.
+        """Get the network policy for the batch task: the default network, with an external IP address if requested.
 
-        The subnetwork needs Private Google Access. Partial URLs resolve against the project the job runs in.
+        Without one, the subnetwork needs Private Google Access. Partial URLs resolve against the job's project.
 
         Returns:
             batch_v1.AllocationPolicy.NetworkPolicy: The network policy for the batch task.
@@ -207,7 +211,7 @@ class AllocationSpec(BaseModel):
                 batch_v1.AllocationPolicy.NetworkInterface(
                     network='global/networks/default',
                     subnetwork=f'regions/{GCP_REGION}/subnetworks/default',
-                    no_external_ip_address=True,
+                    no_external_ip_address=not self.external_ip_address,
                 )
             ]
         )
@@ -237,6 +241,9 @@ class AllocationSpec(BaseModel):
         'n1-standard-4'
         >>> ap.network.network_interfaces[0].no_external_ip_address
         True
+        >>> alloc_ip = AllocationSpec(instance=InstanceSpec(), external_ip_address=True)
+        >>> alloc_ip.build().network.network_interfaces[0].no_external_ip_address
+        False
         >>> alloc_zones = AllocationSpec(instance=InstanceSpec(), zones=["zones/europe-west1-b"], labels={"team": "test"})
         >>> list(alloc_zones.build().location.allowed_locations)
         ['zones/europe-west1-b']
