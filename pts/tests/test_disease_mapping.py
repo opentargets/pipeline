@@ -1,4 +1,4 @@
-"""Tests for the polars port of `OnToma.map_entities` and of `add_efo_mapping`."""
+"""Tests for `map_entities` and `add_efo_mapping`."""
 
 from pathlib import Path
 

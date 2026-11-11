@@ -1,4 +1,4 @@
-"""Tests for literature label mapping with the polars disease mapping, checked against OnToma's output."""
+"""Tests for literature label mapping with the polars disease mapping, checked against golden outputs."""
 
 import shutil
 from pathlib import Path
@@ -86,7 +86,7 @@ def _expected_distinct(*pairs: tuple[str | None, str | None]) -> list[tuple]:
     return _sorted(list({(r[2], r[3], r[5], None if r[6] is None else tuple(r[6])) for r in MAPPED if r[2:4] in pairs}))
 
 
-def test_map_labels_matches_ontoma(spark, lut_path: str) -> None:
+def test_map_labels_matches_goldens(spark, lut_path: str) -> None:
     mapped = _map_labels(spark, match_rows(), lut_path)
     assert mapped.df.columns == [
         *Match.get_schema().fieldNames(),

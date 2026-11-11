@@ -256,6 +256,20 @@ def test_real_name_on_the_same_key_wins(monkeypatch: pytest.MonkeyPatch) -> None
     assert _flags(lut, 'key') == {'MONDO_1': False}
 
 
+def test_lower_scored_real_name_does_not_unflag_the_acronym(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(normalise_module, 'normalise', lambda label, track: 'key')
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_1', 'CF', 0.999, 'term', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_1', 'Cee Eff', 0.5, 'term', 'exact_synonym', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert _flags(lut, 'key') == {'MONDO_1': True}
+
+
 def test_curated_labels_never_flagged() -> None:
     lut = build_lut(
         [_raw(('MONDO_1', 'AD', 1.0, 'symbol', 'ot_curation', 'DS', 'label'))], acronym_allowlist=_allowlist()

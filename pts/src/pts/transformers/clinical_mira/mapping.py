@@ -1,7 +1,7 @@
 """Map clinical report drug and disease labels to ids: ChEMBL curation, Open Targets dictionaries, staged drug NER.
 
-Ported from mira's `map_entities` (`utils/mapping.py`), with OnToma replaced by the polars lookup tables of
-`pts.transformers.ontoma_lut` and the polars `OnToma.map_entities` of `pts.transformers.utils.disease_mapping`.
+Started as a port of mira's `map_entities` (`utils/mapping.py`); entities resolve against the lookup tables of
+`pts.transformers.ontoma_lut` through `pts.transformers.utils.disease_mapping`.
 """
 
 from __future__ import annotations
