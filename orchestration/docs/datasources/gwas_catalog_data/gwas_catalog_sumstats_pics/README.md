@@ -1,27 +1,27 @@
 # GWAS Catalog summary statistics PICS
 
-This document was updated on 2026-10-30.
+This document was updated on 2026-11-11.
 
 ```sh
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/bin/                                   # gentropy CLI and cluster init script of the run
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/config/gwas_catalog_sumstats_pics.yaml # DAG config of the run
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/docs/
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/study/
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/study_locus/
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/ld_annotated_study_locus/
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/credible_set/
-gs://gwas_catalog_sumstats_pics/prod/20261030T072623/output/credible_set_variant/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/bin/                                   # gentropy CLI and cluster init script of the run
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/config/gwas_catalog_sumstats_pics.yaml # DAG config of the run
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/docs/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/output/study/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/output/study_locus/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/output/ld_annotated_study_locus/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/output/credible_set/
+gs://gwas_catalog_sumstats_pics/prod/20261111T160107/output/credible_set_variant/
 ```
 
-The summary statistics PICS credible sets are the PICS fine-mapping of the GWAS Catalog summary statistics harmonised to the Open Targets [SummaryStatistics dataset](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/dataset/summary_statistics.py).
+The summary statistics PICS credible sets are the PICS fine-mapping of the GWAS Catalog summary statistics harmonised to the Open Targets [SummaryStatistics dataset](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/dataset/summary_statistics.py).
 
-Data is produced by **gwas_catalog_sumstats_pics DAG**. The DAG configuration and topology are in `config/gwas_catalog_sumstats_pics.yaml` of the run folder (`gs://gwas_catalog_sumstats_pics/prod/20261030T072623/config/`). The run uses gentropy [`v4.0.0-dev.9`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.9); the links below refer to that tag.
+Data is produced by **gwas_catalog_sumstats_pics DAG**. The DAG configuration and topology are in `config/gwas_catalog_sumstats_pics.yaml` of the run folder (`gs://gwas_catalog_sumstats_pics/prod/20261111T160107/config/`). The run uses gentropy [`v4.0.0-rc.3`](https://github.com/opentargets/gentropy/tree/v4.0.0-rc.3); the links below refer to that tag.
 
 Inputs of the run:
 
 ```sh
-gs://gwas_catalog_inputs/gentroutils/20260802/gwas_catalog_download_studies.tsv
-gs://gwas_catalog_inputs/gentroutils/20260802/gwas_catalog_download_ancestries.tsv
+gs://gwas_catalog_inputs/gentroutils/20261029/gwas_catalog_download_studies.tsv
+gs://gwas_catalog_inputs/gentroutils/20261029/gwas_catalog_download_ancestries.tsv
 gs://gwas_catalog_inputs/harmonised_summary_statistics/
 gs://gnomad_data_2/v2.1.1/ld_index/
 ```
@@ -34,28 +34,36 @@ The DAG has 4 steps, run on two Dataproc clusters:
 
 ## study_index
 
-The step ([`gwas_catalog_study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/gwas_catalog_study_index.py)) builds one study per GWAS Catalog study from the studies and ancestries files ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/datasource/gwas_catalog/study_index.py)). The study index covers every study of the GWAS Catalog release, with or without summary statistics, and carries no curation or summary statistics QC annotation. The output is `output/study/`.
+The step ([`gwas_catalog_study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/gwas_catalog_study_index.py)) builds one study per GWAS Catalog study from the studies and ancestries files ([`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/datasource/gwas_catalog/study_index.py)). The study index covers every study of the GWAS Catalog release, with or without summary statistics, and carries no curation or summary statistics QC annotation. The output is `output/study/`.
 
 ## window_clumping
 
-The step ([`window_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/window_based_clumping.py)) reads the harmonised summary statistics of all studies and keeps, per study, the variants with a p-value of at most 1e-8 that are the most significant within 500 kb ([`window.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/method/clumping/window.py)). Each kept variant is the lead of one study locus, a window of 500 kb on each side of it. The summary statistics of the study inside the window are collected into `locus` (`collect_locus=true`, [`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/method/annotation.py), `annotate_locus`). The output is `output/study_locus/`.
+The step ([`window_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/window_based_clumping.py)) reads the harmonised summary statistics of all studies and keeps, per study, the variants with a p-value of at most 1e-8 that are the most significant within 500 kb ([`window.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/clumping/window.py)). Each kept variant is the lead of one study locus, a window of 500 kb on each side of it. The summary statistics of the study inside the window are collected into `locus` (`collect_locus=true`, [`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/annotation.py), `annotate_locus`). The output is `output/study_locus/`.
 
 ## ld_annotation
 
-The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/ld_based_clumping.py)) adds to each study locus the variants in LD with its lead, from the gnomAD v2.1.1 LD index ([`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/method/annotation.py), `annotate_ld`). The LD population is the major LD population of the study, and only variants with r² of at least 0.5 in that population are kept. A study locus whose lead is in LD with the lead of a more significant study locus of the same study is flagged `Explained by a more significant variant in high LD` and its LD set is emptied ([`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/method/clumping/ld.py)). A study locus with no variant at r² of at least 0.5 in the LD population of its study, the lead included, is flagged `Variant not found in LD reference`, and its LD set holds the lead only: its lead is missing from the LD index, its study has no LD population, or the LD index has no value for that population. The output is `output/ld_annotated_study_locus/`.
+The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/ld_based_clumping.py)) adds to each study locus the variants in LD with its lead, from the gnomAD v2.1.1 LD index ([`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/annotation.py), `annotate_ld`). The LD population is the major LD population of the study, and only variants with r² of at least 0.5 in that population are kept. A study locus whose lead is in LD with the lead of a more significant study locus of the same study is flagged `Explained by a more significant variant in high LD` and its LD set is emptied ([`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/clumping/ld.py)). A study locus with no variant at r² of at least 0.5 in the LD population of its study, the lead included, is flagged `Variant not found in LD reference`, and its LD set holds the lead only: its lead is missing from the LD index, its study has no LD population, or the LD index has no value for that population. The output is `output/ld_annotated_study_locus/`.
 
 ## pics
 
-The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/pics.py)) fine-maps each study locus with [PICS](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.9/src/gentropy/method/fine_mapping/pics.py), from the p-value of the lead and its LD set. Study loci with a lead p-value above 1e-8, or with an empty LD set, give no credible set. Each fine-mapped study locus gives one 95% credible set. The variants of a credible set take their reported statistics from their entry in `locus`. The outputs are `output/credible_set/`, one row per credible set, and `output/credible_set_variant/`, one row per variant of a credible set.
+The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/pics.py)) fine-maps each study locus with [PICS](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/fine_mapping/pics.py), from the p-value of the lead and its LD set. Study loci with a lead p-value above 1e-8, or with an empty LD set, give no credible set. Each fine-mapped study locus gives one 95% credible set. The variants of a credible set take their reported statistics from their entry in `locus`. The outputs are `output/credible_set/`, one row per credible set, and `output/credible_set_variant/`, one row per variant of a credible set.
 
 ## Known issues
 
 - Summary statistics that list the same variant many times give the lead of a study locus the p-value of an arbitrary one of its entries in `locus` ([opentargets/issues#4637](https://github.com/opentargets/issues/issues/4637)).
-- Studies with harmonised summary statistics and no row in the study index of the GWAS Catalog release give credible sets with no study type.
+- Studies with harmonised summary statistics and no row in the study index of the GWAS Catalog release give credible sets with no study type: 140,052 credible sets of 4,173 studies in this run.
 
 ## Outputs
 
 Schemas as read from the parquet files of the run. Nested columns show their `array<struct<...>>` types. "Empty" marks a column with no values in this run.
+
+| Output | Rows | Files |
+|---|---|---|
+| `study` | 232,277 | 1 |
+| `study_locus` | 1,574,359 | 1,000 |
+| `ld_annotated_study_locus` | 1,574,359 | 1,000 |
+| `credible_set` | 1,539,517 | 400 |
+| `credible_set_variant` | 42,945,274 | 161 |
 
 ### study
 

@@ -1,6 +1,6 @@
 # GWAS Catalog data source
 
-This document was updated on 2026-10-26.
+This document was updated on 2026-11-11.
 
 Data stored under 4 buckets:
 
@@ -426,3 +426,7 @@ To adjust the parameters for google batch infrastructure refer to the `google_ba
 ### 2026-10-29
 
 - chore: move the summary statistics PICS release (run of 2026-08-28) from the root of `gs://gwas_catalog_sumstats_pics` to `gs://gwas_catalog_sumstats_pics/prod/20260828T115527/` (`config/`, `docs/`, `output/`), and split its docs into [GWAS Catalog summary statistics PICS](gwas_catalog_sumstats_pics/README.md).
+
+### 2026-11-11
+
+- [chore: 2026/11 GWAS Catalog harmonisation](https://github.com/opentargets/issues/issues/4677): 4,907 of the 4,908 new summary statistics harmonised into `gs://gwas_catalog_inputs/harmonised_summary_statistics/`; GCST90473587 (12 GB unzipped) runs out of disk in the batch task and is not harmonised. The harmonisation batch tasks run with an external IP address, as gentropy 3.4.0-rc.3 fetches the gcs connector jar from github.com.
