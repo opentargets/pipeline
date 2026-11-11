@@ -83,6 +83,16 @@ XREFS = pl.DataFrame(
     schema=XREFS_SCHEMA,
     orient='row',
 )
+#: The canonical transcripts of the TEC and Mt_tRNA genes, and a transcript of TP53 that is not its canonical one.
+RNACENTRAL = pl.DataFrame(
+    [
+        ('ENST00000000021', ['URS0000000012_9606']),
+        ('ENST00000000031', ['URS0000000010_9606']),
+        ('ENST00000413465', ['URS0000000011_9606']),
+    ],
+    schema={'transcriptId': pl.String, 'rnacentral': pl.List(pl.String)},
+    orient='row',
+)
 
 
 N = None

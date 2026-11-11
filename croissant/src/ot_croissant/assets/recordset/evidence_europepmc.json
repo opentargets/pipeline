@@ -27,11 +27,11 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed or preprint identifier of the publication in which the target and the disease are co-mentioned"
   },
   {
     "id": "pmcIds",
-    "description": "List of PubMed Central identifiers of full text publication"
+    "description": "PubMed Central identifiers of the full text publication"
   },
   {
     "id": "publicationDate",
@@ -39,7 +39,7 @@
   },
   {
     "id": "publicationYear",
-    "description": "Year of publication"
+    "description": "Year of publication of the article"
   },
   {
     "id": "qualityControls",
@@ -47,15 +47,15 @@
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "Sum of the Europe PMC text-mining scores of the target-disease co-mentions in the publication"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; the Europe PMC resource score divided by 100, capped at 1"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier of the target recognised by Europe PMC text mining"
   },
   {
     "id": "targetId",
@@ -64,7 +64,7 @@
   },
   {
     "id": "textMiningSentences",
-    "description": "Sentences of a publication supporting the disease/target relationship"
+    "description": "Sentences of the publication in which the target and the disease are co-mentioned"
   },
   {
     "id": "textMiningSentences/dEnd",

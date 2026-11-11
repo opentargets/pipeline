@@ -42,6 +42,18 @@ class EPMCPublication:
         )
 
     @staticmethod
+    def _identify_abstracts_by_pprid(abstract: DataFrame) -> DataFrame:
+        """Use the preprint id as the publication id of abstracts that have no pmid.
+
+        Args:
+            abstract (DataFrame): DataFrame with abstracts of publications.
+
+        Returns:
+            DataFrame: DataFrame of abstracts with pmid falling back to pprid.
+        """
+        return abstract.withColumn('pmid', f.coalesce(f.col('pmid'), f.col('pprid')))
+
+    @staticmethod
     def _merge_abstracts_with_fulltexts(abstract: DataFrame, fulltext: DataFrame) -> DataFrame:
         """Merge abstracts with fulltexts, excluding abstracts for which the fulltext version exists.
 

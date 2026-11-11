@@ -57,7 +57,7 @@ _OBSOLETION_MARKER = r'(?i)^obsolete([^a-z0-9]\s*|$)'
 _MAX_XREF_FANOUT = 40
 
 # Root of the measurement branch: a term under it never merges with one outside it.
-_MEASUREMENT = 'EFO_0001444'
+MEASUREMENT = 'EFO_0001444'
 
 
 def annotate_name_duplicates(n: pl.DataFrame) -> pl.DataFrame:
@@ -662,7 +662,7 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
     protein references are not identity; coarse classification codes are
     many-to-one; a cross-reference carried by more than ``_MAX_XREF_FANOUT``
     terms is a hub rather than an identifier; a pair joining a term under
-    measurement (``_MEASUREMENT``) to one outside it is dropped, since a
+    measurement (``MEASUREMENT``) to one outside it is dropped, since a
     measurement is never the disease it measures (opentargets/issues#4573); and
     a resulting group holding two terms of one ontology is dropped whole, since
     it bridges those two rather than equating them.
@@ -753,7 +753,7 @@ def annotate_xref_duplicates(n: pl.DataFrame, e: pl.DataFrame) -> pl.DataFrame:
     ]
 
     # --- keep measurements apart from everything else ------------------------
-    measurements = {term for term, ancestors in ancestors_of.items() if _MEASUREMENT in {term, *ancestors}}
+    measurements = {term for term, ancestors in ancestors_of.items() if MEASUREMENT in {term, *ancestors}}
     mixed = {(a, b) for a, b in candidates if (a in measurements) != (b in measurements)}
     if mixed:
         logger.info(f'{len(mixed)} candidate pairs join a measurement to a non-measurement and are dropped')

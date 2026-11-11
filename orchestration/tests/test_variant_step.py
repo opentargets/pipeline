@@ -1,5 +1,7 @@
 """The variant index runs on a VM, with FoldX in the same step."""
 
+import pytest
+
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 from orchestration.models.pts_step import pts_step_from_config
 
@@ -16,3 +18,11 @@ def test_foldx_runs_inside_the_variant_step() -> None:
     foldx, index = config.pts.config['steps']['variant']
     assert foldx['transformer'] == 'foldx'
     assert index['requires'] == [foldx['name']]
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_the_variant_index_reads_the_validated_variants(monkeypatch, ppp) -> None:
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    _, index = UnifiedPipelineConfig().pts.config['steps']['variant']
+    assert index['source']['credible_set_variant'] == 'intermediate/validated/credible_set_variant'
+    assert 'credible_set' not in index['source']

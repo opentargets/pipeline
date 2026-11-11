@@ -1,5 +1,11 @@
 [
   {
+    "id": "credibleSetId",
+    "description": "Identifier of the credible set",
+    "foreign_key": "credible_set/id",
+    "isPrimaryKey": true
+  },
+  {
     "id": "features",
     "description": "List of Locus-to-Gene (L2G) feature values"
   },
@@ -23,16 +29,10 @@
   },
   {
     "id": "score",
-    "description": "Locus-to-Gene (L2G) score prediction for the given studyLocusId-geneId pair"
+    "description": "Locus-to-Gene (L2G) score prediction for the given credibleSetId-geneId pair"
   },
   {
     "id": "shapBaseValue",
     "description": "SHAP base value"
-  },
-  {
-    "id": "studyLocusId",
-    "description": "Study-locus identifier for the credible set",
-    "foreign_key": "credible_set/studyLocusId",
-    "isPrimaryKey": true
   }
 ]

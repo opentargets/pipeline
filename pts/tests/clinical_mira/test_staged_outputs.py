@@ -12,6 +12,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.clinical_mira.moa import literature, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -31,7 +32,10 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
+    MOA,
+    MOA_LITERATURE,
     STOP_REASONS,
+    MoaOutput,
     StagedOutput,
     schema_digest,
 )
@@ -381,3 +385,72 @@ def test_staged_outputs_loads_no_heavy_library() -> None:
     )
 
     assert subprocess.run([sys.executable, '-c', code], check=False, capture_output=True).returncode == 0
+
+
+def moa_snapshot(tmp_path: Path, name: str, **overrides: object) -> str:
+    metadata = {**MOA.metadata('abc'), **overrides}
+    return snapshot(tmp_path, name, pl.DataFrame({'id': ['NCT1']}), metadata)
+
+
+def test_moa_tag_is_model_then_digest() -> None:
+    assert re.fullmatch(r'claude-opus-5-5-p[0-9a-f]{8}', MOA.tag())
+
+
+def test_moa_digest_changes_with_params() -> None:
+    assert dataclasses.replace(MOA, params={**MOA.params, 'char_budget': 1}).tag() != MOA.tag()
+
+
+def test_moa_digest_changes_with_logic_version() -> None:
+    assert dataclasses.replace(MOA, logic_version=2).tag() != MOA.tag()
+
+
+def test_moa_metadata_names_the_extraction_tag() -> None:
+    assert MOA.metadata('abc') == {
+        'kind': 'moa',
+        'model': MOA.model,
+        'tag': MOA.tag(),
+        'model_revisions': {MOA.model: MOA.tag()},
+        'extraction_tag': 'abc',
+    }
+
+
+def test_moa_read_accepts_its_own_metadata(tmp_path: Path) -> None:
+    assert MOA.read(moa_snapshot(tmp_path, 'moa')).to_dict(as_series=False) == {'id': ['NCT1']}
+
+
+@pytest.mark.parametrize(('kind', 'sidecar'), [(MOA, 'pools.parquet'), (MOA_LITERATURE, 'drugs.parquet')])
+def test_moa_read_ignores_a_sidecar_parquet_next_to_the_data(tmp_path: Path, kind: MoaOutput, sidecar: str) -> None:
+    uri = snapshot(tmp_path, 'moa', pl.DataFrame({'id': ['NCT1']}), {**kind.metadata('abc'), 'kind': kind.name})
+    pl.DataFrame({'drug_name': ['x'], 'n_trials': [3]}).write_parquet(f'{uri}/{sidecar}')
+
+    assert kind.read(uri).to_dict(as_series=False) == {'id': ['NCT1']}
+
+
+def test_moa_read_rejects_another_kind(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="'extraction'"):
+        MOA.read(moa_snapshot(tmp_path, 'moa', kind='extraction'))
+
+
+def test_moa_read_rejects_another_tag(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match=re.escape(MOA.tag())):
+        MOA.read(moa_snapshot(tmp_path, 'moa', tag='x'))
+
+
+def test_moa_literature_tag() -> None:
+    assert re.fullmatch(r'claude-opus-5-5-p[0-9a-f]{8}', MOA_LITERATURE.tag())
+    assert MOA_LITERATURE.tag() != MOA.tag()
+    assert MOA_LITERATURE.params['effort'] == MOA.params['effort']
+    addendum_sha256 = hashlib.sha256(schemas.load_literature_addendum().encode()).hexdigest()
+    assert MOA_LITERATURE.params['addendum_sha256'] == addendum_sha256
+    constants = {
+        'per_drug': literature.PER_DRUG,
+        'per_file_cap': literature.PER_FILE_CAP,
+        'cue': literature.CUE,
+        'section_rank': literature.SECTION_RANK,
+        'min_chars': literature.MIN_CHARS,
+        'max_chars': literature.MAX_CHARS,
+    }
+    for key, value in constants.items():
+        assert MOA_LITERATURE.params[key] == value
+        changed = {**MOA_LITERATURE.params, key: [value, 'changed']}
+        assert dataclasses.replace(MOA_LITERATURE, params=changed).tag() != MOA_LITERATURE.tag()

@@ -23,6 +23,7 @@ import polars as pl
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
+from pts.transformers.clinical_mira.moa import literature, pooling, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -297,6 +298,53 @@ class ExtractionOutput:
         return scan_dataset(uri).collect()
 
 
+@dataclass(frozen=True)
+class MoaOutput:
+    """The LLM mechanism-of-action extraction, tagged by its model and the code around it.
+
+    Its tag is the model, then ``-p`` and the first 8 hex of the sha256 of ``logic_version``
+    and ``params``.
+    """
+
+    name: str
+    model: str
+    params: dict[str, Any]
+    logic_version: int
+
+    @property
+    def digest(self) -> str:
+        """The first 8 hex of the sha256 of ``params`` and ``logic_version``."""
+        document = json.dumps({'logic_version': self.logic_version, 'params': self.params}, sort_keys=True)
+        return hashlib.sha256(document.encode('utf-8')).hexdigest()[:8]
+
+    def tag(self) -> str:
+        """The output revision of this kind."""
+        return f'{self.model}-p{self.digest}'
+
+    def metadata(self, extraction_tag: str) -> dict[str, Any]:
+        """The snapshot metadata of a run over the extraction snapshot tagged ``extraction_tag``."""
+        return {
+            'kind': self.name,
+            'model': self.model,
+            'tag': self.tag(),
+            'model_revisions': {self.model: self.tag()},
+            'extraction_tag': extraction_tag,
+        }
+
+    def read(self, uri: str) -> pl.DataFrame:
+        """The ``data.parquet`` of the snapshot ``uri``; other parquet files beside it are not read.
+
+        Raises:
+            ValueError: if its metadata lacks a key, is of another kind, or its tag is not ``tag()``.
+        """
+        metadata = read_metadata(self.name, uri)
+        if metadata['kind'] != self.name:
+            raise ValueError(f'snapshot {self.name} is of kind {metadata["kind"]!r}, not {self.name!r}')
+        if metadata['tag'] != self.tag():
+            raise ValueError(f'snapshot {self.name} has tag {metadata["tag"]!r}, this code expects {self.tag()!r}')
+        return scan_dataset(f'{uri.rstrip("/")}/data.parquet').collect()
+
+
 STOP_REASONS = StagedOutput(
     name='stop_reasons',
     model=STOP_REASONS_MODEL,
@@ -335,5 +383,39 @@ EXTRACTION = ExtractionOutput(
     name='extraction',
     model='aact_llm_extraction',
     params={'trial_fields': TRIAL_FIELDS},
+    logic_version=1,
+)
+
+MOA = MoaOutput(
+    name='moa',
+    model='claude-opus-5-5',
+    params={
+        'char_budget': 60000,
+        'class_name_pattern': pooling.CLASS_NAME,
+        'carry_forward': True,
+        'content_fields': list(pooling.CONTENT_FIELDS),
+        'effort': 'medium',
+        'extract_prompt_sha256': schemas.ruleset_sha256('extract'),
+        'schema_sha256': schema_digest(schemas.MoaExtraction),
+    },
+    logic_version=1,
+)
+
+MOA_LITERATURE = MoaOutput(
+    name='moa_literature',
+    model=MOA.model,
+    params={
+        'per_drug': literature.PER_DRUG,
+        'per_file_cap': literature.PER_FILE_CAP,
+        'cue': literature.CUE,
+        'section_rank': literature.SECTION_RANK,
+        'min_chars': literature.MIN_CHARS,
+        'max_chars': literature.MAX_CHARS,
+        'carry_forward': True,
+        'effort': MOA.params['effort'],
+        'extract_prompt_sha256': schemas.ruleset_sha256('extract'),
+        'addendum_sha256': hashlib.sha256(schemas.load_literature_addendum().encode('utf-8')).hexdigest(),
+        'schema_sha256': schema_digest(schemas.MoaExtraction),
+    },
     logic_version=1,
 )

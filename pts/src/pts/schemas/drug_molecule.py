@@ -19,7 +19,17 @@ molecule_schema = pl.Schema({
     'crossReferences': cross_reference_schema,
     'childChemblIds': pl.List(pl.String()),
 })
-"""The chembl_molecule intermediate, as the drug_molecule step consumes it."""
+"""The chembl_molecule columns the drug_molecule step consumes."""
+
+structural_alert_schema = pl.List(pl.Struct({'alertId': pl.Int64(), 'alertName': pl.String()}))
+"""``structuralAlerts``: the PAINS alerts of a molecule, sorted by ``alertId``.
+
+Empty when the molecule's structure matches no PAINS alert; null when the molecule has no
+structure (no SMILES and no molfile, as for antibodies), so it could not be checked.
+"""
+
+chembl_molecule_schema = pl.Schema({**molecule_schema, 'structuralAlerts': structural_alert_schema})
+"""The chembl_molecule intermediate: the consumed columns plus the PAINS alerts, which are not in the index."""
 
 drug_molecule_schema = pl.Schema({
     **molecule_schema,

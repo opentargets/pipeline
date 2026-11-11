@@ -51,6 +51,17 @@ def flag_rows(frame: pl.LazyFrame, condition: pl.Expr, flag: StrEnum) -> pl.Lazy
     )
 
 
+def flag_matching_ids(frame: pl.LazyFrame, key: str, ids: pl.LazyFrame, flag: StrEnum) -> pl.LazyFrame:
+    """Append `flag` to the rows of `frame` whose `key` is among the `id` values of `ids`, keeping the row order."""
+    matched = ids.select(pl.col('id').alias(key), pl.lit(True).alias('_matched')).unique()
+    return (
+        frame
+        .join(matched, on=key, how='left', maintain_order='left')
+        .pipe(flag_rows, pl.col('_matched').is_not_null(), flag)
+        .drop('_matched')
+    )
+
+
 def resolve_flag_names(flags: type[StrEnum], value: Any) -> Any:
     """Map configured flag names (e.g. `UNRESOLVED_TARGET`) to members of `flags`.
 

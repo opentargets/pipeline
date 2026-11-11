@@ -27,7 +27,7 @@ file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction}/  # record stores, shared across versions
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,moa,moa_literature}/  # record stores, shared across versions
 gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
 gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
 gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
@@ -36,14 +36,18 @@ gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.par
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
 gs://clinical_staging/clinical_mining/<staging_version>/{drug_entities,disease_entities}/<tag>/
+gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/{match,drug_molecule}/  # copies of the published release
+gs://clinical_staging/literature/<input_release>/moa_literature/<tag>/  # data.parquet + drugs.parquet + metadata.json
 ```
 
 ## The DAG
 
 Each step is named `{stage}_{step}`, where the stage is the application that
-runs it, and belongs to a `source` (`aact` or `clinical_mining`). The source
-gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
-and its version. Each step runs on its own short-lived GCE VM.
+runs it, and belongs to a `source` (`aact`, `clinical_mining` or `literature`).
+The source gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
+and its version. `pts_moa_literature` publishes its snapshot under the
+published release it reads instead,
+`gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`. Each step runs on its own short-lived GCE VM.
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
@@ -66,6 +70,17 @@ and its version. Each step runs on its own short-lived GCE VM.
    forward pass (`ner_model_batch_size`), the disease NER on one text at a
    time. It waits for `pts_aact_trial_models`, because both write the shared
    drug-entity store.
+6. `pis_moa_literature` — copies every parquet file of the literature match
+   (`gs://open-targets-data-releases/<input_release>/intermediate/literature/match`)
+   and the drug molecules (`.../<input_release>/output/drug_molecule`) of the
+   published release `moa_literature_input_release` in `pis/config.yaml` to
+   `input/literature/<input_release>/{match,drug_molecule}`, billing the
+   requester-pays reads to `open-targets-eu-dev`.
+7. `pts_moa_literature` (n2d-highmem-32) — reads those copies, at
+   `gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/`,
+   and publishes `gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`.
+   Its `input_release` setting in `pts/config.yaml` must equal
+   `moa_literature_input_release`.
 
 ## Upstream sources
 
