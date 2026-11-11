@@ -40,7 +40,7 @@ def test_columns(tmp_path: Path) -> None:
         'resourceScore': 2.3328e-11,
         'ancestry': None,
         'ancestryId': None,
-        'literature': ['35410376'],
+        'literature': None,
         'projectId': 'BipEx',
         'cohortId': 'BipEx2',
         'releaseVersion': '2026-08-07',

@@ -21,7 +21,6 @@ STUDY = Study(
     disease='bipolar disorder',
     disease_id='MONDO_0004985',
     browser='https://bipex.broadinstitute.org',
-    literature=['35410376'],
 )
 
 
