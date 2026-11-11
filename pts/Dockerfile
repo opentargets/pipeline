@@ -1,10 +1,10 @@
 FROM scratch AS fastvep-amd64
-ADD --checksum=sha256:eb96abe28c71f32c2d0ecce9cf340d90e7a3acb9148cacb3a30e123ba0afcea0 \
-  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0-rc.1/fastVEP-v0.5.0-rc.1-x86_64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
+ADD --checksum=sha256:3b081b9e64711adbc0c2df73560df7d9a7240db05dc442ca811ddd8aa881ce82 \
+  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0/fastVEP-v0.5.0-x86_64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
 
 FROM scratch AS fastvep-arm64
-ADD --checksum=sha256:c5026bc058cd76247035169bd3bb619370d7cf4431d2587981ab8ec3c0cbba36 \
-  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0-rc.1/fastVEP-v0.5.0-rc.1-aarch64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
+ADD --checksum=sha256:af0d4dbf07ddcf6fe8baa769152e3b17b4cf5df6da390df61c9969848af2c96e \
+  https://github.com/Huang-lab/fastVEP/releases/download/v0.5.0/fastVEP-v0.5.0-aarch64-unknown-linux-gnu.tar.gz /fastvep.tar.gz
 
 FROM fastvep-${TARGETARCH} AS fastvep
 
