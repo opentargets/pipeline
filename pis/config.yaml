@@ -63,8 +63,8 @@ scratchpad:
   l2g_test_split_version: '2026-10-01'
   encore_version: '2026-09-21'
   # Credible set source runs: the prod/<timestamp> folder of each source bucket.
-  staging_gcca_ts: '20261028T234317'
-  staging_gcss_pics_ts: '20261030T072623'
+  staging_gcca_ts: '20261111T160107'
+  staging_gcss_pics_ts: '20261111T160107'
   staging_gcss_susie_ts: '20261101T152321'
   staging_finngen_gwas_ts: '20261029T152531'
   staging_finngen_meta_ts: '20261102T181409'
