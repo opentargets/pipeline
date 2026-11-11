@@ -253,16 +253,8 @@ class TestMatchMapped:
 
     def test_generate_target_disease_cooccurrences(self, spark):
         def mention(type_, label, mapped_id, text='s1', section='abstract'):
-            return {
-                'pmid': '1',
-                'text': text,
-                'section': section,
-                'type': type_,
-                'label': label,
-                'mappedId': mapped_id,
-                'startInSentence': 0,
-                'endInSentence': 1,
-            }
+            return {'pmid': '1', 'text': text, 'section': section, 'type': type_, 'label': label,
+                    'mappedId': mapped_id, 'startInSentence': 0, 'endInSentence': 1}
 
         df = _mapped_df(
             spark,
