@@ -24,7 +24,7 @@ from pts.transformers.clinical_mira.mapping import require_staged
 from pts.transformers.clinical_mira.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
-from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, read_ttd_curation
+from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, known_disease_ids, read_ttd_curation
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -223,7 +223,7 @@ def clinical_report(
             ttd_downgrades,
             ttd_corrections,
             drug_ids=molecule_index['id'],
-            disease_ids=disease_index['id'],
+            disease_ids=known_disease_ids(disease_index),
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)

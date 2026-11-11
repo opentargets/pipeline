@@ -11,6 +11,7 @@ from pts.transformers.clinical_mira.providers.ttd import extract_clinical_report
 from pts.transformers.clinical_mira.ttd_curation import (
     CURATED_UNKNOWN_PHASE,
     apply_ttd_curation,
+    known_disease_ids,
     read_ttd_curation,
 )
 
@@ -192,3 +193,9 @@ def test_read_rejects_missing_column(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='reason'):
         read_ttd_curation(str(tmp_path / 'd.tsv'), str(tmp_path / 'c.tsv'))
+
+
+def test_known_disease_ids_include_obsolete_terms() -> None:
+    index = pl.DataFrame({'id': ['MONDO_0005301', 'EFO_0803536'], 'obsoleteTerms': [['EFO_0003885'], None]})
+
+    assert set(known_disease_ids(index)) == {'MONDO_0005301', 'EFO_0803536', 'EFO_0003885'}

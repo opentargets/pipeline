@@ -61,6 +61,19 @@ def read_ttd_curation(downgrades: str, corrections: str) -> tuple[pl.DataFrame, 
     return down, fix
 
 
+def known_disease_ids(disease_index: pl.DataFrame) -> pl.Series:
+    """The disease ids a correction may name: current ids and the obsolete ids that resolve to one.
+
+    Args:
+        disease_index: disease index with `id` and `obsoleteTerms`.
+
+    Returns:
+        The current and obsolete ids, unique.
+    """
+    obsolete = disease_index['obsoleteTerms'].explode().drop_nulls()
+    return pl.concat([disease_index['id'], obsolete]).unique()
+
+
 def _require_known(ids: pl.Series, known: pl.Series, what: str) -> None:
     curated = set(ids.drop_nulls().to_list()) - {UNMAPPED}
     unknown = sorted(curated - set(known.to_list()))
