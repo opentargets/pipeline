@@ -704,6 +704,8 @@ steps:
         cvdi: input/evidence/gene_burden/cvdi.xlsx
         genes_and_health: input/evidence/gene_burden/genes_health.xlsx
         brava: input/evidence/gene_burden/brava.xlsx
+        schema: input/evidence/gene_burden/schema/gene_results.tsv.bgz
+        bipex: input/evidence/gene_burden/bipex/gene_results.tsv.bgz
         curated_studies: input/ot_curation/gene_burden/curated_evidence.tsv
         ontoma_disease_label_lut: intermediate/ontoma/disease_label_lookup_table.parquet
         ontoma_disease_id_lut: intermediate/ontoma/disease_id_lookup_table.parquet
@@ -715,6 +717,8 @@ steps:
         evidence: output/evidence_gene_burden
       settings:
         finngen_release: R12
+        schema_release: '2026-07-15'
+        bipex_release: '2026-08-07'
   ##################################################################################################
 
   #: EVIDENCE_CLINICAL_PRECEDENCE STEP :############################################################

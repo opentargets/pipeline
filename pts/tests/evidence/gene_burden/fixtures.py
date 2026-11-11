@@ -320,3 +320,94 @@ def write_brava(
             'Table S15': (GRANULAR_COLUMNS, list(s15)),
         },
     )
+
+
+SCHEMA_COLUMNS = [
+    'gene_id', 'group', 'gene_symbol', 'ptv_case_carrier', 'ptv_control_carrier', 'ptv_p_value', 'ptv_odds_ratio',
+    'ptv_odds_ratio_95_ci', 'ptv_n_de_novo', 'ptv_mis_case_carrier', 'ptv_mis_control_carrier', 'ptv_mis_p_value',
+    'ptv_mis_odds_ratio', 'ptv_mis_odds_ratio_95_ci', 'ptv_mis_n_de_novo', 'mis_case_carrier', 'mis_control_carrier',
+    'mis_p_value', 'mis_odds_ratio', 'mis_odds_ratio_95_ci', 'syn_case_carrier', 'syn_control_carrier',
+    'syn_p_value', 'syn_odds_ratio', 'syn_odds_ratio_95_ci', 'n_de_novo_p_value', 'schema_case_control_p_value',
+    'case_control_plus_de_novo_p_value', 'n_cases', 'n_controls',
+]  # fmt: skip
+
+
+BIPEX_COLUMNS = [
+    'gene_id', 'group', 'gene_symbol',
+    *(
+        f'{test}_{field}'
+        for test in ('syn', 'mis', 'ptv', 'ptv_mis')
+        for field in (
+            'case_carrier', 'ctrl_carrier', 'p_value', 'odds_ratio', 'odds_ratio_95_ci_lower_bound',
+            'odds_ratio_95_ci_upper_bound',
+        )
+    ),
+    'flags', 'n_cases', 'n_controls',
+]  # fmt: skip
+
+
+def schema_row(**fields: str) -> dict[str, str]:
+    """A SCHEMA2 gene row whose PTV+missense test is the significant one."""
+    row = dict.fromkeys(SCHEMA_COLUMNS, 'NA') | {
+        'gene_id': 'ENSG1',
+        'group': 'meta',
+        'gene_symbol': 'G1',
+        'ptv_case_carrier': '40',
+        'ptv_control_carrier': '10',
+        'ptv_p_value': '1.0000e-06',
+        'ptv_odds_ratio': '5.5',
+        'ptv_odds_ratio_95_ci': '1.5 - 20.25',
+        'ptv_mis_case_carrier': '90',
+        'ptv_mis_control_carrier': '30',
+        'ptv_mis_p_value': '2.5000e-09',
+        'ptv_mis_odds_ratio': '4.25',
+        'ptv_mis_odds_ratio_95_ci': '2.5 - 7.75',
+        'schema_case_control_p_value': '2.5000e-09',
+        'n_cases': '87959',
+        'n_controls': '150587',
+    }
+    unknown = set(fields) - set(SCHEMA_COLUMNS)
+    assert not unknown, unknown
+    return row | fields
+
+
+def bipex_row(**fields: str) -> dict[str, str]:
+    """A BipEx gene row, flagged significant, whose PTV test is the more significant."""
+    row = dict.fromkeys(BIPEX_COLUMNS, 'NA') | {
+        'gene_id': 'ENSG1',
+        'group': 'meta',
+        'gene_symbol': 'G1',
+        'ptv_case_carrier': '30',
+        'ptv_ctrl_carrier': '5',
+        'ptv_p_value': '2.3328e-11',
+        'ptv_odds_ratio': '7.5',
+        'ptv_odds_ratio_95_ci_lower_bound': '3.25',
+        'ptv_odds_ratio_95_ci_upper_bound': '17.5',
+        'ptv_mis_case_carrier': '60',
+        'ptv_mis_ctrl_carrier': '50',
+        'ptv_mis_p_value': '4.0000e-08',
+        'ptv_mis_odds_ratio': '2.5',
+        'ptv_mis_odds_ratio_95_ci_lower_bound': '1.5',
+        'ptv_mis_odds_ratio_95_ci_upper_bound': '4.0',
+        'flags': 'bonferonni_significant,fdr_five_percent_significant',
+        'n_cases': '64435',
+        'n_controls': '168101',
+    }
+    unknown = set(fields) - set(BIPEX_COLUMNS)
+    assert not unknown, unknown
+    return row | fields
+
+
+def write_exome_browser(path: Path, columns: list[str], rows: list[dict[str, str]]) -> str:
+    """A Broad exome results browser `gene_results.tsv.bgz`: a gzipped TSV, missing values `NA`, flags empty."""
+    lines = ['\t'.join(columns), *('\t'.join(row[c] for c in columns) for row in rows)]
+    path.write_bytes(gzip.compress(''.join(f'{line}\n' for line in lines).encode()))
+    return str(path)
+
+
+def write_schema(tmp: Path, rows: list[dict[str, str]]) -> str:
+    return write_exome_browser(tmp / 'schema.tsv.bgz', SCHEMA_COLUMNS, rows)
+
+
+def write_bipex(tmp: Path, rows: list[dict[str, str]]) -> str:
+    return write_exome_browser(tmp / 'bipex.tsv.bgz', BIPEX_COLUMNS, rows)
