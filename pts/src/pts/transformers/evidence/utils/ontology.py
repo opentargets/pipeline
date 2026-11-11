@@ -21,14 +21,16 @@ def add_efo_mapping(
     label_col_name: str = 'diseaseFromSource',
     disease_id_lut_path: str | None = None,
     id_col_name: str | None = 'diseaseFromSourceId',
+    *,
+    keep_acronyms: bool = False,
 ) -> pl.LazyFrame:
     """Add `diseaseFromSourceMappedId`, the disease the evidence maps to, one row per mapping.
 
     The disease label is mapped with the label lookup table and, when both an id column and an id
     lookup table are given, the disease id with the id table too; the two sets of mappings are
     merged. Evidence with several mappings is exploded into one row each, and evidence without any
-    is kept with a null mapping. Label mappings flagged as acronyms in the lookup table are dropped. As in
-    OnToma, identical evidence rows come out once.
+    is kept with a null mapping. Label mappings flagged as acronyms in the lookup table are dropped
+    unless `keep_acronyms` is set. Identical evidence rows come out once.
 
     Args:
         evidence: Evidence holding the disease label and, optionally, id columns.
@@ -36,6 +38,7 @@ def add_efo_mapping(
         label_col_name: Column holding the disease label.
         disease_id_lut_path: OnToma disease id lookup table.
         id_col_name: Column holding the disease id.
+        keep_acronyms: Keep label mappings flagged as acronyms.
 
     Returns:
         The evidence with `diseaseFromSourceMappedId` added.
@@ -54,12 +57,15 @@ def add_efo_mapping(
         type_col=pl.lit('DS'),
         include_entity_source=True,
     )
-    all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId')).list.n_unique()
-    kept_ids = non_acronym_ids(pl.col(label_result))
-    labelled = mapped.collect()
-    lost = labelled.select((all_ids > kept_ids.list.len().fill_null(0)).sum()).item()
-    logger.info(f'{lost} evidence rows lost disease ids from acronym label mappings')
-    mapped = labelled.lazy().with_columns(kept_ids.alias(label_result))
+    all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId'))
+    if keep_acronyms:
+        mapped = mapped.with_columns(all_ids.list.unique().list.sort().alias(label_result))
+    else:
+        kept_ids = non_acronym_ids(pl.col(label_result))
+        labelled = mapped.collect()
+        lost = labelled.select((all_ids.list.n_unique() > kept_ids.list.len().fill_null(0)).sum()).item()
+        logger.info(f'{lost} evidence rows lost disease ids from acronym label mappings')
+        mapped = labelled.lazy().with_columns(kept_ids.alias(label_result))
     mapped_ids = pl.col(label_result).fill_null([])
 
     if id_col_name and disease_id_lut_path:

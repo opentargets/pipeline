@@ -48,3 +48,10 @@ def test_logs_dropped_acronym_ids(tmp_path: Path, is_acronym: bool, expected: in
     finally:
         logger.remove(sink)
     assert any(f'{expected} evidence rows lost' in m for m in messages)
+
+
+def test_keep_acronyms_maps_flagged_label(tmp_path: Path) -> None:
+    lut = _label_lut(tmp_path, 'ALS', 'MONDO_0004976', True)
+    evidence = pl.LazyFrame({'diseaseFromSource': ['ALS', 'unknown'], 'diseaseFromSourceId': ['x', 'y']})
+    out = add_efo_mapping(evidence, lut, id_col_name=None, keep_acronyms=True).collect()
+    assert out.rows() == [('ALS', 'x', 'MONDO_0004976'), ('unknown', 'y', None)]
