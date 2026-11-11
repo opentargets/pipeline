@@ -10,7 +10,7 @@ import polars.selectors as cs
 from loguru import logger
 
 from pts.transformers.utils.disease_mapping import map_entities, read_entity_lut
-from pts.transformers.utils.disease_mapping.mapping import temporary_prefix
+from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids, temporary_prefix
 
 MAPPED_ID_COLUMN = 'diseaseFromSourceMappedId'
 
@@ -27,7 +27,8 @@ def add_efo_mapping(
     The disease label is mapped with the label lookup table and, when both an id column and an id
     lookup table are given, the disease id with the id table too; the two sets of mappings are
     merged. Evidence with several mappings is exploded into one row each, and evidence without any
-    is kept with a null mapping. As in OnToma, identical evidence rows come out once.
+    is kept with a null mapping. Label mappings flagged as acronyms in the lookup table are dropped. As in
+    OnToma, identical evidence rows come out once.
 
     Args:
         evidence: Evidence holding the disease label and, optionally, id columns.
@@ -51,7 +52,13 @@ def add_efo_mapping(
         label_col_name,
         'label',
         type_col=pl.lit('DS'),
+        include_entity_source=True,
     )
+    all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId')).list.n_unique()
+    kept_ids = non_acronym_ids(pl.col(label_result))
+    lost = mapped.select((all_ids > kept_ids.list.len().fill_null(0)).sum()).collect().item()
+    logger.info(f'{lost} evidence rows lost disease ids from acronym label mappings')
+    mapped = mapped.with_columns(kept_ids.alias(label_result))
     mapped_ids = pl.col(label_result).fill_null([])
 
     if id_col_name and disease_id_lut_path:
