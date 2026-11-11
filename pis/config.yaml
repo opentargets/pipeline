@@ -24,7 +24,7 @@ scratchpad:
   depmap_version: '2026Q3'
   hpo_version: '2026-09-01'
   mondo_version: '2026-10-06'
-  ot_curation: '26.09.2'
+  ot_curation: '26.11'
   schema_release: '2026-07-15'
   bipex_release: '2026-08-07'
   probes_drugs_version: '01_2026'
