@@ -127,6 +127,80 @@ class TestMatchMapped:
         assert result['3']['validReasons'] == []
         assert [result[k]['isValid'] for k in ('1', '2', '3')] == [True, True, False]
 
+    def test_acronym_id_not_valid_by_only_id_or_trusted_source(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'CF',
+                    'entityIds': [Row(entityId='MONDO_1', entitySource='exact_synonym', isAcronym=True)],
+                    'mappedId': 'MONDO_1',
+                },
+            ],
+        )
+        result = MatchMapped._identify_valid_ids(df, ['exact_synonym']).collect()[0]
+        assert result['validReasons'] == []
+        assert result['isValid'] is False
+
+    def test_acronym_id_valid_by_disambiguation(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'cystic fibrosis',
+                    'entityIds': [Row(entityId='MONDO_1', entitySource='name', isAcronym=False)],
+                    'mappedId': 'MONDO_1',
+                    'isMapped': True,
+                },
+                {
+                    'pmid': '1',
+                    'label': 'CF',
+                    'entityIds': [Row(entityId='MONDO_1', entitySource='exact_synonym', isAcronym=True)],
+                    'mappedId': 'MONDO_1',
+                    'isMapped': True,
+                },
+            ],
+        )
+        result = {
+            r['label']: (r['isValid'], r['validReasons'])
+            for r in MatchMapped(df).disambiguate(trusted_sources=['name', 'exact_synonym']).df.collect()
+        }
+        assert result['CF'] == (True, [IdValidReason.DISAMBIGUATED.value])
+
+    def test_acronym_id_alone_in_publication_fails(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'UC',
+                    'entityIds': [Row(entityId='MONDO_UC', entitySource='exact_synonym', isAcronym=True)],
+                    'mappedId': 'MONDO_UC',
+                    'isMapped': True,
+                },
+            ],
+        )
+        result = MatchMapped(df).disambiguate(trusted_sources=['name', 'exact_synonym']).df.collect()
+        assert [r['isValid'] for r in result] == [False]
+
+    def test_gene_symbols_keep_trusted_source(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'TNF',
+                    'type': 'GP',
+                    'entityIds': [Row(entityId='ENSG1', entitySource='approved_symbol', isAcronym=False)],
+                    'mappedId': 'ENSG1',
+                },
+            ],
+        )
+        result = MatchMapped._identify_valid_ids(df, ['approved_symbol']).collect()[0]
+        assert result['validReasons'] == [IdValidReason.ONLY_ID.value, IdValidReason.ID_FROM_TRUSTED_SOURCE.value]
+
     def test_disambiguate_uses_ids_validated_elsewhere_in_the_publication(self, spark):
         ambiguous = [
             Row(entityId='E1', entitySource='syn', isAcronym=False),

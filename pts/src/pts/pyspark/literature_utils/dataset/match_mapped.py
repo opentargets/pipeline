@@ -42,10 +42,10 @@ class MatchMapped(Dataset):
 
     SECTION_TO_SCORE_CONFIG: ClassVar[list[dict[str, Any]]] = [
         {'score': 10, 'section': ['title']},
-        {'score': 3,  'section': ['abstract']},
-        {'score': 5,  'section': ['results', 'result', 'figure', 'fig', 'table']},
-        {'score': 2,  'section': ['discussion', 'discuss', 'conclusion', 'concl']},
-        {'score': 1,  'section': ['introduction', 'intro', 'case study', 'case', 'appendix', 'methods', 'other']},
+        {'score': 3, 'section': ['abstract']},
+        {'score': 5, 'section': ['results', 'result', 'figure', 'fig', 'table']},
+        {'score': 2, 'section': ['discussion', 'discuss', 'conclusion', 'concl']},
+        {'score': 1, 'section': ['introduction', 'intro', 'case study', 'case', 'appendix', 'methods', 'other']},
     ]
 
     # Salt buckets for shuffles keyed by (pmid, mappedId) in the disambig
@@ -70,9 +70,7 @@ class MatchMapped(Dataset):
         return parse_spark_schema('literature_match_mapped.json')
 
     @staticmethod
-    def _update_flag(
-        flag_column: Column, flag_condition: Column, flag_text: Enum
-    ) -> Column:
+    def _update_flag(flag_column: Column, flag_condition: Column, flag_text: Enum) -> Column:
         """Update the provided flag column with a new flag if condition is met.
 
         Args:
@@ -91,7 +89,7 @@ class MatchMapped(Dataset):
 
     @staticmethod
     def _identify_valid_ids(df: DataFrame, trusted_sources: list[str]) -> DataFrame:
-        """Mark ids as valid based on certain criteria.
+        """Mark ids as valid based on certain criteria; acronym-only mappings are never valid here.
 
         Args:
             df (DataFrame): DataFrame containing id and source information.
@@ -100,6 +98,10 @@ class MatchMapped(Dataset):
         Returns:
             DataFrame: DataFrame where valid ids and their reasons are indicated.
         """
+        mapped_entries = f.filter('entityIds', lambda x: x['entityId'] == f.col('mappedId'))
+        acronym_only = (f.size(mapped_entries) > 0) & f.forall(
+            mapped_entries, lambda x: f.coalesce(x['isAcronym'], f.lit(False))
+        )
         return (
             df
             .withColumn('validReasons', f.lit(None))
@@ -108,28 +110,28 @@ class MatchMapped(Dataset):
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(f.array_distinct('entityIds.entityId')) == 1,
-                    IdValidReason.ONLY_ID
-                )
+                    (f.size(f.array_distinct('entityIds.entityId')) == 1) & ~acronym_only,
+                    IdValidReason.ONLY_ID,
+                ),
             )
             # mappedId is valid if the mapping is from a trusted source
             .withColumn(
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(
-                        f.array_except(
-                            f.col('entityIds.entitySource'),
-                            f.array(*[f.lit(x) for x in trusted_sources])
+                    (
+                        f.size(
+                            f.array_except(
+                                f.col('entityIds.entitySource'), f.array(*[f.lit(x) for x in trusted_sources])
+                            )
                         )
-                    ) == 0,
-                    IdValidReason.ID_FROM_TRUSTED_SOURCE
-                )
+                        == 0
+                    )
+                    & ~acronym_only,
+                    IdValidReason.ID_FROM_TRUSTED_SOURCE,
+                ),
             )
-            .withColumn(
-                'isValid',
-                f.when(f.size('validReasons') > 0, True).otherwise(False)
-            )
+            .withColumn('isValid', f.when(f.size('validReasons') > 0, True).otherwise(False))
         )
 
     @staticmethod
@@ -178,12 +180,7 @@ class MatchMapped(Dataset):
             # would prune the salt and collapse this back to one skewed shuffle)
             .persist(StorageLevel.DISK_ONLY)
         )
-        return (
-            salted_distinct
-            .drop('_salt')
-            .distinct()
-            .withColumn('isDisambiguous', f.lit(True))
-        )
+        return salted_distinct.drop('_salt').distinct().withColumn('isDisambiguous', f.lit(True))
 
     @staticmethod
     def _resolve_ambiguous_mappings(
@@ -210,9 +207,7 @@ class MatchMapped(Dataset):
         Returns:
             MatchMapped: Dataset with resolved mappings.
         """
-        salted_df = df.withColumn(
-            '_salt', (f.rand(seed=42) * salt_buckets).cast('int')
-        )
+        salted_df = df.withColumn('_salt', (f.rand(seed=42) * salt_buckets).cast('int'))
         salted_valid_id_df = valid_id_df.withColumn(
             '_salt', f.explode(f.array(*[f.lit(i) for i in range(salt_buckets)]))
         )
@@ -227,16 +222,13 @@ class MatchMapped(Dataset):
                     MatchMapped._update_flag(
                         f.col('validReasons'),
                         (f.col('isDisambiguous') == True) & (f.col('isValid') == False),  # noqa: E712 (spark Column comparison)
-                        IdValidReason.DISAMBIGUATED
-                    )
+                        IdValidReason.DISAMBIGUATED,
+                    ),
                 )
                 .drop('isDisambiguous')
-                .withColumn(
-                    'isValid',
-                    f.when(f.size('validReasons') > 0, True).otherwise(False)
-                )
+                .withColumn('isValid', f.when(f.size('validReasons') > 0, True).otherwise(False))
             ),
-            _schema=MatchMapped.get_schema()
+            _schema=MatchMapped.get_schema(),
         )
 
     def disambiguate(self: MatchMapped, trusted_sources: list[str]) -> MatchMapped:
@@ -302,18 +294,19 @@ class MatchMapped(Dataset):
                         self.df
                         .filter(f.col('type') == type2)
                         .select(
-                            'pmid', 'text',
-                            'label', 'type',
-                            'startInSentence', 'endInSentence',
-                            'entityLabelNormalised', 'mappedId'
+                            'pmid',
+                            'text',
+                            'label',
+                            'type',
+                            'startInSentence',
+                            'endInSentence',
+                            'entityLabelNormalised',
+                            'mappedId',
                         )
                         .alias('right')
                     ),
-                    on=[
-                        (f.col('left.pmid') == f.col('right.pmid')) &
-                        (f.col('left.text') == f.col('right.text'))
-                    ],
-                    how='inner'
+                    on=[(f.col('left.pmid') == f.col('right.pmid')) & (f.col('left.text') == f.col('right.text'))],
+                    how='inner',
                 )
                 .select(
                     # fields shared between left and right datasets
@@ -344,12 +337,12 @@ class MatchMapped(Dataset):
                     f.col('right.mappedId').alias('mappedId2'),
                     # fields dependent on left and right values
                     f.concat_ws('-', f.col('left.type'), f.col('right.type')).alias('type'),
-                    (f.col('mappedId1').isNotNull() & f.col('mappedId2').isNotNull()).alias('isMapped')
+                    (f.col('mappedId1').isNotNull() & f.col('mappedId2').isNotNull()).alias('isMapped'),
                 )
                 # assign evidenceScore, given section
                 .withColumn('evidenceScore', self._section_to_score(f.col('section')))
             ),
-            _schema=Cooccurrence.get_schema()
+            _schema=Cooccurrence.get_schema(),
         )
 
     def generate_target_disease_cooccurrences(self: MatchMapped) -> Cooccurrence:
