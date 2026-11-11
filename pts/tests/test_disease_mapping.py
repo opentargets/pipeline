@@ -9,7 +9,7 @@ from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
 from pts.transformers.ontoma_lut.build import build_lut
 from pts.transformers.utils.disease_mapping import map_entities
-from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids
+from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids, read_entity_lut
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 
 LUT_SCHEMA = {
@@ -179,6 +179,22 @@ def lut_paths(tmp_path: Path) -> tuple[str, str]:
     LABEL_LUT.write_parquet(label / 'part-0.parquet')
     ID_LUT.write_parquet(ids / 'part-0.parquet')
     return str(label), str(ids)
+
+
+def test_read_entity_lut_rejects_lut_without_is_acronym(tmp_path: Path) -> None:
+    old = pl.DataFrame(
+        [('label', 'DS', 'cf', [{'entityId': 'MONDO_1', 'entitySource': 'name'}])],
+        schema={
+            'entityKind': pl.String,
+            'entityType': pl.String,
+            'entityLabelNormalised': pl.String,
+            'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+        },
+        orient='row',
+    )
+    old.write_parquet(tmp_path / 'part-0.parquet')
+    with pytest.raises(ValueError, match=str(tmp_path)):
+        read_entity_lut(str(tmp_path))
 
 
 def test_add_efo_mapping_merges_label_and_id_mappings(lut_paths: tuple[str, str]) -> None:

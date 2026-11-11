@@ -127,6 +127,20 @@ class TestMatchMapped:
         assert result['3']['validReasons'] == []
         assert [result[k]['isValid'] for k in ('1', '2', '3')] == [True, True, False]
 
+    def test_null_is_acronym_is_not_acronym(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=None)],
+                    'mappedId': 'E1',
+                },
+            ],
+        )
+        result = MatchMapped._identify_valid_ids(df, ['name']).collect()[0]
+        assert result['validReasons'] == [IdValidReason.ONLY_ID.value]
+
     def test_acronym_id_not_valid_by_only_id_or_trusted_source(self, spark):
         df = _mapped_df(
             spark,

@@ -23,6 +23,7 @@ from typing import Literal
 import polars as pl
 import polars.selectors as cs
 
+from pts.schemas.ontoma_lut import ENTITY_LUT
 from pts.transformers.utils.dataset import scan_dataset
 from pts.transformers.utils.disease_mapping.normalise import normalise_batch
 from pts.transformers.utils.disease_mapping.query import (
@@ -66,7 +67,11 @@ class _Working:
 
 def read_entity_lut(path: str) -> pl.LazyFrame:
     """Read a lookup table OnToma wrote (`ReadyEntityLUT`), as written by its `cache_dir`."""
-    return scan_dataset(path).select('entityKind', 'entityType', NORMALISED_COLUMN, 'entityIds')
+    lut = scan_dataset(path).select('entityKind', 'entityType', NORMALISED_COLUMN, 'entityIds')
+    dtype = lut.collect_schema()['entityIds']
+    if dtype != ENTITY_LUT['entityIds']:
+        raise ValueError(f'lookup table {path} has entityIds {dtype}, expected {ENTITY_LUT["entityIds"]}')
+    return lut
 
 
 def non_acronym_ids(structs: pl.Expr) -> pl.Expr:
