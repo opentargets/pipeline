@@ -18,6 +18,8 @@ steps:
         eva: input/evidence/eva.json.gz
         pharmacogenomics: output/pharmacogenomics
         credible_set_variant: intermediate/validated/credible_set_variant
+        additional_variants:
+          - intermediate/vidra/az_exwas
         fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
         gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
         gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw

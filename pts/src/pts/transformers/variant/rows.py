@@ -1,5 +1,7 @@
 """Collect the variant rows that the variant step annotates."""
 
+from collections.abc import Sequence
+
 import polars as pl
 from loguru import logger
 
@@ -56,13 +58,20 @@ def as_vcf_df(frame: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, credible_set_variant: str) -> pl.LazyFrame:
-    """Deduplicated variants from the four evidence sources, sorted by coordinate.
+def collect_variants(
+    uniprot_variants: str,
+    eva: str,
+    pharmacogenomics: str,
+    credible_set_variant: str,
+    additional_variants: Sequence[str] = (),
+) -> pl.LazyFrame:
+    """Deduplicated variants from the four evidence sources and any additional datasets, sorted by coordinate.
 
     The kept rsID is the smallest real one, with '.' for a variant that has none. The credible
     set variants are the validated CredibleSetVariant rows, which hold every lead and member; a
     variant has one row per credible set it is in, so their distinct identifiers are taken before
-    they are split into VCF columns.
+    they are split into VCF columns. Each of `additional_variants` is a parquet dataset with a
+    `variantId` column, read the same way.
 
     Raises:
         ValueError: If the credible set variants have no `variantId` column, as a CredibleSet
@@ -77,6 +86,7 @@ def collect_variants(uniprot_variants: str, eva: str, pharmacogenomics: str, cre
         as_vcf_df(scan_dataset(eva, format='ndjson', infer_schema_length=None)),
         as_vcf_df(scan_dataset(pharmacogenomics)),
         as_vcf_df(credible_set_variants.select('variantId').unique()),
+        *[as_vcf_df(scan_dataset(path)) for path in additional_variants],
     ]
     return (
         pl

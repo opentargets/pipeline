@@ -107,7 +107,11 @@ def _sift(sources: VariantSource, core: str, path: Path) -> Path:
 def chromosome_rows(sources: VariantSource, directory: Path) -> tuple[dict[str, Path], dict[str, int]]:
     """Each chromosome's rows, sorted by position, written to `directory/<chromosome>.parquet`, and their number."""
     rows = collect_variants(
-        sources.uniprot_variants, sources.eva, sources.pharmacogenomics, sources.credible_set_variant
+        sources.uniprot_variants,
+        sources.eva,
+        sources.pharmacogenomics,
+        sources.credible_set_variant,
+        sources.additional_variants,
     ).collect(engine='streaming')
     if rows.is_empty():
         raise ValueError('No variant rows found')

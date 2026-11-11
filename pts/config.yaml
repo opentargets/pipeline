@@ -15,6 +15,20 @@ steps:
       transformer: lof_curation
   ##################################################################################################
 
+  #: VIDRA AZ EXWAS STEP :##########################################################################
+  # Runs before the variant index: its variants are a source of the index, so that VIDRA's AstraZeneca
+  # rare variants (mostly absent from ClinVar and the credible sets) get consequences and scores.
+  vidra_az_exwas:
+    - name: transform vidra az_exwas
+      transformer: vidra.az_exwas
+      source: input/vidra/azphewas-com-470k-exwas-binary.csv.bz2
+      destination: intermediate/vidra/az_exwas
+      settings:
+        models:
+          - allelic
+        p_value_threshold: 5.0e-8
+  ##################################################################################################
+
   #: VARIANT STEP :################################################################################
   variant:
     - name: transform FoldX annotations
@@ -33,6 +47,8 @@ steps:
         eva: input/evidence/eva.json.gz
         pharmacogenomics: output/pharmacogenomics
         credible_set_variant: intermediate/validated/credible_set_variant
+        additional_variants:
+          - intermediate/vidra/az_exwas
         fasta: input/variant/reference/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
         gff3: input/variant/reference/Homo_sapiens.GRCh38.116.gff3.gz
         gerp: input/variant/gerp/gerp_conservation_scores.homo_sapiens.GRCh38.bw

@@ -86,6 +86,7 @@ steps:
   pis_evidence_ppp:
     ppp_only: true
   pis_variant:
+  pis_vidra:
   pis_gwas:
   pis_gwas_ppp:
     ppp_only: true
@@ -113,6 +114,9 @@ steps:
     ppp_only: true
     depends_on:
       - pis_variant_ppp
+  pts_vidra_az_exwas:
+    depends_on:
+      - pis_vidra
   pts_variant:
     machine_type: n2d-standard-64
     disk_size: 500
@@ -123,6 +127,7 @@ steps:
       - pis_evidence_eva
       - pts_pharmacogenetics
       - pts_credible_set
+      - pts_vidra_az_exwas
     depends_on_ppp:
       - pts_variant_ppp
   pts_reactome:

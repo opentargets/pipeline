@@ -144,3 +144,12 @@ def test_a_credible_set_dataset_in_place_of_the_variants_is_an_error(tmp_path):
     )
     with pytest.raises(ValueError, match='variantId'):
         _collect(source)
+
+
+def test_collect_variants_reads_additional_datasets(tmp_path):
+    source = _inputs(tmp_path)
+    extra = tmp_path / 'az_exwas'
+    extra.mkdir()
+    pl.DataFrame({'variantId': ['3_7_G_A', '1_3_A_G'], 'pValue': [1e-9, 1e-9]}).write_parquet(extra / 'part.parquet')
+    result = collect_variants(**source, additional_variants=[str(extra)]).collect()
+    assert result.select('chromosome', 'position').rows() == [('1', 1), ('1', 2), ('1', 3), ('2', 1), ('3', 7)]

@@ -17,6 +17,9 @@ class VariantSource(BaseModel):
     pharmacogenomics: str
     credible_set_variant: str
     """The validated credible set variants, every lead and member of every valid set."""
+    additional_variants: list[str] = Field(default_factory=list)
+    """Further parquet datasets with a `variantId` column (and optionally `variantRsId`), annotated like the four
+    sources above: for example the VIDRA AstraZeneca ExWAS associations, whose rare variants are mostly not in them."""
     fasta: str
     """The gzip GRCh38 primary assembly FASTA."""
     gff3: str

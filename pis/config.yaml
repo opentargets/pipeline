@@ -635,6 +635,16 @@ steps:
           destination: input/ot_curation/${each}
   ##################################################################################################
 
+  #: VIDRA STEP :###################################################################################
+  # Inputs of VIDRA (variant-informed dose-response analysis) that no other step stages. The binary
+  # ExWAS export of the AstraZeneca PheWAS Portal is not public; it is staged from an Open Targets
+  # bucket, to move next to the portal's burden files in otar000-evidence_input once adopted.
+  vidra:
+    - name: copy az exwas binary
+      source: gs://ot-team/dconsidine/vidra/azphewas-com-470k-exwas-binary.csv.bz2
+      destination: input/vidra/azphewas-com-470k-exwas-binary.csv.bz2
+  ##################################################################################################
+
   #: EVIDENCE_GENE2PHENOTYPE STEP :#################################################################
   evidence_gene2phenotype:
     - name: copy gene2phenotype cancer
