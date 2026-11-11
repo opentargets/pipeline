@@ -5,8 +5,11 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
+from pts.transformers.ontoma_lut.build import build_lut
 from pts.transformers.utils.disease_mapping import map_entities
+from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 
 LUT_SCHEMA = {
@@ -216,3 +219,65 @@ def test_add_efo_mapping_keeps_evidence_columns(lut_paths: tuple[str, str], with
     assert out.columns == [*evidence.collect_schema().names(), 'diseaseFromSourceMappedId']
     assert out['labelMappedResult'].to_list() == [['kept'], ['kept']]
     assert out['idMappedResult'].to_list() == [['kept too'], ['kept too']]
+
+
+def _acronym_lut() -> pl.LazyFrame:
+    raw = pl.DataFrame(
+        [
+            ('MONDO_1', 'CF', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+            ('MONDO_1', 'Cystic fibrosis', 1.0, 'term', 'name', 'DS', 'label'),
+            ('MONDO_1', 'MONDO:1', 1.0, 'symbol', 'id', 'DS', 'id'),
+        ],
+        schema=RAW_ENTITY_LUT,
+        orient='row',
+    )
+    return build_lut(
+        [raw], acronym_allowlist=pl.DataFrame(schema={'acronym': pl.String, 'diseaseId': pl.String})
+    ).lazy()
+
+
+def _structs(label: str, kind: str = 'label') -> list[dict] | None:
+    lf = pl.LazyFrame({'x': [label]})
+    out = map_entities(
+        lf, _acronym_lut(), 'ids', 'x', kind, type_col=pl.lit('DS'), include_entity_source=True
+    ).collect()
+    return out['ids'].to_list()[0]
+
+
+@pytest.mark.parametrize('label', ['CF', 'C.F.', '(CF)', '#CF', ' cf '])
+def test_spellings_of_an_acronym_hit_the_flagged_entry(label: str) -> None:
+    assert _structs(label) == [{'entityId': 'MONDO_1', 'entitySource': 'exact_synonym', 'isAcronym': True}]
+
+
+def test_full_name_is_not_flagged() -> None:
+    assert _structs('cystic fibrosis') == [{'entityId': 'MONDO_1', 'entitySource': 'name', 'isAcronym': False}]
+
+
+def test_id_queries_never_flagged() -> None:
+    found = _structs('MONDO:1', kind='id')
+    assert found
+    assert all(not entry['isAcronym'] for entry in found)
+
+
+def test_without_entity_source_ids_are_bare() -> None:
+    lf = pl.LazyFrame({'x': ['CF']})
+    out = map_entities(lf, _acronym_lut(), 'ids', 'x', 'label', type_col=pl.lit('DS')).collect()
+    assert out['ids'].to_list() == [['MONDO_1']]
+
+
+def test_non_acronym_ids() -> None:
+    def entry(i: str, source: str, flag: bool | None) -> dict:
+        return {'entityId': i, 'entitySource': source, 'isAcronym': flag}
+
+    structs = pl.Series(
+        [
+            [entry('A', 's', True), entry('B', 's', False), entry('B', 't', False)],
+            [entry('A', 's', True)],
+            [entry('C', 's', None), entry('A', 's', True)],
+            None,
+            [],
+        ],
+        dtype=ENTITY_LUT['entityIds'],
+    )
+    out = pl.DataFrame({'s': structs}).select(non_acronym_ids(pl.col('s')))['s'].to_list()
+    assert out == [['B'], None, ['C'], None, None]

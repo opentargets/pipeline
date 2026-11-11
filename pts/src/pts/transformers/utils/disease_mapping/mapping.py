@@ -1,31 +1,17 @@
-"""Polars port of `OnToma.map_entities`: resolve labels and ids against an OnToma lookup table.
+"""Resolve labels and ids against an OnToma lookup table.
 
-The lookup tables are built by `pts.transformers.ontoma_lut`; only the query side of OnToma is ported
-here. It must normalise exactly as the tables were, so it is tied to the spark-nlp version they
-follow -- see `pts.transformers.utils.disease_mapping.normalise`.
+Started as a port of `OnToma.map_entities`. The lookup tables are built by `pts.transformers.ontoma_lut`;
+the query side must normalise exactly as they were -- see `pts.transformers.utils.disease_mapping.normalise`.
+With `include_entity_source` the ids come out as `{entityId, entitySource, isAcronym}` structs, the flag
+read from the lookup table; `non_acronym_ids` drops the flagged ones.
 
-Behaviour kept from OnToma on purpose, because it is observable in the output:
-
-* **Identical input rows collapse into one.** OnToma aggregates by every input column, so
-  duplicates do not survive the mapping. This port deduplicates the same way.
+* **Identical input rows collapse into one.**
 * **Each label is tried in two spellings**, translated with and without accented letters, and
   the identifiers found for either are merged.
 * **No identifier means null, not an empty list.**
-
-Differences, none of which can change which identifiers are found for the current callers:
-
-* The identifier lists are sorted. OnToma's come out of `collect_set` in no particular order.
-* Rows keep their input order, which spark's aggregation does not.
-* Input columns are never touched. OnToma works in the input frame itself, so input columns named
-  like its working columns (`entityLabel`, `entityType`, `entityKind`, `nlpPipelineTrack`) are
-  overwritten, and an `entityLabel` label column even changes which track a label takes. Here the
-  working columns carry a random prefix that no input column has, and are dropped before
-  returning; only an output column already in the input is refused.
-
-Diffed against `OnToma.map_entities` on spark with lookup tables built by OnToma from the disease
-index: 162,085 query rows covering names, synonyms, cross references and perturbed copies of
-them, mapped as labels and as ids, with a type column of mixed and null types and with both
-`include_*` flags, matched exactly in every configuration.
+* The identifier lists are sorted, and rows keep their input order.
+* Input columns are never touched. Working columns carry a random prefix that no input column has,
+  and are dropped before returning; only an output column already in the input is refused.
 """
 
 from __future__ import annotations
@@ -81,6 +67,19 @@ class _Working:
 def read_entity_lut(path: str) -> pl.LazyFrame:
     """Read a lookup table OnToma wrote (`ReadyEntityLUT`), as written by its `cache_dir`."""
     return scan_dataset(path).select('entityKind', 'entityType', NORMALISED_COLUMN, 'entityIds')
+
+
+def non_acronym_ids(structs: pl.Expr) -> pl.Expr:
+    """Sorted unique `entityId`s of a list of mapping structs whose `isAcronym` is not true; null when none."""
+    ids = (
+        structs.list
+        .eval(
+            pl.element().filter(pl.element().struct.field('isAcronym').fill_null(False).not_()).struct.field('entityId')
+        )
+        .list.unique()
+        .list.sort()
+    )
+    return pl.when(ids.list.len() > 0).then(ids)
 
 
 def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
@@ -155,7 +154,7 @@ def map_entities(
         type_col: Expression giving the type instead, e.g. `pl.lit('DS')`; it is not kept.
         include_normalised_entities: Also output the normalised label, one row per distinct
             normalised label of an input row.
-        include_entity_source: Output `{entityId, entitySource}` structs rather than bare ids.
+        include_entity_source: Output `{entityId, entitySource, isAcronym}` structs rather than bare ids.
 
     Returns:
         The input, untouched, with the identifiers found added as a list column, null when there
