@@ -105,6 +105,29 @@ def test_flag_rows_accepts_untyped_all_empty_quality_controls():
     assert result['qualityControls'].to_list() == [['invalid study'], []]
 
 
+def test_flag_rows_sorts_null_elements_last_as_spark():
+    frame = pl.LazyFrame({'qualityControls': [['z', None]]})
+
+    result = flag_rows(frame, pl.lit(True), Flag.INVALID).collect()
+
+    assert result['qualityControls'].to_list() == [['invalid study', 'z', None]]
+
+
+@pytest.mark.parametrize('lazy', [True, False], ids=['lazy', 'eager'])
+def test_flag_rows_keeps_the_frame_kind_and_empties_null_lists(lazy):
+    """A missing column is added, and a null list stays countable when the condition is false."""
+    missing = pl.DataFrame({'x': [1, 0]})
+    null_lists = pl.DataFrame(
+        {'qualityControls': [None, None], 'x': [1, 0]}, schema_overrides={'qualityControls': pl.List(pl.String)}
+    )
+
+    for frame in (missing, null_lists):
+        result = flag_rows(frame.lazy() if lazy else frame, pl.col('x') == 1, Flag.INVALID)
+        assert isinstance(result, pl.LazyFrame if lazy else pl.DataFrame)
+        rows = result.collect() if isinstance(result, pl.LazyFrame) else result
+        assert rows['qualityControls'].to_list() == [['invalid study'], []]
+
+
 def test_has_excluded_flag_matches_valid_rows():
     frame = flagged_frame()
     marked = frame.with_columns(has_excluded_flag([Flag.INVALID]).alias('excluded')).collect()
