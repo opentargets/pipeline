@@ -1,5 +1,7 @@
 """Tests for the polars vep_view transformer."""
 
+import gzip
+import struct
 from pathlib import Path
 
 import polars as pl
@@ -236,53 +238,54 @@ def _variant(credible_set_id: str, variant_id: str, posterior: float) -> dict:
     }
 
 
+@pytest.fixture
+def outputs(tmp_path: Path) -> dict[str, str]:
+    """Run vep_view on one GWAS locus (chr 2 and 10) and one QTL locus (chr 1)."""
+    credible_set = published_credible_set(
+        {'id': 'gwasLocus', 'studyId': 'gwasStudy', 'leadVariantId': '2_500_A_G', 'fineMappingMethod': 'SuSiE'},
+        {'id': 'qtlLocus', 'studyId': 'qtlStudy', 'leadVariantId': '1_100_A_T', 'fineMappingMethod': 'SuSiE'},
+    )
+    credible_set_variant = published_credible_set_variant(
+        _variant('gwasLocus', '2_500_A_G', 0.7),
+        _variant('gwasLocus', '10_50_C_T', 0.3),
+        _variant('qtlLocus', '1_100_A_T', 0.9),
+        _variant('qtlLocus', '1_200_C_G', 0.1),
+    )
+    study = pl.DataFrame(
+        {
+            'studyId': ['gwasStudy', 'qtlStudy'],
+            'studyType': ['gwas', 'eqtl'],
+            'diseaseIds': [['EFO_1'], []],
+            'geneId': [None, 'ENSG_QTL'],
+            'biosampleId': [None, 'UBERON_1'],
+        },
+        schema_overrides={'diseaseIds': pl.List(pl.String)},
+    )
+    l2g = pl.DataFrame({'credibleSetId': ['gwasLocus'], 'geneId': ['ENSG_L2G'], 'score': [0.8]})
+    biosample = pl.DataFrame({'biosampleId': ['UBERON_1'], 'biosampleName': ['liver']})
+
+    source = {}
+    for name, frame in {
+        'credible_set': credible_set,
+        'credible_set_variant': credible_set_variant,
+        'study_table': study,
+        'l2g_table': l2g,
+        'biosample': biosample,
+    }.items():
+        source[name] = str(tmp_path / 'input' / name)
+        write_dataset(frame, source[name])
+
+    export = tmp_path / 'etc' / 'export' / 'vep_data'
+    export.mkdir(parents=True)
+    names = {'all': 'open_targets_vep', 'gwas': 'open_targets_vep_gwas', 'qtl': 'open_targets_vep_qtl'}
+    destination = {f'vep_data_{key}': str(export / f'{name}.tsv.bgz') for key, name in names.items()}
+
+    vep_view(source, destination, {}, Config(step='vep_view', steps=['vep_view'], work_path=tmp_path))
+    return destination
+
+
 class TestVepView:
     """End-to-end tests for vep_view: bgzipped, tabix-indexed output files."""
-
-    @pytest.fixture
-    def outputs(self, tmp_path: Path) -> dict[str, str]:
-        """Run vep_view on one GWAS locus (chr 2 and 10) and one QTL locus (chr 1)."""
-        credible_set = published_credible_set(
-            {'id': 'gwasLocus', 'studyId': 'gwasStudy', 'leadVariantId': '2_500_A_G', 'fineMappingMethod': 'SuSiE'},
-            {'id': 'qtlLocus', 'studyId': 'qtlStudy', 'leadVariantId': '1_100_A_T', 'fineMappingMethod': 'SuSiE'},
-        )
-        credible_set_variant = published_credible_set_variant(
-            _variant('gwasLocus', '2_500_A_G', 0.7),
-            _variant('gwasLocus', '10_50_C_T', 0.3),
-            _variant('qtlLocus', '1_100_A_T', 0.9),
-            _variant('qtlLocus', '1_200_C_G', 0.1),
-        )
-        study = pl.DataFrame(
-            {
-                'studyId': ['gwasStudy', 'qtlStudy'],
-                'studyType': ['gwas', 'eqtl'],
-                'diseaseIds': [['EFO_1'], []],
-                'geneId': [None, 'ENSG_QTL'],
-                'biosampleId': [None, 'UBERON_1'],
-            },
-            schema_overrides={'diseaseIds': pl.List(pl.String)},
-        )
-        l2g = pl.DataFrame({'credibleSetId': ['gwasLocus'], 'geneId': ['ENSG_L2G'], 'score': [0.8]})
-        biosample = pl.DataFrame({'biosampleId': ['UBERON_1'], 'biosampleName': ['liver']})
-
-        source = {}
-        for name, frame in {
-            'credible_set': credible_set,
-            'credible_set_variant': credible_set_variant,
-            'study_table': study,
-            'l2g_table': l2g,
-            'biosample': biosample,
-        }.items():
-            source[name] = str(tmp_path / 'input' / name)
-            write_dataset(frame, source[name])
-
-        export = tmp_path / 'etc' / 'export' / 'vep_data'
-        export.mkdir(parents=True)
-        names = {'all': 'open_targets_vep', 'gwas': 'open_targets_vep_gwas', 'qtl': 'open_targets_vep_qtl'}
-        destination = {f'vep_data_{key}': str(export / f'{name}.tsv.bgz') for key, name in names.items()}
-
-        vep_view(source, destination, {}, Config(step='vep_view', steps=['vep_view'], work_path=tmp_path))
-        return destination
 
     @pytest.mark.parametrize(
         ('key', 'columns'),
@@ -326,3 +329,76 @@ class TestVepView:
         """The local TSV/bgzip scratch directory must be removed after upload."""
         assert not list(tmp_path.glob('vep_view_*'))
 
+
+ENSEMBL_COMMON_HEADER = [
+    '#chromosome',
+    'position',
+    'referenceAllele',
+    'alternateAllele',
+    'variantId',
+    'studyId',
+    'studyType',
+    'credibleSetId',
+    'pValueMantissa',
+    'pValueExponent',
+    'beta',
+    'is95CredibleSet',
+    'is99CredibleSet',
+    'posteriorProbability',
+    'finemappingMethod',
+    'isLead',
+]
+ENSEMBL_GWAS_HEADER = ['gwasGeneId', 'gwasLocusToGeneScore', 'gwasDiseases']
+ENSEMBL_QTL_HEADER = ['qtlGeneId', 'qtlBiosampleName']
+
+
+def _rows(path: str) -> list[list[str]]:
+    with pysam.TabixFile(path) as tbx:
+        return [row.split('\t') for contig in tbx.contigs for row in tbx.fetch(contig)]
+
+
+def _tabix_conf(path: str) -> tuple[int, int, int, int, str, int]:
+    """Read (format, col_seq, col_beg, col_end, meta, skip) from a `.tbi` header, 1-based columns."""
+    with gzip.open(f'{path}.tbi') as f:
+        magic, _n_ref, fmt, col_seq, col_beg, col_end, meta, skip = struct.unpack('<4s7i', f.read(32))
+    assert magic == b'TBI\x01'
+    return fmt, col_seq, col_beg, col_end, chr(meta), skip
+
+
+class TestEnsemblContract:
+    """The file layout promised to the Ensembl VEP plugin (opentargets/issues#3462).
+
+    The plugin reads column names from `tabix -H`. The split files are documented as
+    `cut -f 1-16,17-19` (GWAS) and `cut -f 1-16,20,21` (QTL) of the combined file.
+    The headers are literal lists on purpose: they must not follow the transformer's constants.
+    """
+
+    @pytest.mark.parametrize(
+        ('key', 'header'),
+        [
+            ('vep_data_all', ENSEMBL_COMMON_HEADER + ENSEMBL_GWAS_HEADER + ENSEMBL_QTL_HEADER),
+            ('vep_data_gwas', ENSEMBL_COMMON_HEADER + ENSEMBL_GWAS_HEADER),
+            ('vep_data_qtl', ENSEMBL_COMMON_HEADER + ENSEMBL_QTL_HEADER),
+        ],
+    )
+    def test_header(self, outputs: dict[str, str], key: str, header: list[str]) -> None:
+        """Each file's `tabix -H` output is exactly the promised header."""
+        with pysam.TabixFile(outputs[key]) as tbx:
+            assert list(tbx.header) == ['\t'.join(header)]
+
+    @pytest.mark.parametrize('key', ['vep_data_all', 'vep_data_gwas', 'vep_data_qtl'])
+    def test_index_is_generic_tsv_on_chromosome_and_position(self, outputs: dict[str, str], key: str) -> None:
+        """Each index is `tabix -s 1 -b 2 -e 2` with `#` meta lines and no skipped lines."""
+        assert _tabix_conf(outputs[key]) == (0, 1, 2, 2, '#', 0)
+
+    def test_gwas_file_is_cut_of_gwas_rows(self, outputs: dict[str, str]) -> None:
+        """The GWAS file equals `cut -f 1-16,17-19` of the combined file's `gwas` rows."""
+        combined = [row[:19] for row in _rows(outputs['vep_data_all']) if row[6] == 'gwas']
+        assert combined
+        assert _rows(outputs['vep_data_gwas']) == combined
+
+    def test_qtl_file_is_cut_of_qtl_rows(self, outputs: dict[str, str]) -> None:
+        """The QTL file equals `cut -f 1-16,20,21` of the combined file's rows whose study type ends in `qtl`."""
+        combined = [row[:16] + row[19:21] for row in _rows(outputs['vep_data_all']) if row[6].endswith('qtl')]
+        assert combined
+        assert _rows(outputs['vep_data_qtl']) == combined
