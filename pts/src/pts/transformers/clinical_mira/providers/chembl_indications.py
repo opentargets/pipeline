@@ -58,6 +58,8 @@ def extract_clinical_report(
                 pl
                 .when(pl.col('ref_type').is_in(APPROVAL_SOURCES))
                 .then(pl.lit(ClinicalStageCategory.APPROVAL))
+                .when((pl.col('ref_type') == 'ATC') & (pl.col('max_phase_for_ind') == 4))
+                .then(pl.lit('approved'))
                 .when(pl.col('ref_type').is_in(['INN', 'USAN']))
                 .then(pl.lit(ClinicalStageCategory.UNKNOWN))
                 .otherwise(
