@@ -116,7 +116,7 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 
     orchestration does not depend on pts; pts tests that the pins equal the tags staging writes.
     """
-    text = _release_step_text({'staging_version': 'S', **FAKE_TAGS})
+    text = _release_step_text({'staging_version': 'S', 'ot_curation': 'C', **FAKE_TAGS})
     stop = FAKE_TAGS['stop_reasons_tag']
     drug = FAKE_TAGS['drug_entities_tag']
     disease = FAKE_TAGS['disease_entities_tag']
@@ -132,7 +132,8 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     ):
         for name in ('data.parquet', 'metadata.json'):
             assert f'{base}/{name}' in text
-    assert '${' not in text
+    assert 'https://raw.githubusercontent.com/opentargets/curation/refs/tags/C/${each}' in text
+    assert '${' not in text.replace('${each}', '')
 
 
 def test_release_reads_nothing_from_ot_team() -> None:
