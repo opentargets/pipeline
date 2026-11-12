@@ -2021,7 +2021,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.12.0rc54"
+version = "26.12.0rc55"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
