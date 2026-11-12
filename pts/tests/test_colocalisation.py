@@ -58,3 +58,25 @@ def test_colocalisation_end_to_end(spark, tmp_path, monkeypatch):
     assert row['h4'] == pytest.approx(5e-6 / (5e-6 + 5e-9), rel=1e-9)
     assert row['h3'] == pytest.approx(5e-9 / (5e-6 + 5e-9), rel=1e-9)
     assert row['betaRatioSignAverage'] == -1.0
+
+
+def test_string_priors_from_yaml_are_accepted(spark, tmp_path, monkeypatch):
+    _write_inputs(tmp_path)
+    monkeypatch.setattr(
+        step,
+        'Session',
+        lambda **kwargs: SimpleNamespace(load_data=lambda path, schema=None: spark.read.schema(schema).parquet(path)),
+    )
+
+    step.colocalisation(
+        {
+            'credible_set': str(tmp_path / 'credible_set.parquet'),
+            'credible_set_variant': str(tmp_path / 'credible_set_variant.parquet'),
+        },
+        {'colocalisation': str(tmp_path / 'out')},
+        {'priorc1': '1e-4', 'priorc2': '1e-4', 'priorc12': '1e-5', 'output_partitions': 1},
+        {},
+    )
+
+    [row] = pl.read_parquet(tmp_path / 'out' / '*.parquet').to_dicts()
+    assert row['h4'] == pytest.approx(5e-6 / (5e-6 + 5e-9), rel=1e-9)
