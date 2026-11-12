@@ -10,6 +10,8 @@ structs, the flags read from the lookup table; `non_acronym_ids` drops the flagg
   the identifiers found for either are merged.
 * **No identifier means null, not an empty list.**
 * The identifier lists are sorted, and rows keep their input order.
+* **A label's NLP pipeline track is decided on the trimmed label**, here and in the lookup tables, so
+  a label padded with spaces, such as ' ALS ', takes the track of its trimmed form.
 * Input columns are never touched. Working columns carry a random prefix that no input column has,
   and are dropped before returning; only an output column already in the input is refused.
 """
@@ -95,8 +97,12 @@ def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
         query
         .with_columns(
             alternative_translations(spark_trim(entity)).alias(w.label),
-            # decided on the raw label, before trimming, translating or cleaning
-            pl.when(entity_type == 'CD').then(pl.lit('symbol')).otherwise(determine_track(entity)).alias(w.track),
+            # decided on the trimmed label, before translating or cleaning
+            pl
+            .when(entity_type == 'CD')
+            .then(pl.lit('symbol'))
+            .otherwise(determine_track(spark_trim(entity)))
+            .alias(w.track),
         )
         .explode(w.label)
         .with_columns(

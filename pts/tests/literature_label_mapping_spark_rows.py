@@ -7,7 +7,8 @@ the spark-nlp jar, against the parquet that `write_dataset` wrote from `build_lu
 (`pmid`, `text`, `label`, `type`, `startInSentence`, `entityLabelNormalised`, `entityIds`,
 `mappedId`, `isMapped`) with `entityIds` as (entityId, entitySource, isAcronym) triples sorted, and the
 rows sorted on every column (nulls first); the other columns are the constants of `match_rows`. They are
-no longer pure OnToma output: `isAcronym` is the lookup table's flag, which OnToma does not produce.
+no longer pure OnToma output: `isAcronym` is the lookup table's flag, which OnToma does not produce,
+and 'ALS' maps through the padded synonym ' ALS ', whose track is now decided on the trimmed label.
 """
 
 # ruff: noqa: RUF001
@@ -169,7 +170,7 @@ MAPPED = [
         True,
     ),
     ('1', 's1', '--', 'DS', 26, '', None, None, False),
-    ('1', 's1', 'ALS', 'DS', 5, 'als', None, None, False),
+    ('1', 's1', 'ALS', 'DS', 5, 'als', [('MONDO_0000001', 'related_synonym', True)], 'MONDO_0000001', True),
     ('1', 's1', 'CF', 'DS', 4, 'cf', [('MONDO_0000001', 'ot_curation', False)], 'MONDO_0000001', True),
     ('1', 's1', 'Cystic fibrosis #', 'DS', 23, '', None, None, False),
     ('1', 's1', 'Cystic fibrosis', 'DS', 0, 'cysticfibrosi', [('MONDO_0000001', 'name', False)], 'MONDO_0000001', True),
