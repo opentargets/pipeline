@@ -296,9 +296,6 @@ with DAG(
 
     def gentropy_step_differs(step_name: str) -> list[Differ]:
         gentropy_step_outputs: dict[str, dict[str, Any]] = {
-            'gentropy_colocalisation': {
-                'step.coloc_path': gsp('gentropy_colocalisation', 'step.coloc_path'),
-            },
             'gentropy_l2g_feature_matrix': {
                 'step.feature_matrix_path': gsp('gentropy_l2g_feature_matrix', 'step.feature_matrix_path'),
             },

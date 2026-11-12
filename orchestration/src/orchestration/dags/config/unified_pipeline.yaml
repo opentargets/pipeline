@@ -523,13 +523,12 @@ steps:
   pts_credible_set_annotation:
     depends_on:
       - pts_variant
-  gentropy_colocalisation:
-    num_partitions: 200
+  pts_colocalisation:
     depends_on:
       - pts_credible_set_annotation
   gentropy_l2g_feature_matrix:
     depends_on:
-      - gentropy_colocalisation
+      - pts_colocalisation
       - pts_enhancer_to_gene
       - pts_interaction
   gentropy_l2g_effector_gene_list:
