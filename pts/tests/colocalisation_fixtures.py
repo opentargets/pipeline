@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def credible_sets(spark: SparkSession, rows: Iterable[tuple[str, str, str]]) -> DataFrame:
     """Build credible sets from `(id, studyType, chromosome)` tuples."""
     return spark.createDataFrame(
-        [(i, s, c) for i, s, c in rows],
+        list(rows),
         to_spark_schema(credible_set_schema, CREDIBLE_SET_COLUMNS),
     )
 

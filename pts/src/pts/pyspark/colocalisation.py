@@ -34,7 +34,7 @@ def colocalisation(
     """
     spark = Session(app_name='colocalisation', properties=properties)
 
-    priors = {key: settings[key] for key in ('priorc1', 'priorc2', 'priorc12') if key in settings}
+    priors = {key: float(settings[key]) for key in ('priorc1', 'priorc2', 'priorc12') if key in settings}
 
     logger.info(f'load credible sets from: {source["credible_set"]}')
     credible_set = spark.load_data(
@@ -47,10 +47,12 @@ def colocalisation(
     )
 
     all_tags = tags(credible_set, credible_set_variant).persist()
-    result = colocalise(aligned_tags(all_tags, overlapping_pairs(all_tags)), **priors)
+    pairs = overlapping_pairs(all_tags).persist()
+    result = colocalise(aligned_tags(all_tags, pairs), **priors)
 
     logger.info(f'write colocalisation to {destination["colocalisation"]}')
     maybe_coalesce(result, settings.get('output_partitions')).write.mode('overwrite').parquet(
         destination['colocalisation']
     )
+    pairs.unpersist()
     all_tags.unpersist()

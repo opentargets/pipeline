@@ -42,16 +42,29 @@ def test_worked_example(spark):
     assert row.colocalisationMethod == 'COLOC_PIP_ECAVIAR'
 
 
+def _expected_h3_h4(pairs, floor):
+    def fl(p):
+        return max(p or 0.0, floor)
+
+    s1 = sum(fl(left) for left, _ in pairs)
+    s2 = sum(fl(right) for _, right in pairs)
+    b = sum(fl(left) * fl(right) for left, right in pairs)
+    h3u = 1e-4 * 1e-4 * max(s1 * s2 - b, 0.0)
+    h4u = 1e-5 * b
+    return h3u / (h3u + h4u), h4u / (h3u + h4u)
+
+
 def test_one_sided_tag_is_floored_and_not_counted(spark):
-    two_sided = _aligned(spark, [('v1', 0.5, 1.0, 0.2, -0.3)])
-    base = colocalise(two_sided).collect()[0]
-    row = colocalise(_one_sided(spark)).collect()[0]
+    df = _aligned(spark, [('v1', 1e-15, 1e-15, 0.2, 0.3), ('v2', 0.5, None, 0.1, None)])
+    row = colocalise(df).collect()[0]
+    pairs = [(1e-15, 1e-15), (0.5, None)]
+    h3, h4 = _expected_h3_h4(pairs, 1e-16)
+    unfloored_h3, _ = _expected_h3_h4(pairs, 0.0)
+    assert row.h3 == pytest.approx(h3, rel=1e-9)
+    assert row.h4 == pytest.approx(h4, rel=1e-9)
+    assert abs(h3 - unfloored_h3) > 1e-3
     assert row.numberColocalisingVariants == 1
-    assert row.clpp == base.clpp
-    s1, s2, b = 1.0, 1.0 + 1e-16, 0.5 + 0.5 * 1e-16
-    h3u, h4u = 1e-8 * max(s1 * s2 - b, 0.0), 1e-5 * b
-    assert row.h4 == pytest.approx(h4u / (h3u + h4u), rel=1e-12)
-    assert base.h4 != row.h4
+    assert row.clpp == pytest.approx(1e-30)
 
 
 def test_beta_ratio_is_null_without_usable_betas(spark):
