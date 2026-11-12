@@ -214,7 +214,7 @@ def vep_view(
     bgzip-compressed, tabix-indexed TSV files, sorted by chromosome/position:
     - `vep_data_all`: all study types combined, with both GWAS and QTL columns.
     - `vep_data_gwas`: GWAS-only rows (studyType == 'gwas'), without the QTL columns.
-    - `vep_data_qtl`: QTL-only rows (studyType != 'gwas'), without the GWAS columns.
+    - `vep_data_qtl`: QTL-only rows (studyType ending in 'qtl'), without the GWAS columns.
 
     The header line starts with `#`, so tabix keeps it as a meta line and `tabix -H` returns it.
 
@@ -275,7 +275,7 @@ def vep_view(
 
     logger.info('Writing QTL dataset')
     write_tabix(
-        result.filter(pl.col('studyType') != 'gwas').select(*COMMON_COLUMNS, *QTL_COLUMNS),
+        result.filter(pl.col('studyType').str.ends_with('qtl')).select(*COMMON_COLUMNS, *QTL_COLUMNS),
         destination['vep_data_qtl'],
         work_dir,
     )

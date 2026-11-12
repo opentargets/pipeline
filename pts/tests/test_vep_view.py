@@ -240,24 +240,26 @@ def _variant(credible_set_id: str, variant_id: str, posterior: float) -> dict:
 
 @pytest.fixture
 def outputs(tmp_path: Path) -> dict[str, str]:
-    """Run vep_view on one GWAS locus (chr 2 and 10) and one QTL locus (chr 1)."""
+    """Run vep_view on a GWAS locus (chr 2 and 10), a QTL locus (chr 1) and a locus of another study type (chr 2)."""
     credible_set = published_credible_set(
         {'id': 'gwasLocus', 'studyId': 'gwasStudy', 'leadVariantId': '2_500_A_G', 'fineMappingMethod': 'SuSiE'},
         {'id': 'qtlLocus', 'studyId': 'qtlStudy', 'leadVariantId': '1_100_A_T', 'fineMappingMethod': 'SuSiE'},
+        {'id': 'otherLocus', 'studyId': 'otherStudy', 'leadVariantId': '2_900_G_A', 'fineMappingMethod': 'SuSiE'},
     )
     credible_set_variant = published_credible_set_variant(
         _variant('gwasLocus', '2_500_A_G', 0.7),
         _variant('gwasLocus', '10_50_C_T', 0.3),
         _variant('qtlLocus', '1_100_A_T', 0.9),
         _variant('qtlLocus', '1_200_C_G', 0.1),
+        _variant('otherLocus', '2_900_G_A', 1.0),
     )
     study = pl.DataFrame(
         {
-            'studyId': ['gwasStudy', 'qtlStudy'],
-            'studyType': ['gwas', 'eqtl'],
-            'diseaseIds': [['EFO_1'], []],
-            'geneId': [None, 'ENSG_QTL'],
-            'biosampleId': [None, 'UBERON_1'],
+            'studyId': ['gwasStudy', 'qtlStudy', 'otherStudy'],
+            'studyType': ['gwas', 'eqtl', 'other'],
+            'diseaseIds': [['EFO_1'], [], []],
+            'geneId': [None, 'ENSG_QTL', None],
+            'biosampleId': [None, 'UBERON_1', None],
         },
         schema_overrides={'diseaseIds': pl.List(pl.String)},
     )
