@@ -1,12 +1,51 @@
 """Module to generate view for Open Target's VEP plugin."""
 
+import io
+import os
+import shutil
+import struct
+import tempfile
+import zlib
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import polars as pl
+import pysam
 from loguru import logger
 from otter.config.model import Config
+from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.utils.dataset import scan_dataset
+
+# Columns shared by every VEP file. The leading `#` on the first column makes the header line a
+# tabix meta line, so it is kept in the index and `tabix -H` returns the column names.
+COMMON_COLUMNS = [
+    '#chromosome',
+    'position',
+    'referenceAllele',
+    'alternateAllele',
+    'variantId',
+    'studyId',
+    'studyType',
+    'credibleSetId',
+    'pValueMantissa',
+    'pValueExponent',
+    'beta',
+    'is95CredibleSet',
+    'is99CredibleSet',
+    'posteriorProbability',
+    'finemappingMethod',
+    'isLead',
+]
+GWAS_COLUMNS = ['gwasGeneId', 'gwasLocusToGeneScore', 'gwasDiseases']
+QTL_COLUMNS = ['qtlGeneId', 'qtlBiosampleName']
+
+BGZF_BLOCK_SIZE = 0xFF00
+BGZF_EOF = bytes.fromhex('1f8b08040000000000ff0600424302001b0003000000000000000000')
+CSV_BATCH_ROWS = 500_000
 
 
 def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
@@ -127,6 +166,101 @@ def process_l2g(l2g: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+def _upload(local_path: Path, destination: str) -> None:
+    """Copy a local file to a destination that may be local or remote.
+
+    A plain `open()` on a `gs://` path would write to the container's disk instead, so the copy
+    goes through `StorageHandle`.
+    """
+    with local_path.open('rb') as src, StorageHandle(destination).open('wb') as dst:
+        shutil.copyfileobj(src, dst)
+
+
+def _bgzf_block(data: bytes | memoryview) -> bytes:
+    """Compress one BGZF block: a gzip member whose extra field records its compressed size."""
+    deflate = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS)
+    payload = deflate.compress(data) + deflate.flush()
+    header = struct.pack('<4BI2BH2BHH', 31, 139, 8, 4, 0, 0, 255, 6, 66, 67, 2, len(payload) + 25)
+    return header + payload + struct.pack('<2I', zlib.crc32(data), len(data))
+
+
+class BgzfWriter:
+    """Write a BGZF file from chunks of bytes, compressing its blocks on a shared thread pool.
+
+    Each chunk is compressed while the next one is produced; blocks are written in order.
+    """
+
+    def __init__(self, path: Path, pool: ThreadPoolExecutor) -> None:
+        self._out = path.open('wb')
+        self._pool = pool
+        self._pending: Iterable[bytes] = ()
+
+    def write(self, data: bytes | memoryview) -> None:
+        """Queue a chunk for compression and write the previous chunk's blocks."""
+        blocks = [data[i : i + BGZF_BLOCK_SIZE] for i in range(0, len(data), BGZF_BLOCK_SIZE)]
+        compressed = self._pool.map(_bgzf_block, blocks)
+        self._out.writelines(self._pending)
+        self._pending = compressed
+
+    def close(self) -> None:
+        """Write the remaining blocks and the BGZF end-of-file marker."""
+        self._out.writelines(self._pending)
+        self._out.write(BGZF_EOF)
+        self._out.close()
+
+
+@dataclass(frozen=True)
+class TabixOutput:
+    """One tabix-indexed file: where it goes, its columns and which rows it keeps."""
+
+    destination: str
+    columns: list[str]
+    rows: pl.Expr = field(default_factory=lambda: pl.lit(True))
+
+
+def write_tabix(frame: pl.DataFrame, order: pl.Series, outputs: list[TabixOutput], work_dir: Path) -> None:
+    """Write bgzip-compressed, tabix-indexed TSV files in one pass over a frame.
+
+    The frame is read in `order`, in batches of `CSV_BATCH_ROWS` rows, so a sorted copy of it is
+    never built. Each batch is filtered and serialised for every output, and the header is written
+    with the first batch. htslib can only write to the local filesystem, so the files are written
+    and indexed in a temporary directory under `work_dir` and then copied to their (possibly remote)
+    destinations, each index as `<destination>.tbi`.
+
+    Args:
+        frame: Data to write. Its first column is the chromosome and its second the 1-based
+            position, which tabix uses as both the start and the end of the interval.
+        order: Row indices that sort the frame by chromosome and position, with each chromosome
+            in one contiguous block.
+        outputs: The files to write.
+        work_dir: Local directory for the temporary files.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    with (
+        tempfile.TemporaryDirectory(dir=work_dir, prefix='vep_view_') as tmp,
+        ThreadPoolExecutor(os.cpu_count() or 1) as pool,
+    ):
+        paths = [Path(tmp) / f'{i}.tsv.bgz' for i in range(len(outputs))]
+        writers = [BgzfWriter(path, pool) for path in paths]
+        for offset in range(0, max(order.len(), 1), CSV_BATCH_ROWS):
+            batch = frame[order.slice(offset, CSV_BATCH_ROWS)]
+            for output, writer in zip(outputs, writers, strict=True):
+                buffer = io.BytesIO()
+                batch.filter(output.rows).select(output.columns).write_csv(
+                    buffer, separator='\t', include_header=offset == 0
+                )
+                writer.write(buffer.getbuffer())
+        for writer in writers:
+            writer.close()
+
+        def index_and_upload(path: Path, output: TabixOutput) -> None:
+            pysam.tabix_index(str(path), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
+            _upload(path, output.destination)
+            _upload(Path(f'{path}.tbi'), f'{output.destination}.tbi')
+
+        list(pool.map(index_and_upload, paths, outputs))
+
+
 def vep_view(
     source: dict[str, str],
     destination: dict[str, str],
@@ -142,10 +276,12 @@ def vep_view(
 
     Loads four input datasets (credible sets, study index, L2G predictions, biosample
     index), processes and joins them into a flat, per-tag-variant table, and writes three
-    tab-separated output files:
-    - `vep_data_all`: all study types combined, sorted by chromosome/position.
-    - `vep_data_gwas`: GWAS-only rows (studyType == 'gwas').
-    - `vep_data_qtl`: QTL-only rows (studyType != 'gwas').
+    bgzip-compressed, tabix-indexed TSV files, sorted by chromosome/position:
+    - `vep_data_all`: all study types combined, with both GWAS and QTL columns.
+    - `vep_data_gwas`: GWAS-only rows (studyType == 'gwas'), without the QTL columns.
+    - `vep_data_qtl`: QTL-only rows (studyType ending in 'qtl'), without the GWAS columns.
+
+    The header line starts with `#`, so tabix keeps it as a meta line and `tabix -H` returns it.
 
     Variant IDs (format `chr_pos_ref_alt`) are parsed into separate `chromosome`,
     `position`, `referenceAllele`, and `alternateAllele` columns. Rows with a null
@@ -156,10 +292,10 @@ def vep_view(
         source: Mapping of input dataset keys to their parquet directory paths.
             Required keys: `credible_set`, `credible_set_variant`, `study_table`, `l2g_table`, `biosample`.
         destination: Mapping of output keys to file paths.
-            Required keys: `vep_data_all`, `vep_data_gwas`, `vep_data_qtl`.
+            Required keys: `vep_data_all`, `vep_data_gwas`, `vep_data_qtl`. Each tabix index is
+            written next to its data file, with `.tbi` appended to the path.
         settings: Unused transformer settings dict (reserved for future use).
-        config: Otter pipeline config object (unused directly, passed for interface
-            compatibility).
+        config: Otter pipeline config object; its `work_path` holds the temporary files.
     """
     logger.info('Loading input data')
     credible_set = process_credible_set(
@@ -181,51 +317,27 @@ def vep_view(
             pl.col('variantId').str.split('_').list.get(2).alias('referenceAllele'),
             pl.col('variantId').str.split('_').list.get(3).alias('alternateAllele'),
         )
-        .select(
-            '#chromosome',
-            'position',
-            'referenceAllele',
-            'alternateAllele',
-            'variantId',
-            'studyId',
-            'studyType',
-            'credibleSetId',
-            'pValueMantissa',
-            'pValueExponent',
-            'beta',
-            'is95CredibleSet',
-            'is99CredibleSet',
-            'posteriorProbability',
-            'finemappingMethod',
-            'isLead',
-            'gwasGeneId',
-            'gwasLocusToGeneScore',
-            'gwasDiseases',
-            'qtlGeneId',
-            'qtlBiosampleName',
-        )
+        .select(*COMMON_COLUMNS, *GWAS_COLUMNS, *QTL_COLUMNS)
         .filter(
             pl.col('position').is_not_null(),
             pl.col('#chromosome').str.len_chars() < 3,
         )
-        .sort('#chromosome', 'position')
         .collect()
     )
+    order = result.select('#chromosome', 'position').with_row_index().sort('#chromosome', 'position')['index']
 
-    logger.info('Writing full dataset')
-    result.write_csv(
-        destination['vep_data_all'],
-        separator='\t',
-    )
-
-    logger.info('Writing GWAS dataset')
-    result.filter(pl.col('studyType') == 'gwas').write_csv(
-        destination['vep_data_gwas'],
-        separator='\t',
-    )
-
-    logger.info('Writing QTL dataset')
-    result.filter(pl.col('studyType') != 'gwas').write_csv(
-        destination['vep_data_qtl'],
-        separator='\t',
+    logger.info('Writing datasets')
+    write_tabix(
+        result,
+        order,
+        [
+            TabixOutput(destination['vep_data_all'], [*COMMON_COLUMNS, *GWAS_COLUMNS, *QTL_COLUMNS]),
+            TabixOutput(destination['vep_data_gwas'], [*COMMON_COLUMNS, *GWAS_COLUMNS], pl.col('studyType') == 'gwas'),
+            TabixOutput(
+                destination['vep_data_qtl'],
+                [*COMMON_COLUMNS, *QTL_COLUMNS],
+                pl.col('studyType').str.ends_with('qtl'),
+            ),
+        ],
+        Path(config.work_path),
     )
