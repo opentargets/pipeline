@@ -320,3 +320,42 @@ def test_non_acronym_ids() -> None:
     )
     out = pl.DataFrame({'s': structs}).select(non_acronym_ids(pl.col('s')))['s'].to_list()
     assert out == [['B'], None, ['C'], None, None]
+
+
+SPELLING_LUT = _lut([
+    ('label', 'DS', normalise_term('chronic myeloid leukemia'), [('MONDO_0011996', 'name')]),
+    ('label', 'DS', normalise_term('coronavirus disease 2019'), [('MONDO_0100096', 'name')]),
+    ('label', 'DS', normalise_term('diabetes'), [('EFO_0000400', 'name')]),
+    ('label', 'DS', normalise_term('anaemia'), [('EFO_BRITISH', 'exact_synonym')]),
+    ('label', 'DS', normalise_term('anemia'), [('EFO_AMERICAN', 'name')]),
+])
+
+
+def _map_variants(labels: list[str | None], **kwargs) -> list[list[str] | None]:
+    df = pl.DataFrame({'label': labels}, schema={'label': pl.String})
+    out = map_entities(df.lazy(), SPELLING_LUT.lazy(), 'ids', 'label', 'label', type_col=pl.lit('DS'), **kwargs)
+    return out.collect()['ids'].to_list()
+
+
+def test_spelling_variants_are_off_by_default() -> None:
+    assert _map_variants(['Chronic Myeloid Leukaemia', 'coronavirus disease 2019 (COVID-19)']) == [None, None]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('Chronic Myeloid Leukaemia', ['MONDO_0011996']),
+        ('coronavirus disease 2019 (COVID-19)', ['MONDO_0100096']),
+        ('chronic myeloid leukaemia (CML)', ['MONDO_0011996']),
+    ],
+)
+def test_spelling_variants_map_british_spellings_and_bracketed_acronyms(label: str, expected: list[str]) -> None:
+    assert _map_variants([label], spelling_variants=True) == [expected]
+
+
+def test_spelling_variants_keep_brackets_of_several_words() -> None:
+    assert _map_variants(['diabetes (type 2)'], spelling_variants=True) == [None]
+
+
+def test_spelling_variants_are_only_tried_when_the_label_finds_nothing() -> None:
+    assert _map_variants(['anaemia', None, 'unknown disease'], spelling_variants=True) == [['EFO_BRITISH'], None, None]

@@ -8,6 +8,8 @@ structs, the flags read from the lookup table; `non_acronym_ids` drops the flagg
 * **Identical input rows collapse into one.**
 * **Each label is tried in two spellings**, translated with and without accented letters, and
   the identifiers found for either are merged.
+* **With `spelling_variants`, a disease label that finds nothing is retried** in American spelling and
+  without bracketed single tokens. Off by default, so callers keep OnToma's behaviour unless they ask.
 * **No identifier means null, not an empty list.**
 * The identifier lists are sorted, and rows keep their input order.
 * **A label's NLP pipeline track is decided on the trimmed label**, here and in the lookup tables, so
@@ -33,6 +35,7 @@ from pts.transformers.utils.disease_mapping.query import (
     clean_disease_label,
     determine_track,
     format_identifier,
+    spelling_variant,
 )
 from pts.transformers.utils.spark_strings import spark_trim
 
@@ -60,10 +63,11 @@ class _Working:
     track: str
     normalised: str
     ids: str
+    priority: str
 
     @classmethod
     def under(cls, prefix: str) -> _Working:
-        names = ('entity', 'type', 'label', 'track', 'normalised', 'ids')
+        names = ('entity', 'type', 'label', 'track', 'normalised', 'ids', 'priority')
         return cls(prefix, *(f'{prefix}{name}' for name in names))
 
 
@@ -152,6 +156,7 @@ def map_entities(
     *,
     include_normalised_entities: bool = False,
     include_entity_source: bool = False,
+    spelling_variants: bool = False,
 ) -> pl.LazyFrame:
     """Map the labels or ids in a column to entity identifiers, as `OnToma.map_entities` does.
 
@@ -166,6 +171,8 @@ def map_entities(
         include_normalised_entities: Also output the normalised label, one row per distinct
             normalised label of an input row.
         include_entity_source: Output the lookup table's `entityIds` structs rather than bare ids.
+        spelling_variants: For a disease label that finds nothing, also try it in American spelling
+            and without bracketed single tokens (`spelling_variant`). Not an OnToma behaviour.
 
     Returns:
         The input, untouched, with the identifiers found added as a list column, null when there
@@ -194,6 +201,15 @@ def map_entities(
     keys = [w.entity, w.type]
     query = keyed.select(keys).unique()
     query = _query_labels(query, w) if entity_kind == 'label' else _query_ids(query, w)
+    query = query.with_columns(pl.lit(0).alias(w.priority))
+    if spelling_variants and entity_kind == 'label':
+        variant = spelling_variant(pl.col(w.label))
+        query = pl.concat([
+            query,
+            query.filter((pl.col(w.type) == 'DS') & (variant != pl.col(w.label))).with_columns(
+                variant.alias(w.label), pl.lit(1).alias(w.priority)
+            ),
+        ])
 
     lut = lut.filter(pl.col('entityKind') == entity_kind).select(
         pl.col(NORMALISED_COLUMN).alias(w.normalised),
@@ -201,6 +217,9 @@ def map_entities(
         pl.col('entityIds').alias(w.ids),
     )
     mapped = _normalise_query(query, w).join(lut, on=[w.normalised, w.type], how='left')
+    # a variant is only used when no label of a higher priority found anything
+    best = pl.when(pl.col(w.ids).is_not_null()).then(pl.col(w.priority)).min().over(keys)
+    mapped = mapped.filter((pl.col(w.priority) == best) | (best.is_null() & (pl.col(w.priority) == 0)))
 
     ids = pl.col(w.ids)
     if not include_entity_source:

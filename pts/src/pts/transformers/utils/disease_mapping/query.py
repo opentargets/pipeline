@@ -80,3 +80,35 @@ def format_identifier(identifier: pl.Expr) -> pl.Expr:
     nested = regexp_extract(identifier, _NESTED_IDENTIFIER, 1)
     identifier = pl.when(nested.str.len_chars() > 1).then(nested).otherwise(identifier)
     return identifier.str.replace_all('_', ':', literal=True).str.replace_all('ORDO:|ORPHA:', 'ORPHANET:')
+
+
+#: British spellings rewritten to the American ones the ontologies mostly use, as case-insensitive
+#: regular expressions. Each preserves meaning; generic rules such as `-ise` to `-ize` are left out
+#: because they also rewrite words like "disease".
+BRITISH_TO_AMERICAN = (
+    (r'(?i)rrhoea', 'rrhea'),
+    (r'(?i)aem', 'em'),
+    (r'(?i)haem', 'hem'),
+    (r'(?i)paed', 'ped'),
+    (r'(?i)oesoph', 'esoph'),
+    (r'(?i)oedem', 'edem'),
+    (r'(?i)oestr', 'estr'),
+    (r'(?i)anaes', 'anes'),
+    (r'(?i)aetio', 'etio'),
+    (r'(?i)faec', 'fec'),
+    (r'(?i)foet', 'fet'),
+    (r'(?i)coeliac', 'celiac'),
+    (r'(?i)tumour', 'tumor'),
+    (r'(?i)behaviour', 'behavior'),
+    (r'(?i)colour', 'color'),
+    (r'(?i)isation', 'ization'),
+)
+#: A bracketed single token, such as an acronym: `(COVID-19)` but not `(type 2)`.
+_BRACKETED_WORD = r'\s*\([^\s()]{1,12}\)'
+
+
+def spelling_variant(label: pl.Expr) -> pl.Expr:
+    """The label in American spelling, without bracketed single tokens; equal to the label when neither applies."""
+    for pattern, replacement in BRITISH_TO_AMERICAN:
+        label = label.str.replace_all(pattern, replacement)
+    return label.str.replace_all(_BRACKETED_WORD, '').str.strip_chars()
