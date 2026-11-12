@@ -24,7 +24,9 @@ scratchpad:
   depmap_version: '2026Q3'
   hpo_version: '2026-09-01'
   mondo_version: '2026-10-06'
-  ot_curation: '26.09.2'
+  ot_curation: '26.11'
+  schema_release: '2026-07-15'
+  bipex_release: '2026-08-07'
   probes_drugs_version: '01_2026'
   gnomad_version: '4.1.2'
   gtex_version: '11'
@@ -592,6 +594,14 @@ steps:
     - name: copy gene_burden brava
       source: https://www.medrxiv.org/content/medrxiv/early/2026/05/24/2026.05.21.26353759/DC2/embed/media-2.xlsx
       destination: input/evidence/gene_burden/brava.xlsx
+
+    - name: copy gene_burden schema
+      source: https://storage.googleapis.com/exome-results-browsers-public/downloads/${schema_release}/SCHEMA2/SCHEMA2_gene_results.tsv.bgz
+      destination: input/evidence/gene_burden/schema/gene_results.tsv.bgz
+
+    - name: copy gene_burden bipex
+      source: https://storage.googleapis.com/exome-results-browsers-public/downloads/${bipex_release}/BipEx/BipEx_v2_gene_results.tsv.bgz
+      destination: input/evidence/gene_burden/bipex/gene_results.tsv.bgz
 
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
