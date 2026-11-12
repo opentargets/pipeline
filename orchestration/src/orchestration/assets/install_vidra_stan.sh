@@ -19,9 +19,13 @@ if [[ -z "${VIDRA_STAN_URI}" ]]; then
 fi
 
 tarball=$(mktemp)
-for ((i = 0; i < 5; i++)); do
-    if gsutil -q cp "${VIDRA_STAN_URI}" "${tarball}"; then
+for ((i = 0; ; i++)); do
+    if gcloud storage cp --no-user-output-enabled "${VIDRA_STAN_URI}" "${tarball}"; then
         break
+    fi
+    if ((i == 4)); then
+        echo "ERROR: could not download ${VIDRA_STAN_URI}"
+        exit 1
     fi
     sleep $((5 * (i + 1)))
 done
