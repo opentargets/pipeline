@@ -9,8 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 from pts.pyspark import vidra_bayes as vb
@@ -36,8 +35,19 @@ ROW_COLUMNS = [
 ]
 
 
-def _rows(*rows: tuple) -> pd.DataFrame:
-    return pd.DataFrame(list(rows), columns=ROW_COLUMNS)
+ROW_SCHEMA = {
+    **dict.fromkeys(ROW_COLUMNS, pl.Float64),
+    'variant': pl.String,
+    'as_gene': pl.String,
+    'as_disease': pl.String,
+    'GsourceLab': pl.Int32,
+    'GqtlLab': pl.Int32,
+    'consequence_class': pl.String,
+}
+
+
+def _rows(*rows: tuple) -> pl.DataFrame:
+    return pl.DataFrame(list(rows), schema=ROW_SCHEMA, orient='row')
 
 
 def _qtl(variant: str, disease: str = 'd', yc: float = 0.3, xc: float = 0.6, qtl: int = 0, bo: float = 0.0) -> tuple:
@@ -94,25 +104,28 @@ def _coding(variant: str, disease: str = 'd', yc: float = 0.2) -> tuple:
 
 
 def test_impute_scores_by_consequence_class():
-    gene = pd.DataFrame({
+    gene = pl.DataFrame({
         'consequence_class': ['missense', 'missense', 'lof', 'other', 'inframe_or_splice', 'unknown', None],
         'as_gpnstar': [0.2, None, 0.9, None, None, 0.5, None],
         'as_alphamissense': [0.4, 0.6, None, 0.3, None, None, None],
     })
     out = vb.impute_scores(gene)
-    assert out['as_gpnstar'].tolist() == pytest.approx([0.2, 0.2, 0.0, 1.0, 0.2, 0.5, 0.2])
-    assert out['as_alphamissense'].tolist() == pytest.approx([0.4, 0.6, 0.0, 0.3, 0.5, 0.5, 0.5])
+    assert out['as_gpnstar'].to_list() == pytest.approx([0.2, 0.2, 0.0, 1.0, 0.2, 0.5, 0.2])
+    assert out['as_alphamissense'].to_list() == pytest.approx([0.4, 0.6, 0.0, 0.3, 0.5, 0.5, 0.5])
 
 
 def test_impute_scores_falls_back_to_any_observed_then_benign():
-    gene = pd.DataFrame({
-        'consequence_class': ['other', 'inframe_or_splice', 'unknown'],
-        'as_gpnstar': [0.4, None, None],
-        'as_alphamissense': [None, None, None],
-    })
+    gene = pl.DataFrame(
+        {
+            'consequence_class': ['other', 'inframe_or_splice', 'unknown'],
+            'as_gpnstar': [0.4, None, None],
+            'as_alphamissense': [None, None, None],
+        },
+        schema_overrides={'as_alphamissense': pl.Float64},
+    )
     out = vb.impute_scores(gene)
-    assert out['as_gpnstar'].tolist() == pytest.approx([0.4, 0.4, 0.4])
-    assert out['as_alphamissense'].tolist() == pytest.approx([1.0, 1.0, 1.0])
+    assert out['as_gpnstar'].to_list() == pytest.approx([0.4, 0.4, 0.4])
+    assert out['as_alphamissense'].to_list() == pytest.approx([1.0, 1.0, 1.0])
 
 
 def test_preprocess_gene_dedups_fills_and_drops_lone_coding_variants():
@@ -124,23 +137,23 @@ def test_preprocess_gene_dedups_fills_and_drops_lone_coding_variants():
         _coding('v3', disease='e'),
         _coding('v4', disease='e'),
     )
-    gene.loc[gene['variant'] == 'v3', 'xc'] = np.nan
+    gene = gene.with_columns(pl.when(pl.col('variant') == 'v3').then(float('nan')).otherwise(pl.col('xc')).alias('xc'))
     out = vb.preprocess_gene(gene)
     assert sorted(out['variant']) == ['v1', 'v1', 'v3', 'v4']
-    clinvar = out[(out['variant'] == 'v1') & (out['GsourceLab'] == SOURCE_CLINVAR)]
-    assert clinvar['as_clinicalSignificance'].tolist() == [1.0]
-    assert out[out['variant'] == 'v3']['xc'].tolist() == [0.0]
-    assert out['GsourceLab'].dtype.kind == 'i'
-    assert list(out.columns) == ROW_COLUMNS
+    clinvar = out.filter((pl.col('variant') == 'v1') & (pl.col('GsourceLab') == SOURCE_CLINVAR))
+    assert clinvar['as_clinicalSignificance'].to_list() == [1.0]
+    assert out.filter(pl.col('variant') == 'v3')['xc'].to_list() == [0.0]
+    assert out['GsourceLab'].dtype.is_integer()
+    assert out.columns == ROW_COLUMNS
 
 
 def test_preprocess_gene_keeps_empty_frames():
-    assert vb.preprocess_gene(_rows()).empty
+    assert vb.preprocess_gene(_rows()).is_empty()
 
 
 def test_process_pair_without_fit_returns_full_schema():
     columns = list(vb.RESULT_COLUMNS)
-    assert vb.process_pair(_rows(), vb.VidraBayesSettings()).columns.tolist() == columns
+    assert vb.process_pair(_rows(), vb.VidraBayesSettings()).columns == columns
     assert len(vb.result_schema().fields) == len(columns)
     assert len(vb.result_schema(True).fields) == len(vb.VARIANT_RESULT_COLUMNS)
 
@@ -166,7 +179,7 @@ def test_failed_fit_is_an_error_row(monkeypatch):
     assert 'no stan here' in rows[0]['error']
     assert rows[0]['hasBurden'] is False
     frame = vb.process_pair(_rows(_qtl('v1')), vb.VidraBayesSettings())
-    assert frame['mean'].isna().all()
+    assert frame['mean'].is_null().all()
 
 
 # -------------------------------------------------------------------------------------------
@@ -211,22 +224,21 @@ def test_single_qtl_pair_recovers_the_wald_ratio(settings):
 def test_multi_variant_pair_reports_every_parameter_and_pools_present_sources(settings):
     pair = _rows(_qtl('v1', yc=0.3, xc=0.6, bo=0.5), _qtl('v2', yc=-0.2, xc=-0.4, bo=0.5), _rare('v3', bo=0.5, gpn=0.2))
     rows = vb.fit_pair(pair, settings)
-    frame = pd.DataFrame(rows)
-    assert set(frame['parameter']) == {'slope', 'intercept', *vb.SLOPE_RANDOM_NAMES, 'meta_slope'}
-    assert frame['model'].unique().tolist() == ['multiple_variant_fullrank']
-    assert frame['hasBurden'].all()
-    assert frame['sources'].iloc[0] == [SOURCE_COMMON_QTL, SOURCE_AZ_RARE]
-    eqtl = frame.set_index('parameter').loc['slope_eqtl']
-    assert eqtl['mean'] == pytest.approx(0.5, abs=0.3)
+    by_parameter = {row['parameter']: row for row in rows}
+    assert set(by_parameter) == {'slope', 'intercept', *vb.SLOPE_RANDOM_NAMES, 'meta_slope'}
+    assert {row['model'] for row in rows} == {'multiple_variant_fullrank'}
+    assert all(row['hasBurden'] for row in rows)
+    assert rows[0]['sources'] == [SOURCE_COMMON_QTL, SOURCE_AZ_RARE]
+    assert by_parameter['slope_eqtl']['mean'] == pytest.approx(0.5, abs=0.3)
 
 
 @needs_stan
 @pytest.mark.slow
 def test_variant_outputs_have_one_row_per_variant_and_parameter(settings):
     pair = _rows(_qtl('v1'), _qtl('v2', yc=-0.2, xc=-0.4))
-    rows = pd.DataFrame(vb.fit_pair(pair, settings, variant_outputs=True))
-    assert sorted(rows['variantId'].unique()) == ['v1', 'v2']
-    assert set(rows['parameter']) == set(vb.VARIANT_PARAMETERS)
+    rows = vb.fit_pair(pair, settings, variant_outputs=True)
+    assert sorted({row['variantId'] for row in rows}) == ['v1', 'v2']
+    assert {row['parameter'] for row in rows} == set(vb.VARIANT_PARAMETERS)
     assert len(rows) == 2 * len(vb.VARIANT_PARAMETERS)
 
 
@@ -237,7 +249,7 @@ def test_vidra_bayes_end_to_end(spark, tmp_path, settings):
     rows = _rows(
         _qtl('v1'), _qtl('v2', yc=-0.2, xc=-0.4), _clinvar('v3', disease='e'), _rare('v4', disease='f', bo=0.4)
     )
-    spark.createDataFrame(rows).write.partitionBy('as_gene').parquet(str(source))
+    spark.createDataFrame(rows.to_arrow()).write.partitionBy('as_gene').parquet(str(source))
     genes = tmp_path / 'genes.txt'
     genes.write_text('g\n')
     destination = {'results': str(tmp_path / 'results'), 'stan_inputs': str(tmp_path / 'stan_inputs')}
@@ -247,9 +259,9 @@ def test_vidra_bayes_end_to_end(spark, tmp_path, settings):
         {**settings.model_dump(), 'genes': str(genes), 'save_stan_inputs': True, 'output_partitions': 1},
         {},
     )
-    results = spark.read.parquet(destination['results']).toPandas()
-    assert set(results['diseaseId']) == {'d', 'e', 'f'}
-    by_disease = results.groupby('diseaseId')['model'].first()
+    results = spark.read.parquet(destination['results']).select('diseaseId', 'model').collect()
+    assert {row.diseaseId for row in results} == {'d', 'e', 'f'}
+    by_disease = {row.diseaseId: row.model for row in results}
     assert by_disease['d'] == 'multiple_variant_fullrank'
     assert by_disease['e'] == vb.MODEL_UNIDENTIFIED
     assert by_disease['f'] == vb.MODEL_SINGLE
