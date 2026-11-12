@@ -3,11 +3,14 @@
 The models live in `pts/src/pts/stan/vidra/`. On a Dataproc worker they are not compiled: the
 cluster's init action installs CmdStan and the two compiled executables from a prebuilt tarball
 (`pts/tools/build_vidra_stan.sh`), and `load_models` points cmdstanpy at them. Without an
-executable directory (local runs, tests) the models are compiled once into a cache directory.
+executable directory (local runs, tests) each model is compiled once per machine into a cache
+keyed by the hash of its source.
 """
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import os
 import tempfile
 from functools import cache
@@ -73,13 +76,30 @@ def load_models(exe_dir: str | None = None, cmdstan_dir: str | None = None) -> d
         if exe_dir:
             models[name] = CmdStanModel(exe_file=str(Path(exe_dir) / name))
         else:
-            cache_dir = Path(scratch_dir()) / 'vidra_stan_cache'
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            source = cache_dir / f'{name}.stan'
-            if not source.exists() or source.read_text() != (STAN_DIR / f'{name}.stan').read_text():
-                source.write_text((STAN_DIR / f'{name}.stan').read_text())
-            models[name] = CmdStanModel(stan_file=str(source))
+            models[name] = CmdStanModel(exe_file=str(_compiled(name)))
     return models
+
+
+def _compiled(name: str) -> Path:
+    """The executable of a model, compiled once per machine into a cache keyed by the source's hash.
+
+    Spark runs several Python workers per machine; an exclusive lock makes one of them compile while
+    the others wait, then reuse the executable.
+    """
+    from cmdstanpy import CmdStanModel
+
+    text = (STAN_DIR / f'{name}.stan').read_text()
+    digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+    cache_dir = Path(tempfile.gettempdir()) / 'vidra_stan_cache' / digest
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    executable = cache_dir / name
+    with (cache_dir / f'{name}.lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not executable.exists():
+            (cache_dir / f'{name}.stan').write_text(text)
+            CmdStanModel(stan_file=str(cache_dir / f'{name}.stan'))
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    return executable
 
 
 def summarise(draws: np.ndarray) -> dict[str, float]:
