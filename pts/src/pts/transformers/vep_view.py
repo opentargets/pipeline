@@ -1,7 +1,13 @@
 """Module to generate view for Open Target's VEP plugin."""
 
+import io
+import os
 import shutil
+import struct
 import tempfile
+import zlib
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +41,10 @@ COMMON_COLUMNS = [
 ]
 GWAS_COLUMNS = ['gwasGeneId', 'gwasLocusToGeneScore', 'gwasDiseases']
 QTL_COLUMNS = ['qtlGeneId', 'qtlBiosampleName']
+
+BGZF_BLOCK_SIZE = 0xFF00
+BGZF_EOF = bytes.fromhex('1f8b08040000000000ff0600424302001b0003000000000000000000')
+CSV_BATCH_ROWS = 500_000
 
 
 def process_biosample(biosample: pl.LazyFrame) -> pl.LazyFrame:
@@ -165,14 +175,47 @@ def _upload(local_path: Path, destination: str) -> None:
         shutil.copyfileobj(src, dst)
 
 
+def _bgzf_block(data: bytes | memoryview) -> bytes:
+    """Compress one BGZF block: a gzip member whose extra field records its compressed size."""
+    deflate = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS)
+    payload = deflate.compress(data) + deflate.flush()
+    header = struct.pack('<4BI2BH2BHH', 31, 139, 8, 4, 0, 0, 255, 6, 66, 67, 2, len(payload) + 25)
+    return header + payload + struct.pack('<2I', zlib.crc32(data), len(data))
+
+
+def write_bgzf(frame: pl.DataFrame, path: Path, threads: int) -> None:
+    """Write a frame as a tab-separated, BGZF-compressed file, compressing blocks in parallel.
+
+    The frame is serialised in batches of `CSV_BATCH_ROWS` rows; each batch is compressed while
+    the next one is serialised. The header is written with the first batch.
+
+    Args:
+        frame: Data to write.
+        path: Local file to write.
+        threads: Number of compression threads.
+    """
+    with path.open('wb') as out, ThreadPoolExecutor(threads) as pool:
+        pending: Iterable[bytes] = ()
+        for offset in range(0, max(frame.height, 1), CSV_BATCH_ROWS):
+            buffer = io.BytesIO()
+            frame.slice(offset, CSV_BATCH_ROWS).write_csv(buffer, separator='\t', include_header=offset == 0)
+            data = buffer.getbuffer()
+            blocks = [data[i : i + BGZF_BLOCK_SIZE] for i in range(0, len(data), BGZF_BLOCK_SIZE)]
+            compressed = pool.map(_bgzf_block, blocks)
+            out.writelines(pending)
+            pending = compressed
+        out.writelines(pending)
+        out.write(BGZF_EOF)
+
+
 def write_tabix(frame: pl.DataFrame, destination: str, work_dir: Path) -> None:
     """Write a frame as a bgzip-compressed TSV with a tabix index.
 
-    htslib can only write to the local filesystem, so the TSV is written, compressed and indexed
-    in a temporary directory under `work_dir` and then copied to the (possibly remote)
-    destinations. The index is written next to the data file as `<destination>.tbi`, the name
-    tabix readers look for. The frame must be sorted by `#chromosome` and `position`, with each
-    chromosome in one contiguous block.
+    htslib can only write to the local filesystem, so the file is compressed and indexed in a
+    temporary directory under `work_dir` and then copied to the (possibly remote) destinations.
+    The index is written next to the data file as `<destination>.tbi`, the name tabix readers
+    look for. The frame must be sorted by `#chromosome` and `position`, with each chromosome in
+    one contiguous block.
 
     Args:
         frame: Data to write. The first column is the chromosome and the second the 1-based
@@ -182,11 +225,8 @@ def write_tabix(frame: pl.DataFrame, destination: str, work_dir: Path) -> None:
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=work_dir, prefix='vep_view_') as tmp:
-        tsv = Path(tmp) / 'data.tsv'
         bgz = Path(tmp) / 'data.tsv.bgz'
-        frame.write_csv(tsv, separator='\t')
-        pysam.tabix_compress(str(tsv), str(bgz), force=True)
-        tsv.unlink()
+        write_bgzf(frame, bgz, threads=os.cpu_count() or 1)
         pysam.tabix_index(str(bgz), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
         _upload(bgz, destination)
         _upload(Path(f'{bgz}.tbi'), f'{destination}.tbi')

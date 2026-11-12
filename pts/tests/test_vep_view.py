@@ -9,6 +9,7 @@ import pysam
 import pytest
 from otter.config.model import Config
 
+from pts.transformers import vep_view as vep_view_module
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.vep_view import (
     COMMON_COLUMNS,
@@ -19,6 +20,7 @@ from pts.transformers.vep_view import (
     process_l2g,
     process_study,
     vep_view,
+    write_bgzf,
 )
 from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
@@ -404,3 +406,60 @@ class TestEnsemblContract:
         combined = [row[:16] + row[19:21] for row in _rows(outputs['vep_data_all']) if row[6].endswith('qtl')]
         assert combined
         assert _rows(outputs['vep_data_qtl']) == combined
+
+
+class TestWriteBgzf:
+    """Tests for write_bgzf."""
+
+    @pytest.fixture
+    def frame(self) -> pl.DataFrame:
+        """Seven rows on two chromosomes, sorted by chromosome and position."""
+        return pl.DataFrame({
+            '#chromosome': ['1', '1', '1', '1', '2', '2', '2'],
+            'position': [10, 20, 30, 40, 5, 15, 25],
+            'value': ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+        })
+
+    @pytest.fixture
+    def small_batches_and_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Split the output into many batches and blocks, so lines straddle block boundaries."""
+        monkeypatch.setattr(vep_view_module, 'CSV_BATCH_ROWS', 3)
+        monkeypatch.setattr(vep_view_module, 'BGZF_BLOCK_SIZE', 7)
+
+    @pytest.mark.usefixtures('small_batches_and_blocks')
+    def test_content_matches_tsv(self, frame: pl.DataFrame, tmp_path: Path) -> None:
+        """Decompressed, the file is the frame's TSV with a single header line."""
+        path = tmp_path / 'out.tsv.bgz'
+        write_bgzf(frame, path, threads=4)
+        assert gzip.decompress(path.read_bytes()).decode() == frame.write_csv(separator='\t')
+
+    @pytest.mark.usefixtures('small_batches_and_blocks')
+    def test_file_is_bgzf_with_eof_marker(self, frame: pl.DataFrame, tmp_path: Path) -> None:
+        """Every gzip member carries the BGZF size field, and the file ends with the BGZF EOF block."""
+        path = tmp_path / 'out.tsv.bgz'
+        write_bgzf(frame, path, threads=2)
+        data = path.read_bytes()
+        assert data.endswith(vep_view_module.BGZF_EOF)
+        offset = 0
+        while offset < len(data):
+            assert data[offset : offset + 4] == bytes([31, 139, 8, 4])
+            assert data[offset + 12 : offset + 16] == b'BC\x02\x00'
+            offset += struct.unpack('<H', data[offset + 16 : offset + 18])[0] + 1
+        assert offset == len(data)
+
+    @pytest.mark.usefixtures('small_batches_and_blocks')
+    def test_tabix_indexes_and_fetches(self, frame: pl.DataFrame, tmp_path: Path) -> None:
+        """Tabix indexes the file and region fetches return the right rows."""
+        path = tmp_path / 'out.tsv.bgz'
+        write_bgzf(frame, path, threads=4)
+        pysam.tabix_index(str(path), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
+        with pysam.TabixFile(str(path)) as tbx:
+            assert list(tbx.header) == ['#chromosome\tposition\tvalue']
+            assert [row.split('\t')[2] for row in tbx.fetch('1', 15, 35)] == ['b', 'c']
+            assert [row.split('\t')[2] for row in tbx.fetch('2')] == ['e', 'f', 'g']
+
+    def test_empty_frame_writes_header_only(self, frame: pl.DataFrame, tmp_path: Path) -> None:
+        """An empty frame still produces a valid file holding just the header."""
+        path = tmp_path / 'out.tsv.bgz'
+        write_bgzf(frame.clear(), path, threads=2)
+        assert gzip.decompress(path.read_bytes()).decode() == '#chromosome\tposition\tvalue\n'
