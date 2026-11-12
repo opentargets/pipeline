@@ -1,7 +1,7 @@
 """Map clinical report drug and disease labels to ids: ChEMBL curation, Open Targets dictionaries, staged drug NER.
 
-Ported from mira's `map_entities` (`utils/mapping.py`), with OnToma replaced by the polars lookup tables of
-`pts.transformers.ontoma_lut` and the polars `OnToma.map_entities` of `pts.transformers.utils.disease_mapping`.
+Started as a port of mira's `map_entities` (`utils/mapping.py`); entities resolve against the lookup tables of
+`pts.transformers.ontoma_lut` through `pts.transformers.utils.disease_mapping`.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pts.transformers.ontoma_lut.build import (
     build_lut,
     disease_label_lut,
     drug_label_lut,
+    packaged_acronym_allowlist,
 )
 from pts.transformers.utils.disease_mapping.mapping import map_entities as map_lut_entities
 
@@ -215,6 +216,7 @@ def map_entities(
     disease_column_name: str = 'diseaseFromSource',
     drug_id_column_name: str = 'drugId',
     disease_id_column_name: str = 'diseaseId',
+    record_column_name: str = 'id',
 ) -> pl.DataFrame:
     """Map drug and disease labels to ids, keeping ids already set.
 
@@ -222,6 +224,9 @@ def map_entities(
     1. ids already in `df`, then ids curated by ChEMBL for the study and label;
     2. the disease and drug label dictionaries, for labels still without an id;
     3. drug NER, for drug labels still without an id: the staged names of the label mapped with the drug dictionary.
+
+    A disease id the dictionary flags as acronym-only is kept only when another row of the same record has it
+    without the flag, from the dictionary, ChEMBL curation or `df`.
 
     Args:
         df: Reports to map.
@@ -233,6 +238,7 @@ def map_entities(
         disease_column_name: Column of disease labels.
         drug_id_column_name: Column of drug ids, added when missing.
         disease_id_column_name: Column of disease ids, added when missing.
+        record_column_name: Column identifying the report whose rows give an acronym its context.
 
     Returns:
         `df` with the ids found, one row per drug id and disease id of a row.
@@ -266,48 +272,54 @@ def map_entities(
         logger.info('all entities already mapped after curation and existing IDs')
         return df
 
-    lut = build_lut([
-        disease_label_lut(disease.select(DISEASE_COLUMNS)),
-        drug_label_lut(drug.select(DRUG_COLUMNS)),
-    ]).lazy()
-    mapping_results = map_lut_entities(
-        queries.lazy(), lut, 'mapped_ids', 'query_label', 'label', type_col_name='entity_type'
+    lut = build_lut(
+        [
+            disease_label_lut(disease.select(DISEASE_COLUMNS)),
+            drug_label_lut(drug.select(DRUG_COLUMNS)),
+        ],
+        acronym_allowlist=packaged_acronym_allowlist(disease.select(DISEASE_COLUMNS)),
+    ).lazy()
+    disease_results = (
+        map_lut_entities(
+            queries.filter(pl.col('entity_type') == 'DS').lazy(),
+            lut,
+            'mapped_ids',
+            'query_label',
+            'label',
+            type_col_name='entity_type',
+            include_entity_source=True,
+        )
+        .collect()
+        .pipe(_disease_ids_with_acronym_flag)
+    )
+    drug_results = map_lut_entities(
+        queries.filter(pl.col('entity_type') == 'CD').lazy(),
+        lut,
+        'mapped_ids',
+        'query_label',
+        'label',
+        type_col_name='entity_type',
     ).collect()
 
-    unmapped_drugs = (
-        mapping_results
-        .filter((pl.col('entity_type') == 'CD') & pl.col('mapped_ids').is_null())
-        .get_column('query_label')
-        .unique()
-        .sort()
-    )
+    unmapped_drugs = drug_results.filter(pl.col('mapped_ids').is_null()).get_column('query_label').unique().sort()
     if unmapped_drugs.len() > 0:
         logger.info(f'found {unmapped_drugs.len()} unmapped drug labels')
         names = _staged_ner_names(unmapped_drugs, staged_drug_entities)
         ner = _ner_drug_ids(names, lut.filter(pl.col('entityType') == 'CD'))
-        mapping_results = (
-            mapping_results
+        drug_results = (
+            drug_results
             .join(ner, on='query_label', how='left', maintain_order='left')
-            .with_columns(
-                pl
-                .when(pl.col('mapped_ids').is_null() & (pl.col('entity_type') == 'CD'))
-                .then(pl.col('ner_mapped_ids'))
-                .otherwise(pl.col('mapped_ids'))
-                .alias('mapped_ids')
-            )
+            .with_columns(pl.coalesce('mapped_ids', 'ner_mapped_ids').alias('mapped_ids'))
             .drop('ner_mapped_ids')
         )
         logger.info(f'ner recovered {ner.height}/{unmapped_drugs.len()}')
 
-    mapping_results = mapping_results.filter(pl.col('mapped_ids').is_not_null()).select(
-        'query_label',
-        'entity_type',
-        pl.when(pl.col('entity_type') == 'DS').then(pl.col('mapped_ids')).alias('diseaseIds'),
-        pl.when(pl.col('entity_type') == 'CD').then(pl.col('mapped_ids')).alias('drugIds'),
-    )
-
-    return (
+    columns = df.columns
+    new_disease = f'new_{disease_id_column_name}'
+    new_drug = f'new_{drug_id_column_name}'
+    mapped = (
         df
+        .with_row_index('__row')
         .with_columns(
             pl
             .when(pl.col(disease_id_column_name).is_null())
@@ -316,30 +328,79 @@ def map_entities(
             pl.when(pl.col(drug_id_column_name).is_null()).then(pl.col(drug_column_name)).alias('__drug_query'),
         )
         .join(
-            mapping_results.filter(pl.col('entity_type') == 'DS').select(['query_label', 'diseaseIds']),
-            left_on='__disease_query',
-            right_on='query_label',
+            disease_results.filter(pl.col('mapped_ids').is_not_null()).select(
+                pl.col('query_label').alias('__disease_query'), pl.col('mapped_ids').alias(new_disease)
+            ),
+            on='__disease_query',
             how='left',
-            suffix='_disease',
             maintain_order='left',
         )
         .join(
-            mapping_results.filter(pl.col('entity_type') == 'CD').select(['query_label', 'drugIds']),
-            left_on='__drug_query',
-            right_on='query_label',
+            drug_results.filter(pl.col('mapped_ids').is_not_null()).select(
+                pl.col('query_label').alias('__drug_query'), pl.col('mapped_ids').alias(new_drug)
+            ),
+            on='__drug_query',
             how='left',
-            suffix='_drug',
             maintain_order='left',
         )
-        .drop('__disease_query', '__drug_query')
-        .explode('diseaseIds', empty_as_null=True)
-        .explode('drugIds', empty_as_null=True)
-        .rename({'diseaseIds': f'new_{disease_id_column_name}', 'drugIds': f'new_{drug_id_column_name}'})
+        .explode(new_disease, empty_as_null=True)
+        .explode(new_drug, empty_as_null=True)
+        .rechunk()
         .with_columns(
-            pl.coalesce(pl.col(disease_id_column_name), pl.col(f'new_{disease_id_column_name}')).alias(
-                disease_id_column_name
-            ),
-            pl.coalesce(pl.col(drug_id_column_name), pl.col(f'new_{drug_id_column_name}')).alias(drug_id_column_name),
+            pl.col(new_disease).struct.field('entityId').alias('__lut_disease_id'),
+            pl.col(new_disease).struct.field('isAcronym').fill_null(False).alias('__acronym'),
         )
-        .drop(f'new_{disease_id_column_name}', f'new_{drug_id_column_name}')
+        .with_columns(
+            pl.coalesce(disease_id_column_name, '__lut_disease_id').alias(disease_id_column_name),
+            pl.coalesce(drug_id_column_name, new_drug).alias(drug_id_column_name),
+        )
+    )
+    return _drop_acronyms_without_context(
+        mapped, disease_id_column_name, drug_id_column_name, record_column_name
+    ).select(columns)
+
+
+def _disease_ids_with_acronym_flag(results: pl.DataFrame) -> pl.DataFrame:
+    """`mapped_ids` as sorted `{entityId, isAcronym}` structs, an id acronym-only if all of its structs are."""
+    ids = (
+        results
+        .select('query_label', pl.col('mapped_ids').alias('id'))
+        .explode('id')
+        .filter(pl.col('id').is_not_null())
+        .unnest('id')
+        .group_by('query_label', 'entityId')
+        .agg(pl.col('isAcronym').fill_null(False).all())
+        .sort('query_label', 'entityId')
+        .group_by('query_label', maintain_order=True)
+        .agg(pl.struct('entityId', 'isAcronym').alias('mapped_ids'))
+    )
+    return results.select('query_label').join(ids, on='query_label', how='left', maintain_order='left')
+
+
+def _drop_acronyms_without_context(
+    mapped: pl.DataFrame, disease_id_column_name: str, drug_id_column_name: str, record_column_name: str
+) -> pl.DataFrame:
+    """Drop acronym-only disease ids that no non-acronym row of the same record names.
+
+    An input row (`__row`) left without a disease id keeps one row per drug id, with a null disease id.
+    """
+    disease_id = pl.col(disease_id_column_name)
+    context = (
+        mapped
+        .filter(~pl.col('__acronym') & disease_id.is_not_null())
+        .select(record_column_name, disease_id_column_name, pl.lit(True).alias('__in_context'))
+        .unique()
+    )
+    flagged = mapped.join(
+        context, on=[record_column_name, disease_id_column_name], how='left', nulls_equal=True, maintain_order='left'
+    ).with_columns((pl.col('__acronym') & pl.col('__in_context').is_null()).alias('__drop'))
+    dropped = flagged.filter('__drop').select('__row', disease_id_column_name).unique().height
+    logger.info(f'dropped {dropped} acronym disease ids without report context')
+    all_dropped = pl.col('__drop').all().over('__row')
+    return (
+        flagged
+        .filter(~pl.col('__drop') | all_dropped)
+        .with_columns(pl.when(all_dropped).then(None).otherwise(disease_id).alias(disease_id_column_name))
+        .unique(['__row', disease_id_column_name, drug_id_column_name], maintain_order=True)
+        .sort('__row', maintain_order=True)
     )

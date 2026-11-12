@@ -26,11 +26,13 @@ class IdValidReason(Enum):
         ONLY_ID (str): Only entityId for the entityLabel
         ID_FROM_TRUSTED_SOURCE (str): entityId is from a trusted source
         DISAMBIGUATED (str): entityId is successfully disambiguated
+        ALLOWLISTED_ACRONYM (str): entityId is valid and comes from an allowlisted acronym
     """
 
     ONLY_ID = 'Only entityId for the entityLabel'
     ID_FROM_TRUSTED_SOURCE = 'entityId is from a trusted source'
     DISAMBIGUATED = 'entityId is successfully disambiguated'
+    ALLOWLISTED_ACRONYM = 'entityId is from an allowlisted acronym'
 
 
 @dataclass
@@ -91,7 +93,7 @@ class MatchMapped(Dataset):
 
     @staticmethod
     def _identify_valid_ids(df: DataFrame, trusted_sources: list[str]) -> DataFrame:
-        """Mark ids as valid based on certain criteria.
+        """Mark ids as valid based on certain criteria; acronym-only mappings are never valid here.
 
         Args:
             df (DataFrame): DataFrame containing id and source information.
@@ -100,6 +102,13 @@ class MatchMapped(Dataset):
         Returns:
             DataFrame: DataFrame where valid ids and their reasons are indicated.
         """
+        mapped_entries = f.filter('entityIds', lambda x: x['entityId'] == f.col('mappedId'))
+        acronym_only = (f.size(mapped_entries) > 0) & f.forall(
+            mapped_entries, lambda x: f.coalesce(x['isAcronym'], f.lit(False))
+        )
+        allowlisted_acronym = (f.size(mapped_entries) > 0) & f.forall(
+            mapped_entries, lambda x: f.coalesce(x['isAllowlistedAcronym'], f.lit(False))
+        )
         return (
             df
             .withColumn('validReasons', f.lit(None))
@@ -108,7 +117,7 @@ class MatchMapped(Dataset):
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(f.array_distinct('entityIds.entityId')) == 1,
+                    (f.size(f.array_distinct('entityIds.entityId')) == 1) & ~acronym_only,
                     IdValidReason.ONLY_ID
                 )
             )
@@ -117,13 +126,23 @@ class MatchMapped(Dataset):
                 'validReasons',
                 MatchMapped._update_flag(
                     f.col('validReasons'),
-                    f.size(
-                        f.array_except(
-                            f.col('entityIds.entitySource'),
-                            f.array(*[f.lit(x) for x in trusted_sources])
-                        )
-                    ) == 0,
+                    (
+                        f.size(
+                            f.array_except(
+                                f.col('entityIds.entitySource'),
+                                f.array(*[f.lit(x) for x in trusted_sources])
+                            )
+                        ) == 0
+                    ) & ~acronym_only,
                     IdValidReason.ID_FROM_TRUSTED_SOURCE
+                )
+            )
+            .withColumn(
+                'validReasons',
+                MatchMapped._update_flag(
+                    f.col('validReasons'),
+                    allowlisted_acronym & (f.size('validReasons') > 0),
+                    IdValidReason.ALLOWLISTED_ACRONYM
                 )
             )
             .withColumn(
