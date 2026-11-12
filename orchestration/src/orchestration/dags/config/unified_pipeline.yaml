@@ -492,8 +492,9 @@ steps:
       # Also brings pis_literature, through the evidence steps the effector gene list reads.
       - pts_l2g
 
-  # published, but no other step reads it
+  # published in PPP only; no other step reads it
   pts_biosample_enrichment:
+    ppp_only: true
     depends_on:
       # pts_l2g brings pts_credible_set, pts_study and pts_target
       - pts_l2g
