@@ -15,12 +15,13 @@ from pts.transformers.vep_view import (
     COMMON_COLUMNS,
     GWAS_COLUMNS,
     QTL_COLUMNS,
+    TabixOutput,
     process_biosample,
     process_credible_set,
     process_l2g,
     process_study,
     vep_view,
-    write_bgzf,
+    write_tabix,
 )
 from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
@@ -408,17 +409,22 @@ class TestEnsemblContract:
         assert _rows(outputs['vep_data_qtl']) == combined
 
 
-class TestWriteBgzf:
-    """Tests for write_bgzf."""
+class TestWriteTabix:
+    """Tests for write_tabix."""
 
     @pytest.fixture
     def frame(self) -> pl.DataFrame:
-        """Seven rows on two chromosomes, sorted by chromosome and position."""
+        """Seven rows on two chromosomes, out of order."""
         return pl.DataFrame({
-            '#chromosome': ['1', '1', '1', '1', '2', '2', '2'],
-            'position': [10, 20, 30, 40, 5, 15, 25],
-            'value': ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+            '#chromosome': ['2', '1', '2', '1', '1', '2', '1'],
+            'position': [15, 30, 5, 10, 40, 25, 20],
+            'value': ['f', 'c', 'e', 'a', 'd', 'g', 'b'],
         })
+
+    @pytest.fixture
+    def order(self, frame: pl.DataFrame) -> pl.Series:
+        """Row indices that sort the frame by chromosome and position."""
+        return frame.select(pl.arg_sort_by('#chromosome', 'position')).to_series()
 
     @pytest.fixture
     def small_batches_and_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,19 +432,31 @@ class TestWriteBgzf:
         monkeypatch.setattr(vep_view_module, 'CSV_BATCH_ROWS', 3)
         monkeypatch.setattr(vep_view_module, 'BGZF_BLOCK_SIZE', 7)
 
-    @pytest.mark.usefixtures('small_batches_and_blocks')
-    def test_content_matches_tsv(self, frame: pl.DataFrame, tmp_path: Path) -> None:
-        """Decompressed, the file is the frame's TSV with a single header line."""
-        path = tmp_path / 'out.tsv.bgz'
-        write_bgzf(frame, path, threads=4)
-        assert gzip.decompress(path.read_bytes()).decode() == frame.write_csv(separator='\t')
+    @staticmethod
+    def _text(path: str) -> str:
+        return gzip.decompress(Path(path).read_bytes()).decode()
 
     @pytest.mark.usefixtures('small_batches_and_blocks')
-    def test_file_is_bgzf_with_eof_marker(self, frame: pl.DataFrame, tmp_path: Path) -> None:
+    def test_each_output_is_the_sorted_filtered_tsv(
+        self, frame: pl.DataFrame, order: pl.Series, tmp_path: Path
+    ) -> None:
+        """Decompressed, each file is its rows and columns of the sorted frame, with one header line."""
+        outputs = [
+            TabixOutput(str(tmp_path / 'all.tsv.bgz'), ['#chromosome', 'position', 'value']),
+            TabixOutput(str(tmp_path / 'chr1.tsv.bgz'), ['#chromosome', 'position'], pl.col('#chromosome') == '1'),
+        ]
+        write_tabix(frame, order, outputs, tmp_path / 'work')
+        ordered = frame.sort('#chromosome', 'position')
+        assert self._text(outputs[0].destination) == ordered.write_csv(separator='\t')
+        expected = ordered.filter(pl.col('#chromosome') == '1').select('#chromosome', 'position')
+        assert self._text(outputs[1].destination) == expected.write_csv(separator='\t')
+
+    @pytest.mark.usefixtures('small_batches_and_blocks')
+    def test_file_is_bgzf_with_eof_marker(self, frame: pl.DataFrame, order: pl.Series, tmp_path: Path) -> None:
         """Every gzip member carries the BGZF size field, and the file ends with the BGZF EOF block."""
-        path = tmp_path / 'out.tsv.bgz'
-        write_bgzf(frame, path, threads=2)
-        data = path.read_bytes()
+        destination = str(tmp_path / 'out.tsv.bgz')
+        write_tabix(frame, order, [TabixOutput(destination, frame.columns)], tmp_path / 'work')
+        data = Path(destination).read_bytes()
         assert data.endswith(vep_view_module.BGZF_EOF)
         offset = 0
         while offset < len(data):
@@ -448,18 +466,24 @@ class TestWriteBgzf:
         assert offset == len(data)
 
     @pytest.mark.usefixtures('small_batches_and_blocks')
-    def test_tabix_indexes_and_fetches(self, frame: pl.DataFrame, tmp_path: Path) -> None:
-        """Tabix indexes the file and region fetches return the right rows."""
-        path = tmp_path / 'out.tsv.bgz'
-        write_bgzf(frame, path, threads=4)
-        pysam.tabix_index(str(path), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
-        with pysam.TabixFile(str(path)) as tbx:
+    def test_index_fetches_regions(self, frame: pl.DataFrame, order: pl.Series, tmp_path: Path) -> None:
+        """The index is written next to the file, and region fetches return the right rows."""
+        destination = str(tmp_path / 'out.tsv.bgz')
+        write_tabix(frame, order, [TabixOutput(destination, frame.columns)], tmp_path / 'work')
+        assert Path(f'{destination}.tbi').exists()
+        with pysam.TabixFile(destination) as tbx:
             assert list(tbx.header) == ['#chromosome\tposition\tvalue']
             assert [row.split('\t')[2] for row in tbx.fetch('1', 15, 35)] == ['b', 'c']
             assert [row.split('\t')[2] for row in tbx.fetch('2')] == ['e', 'f', 'g']
 
     def test_empty_frame_writes_header_only(self, frame: pl.DataFrame, tmp_path: Path) -> None:
         """An empty frame still produces a valid file holding just the header."""
-        path = tmp_path / 'out.tsv.bgz'
-        write_bgzf(frame.clear(), path, threads=2)
-        assert gzip.decompress(path.read_bytes()).decode() == '#chromosome\tposition\tvalue\n'
+        destination = str(tmp_path / 'out.tsv.bgz')
+        empty = frame.clear()
+        write_tabix(empty, pl.Series([], dtype=pl.UInt32), [TabixOutput(destination, frame.columns)], tmp_path)
+        assert self._text(destination) == '#chromosome\tposition\tvalue\n'
+
+    def test_no_temporary_files_are_left(self, frame: pl.DataFrame, order: pl.Series, tmp_path: Path) -> None:
+        """The scratch directory is removed after the upload."""
+        write_tabix(frame, order, [TabixOutput(str(tmp_path / 'out.tsv.bgz'), frame.columns)], tmp_path / 'work')
+        assert not list((tmp_path / 'work').glob('vep_view_*'))

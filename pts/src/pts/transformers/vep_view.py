@@ -8,6 +8,7 @@ import tempfile
 import zlib
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -183,53 +184,81 @@ def _bgzf_block(data: bytes | memoryview) -> bytes:
     return header + payload + struct.pack('<2I', zlib.crc32(data), len(data))
 
 
-def write_bgzf(frame: pl.DataFrame, path: Path, threads: int) -> None:
-    """Write a frame as a tab-separated, BGZF-compressed file, compressing blocks in parallel.
+class BgzfWriter:
+    """Write a BGZF file from chunks of bytes, compressing its blocks on a shared thread pool.
 
-    The frame is serialised in batches of `CSV_BATCH_ROWS` rows; each batch is compressed while
-    the next one is serialised. The header is written with the first batch.
-
-    Args:
-        frame: Data to write.
-        path: Local file to write.
-        threads: Number of compression threads.
+    Each chunk is compressed while the next one is produced; blocks are written in order.
     """
-    with path.open('wb') as out, ThreadPoolExecutor(threads) as pool:
-        pending: Iterable[bytes] = ()
-        for offset in range(0, max(frame.height, 1), CSV_BATCH_ROWS):
-            buffer = io.BytesIO()
-            frame.slice(offset, CSV_BATCH_ROWS).write_csv(buffer, separator='\t', include_header=offset == 0)
-            data = buffer.getbuffer()
-            blocks = [data[i : i + BGZF_BLOCK_SIZE] for i in range(0, len(data), BGZF_BLOCK_SIZE)]
-            compressed = pool.map(_bgzf_block, blocks)
-            out.writelines(pending)
-            pending = compressed
-        out.writelines(pending)
-        out.write(BGZF_EOF)
+
+    def __init__(self, path: Path, pool: ThreadPoolExecutor) -> None:
+        self._out = path.open('wb')
+        self._pool = pool
+        self._pending: Iterable[bytes] = ()
+
+    def write(self, data: bytes | memoryview) -> None:
+        """Queue a chunk for compression and write the previous chunk's blocks."""
+        blocks = [data[i : i + BGZF_BLOCK_SIZE] for i in range(0, len(data), BGZF_BLOCK_SIZE)]
+        compressed = self._pool.map(_bgzf_block, blocks)
+        self._out.writelines(self._pending)
+        self._pending = compressed
+
+    def close(self) -> None:
+        """Write the remaining blocks and the BGZF end-of-file marker."""
+        self._out.writelines(self._pending)
+        self._out.write(BGZF_EOF)
+        self._out.close()
 
 
-def write_tabix(frame: pl.DataFrame, destination: str, work_dir: Path) -> None:
-    """Write a frame as a bgzip-compressed TSV with a tabix index.
+@dataclass(frozen=True)
+class TabixOutput:
+    """One tabix-indexed file: where it goes, its columns and which rows it keeps."""
 
-    htslib can only write to the local filesystem, so the file is compressed and indexed in a
-    temporary directory under `work_dir` and then copied to the (possibly remote) destinations.
-    The index is written next to the data file as `<destination>.tbi`, the name tabix readers
-    look for. The frame must be sorted by `#chromosome` and `position`, with each chromosome in
-    one contiguous block.
+    destination: str
+    columns: list[str]
+    rows: pl.Expr = field(default_factory=lambda: pl.lit(True))
+
+
+def write_tabix(frame: pl.DataFrame, order: pl.Series, outputs: list[TabixOutput], work_dir: Path) -> None:
+    """Write bgzip-compressed, tabix-indexed TSV files in one pass over a frame.
+
+    The frame is read in `order`, in batches of `CSV_BATCH_ROWS` rows, so a sorted copy of it is
+    never built. Each batch is filtered and serialised for every output, and the header is written
+    with the first batch. htslib can only write to the local filesystem, so the files are written
+    and indexed in a temporary directory under `work_dir` and then copied to their (possibly remote)
+    destinations, each index as `<destination>.tbi`.
 
     Args:
-        frame: Data to write. The first column is the chromosome and the second the 1-based
+        frame: Data to write. Its first column is the chromosome and its second the 1-based
             position, which tabix uses as both the start and the end of the interval.
-        destination: Where to write the `.tsv.bgz` file.
+        order: Row indices that sort the frame by chromosome and position, with each chromosome
+            in one contiguous block.
+        outputs: The files to write.
         work_dir: Local directory for the temporary files.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=work_dir, prefix='vep_view_') as tmp:
-        bgz = Path(tmp) / 'data.tsv.bgz'
-        write_bgzf(frame, bgz, threads=os.cpu_count() or 1)
-        pysam.tabix_index(str(bgz), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
-        _upload(bgz, destination)
-        _upload(Path(f'{bgz}.tbi'), f'{destination}.tbi')
+    with (
+        tempfile.TemporaryDirectory(dir=work_dir, prefix='vep_view_') as tmp,
+        ThreadPoolExecutor(os.cpu_count() or 1) as pool,
+    ):
+        paths = [Path(tmp) / f'{i}.tsv.bgz' for i in range(len(outputs))]
+        writers = [BgzfWriter(path, pool) for path in paths]
+        for offset in range(0, max(order.len(), 1), CSV_BATCH_ROWS):
+            batch = frame[order.slice(offset, CSV_BATCH_ROWS)]
+            for output, writer in zip(outputs, writers, strict=True):
+                buffer = io.BytesIO()
+                batch.filter(output.rows).select(output.columns).write_csv(
+                    buffer, separator='\t', include_header=offset == 0
+                )
+                writer.write(buffer.getbuffer())
+        for writer in writers:
+            writer.close()
+
+        def index_and_upload(path: Path, output: TabixOutput) -> None:
+            pysam.tabix_index(str(path), force=True, seq_col=0, start_col=1, end_col=1, meta_char='#', zerobased=False)
+            _upload(path, output.destination)
+            _upload(Path(f'{path}.tbi'), f'{output.destination}.tbi')
+
+        list(pool.map(index_and_upload, paths, outputs))
 
 
 def vep_view(
@@ -293,25 +322,22 @@ def vep_view(
             pl.col('position').is_not_null(),
             pl.col('#chromosome').str.len_chars() < 3,
         )
-        .sort('#chromosome', 'position')
         .collect()
     )
+    order = result.select('#chromosome', 'position').with_row_index().sort('#chromosome', 'position')['index']
 
-    work_dir = Path(config.work_path)
-
-    logger.info('Writing full dataset')
-    write_tabix(result, destination['vep_data_all'], work_dir)
-
-    logger.info('Writing GWAS dataset')
+    logger.info('Writing datasets')
     write_tabix(
-        result.filter(pl.col('studyType') == 'gwas').select(*COMMON_COLUMNS, *GWAS_COLUMNS),
-        destination['vep_data_gwas'],
-        work_dir,
-    )
-
-    logger.info('Writing QTL dataset')
-    write_tabix(
-        result.filter(pl.col('studyType').str.ends_with('qtl')).select(*COMMON_COLUMNS, *QTL_COLUMNS),
-        destination['vep_data_qtl'],
-        work_dir,
+        result,
+        order,
+        [
+            TabixOutput(destination['vep_data_all'], [*COMMON_COLUMNS, *GWAS_COLUMNS, *QTL_COLUMNS]),
+            TabixOutput(destination['vep_data_gwas'], [*COMMON_COLUMNS, *GWAS_COLUMNS], pl.col('studyType') == 'gwas'),
+            TabixOutput(
+                destination['vep_data_qtl'],
+                [*COMMON_COLUMNS, *QTL_COLUMNS],
+                pl.col('studyType').str.ends_with('qtl'),
+            ),
+        ],
+        Path(config.work_path),
     )
