@@ -1,28 +1,28 @@
 # GWAS Catalog top hits
 
-This document was updated on 2026-10-29.
+This document was updated on 2026-11-11.
 
 ```sh
-gs://gwas_catalog_top_hits/prod/20261028T234317/bin/                              # gentropy CLI and cluster init script of the run
-gs://gwas_catalog_top_hits/prod/20261028T234317/config/gwas_catalog_top_hits.yaml # DAG config of the run
-gs://gwas_catalog_top_hits/prod/20261028T234317/docs/
-gs://gwas_catalog_top_hits/prod/20261028T234317/output/study/
-gs://gwas_catalog_top_hits/prod/20261028T234317/output/study_locus/
-gs://gwas_catalog_top_hits/prod/20261028T234317/output/ld_annotated_study_locus/
-gs://gwas_catalog_top_hits/prod/20261028T234317/output/credible_set/
-gs://gwas_catalog_top_hits/prod/20261028T234317/output/credible_set_variant/
+gs://gwas_catalog_top_hits/prod/20261111T160107/bin/                              # gentropy CLI and cluster init script of the run
+gs://gwas_catalog_top_hits/prod/20261111T160107/config/gwas_catalog_top_hits.yaml # DAG config of the run
+gs://gwas_catalog_top_hits/prod/20261111T160107/docs/
+gs://gwas_catalog_top_hits/prod/20261111T160107/output/study/
+gs://gwas_catalog_top_hits/prod/20261111T160107/output/study_locus/
+gs://gwas_catalog_top_hits/prod/20261111T160107/output/ld_annotated_study_locus/
+gs://gwas_catalog_top_hits/prod/20261111T160107/output/credible_set/
+gs://gwas_catalog_top_hits/prod/20261111T160107/output/credible_set_variant/
 ```
 
 Data contained in the `top_hits` corresponds to the [GWAS Catalog top associations](https://www.ebi.ac.uk/gwas/docs/methods/criteria#:~:text=statistics%20here.-,Top%20associations,-We%20also%20report)
 
-Data is produced by **gwas_catalog_top_hits DAG**. The DAG configuration and topology are in `config/gwas_catalog_top_hits.yaml` of the run folder (`gs://gwas_catalog_top_hits/prod/20261028T234317/config/`). The run uses gentropy [`v4.0.0-dev.4`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.4); the links below refer to that tag. The gentropy CLI (`cli.py`) and the cluster init script (`install_dependencies_on_cluster.sh`) of the tag are copied to `bin/` of the run folder.
+Data is produced by **gwas_catalog_top_hits DAG**. The DAG configuration and topology are in `config/gwas_catalog_top_hits.yaml` of the run folder (`gs://gwas_catalog_top_hits/prod/20261111T160107/config/`). The run uses gentropy [`v4.0.0-rc.3`](https://github.com/opentargets/gentropy/tree/v4.0.0-rc.3); the links below refer to that tag. The gentropy CLI (`cli.py`) and the cluster init script (`install_dependencies_on_cluster.sh`) of the tag are copied to `bin/` of the run folder.
 
 Inputs of the run:
 
 ```sh
-gs://gwas_catalog_inputs/gentroutils/20260802/gwas_catalog_download_studies.tsv
-gs://gwas_catalog_inputs/gentroutils/20260802/gwas_catalog_download_ancestries.tsv
-gs://gwas_catalog_inputs/gentroutils/20260802/gwas_catalog_associations_ontology_annotated.tsv
+gs://gwas_catalog_inputs/gentroutils/20261029/gwas_catalog_download_studies.tsv
+gs://gwas_catalog_inputs/gentroutils/20261029/gwas_catalog_download_ancestries.tsv
+gs://gwas_catalog_inputs/gentroutils/20261029/gwas_catalog_associations_ontology_annotated.tsv
 gs://gnomad_data_2/v4.1/variant_index/
 gs://gnomad_data_2/v2.1.1/ld_index/
 ```
@@ -39,15 +39,15 @@ The DAG has 3 steps, run one after another on one Dataproc cluster:
 
 ## ingestion
 
-The step ([`gwas_catalog_top_hits.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/gwas_catalog_top_hits.py)) maps the curated associations to the gnomAD v4.1 variant index and splits the GWAS Catalog studies by the trait, `P-VALUE (TEXT)` label and EFO terms of their associations ([`study_splitter.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/datasource/gwas_catalog/study_splitter.py)). Each association becomes a study locus. A study locus within 500 kb of a more significant one of the same study is flagged `Explained by a more significant variant in the same window` and kept ([`associations.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/datasource/gwas_catalog/associations.py), `window_clump`). The outputs are `output/study/` and `output/study_locus/`.
+The step ([`gwas_catalog_top_hits.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/gwas_catalog_top_hits.py)) maps the curated associations to the gnomAD v4.1 variant index and splits the GWAS Catalog studies by the trait, `P-VALUE (TEXT)` label and EFO terms of their associations ([`study_splitter.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/datasource/gwas_catalog/study_splitter.py)). Each association becomes a study locus. A study locus within 500 kb of a more significant one of the same study is flagged `Explained by a more significant variant in the same window` and kept ([`associations.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/datasource/gwas_catalog/associations.py), `window_clump`). The outputs are `output/study/` and `output/study_locus/`.
 
 ## ld_annotation
 
-The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/ld_based_clumping.py)) adds to each study locus the variants in LD with its lead, from the gnomAD v2.1.1 LD index ([`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/method/annotation.py), `annotate_ld`). The LD population is the major LD population of the study, and only variants with r² of at least 0.5 are kept. A study locus whose lead is in LD with the lead of a more significant study locus of the same study is flagged `Explained by a more significant variant in high LD` and its LD set is emptied ([`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/method/clumping/ld.py)). The output is `output/ld_annotated_study_locus/`.
+The step ([`ld_based_clumping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/ld_based_clumping.py)) adds to each study locus the variants in LD with its lead, from the gnomAD v2.1.1 LD index ([`annotation.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/annotation.py), `annotate_ld`). The LD population is the major LD population of the study, and only variants with r² of at least 0.5 are kept. A study locus whose lead is in LD with the lead of a more significant study locus of the same study is flagged `Explained by a more significant variant in high LD` and its LD set is emptied ([`ld.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/clumping/ld.py)). The output is `output/ld_annotated_study_locus/`.
 
 ## pics
 
-The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/pics.py)) fine-maps each study locus with [PICS](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.4/src/gentropy/method/fine_mapping/pics.py), from the p-value of the lead and its LD set. Study loci with a lead p-value above 1e-8, or with an empty LD set, give no credible set. Each fine-mapped study locus gives one 95% credible set. The outputs are `output/credible_set/`, one row per credible set, and `output/credible_set_variant/`, one row per variant of a credible set.
+The step ([`pics.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/pics.py)) fine-maps each study locus with [PICS](https://github.com/opentargets/gentropy/blob/v4.0.0-rc.3/src/gentropy/method/fine_mapping/pics.py), from the p-value of the lead and its LD set. Study loci with a lead p-value above 1e-8, or with an empty LD set, give no credible set. Each fine-mapped study locus gives one 95% credible set. The outputs are `output/credible_set/`, one row per credible set, and `output/credible_set_variant/`, one row per variant of a credible set.
 
 ## Outputs
 
@@ -55,11 +55,11 @@ Schemas as read from the parquet files of the run. Nested columns show their `ar
 
 | Output | Rows | Files |
 |---|---|---|
-| `study` | 230,547 | 1 |
-| `study_locus` | 957,075 | 1 |
-| `ld_annotated_study_locus` | 957,075 | 4 |
-| `credible_set` | 701,675 | 2 |
-| `credible_set_variant` | 19,577,608 | 2 |
+| `study` | 233,217 | 1 |
+| `study_locus` | 965,875 | 1 |
+| `ld_annotated_study_locus` | 965,875 | 4 |
+| `credible_set` | 707,404 | 2 |
+| `credible_set_variant` | 19,753,549 | 2 |
 
 ### study
 
