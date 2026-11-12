@@ -1564,6 +1564,30 @@ steps:
       settings:
         locus_to_gene_threshold: *l2g_threshold
 
+  #: BIOSAMPLE_ENRICHMENT STEP :####################################################################
+  biosample_enrichment:
+    - name: transform biosample_enrichment
+      transformer: biosample_enrichment
+      source:
+        l2g_prediction: output/l2g_prediction
+        credible_set: output/credible_set
+        study: output/study
+        target: output/target
+        baseline_expression: output/baseline_expression
+      destination: output/biosample_enrichment
+      settings:
+        # the CELLEX specificity panels of the LDSC cell type analysis
+        panels:
+          - datasourceId: gtex
+            biosampleType: tissue
+          - datasourceId: tabula_sapiens
+            biosampleType: tissue
+          - datasourceId: tabula_sapiens
+            biosampleType: celltype
+          - datasourceId: tabula_sapiens
+            biosampleType: tissue_celltype
+        pool_by_disease: true
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view

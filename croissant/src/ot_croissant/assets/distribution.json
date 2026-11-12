@@ -71,6 +71,22 @@
     "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies"
   },
   {
+    "id": "biosample_enrichment",
+    "nice_name": "Biosample enrichment",
+    "key": [
+      "diseaseId",
+      "studyId",
+      "biosampleId",
+      "tissueBiosampleId",
+      "biosampleDataset"
+    ],
+    "tags": [
+      "Genetics",
+      "Disease"
+    ],
+    "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics. Every row leaves one or two key columns null: exactly one of diseaseId (a disease's studies pooled) and studyId (a single study) is set, and tissueBiosampleId is set only for tissue x cell type biosamples. The key is unique with nulls compared as equal"
+  },
+  {
     "id": "chembl_bioactivity",
     "nice_name": "Drug - ChEMBL bioactivity",
     "tags": [
