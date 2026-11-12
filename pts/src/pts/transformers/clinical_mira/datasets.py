@@ -117,7 +117,7 @@ PHASE_TO_CATEGORY_MAP = {
 
 
 # Sources that indicate approved status when phase is null
-APPROVAL_SOURCES = {'ATC', 'EMA', 'FDA', 'DailyMed', 'PMDA'}
+APPROVAL_SOURCES = {'EMA', 'FDA', 'DailyMed', 'PMDA'}
 
 
 def map_phase_to_category(phase: str | None, source: str, overall_status: str | None) -> ClinicalStageCategory:
