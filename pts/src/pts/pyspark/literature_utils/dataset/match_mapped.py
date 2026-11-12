@@ -26,11 +26,13 @@ class IdValidReason(Enum):
         ONLY_ID (str): Only entityId for the entityLabel
         ID_FROM_TRUSTED_SOURCE (str): entityId is from a trusted source
         DISAMBIGUATED (str): entityId is successfully disambiguated
+        ALLOWLISTED_ACRONYM (str): entityId is valid and comes from an allowlisted acronym
     """
 
     ONLY_ID = 'Only entityId for the entityLabel'
     ID_FROM_TRUSTED_SOURCE = 'entityId is from a trusted source'
     DISAMBIGUATED = 'entityId is successfully disambiguated'
+    ALLOWLISTED_ACRONYM = 'entityId is from an allowlisted acronym'
 
 
 @dataclass
@@ -104,6 +106,9 @@ class MatchMapped(Dataset):
         acronym_only = (f.size(mapped_entries) > 0) & f.forall(
             mapped_entries, lambda x: f.coalesce(x['isAcronym'], f.lit(False))
         )
+        allowlisted_acronym = (f.size(mapped_entries) > 0) & f.forall(
+            mapped_entries, lambda x: f.coalesce(x['isAllowlistedAcronym'], f.lit(False))
+        )
         return (
             df
             .withColumn('validReasons', f.lit(None))
@@ -130,6 +135,14 @@ class MatchMapped(Dataset):
                         ) == 0
                     ) & ~acronym_only,
                     IdValidReason.ID_FROM_TRUSTED_SOURCE
+                )
+            )
+            .withColumn(
+                'validReasons',
+                MatchMapped._update_flag(
+                    f.col('validReasons'),
+                    allowlisted_acronym & (f.size('validReasons') > 0),
+                    IdValidReason.ALLOWLISTED_ACRONYM
                 )
             )
             .withColumn(

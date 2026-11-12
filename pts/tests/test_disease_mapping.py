@@ -16,14 +16,26 @@ LUT_SCHEMA = {
     'entityKind': pl.String,
     'entityType': pl.String,
     'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String, 'isAcronym': pl.Boolean})),
+    'entityIds': pl.List(
+        pl.Struct({
+            'entityId': pl.String,
+            'entitySource': pl.String,
+            'isAcronym': pl.Boolean,
+            'isAllowlistedAcronym': pl.Boolean,
+        })
+    ),
 }
 
 
 def _lut(rows: list[tuple[str, str, str, list[tuple[str, str]]]]) -> pl.DataFrame:
     return pl.DataFrame(
         [
-            (kind, type_, label, [{'entityId': i, 'entitySource': s, 'isAcronym': False} for i, s in ids])
+            (
+                kind,
+                type_,
+                label,
+                [{'entityId': i, 'entitySource': s, 'isAcronym': False, 'isAllowlistedAcronym': False} for i, s in ids],
+            )
             for kind, type_, label, ids in rows
         ],
         schema=LUT_SCHEMA,
@@ -104,11 +116,18 @@ def test_include_flags() -> None:
     assert sorted(out.select('entityLabelNormalised', 'ids').rows()) == sorted([
         (
             normalise_term('Papillon-Lefevre syndrome'),
-            [{'entityId': 'MONDO_0009859', 'entitySource': 'name', 'isAcronym': False}],
+            [{'entityId': 'MONDO_0009859', 'entitySource': 'name', 'isAcronym': False, 'isAllowlistedAcronym': False}],
         ),
         (
             normalise_term('Papillon-Lefèvre syndrome'),
-            [{'entityId': 'EFO_0000001', 'entitySource': 'exact_synonym', 'isAcronym': False}],
+            [
+                {
+                    'entityId': 'EFO_0000001',
+                    'entitySource': 'exact_synonym',
+                    'isAcronym': False,
+                    'isAllowlistedAcronym': False,
+                }
+            ],
         ),
     ])
 
@@ -262,11 +281,15 @@ def _structs(label: str, kind: str = 'label') -> list[dict] | None:
 
 @pytest.mark.parametrize('label', ['CF', 'C.F.', '(CF)', '#CF', ' cf '])
 def test_spellings_of_an_acronym_hit_the_flagged_entry(label: str) -> None:
-    assert _structs(label) == [{'entityId': 'MONDO_1', 'entitySource': 'exact_synonym', 'isAcronym': True}]
+    assert _structs(label) == [
+        {'entityId': 'MONDO_1', 'entitySource': 'exact_synonym', 'isAcronym': True, 'isAllowlistedAcronym': False}
+    ]
 
 
 def test_full_name_is_not_flagged() -> None:
-    assert _structs('cystic fibrosis') == [{'entityId': 'MONDO_1', 'entitySource': 'name', 'isAcronym': False}]
+    assert _structs('cystic fibrosis') == [
+        {'entityId': 'MONDO_1', 'entitySource': 'name', 'isAcronym': False, 'isAllowlistedAcronym': False}
+    ]
 
 
 def test_id_queries_never_flagged() -> None:
@@ -283,7 +306,7 @@ def test_without_entity_source_ids_are_bare() -> None:
 
 def test_non_acronym_ids() -> None:
     def entry(i: str, source: str, flag: bool | None) -> dict:
-        return {'entityId': i, 'entitySource': source, 'isAcronym': flag}
+        return {'entityId': i, 'entitySource': source, 'isAcronym': flag, 'isAllowlistedAcronym': False}
 
     structs = pl.Series(
         [

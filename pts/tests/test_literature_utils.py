@@ -12,6 +12,9 @@ from pts.pyspark.literature_utils.datasource.epmc.publication import EPMCPublica
 from pts.pyspark.literature_utils.datasource.epmc.publication_id_lut import PublicationIdLUT
 
 
+def _entry(entity_id: str, source: str, is_acronym: bool | None = False, allowlisted: bool = False) -> Row:
+    return Row(entityId=entity_id, entitySource=source, isAcronym=is_acronym, isAllowlistedAcronym=allowlisted)
+
 def _mapped_df(spark, rows):
     """Build a DataFrame with the full MatchMapped schema; missing fields are null."""
     return spark.createDataFrame(rows, schema=MatchMapped.get_schema())
@@ -100,13 +103,13 @@ class TestMatchMapped:
             spark,
             [
                 # single id for the label
-                {'pmid': '1', 'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=False)], 'mappedId': 'E1'},
+                {'pmid': '1', 'entityIds': [_entry('E1', 'syn')], 'mappedId': 'E1'},
                 # two ids, all from a trusted source
                 {
                     'pmid': '2',
                     'entityIds': [
-                        Row(entityId='E1', entitySource='name', isAcronym=False),
-                        Row(entityId='E2', entitySource='name', isAcronym=False),
+                        _entry('E1', 'name'),
+                        _entry('E2', 'name'),
                     ],
                     'mappedId': 'E1',
                 },
@@ -114,8 +117,8 @@ class TestMatchMapped:
                 {
                     'pmid': '3',
                     'entityIds': [
-                        Row(entityId='E1', entitySource='name', isAcronym=False),
-                        Row(entityId='E2', entitySource='syn', isAcronym=False),
+                        _entry('E1', 'name'),
+                        _entry('E2', 'syn'),
                     ],
                     'mappedId': 'E1',
                 },
@@ -133,7 +136,7 @@ class TestMatchMapped:
             [
                 {
                     'pmid': '1',
-                    'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=None)],
+                    'entityIds': [_entry('E1', 'syn', is_acronym=None)],
                     'mappedId': 'E1',
                 },
             ],
@@ -148,7 +151,7 @@ class TestMatchMapped:
                 {
                     'pmid': '1',
                     'label': 'CF',
-                    'entityIds': [Row(entityId='MONDO_1', entitySource='exact_synonym', isAcronym=True)],
+                    'entityIds': [_entry('MONDO_1', 'exact_synonym', is_acronym=True)],
                     'mappedId': 'MONDO_1',
                 },
             ],
@@ -164,14 +167,14 @@ class TestMatchMapped:
                 {
                     'pmid': '1',
                     'label': 'cystic fibrosis',
-                    'entityIds': [Row(entityId='MONDO_1', entitySource='name', isAcronym=False)],
+                    'entityIds': [_entry('MONDO_1', 'name')],
                     'mappedId': 'MONDO_1',
                     'isMapped': True,
                 },
                 {
                     'pmid': '1',
                     'label': 'CF',
-                    'entityIds': [Row(entityId='MONDO_1', entitySource='exact_synonym', isAcronym=True)],
+                    'entityIds': [_entry('MONDO_1', 'exact_synonym', is_acronym=True)],
                     'mappedId': 'MONDO_1',
                     'isMapped': True,
                 },
@@ -190,7 +193,7 @@ class TestMatchMapped:
                 {
                     'pmid': '1',
                     'label': 'UC',
-                    'entityIds': [Row(entityId='MONDO_UC', entitySource='exact_synonym', isAcronym=True)],
+                    'entityIds': [_entry('MONDO_UC', 'exact_synonym', is_acronym=True)],
                     'mappedId': 'MONDO_UC',
                     'isMapped': True,
                 },
@@ -198,6 +201,43 @@ class TestMatchMapped:
         )
         result = MatchMapped(df).disambiguate(trusted_sources=['name', 'exact_synonym']).df.collect()
         assert [r['isValid'] for r in result] == [False]
+
+    def test_allowlisted_acronym_tagged_when_valid(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'HIV',
+                    'entityIds': [
+                        _entry('MONDO_HIV', 'exact_synonym', allowlisted=True)
+                    ],
+                    'mappedId': 'MONDO_HIV',
+                },
+            ],
+        )
+        result = MatchMapped._identify_valid_ids(df, ['name']).collect()[0]
+        assert result['validReasons'] == [IdValidReason.ONLY_ID.value, IdValidReason.ALLOWLISTED_ACRONYM.value]
+        assert result['isValid'] is True
+
+    def test_allowlisted_acronym_not_tagged_when_not_valid(self, spark):
+        df = _mapped_df(
+            spark,
+            [
+                {
+                    'pmid': '1',
+                    'label': 'IBD',
+                    'entityIds': [
+                        _entry('MONDO_IBD', 'exact_synonym', allowlisted=True),
+                        _entry('MONDO_IBS', 'exact_synonym', is_acronym=True),
+                    ],
+                    'mappedId': 'MONDO_IBD',
+                },
+            ],
+        )
+        result = MatchMapped._identify_valid_ids(df, ['name']).collect()[0]
+        assert result['validReasons'] == []
+        assert result['isValid'] is False
 
     def test_gene_symbols_keep_trusted_source(self, spark):
         df = _mapped_df(
@@ -207,7 +247,7 @@ class TestMatchMapped:
                     'pmid': '1',
                     'label': 'TNF',
                     'type': 'GP',
-                    'entityIds': [Row(entityId='ENSG1', entitySource='approved_symbol', isAcronym=False)],
+                    'entityIds': [_entry('ENSG1', 'approved_symbol')],
                     'mappedId': 'ENSG1',
                 },
             ],
@@ -217,8 +257,8 @@ class TestMatchMapped:
 
     def test_disambiguate_uses_ids_validated_elsewhere_in_the_publication(self, spark):
         ambiguous = [
-            Row(entityId='E1', entitySource='syn', isAcronym=False),
-            Row(entityId='E2', entitySource='syn', isAcronym=False),
+            _entry('E1', 'syn'),
+            _entry('E2', 'syn'),
         ]
         df = _mapped_df(
             spark,
@@ -227,7 +267,7 @@ class TestMatchMapped:
                 {
                     'pmid': '1',
                     'label': 'gene one',
-                    'entityIds': [Row(entityId='E1', entitySource='syn', isAcronym=False)],
+                    'entityIds': [_entry('E1', 'syn')],
                     'mappedId': 'E1',
                     'isMapped': True,
                 },

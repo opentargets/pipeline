@@ -296,7 +296,8 @@ def packaged_acronym_allowlist(disease: pl.DataFrame) -> pl.DataFrame:
 def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None = None) -> pl.DataFrame:
     """Each normalised label or id with the ids of its top-scored rows, flagging acronym-only disease mappings.
 
-    `acronym_allowlist` holds (`acronym`, `diseaseId`) pairs that are not flagged; none when not given.
+    `acronym_allowlist` holds (`acronym`, `diseaseId`) pairs that are not flagged as `isAcronym` but as
+    `isAllowlistedAcronym`; none when not given.
     """
     key = list(ENTITY_LUT_KEY)
     if acronym_allowlist is None:
@@ -317,13 +318,13 @@ def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None
     )
     score = pl.col('entityScore')
     label_sources = [source for *_, source in DISEASE_LABELS]
-    row_acronym = (
+    row_acronym_shaped = (
         (pl.col('entityType') == 'DS')
         & (pl.col('entityKind') == 'label')
         & pl.col('entitySource').is_in(label_sources)
         & is_acronym_label(pl.col('entityLabel'))
-        & pl.col('listed').is_null()
     )
+    row_listed = pl.col('listed').is_not_null()
     return (
         lut
         .join(normalised, on=['entityLabel', 'nlpPipelineTrack'], how='inner')
@@ -332,9 +333,18 @@ def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None
         .filter(score.eq_missing(score.max().over(key)))
         .with_columns(acronymKey=acronym_key(pl.col('entityLabel')))
         .join(listed, on=['acronymKey', 'entityId'], how='left')
-        .with_columns(isAcronym=row_acronym.all().over([*key, 'entityId']))
+        .with_columns(
+            isAcronym=(row_acronym_shaped & ~row_listed).all().over([*key, 'entityId']),
+            isAllowlistedAcronym=(row_acronym_shaped & row_listed).all().over([*key, 'entityId']),
+        )
         .group_by(key)
-        .agg(pl.struct('entityId', 'entitySource', 'isAcronym').unique().sort().alias('entityIds'))
+        .agg(
+            pl
+            .struct('entityId', 'entitySource', 'isAcronym', 'isAllowlistedAcronym')
+            .unique()
+            .sort()
+            .alias('entityIds')
+        )
         .select(pl.col(name).cast(dtype) for name, dtype in ENTITY_LUT.items())
         .sort(key)
     )

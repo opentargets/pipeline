@@ -306,6 +306,25 @@ def test_allowlist_unflags_only_the_listed_id() -> None:
     assert _flags(lut, 'hiv') == {'MONDO_0005109': False, 'MONDO_9': True}
 
 
+def _both_flags(lut: pl.DataFrame, label: str) -> dict[str, tuple[bool, bool]]:
+    row = lut.filter((pl.col('entityLabelNormalised') == label) & (pl.col('entityKind') == 'label'))
+    assert row.height == 1
+    return {i['entityId']: (i['isAcronym'], i['isAllowlistedAcronym']) for i in row['entityIds'][0]}
+
+
+def test_allowlisted_acronym_flagged_as_allowlisted() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_0005109', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_9', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(('hiv', 'MONDO_0005109')),
+    )
+    assert _both_flags(lut, 'hiv') == {'MONDO_0005109': (False, True), 'MONDO_9': (True, False)}
+
+
 def test_packaged_allowlist_parses() -> None:
     allowlist = read_acronym_allowlist()
     assert allowlist.schema == pl.Schema({'acronym': pl.String, 'diseaseId': pl.String})

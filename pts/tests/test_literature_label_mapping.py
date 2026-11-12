@@ -120,7 +120,12 @@ def test_map_distinct_labels_one_row_per_spelling(lut: pl.DataFrame) -> None:
     mapped = map_distinct_labels(_labels(*pairs), lut)
     assert mapped.columns == ['label', 'type', 'entityLabelNormalised', 'entityIds']
     assert mapped.schema['entityIds'] == pl.List(
-        pl.Struct({'entityId': pl.String, 'entitySource': pl.String, 'isAcronym': pl.Boolean})
+        pl.Struct({
+            'entityId': pl.String,
+            'entitySource': pl.String,
+            'isAcronym': pl.Boolean,
+            'isAllowlistedAcronym': pl.Boolean,
+        })
     )
     rows = _distinct_rows(mapped)
     assert rows == _expected_distinct(*pairs)

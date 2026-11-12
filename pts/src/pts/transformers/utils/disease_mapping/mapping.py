@@ -2,8 +2,8 @@
 
 Started as a port of `OnToma.map_entities`. The lookup tables are built by `pts.transformers.ontoma_lut`;
 the query side must normalise exactly as they were -- see `pts.transformers.utils.disease_mapping.normalise`.
-With `include_entity_source` the ids come out as `{entityId, entitySource, isAcronym}` structs, the flag
-read from the lookup table; `non_acronym_ids` drops the flagged ones.
+With `include_entity_source` the ids come out as `{entityId, entitySource, isAcronym, isAllowlistedAcronym}`
+structs, the flags read from the lookup table; `non_acronym_ids` drops the flagged ones.
 
 * **Identical input rows collapse into one.**
 * **Each label is tried in two spellings**, translated with and without accented letters, and
@@ -159,7 +159,7 @@ def map_entities(
         type_col: Expression giving the type instead, e.g. `pl.lit('DS')`; it is not kept.
         include_normalised_entities: Also output the normalised label, one row per distinct
             normalised label of an input row.
-        include_entity_source: Output `{entityId, entitySource, isAcronym}` structs rather than bare ids.
+        include_entity_source: Output the lookup table's `entityIds` structs rather than bare ids.
 
     Returns:
         The input, untouched, with the identifiers found added as a list column, null when there

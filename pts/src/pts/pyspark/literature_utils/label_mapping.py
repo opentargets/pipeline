@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 #: `map_label_batches` output, as a spark DDL.
 MAPPED_LABELS_DDL = (
     'label string, type string, entityLabelNormalised string, '
-    'entityIds array<struct<entityId: string, entitySource: string, isAcronym: boolean>>'
+    'entityIds array<struct<entityId: string, entitySource: string, isAcronym: boolean, isAllowlistedAcronym: boolean>>'
 )
 
 _MAPPED_LABELS = pa.schema([
@@ -24,7 +24,14 @@ _MAPPED_LABELS = pa.schema([
     ('entityLabelNormalised', pa.string()),
     (
         'entityIds',
-        pa.list_(pa.struct([('entityId', pa.string()), ('entitySource', pa.string()), ('isAcronym', pa.bool_())])),
+        pa.list_(
+            pa.struct([
+                ('entityId', pa.string()),
+                ('entitySource', pa.string()),
+                ('isAcronym', pa.bool_()),
+                ('isAllowlistedAcronym', pa.bool_()),
+            ])
+        ),
     ),
 ])
 

@@ -141,6 +141,12 @@
                     "type": "boolean",
                     "nullable": true,
                     "metadata": {}
+                },
+                {
+                    "name": "isAllowlistedAcronym",
+                    "type": "boolean",
+                    "nullable": true,
+                    "metadata": {}
                 }
             ],
             "type": "struct"

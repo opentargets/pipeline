@@ -63,7 +63,21 @@ def write_ontoma_lut(path: Path, kind: str, label: str, entity_id: str, is_acron
     """One-row OnToma disease look-up table: `label` is the already normalised key."""
     path.mkdir(parents=True)
     pl.DataFrame(
-        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name', 'isAcronym': is_acronym}])],
+        [
+            (
+                kind,
+                'DS',
+                label,
+                [
+                    {
+                        'entityId': entity_id,
+                        'entitySource': 'name',
+                        'isAcronym': is_acronym,
+                        'isAllowlistedAcronym': False,
+                    }
+                ],
+            )
+        ],
         schema=ENTITY_LUT,
         orient='row',
     ).write_parquet(path / 'part-0.parquet')

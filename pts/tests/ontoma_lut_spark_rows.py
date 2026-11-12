@@ -4,9 +4,10 @@ The raw tables are the output of OnToma 2.7.1's `OpenTargetsDisease.as_label_lut
 `DiseaseCuration.as_label_lut` (source `ot_curation`), `OpenTargetsTarget.as_label_lut` and
 `OpenTargetsDrug.as_label_lut`, run on the fixtures as Spark dataframes and sorted on every column
 (nulls last). `LUT` is the table `OnToma(spark, [those five tables])` wrote, read back, with
-`entityIds` sorted and the rows sorted on kind, type and label, plus the `isAcronym` flag of each
-struct, which OnToma does not produce. The `STEP_*` tables are the same, built from the fixtures with
-one single-row curation per source.
+`entityIds` sorted and the rows sorted on kind, type and label, plus the `isAcronym` and
+`isAllowlistedAcronym` flags of each struct, which OnToma does not produce; the latter is added
+below. The `STEP_*` tables are the same, built from the fixtures with one single-row curation per
+source.
 """
 
 # ruff: noqa: RUF001
@@ -447,3 +448,15 @@ STEP_LITERATURE = [
     ('label', 'GP', 'tnfa', [{'entityId': 'ENSG01', 'entitySource': 'symbol_synonym', 'isAcronym': False}]),
     ('label', 'GP', 'tnfsf2', [{'entityId': 'ENSG01', 'entitySource': 'symbol_synonym', 'isAcronym': False}]),
 ]
+
+
+def _add_allowlisted_flag(value: object) -> None:
+    if isinstance(value, dict) and 'isAcronym' in value:
+        value.setdefault('isAllowlistedAcronym', False)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _add_allowlisted_flag(item)
+
+
+for _table in (LUT, STEP_DISEASE_LABEL, STEP_DISEASE_ID, STEP_LITERATURE):
+    _add_allowlisted_flag(_table)
