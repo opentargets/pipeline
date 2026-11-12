@@ -13,6 +13,19 @@ TTD_DRUG_URL = 'https://ttd.idrblab.cn/data/drug/details/'
 """Prefix of a TTD drug page; the TTD drug id completes it."""
 
 
+def ttd_report_id(ttd_id: pl.Expr, indication: pl.Expr) -> pl.Expr:
+    """The id of the TTD report for a TTD drug id and an indication text.
+
+    Args:
+        ttd_id: the TTD drug id (`TTDDRUID`).
+        indication: the indication text, as TTD writes it; case does not matter.
+
+    Returns:
+        The lowercase hex SHA-256 of the drug id followed by the lowercased indication.
+    """
+    return plh.concat_str(ttd_id, indication.str.to_lowercase()).chash.sha2_256().str.to_lowercase()
+
+
 def extract_indication(ttd_input: str | list[str]) -> pl.DataFrame:
     """Extract indications from TTD Indications dataset.
 
@@ -70,10 +83,7 @@ def extract_clinical_report(
 ) -> ClinicalReport:
     """Extract clinical reports from TTD drug/disease dataset."""
     reports = indications.select(
-        id=plh.concat_str(
-            pl.col('ttd_id'),
-            pl.col('diseaseFromSource').str.to_lowercase(),
-        ).chash.sha2_256(),
+        id=ttd_report_id(pl.col('ttd_id'), pl.col('diseaseFromSource')),
         origin=pl.lit(ClinicalReportOrigin.CURATED_RESOURCE),
         url=pl.concat_str([pl.lit(TTD_DRUG_URL), pl.col('ttd_id')]),
         phaseFromSource=pl.col('clinical_stage').str.to_lowercase(),

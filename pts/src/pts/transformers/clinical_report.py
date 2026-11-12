@@ -24,6 +24,7 @@ from pts.transformers.clinical_mira.mapping import require_staged
 from pts.transformers.clinical_mira.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, known_disease_ids, read_ttd_curation
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import flag_rows
@@ -122,6 +123,7 @@ def clinical_report(
     )
     disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
+    ttd_downgrades, ttd_corrections = read_ttd_curation(source['ttd_stage_downgrades'], source['ttd_link_corrections'])
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
@@ -215,6 +217,13 @@ def clinical_report(
             drug_index=molecule_index,
             chembl_curation=chembl_curation,
             drug_entities=drug_entities,
+        )
+        .pipe(
+            apply_ttd_curation,
+            ttd_downgrades,
+            ttd_corrections,
+            drug_ids=molecule_index['id'],
+            disease_ids=known_disease_ids(disease_index),
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
