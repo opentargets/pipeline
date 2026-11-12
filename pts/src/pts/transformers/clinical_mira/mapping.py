@@ -15,6 +15,7 @@ from pts.transformers.ontoma_lut.build import (
     build_lut,
     disease_label_lut,
     drug_label_lut,
+    packaged_acronym_allowlist,
 )
 from pts.transformers.utils.disease_mapping.mapping import map_entities as map_lut_entities
 
@@ -271,10 +272,13 @@ def map_entities(
         logger.info('all entities already mapped after curation and existing IDs')
         return df
 
-    lut = build_lut([
-        disease_label_lut(disease.select(DISEASE_COLUMNS)),
-        drug_label_lut(drug.select(DRUG_COLUMNS)),
-    ]).lazy()
+    lut = build_lut(
+        [
+            disease_label_lut(disease.select(DISEASE_COLUMNS)),
+            drug_label_lut(drug.select(DRUG_COLUMNS)),
+        ],
+        acronym_allowlist=packaged_acronym_allowlist(disease.select(DISEASE_COLUMNS)),
+    ).lazy()
     disease_results = (
         map_lut_entities(
             queries.filter(pl.col('entity_type') == 'DS').lazy(),

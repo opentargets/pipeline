@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
+from loguru import logger
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.utils.disease_mapping.normalise import normalise_batch
@@ -274,11 +275,32 @@ def read_acronym_allowlist() -> pl.DataFrame:
     return pl.read_csv(ACRONYM_ALLOWLIST, separator='\t', schema={'acronym': pl.String, 'diseaseId': pl.String})
 
 
+def resolve_acronym_allowlist(allowlist: pl.DataFrame, disease: pl.DataFrame) -> pl.DataFrame:
+    """The allowlist with each `diseaseId` resolved to the one disease-index id it names, obsolete ids included.
+
+    Entries whose id resolves to no disease, or to several, are logged and left out.
+    """
+    resolved = allowlist.with_columns(
+        entityIdToJoin=pl.col('diseaseId').str.to_lowercase().str.replace_all(':', '_', literal=True)
+    ).join(_remapped_ids(disease), on='entityIdToJoin', how='left', maintain_order='left')
+    for acronym, disease_id in resolved.filter(pl.col('entityId').is_null()).select('acronym', 'diseaseId').rows():
+        logger.warning(f'acronym allowlist entry {acronym} {disease_id} names no single disease; ignored')
+    return resolved.filter(pl.col('entityId').is_not_null()).select('acronym', pl.col('entityId').alias('diseaseId'))
+
+
+def packaged_acronym_allowlist(disease: pl.DataFrame) -> pl.DataFrame:
+    """The packaged allowlist, resolved against `disease`."""
+    return resolve_acronym_allowlist(read_acronym_allowlist(), disease)
+
+
 def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None = None) -> pl.DataFrame:
-    """Each normalised label or id with the ids of its top-scored rows, flagging acronym-only disease mappings."""
+    """Each normalised label or id with the ids of its top-scored rows, flagging acronym-only disease mappings.
+
+    `acronym_allowlist` holds (`acronym`, `diseaseId`) pairs that are not flagged; none when not given.
+    """
     key = list(ENTITY_LUT_KEY)
     if acronym_allowlist is None:
-        acronym_allowlist = read_acronym_allowlist()
+        acronym_allowlist = pl.DataFrame(schema={'acronym': pl.String, 'diseaseId': pl.String})
     listed = acronym_allowlist.select(
         pl.col('acronym').alias('acronymKey'), pl.col('diseaseId').alias('entityId'), pl.lit(True).alias('listed')
     ).unique()

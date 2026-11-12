@@ -2,6 +2,7 @@
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.schemas.ontoma_lut import ENTITY_LUT, ENTITY_LUT_KEY, RAW_ENTITY_LUT
 from pts.transformers.ontoma_lut.build import (
@@ -13,6 +14,7 @@ from pts.transformers.ontoma_lut.build import (
     drug_label_lut,
     is_acronym_label,
     read_acronym_allowlist,
+    resolve_acronym_allowlist,
     target_label_lut,
 )
 from pts.transformers.utils.disease_mapping import normalise as normalise_module
@@ -310,3 +312,36 @@ def test_packaged_allowlist_parses() -> None:
     assert allowlist.height > 0
     assert allowlist.is_duplicated().not_().all()
     assert allowlist.select(same=pl.col('acronym') == acronym_key(pl.col('acronym')))['same'].all()
+
+
+@pytest.mark.parametrize(
+    ('disease_id', 'resolved'),
+    [
+        ('MONDO_0000001', 'MONDO_0000001'),
+        ('EFO_0000001', 'MONDO_0000001'),
+        ('MONDO:0000002', 'MONDO_0000001'),
+    ],
+)
+def test_allowlist_follows_obsolete_ids(disease_id: str, resolved: str) -> None:
+    allowlist = resolve_acronym_allowlist(_allowlist(('hiv', disease_id)), DISEASE)
+    assert allowlist.rows() == [('hiv', resolved)]
+
+
+@pytest.mark.parametrize('disease_id', ['MONDO_9999999', 'Orphanet:100'])
+def test_allowlist_drops_and_logs_ids_naming_no_single_disease(disease_id: str) -> None:
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level='WARNING')
+    try:
+        allowlist = resolve_acronym_allowlist(_allowlist(('hiv', disease_id)), DISEASE)
+    finally:
+        logger.remove(sink)
+    assert allowlist.is_empty()
+    assert any(f'hiv {disease_id}' in m for m in messages)
+
+
+def test_obsolete_allowlist_id_unflags_current_id() -> None:
+    lut = build_lut(
+        [_raw(('MONDO_0000001', 'HIV', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'))],
+        acronym_allowlist=resolve_acronym_allowlist(_allowlist(('hiv', 'EFO_0000001')), DISEASE),
+    )
+    assert _flags(lut, 'hiv') == {'MONDO_0000001': False}

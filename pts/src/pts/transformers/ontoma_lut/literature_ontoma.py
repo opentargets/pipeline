@@ -12,6 +12,7 @@ from pts.transformers.ontoma_lut.build import (
     build_lut,
     disease_label_lut,
     drug_label_lut,
+    packaged_acronym_allowlist,
     target_label_lut,
 )
 from pts.transformers.ontoma_lut.inputs import curation_label_luts, load_dataset
@@ -36,11 +37,14 @@ def literature_ontoma(
     check_destinations_absent([destination['disease_target_drug_label_lut']])
     logger.info(f'load data from: {source}')
     disease = load_dataset(source['disease_index'], DISEASE_COLUMNS)
-    lut = build_lut([
-        disease_label_lut(disease),
-        *curation_label_luts(source, disease),
-        target_label_lut(load_dataset(source['target_index'], TARGET_COLUMNS)),
-        drug_label_lut(load_dataset(source['drug_index'], DRUG_COLUMNS)),
-    ])
+    lut = build_lut(
+        [
+            disease_label_lut(disease),
+            *curation_label_luts(source, disease),
+            target_label_lut(load_dataset(source['target_index'], TARGET_COLUMNS)),
+            drug_label_lut(load_dataset(source['drug_index'], DRUG_COLUMNS)),
+        ],
+        acronym_allowlist=packaged_acronym_allowlist(disease),
+    )
     logger.info(f'save disease_target_drug label lookup table to {destination["disease_target_drug_label_lut"]}')
     write_dataset(lut, destination['disease_target_drug_label_lut'])

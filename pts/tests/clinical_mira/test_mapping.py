@@ -256,4 +256,5 @@ def test_logs_dropped_acronym_ids() -> None:
         )
     finally:
         logger.remove(sink)
-    assert [m for m in messages if 'acronym' in m] == ['dropped 3 acronym disease ids without report context']
+    dropped = [m for m in messages if 'without report context' in m]
+    assert dropped == ['dropped 3 acronym disease ids without report context']
