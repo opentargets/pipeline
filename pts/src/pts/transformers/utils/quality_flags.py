@@ -10,11 +10,11 @@ from loguru import logger
 QC_COLUMN = 'qualityControls'
 
 
-class ValidationResult(NamedTuple):
-    """Accepted and excluded partitions of a flagged dataset."""
+class ValidationResult[F: pl.DataFrame | pl.LazyFrame](NamedTuple):
+    """Accepted and excluded partitions of a flagged dataset, eager or lazy as the dataset was."""
 
-    valid: pl.LazyFrame
-    invalid: pl.LazyFrame
+    valid: F
+    invalid: F
 
 
 def _quality_controls() -> pl.Expr:
@@ -22,15 +22,31 @@ def _quality_controls() -> pl.Expr:
     return pl.col(QC_COLUMN).cast(pl.List(pl.String)).fill_null([])
 
 
-def has_excluded_flag(invalid_flags: Sequence[StrEnum]) -> pl.Expr:
-    """True where a row carries any of `invalid_flags`; null or empty QC lists carry none."""
-    reasons = [flag.value for flag in invalid_flags]
+def has_excluded_flag(invalid_flags: Sequence[str]) -> pl.Expr:
+    """True where a row carries any of `invalid_flags`; null or empty QC lists carry none.
+
+    `invalid_flags` are enum members or their values, such as the plain strings of a step's
+    settings. An empty `invalid_flags` excludes nothing.
+    """
+    reasons = [str(flag) for flag in invalid_flags]
     return _quality_controls().list.set_intersection(reasons).list.len() > 0
 
 
-def valid_rows(frame: pl.LazyFrame, invalid_flags: Sequence[StrEnum]) -> ValidationResult:
-    """Split a dataset by configured QC enum values, treating null QC lists as empty."""
+@overload
+def valid_rows(frame: pl.DataFrame, invalid_flags: Sequence[str]) -> ValidationResult[pl.DataFrame]: ...
+@overload
+def valid_rows(frame: pl.LazyFrame, invalid_flags: Sequence[str]) -> ValidationResult[pl.LazyFrame]: ...
+def valid_rows(
+    frame: pl.DataFrame | pl.LazyFrame, invalid_flags: Sequence[str]
+) -> ValidationResult[pl.DataFrame | pl.LazyFrame]:
+    """Split a dataset by `invalid_flags` (see `has_excluded_flag`), eager or lazy as it was given.
+
+    With no `invalid_flags`, or no `qualityControls` column to carry flags, every row is valid and
+    `frame` is returned as it is.
+    """
     logger.info('Splitting dataset by {} excluded QC flags', len(invalid_flags))
+    if not invalid_flags or QC_COLUMN not in frame.collect_schema():
+        return ValidationResult(valid=frame, invalid=frame.clear())
     invalid = has_excluded_flag(invalid_flags)
     return ValidationResult(valid=frame.filter(~invalid), invalid=frame.filter(invalid))
 
