@@ -1,4 +1,4 @@
-"""Tags of credible sets, the pairs of credible sets that share a tag, and their aligned tags."""
+"""Tags of credible sets and the shared tags of overlapping credible set pairs."""
 
 from __future__ import annotations
 
@@ -38,8 +38,8 @@ def tags(credible_set: DataFrame, credible_set_variant: DataFrame) -> DataFrame:
     )
 
 
-def overlapping_pairs(tags: DataFrame) -> DataFrame:
-    """Find the pairs of loci that share a tag variant on a chromosome.
+def overlapping_tags(tags: DataFrame) -> DataFrame:
+    """Join the tags of each GWAS locus to the tags of the loci it overlaps, on the shared variant.
 
     The left locus is a GWAS. A right locus is any molecular trait locus, or a GWAS locus with a
     smaller id.
@@ -48,66 +48,26 @@ def overlapping_pairs(tags: DataFrame) -> DataFrame:
         tags: The output of `tags`.
 
     Returns:
-        Distinct `leftLocusId`, `rightLocusId`, `rightStudyType` and `chromosome`.
+        One row per pair and shared tag variant: `leftLocusId`, `rightLocusId`, `rightStudyType`,
+        `chromosome`, `tagVariantId`, and `left_` and `right_` `posteriorProbability` and `beta`.
     """
-    minimal = tags.select('locusId', 'studyType', 'chromosome', 'tagVariantId')
-    return (
-        minimal
-        .alias('left')
-        .join(
-            minimal.alias('right'),
-            on=[
-                f.col('left.chromosome') == f.col('right.chromosome'),
-                f.col('left.tagVariantId') == f.col('right.tagVariantId'),
-                (f.col('right.studyType') != 'gwas') | (f.col('left.locusId') > f.col('right.locusId')),
-                f.col('left.studyType') == f.lit('gwas'),
-            ],
-            how='inner',
-        )
-        .select(
-            f.col('left.locusId').alias('leftLocusId'),
-            f.col('right.locusId').alias('rightLocusId'),
-            f.col('right.studyType').alias('rightStudyType'),
-            f.col('left.chromosome').alias('chromosome'),
-        )
-        .distinct()
-    )
-
-
-def aligned_tags(tags: DataFrame, pairs: DataFrame) -> DataFrame:
-    """Align all tags of both loci of each pair by tag variant, keeping one-sided tags.
-
-    Args:
-        tags: The output of `tags`.
-        pairs: The output of `overlapping_pairs`.
-
-    Returns:
-        One row per pair and tag variant, with `left_` and `right_` `posteriorProbability` and `beta`.
-    """
-    left = tags.select(
-        'chromosome',
-        'tagVariantId',
-        f.col('locusId').alias('leftLocusId'),
-        *[f.col(c).alias(f'left_{c}') for c in _STATISTICS],
-    ).join(pairs, on=['chromosome', 'leftLocusId'], how='inner')
-    right = tags.select(
-        'chromosome',
-        'tagVariantId',
-        f.col('locusId').alias('rightLocusId'),
-        *[f.col(c).alias(f'right_{c}') for c in _STATISTICS],
-    ).join(pairs, on=['chromosome', 'rightLocusId'], how='inner')
+    left = tags.alias('left')
+    right = tags.alias('right')
     return left.join(
         right,
-        on=['chromosome', 'rightLocusId', 'leftLocusId', 'tagVariantId', 'rightStudyType'],
-        how='outer',
+        on=[
+            f.col('left.chromosome') == f.col('right.chromosome'),
+            f.col('left.tagVariantId') == f.col('right.tagVariantId'),
+            (f.col('right.studyType') != 'gwas') | (f.col('left.locusId') > f.col('right.locusId')),
+            f.col('left.studyType') == f.lit('gwas'),
+        ],
+        how='inner',
     ).select(
-        'leftLocusId',
-        'rightLocusId',
-        'rightStudyType',
-        'chromosome',
-        'tagVariantId',
-        'left_posteriorProbability',
-        'right_posteriorProbability',
-        'left_beta',
-        'right_beta',
+        f.col('left.locusId').alias('leftLocusId'),
+        f.col('right.locusId').alias('rightLocusId'),
+        f.col('right.studyType').alias('rightStudyType'),
+        f.col('left.chromosome').alias('chromosome'),
+        f.col('left.tagVariantId').alias('tagVariantId'),
+        *[f.col(f'left.{c}').alias(f'left_{c}') for c in _STATISTICS],
+        *[f.col(f'right.{c}').alias(f'right_{c}') for c in _STATISTICS],
     )

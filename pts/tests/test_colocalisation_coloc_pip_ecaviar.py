@@ -1,31 +1,31 @@
-"""Tests for the coloc_pip_ecaviar colocalisation aggregation."""
+"""Tests for the coloc_pip_ecaviar colocalisation of overlapping credible set pairs."""
 
 from __future__ import annotations
 
+import struct
+
 import pytest
-from pyspark.sql import types as t
 
 from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise
-from pts.pyspark.colocalisation_utils.overlap import aligned_tags, overlapping_pairs, tags
+from pts.pyspark.colocalisation_utils.overlap import tags
 from pts.schemas.colocalisation import colocalisation_schema
 from pts.schemas.spark import to_spark_schema
 from tests.colocalisation_fixtures import credible_set_variants, credible_sets
 
-_ALIGNED = t.StructType([
-    t.StructField('leftLocusId', t.StringType()),
-    t.StructField('rightLocusId', t.StringType()),
-    t.StructField('rightStudyType', t.StringType()),
-    t.StructField('chromosome', t.StringType()),
-    t.StructField('tagVariantId', t.StringType()),
-    t.StructField('left_posteriorProbability', t.DoubleType()),
-    t.StructField('right_posteriorProbability', t.DoubleType()),
-    t.StructField('left_beta', t.DoubleType()),
-    t.StructField('right_beta', t.DoubleType()),
-])
-
 
 def _aligned(spark, rows):
-    return spark.createDataFrame([('L', 'R', 'eqtl', '1', *r) for r in rows], _ALIGNED)
+    """Tags of a GWAS locus L and an eQTL locus R from `(variant, left_pp, right_pp, left_beta, right_beta)`.
+
+    A variant is a tag of a locus only where its posterior probability on that side is given.
+    """
+    sets = credible_sets(spark, [('L', 'gwas', '1'), ('R', 'eqtl', '1')])
+    variants = [
+        (locus, variant, pp, None, beta)
+        for variant, left_pp, right_pp, left_beta, right_beta in rows
+        for locus, pp, beta in (('L', left_pp, left_beta), ('R', right_pp, right_beta))
+        if pp is not None
+    ]
+    return tags(sets, credible_set_variants(spark, variants))
 
 
 def _one_sided(spark):
@@ -40,6 +40,10 @@ def test_worked_example(spark):
     assert row.h3 == pytest.approx(5e-9 / (5e-6 + 5e-9), rel=1e-9)
     assert row.betaRatioSignAverage == -1.0
     assert row.colocalisationMethod == 'COLOC_PIP_ECAVIAR'
+
+
+def _float32(value):
+    return struct.unpack('f', struct.pack('f', value))[0]
 
 
 def _expected_h3_h4(pairs, floor):
@@ -57,14 +61,14 @@ def _expected_h3_h4(pairs, floor):
 def test_one_sided_tag_is_floored_and_not_counted(spark):
     df = _aligned(spark, [('v1', 1e-15, 1e-15, 0.2, 0.3), ('v2', 0.5, None, 0.1, None)])
     row = colocalise(df).collect()[0]
-    pairs = [(1e-15, 1e-15), (0.5, None)]
+    pairs = [(_float32(1e-15), _float32(1e-15)), (0.5, None)]
     h3, h4 = _expected_h3_h4(pairs, 1e-16)
     unfloored_h3, _ = _expected_h3_h4(pairs, 0.0)
     assert row.h3 == pytest.approx(h3, rel=1e-9)
     assert row.h4 == pytest.approx(h4, rel=1e-9)
     assert abs(h3 - unfloored_h3) > 1e-3
     assert row.numberColocalisingVariants == 1
-    assert row.clpp == pytest.approx(1e-30)
+    assert row.clpp == pytest.approx(_float32(1e-15) ** 2, rel=1e-12)
 
 
 def test_beta_ratio_is_null_without_usable_betas(spark):
@@ -101,8 +105,7 @@ def test_left_locus_in_two_pairs_counts_independently(spark):
             ('q2', 'v2', 0.5, None, 0.3),
         ],
     )
-    all_tags = tags(sets, variants)
-    out = colocalise(aligned_tags(all_tags, overlapping_pairs(all_tags)))
+    out = colocalise(tags(sets, variants))
     rows = {r.rightLocusId: r for r in out.collect()}
     assert set(rows) == {'q1', 'q2'}
     assert rows['q1'].numberColocalisingVariants == 1

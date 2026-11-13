@@ -1,6 +1,6 @@
 """Colocalisation step.
 
-Finds the overlapping pairs of credible sets and scores each pair with coloc_pip_ecaviar.
+Scores each overlapping pair of credible sets with coloc_pip_ecaviar.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise
-from pts.pyspark.colocalisation_utils.overlap import aligned_tags, overlapping_pairs, tags
+from pts.pyspark.colocalisation_utils.overlap import tags
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
 from pts.schemas.colocalisation import CREDIBLE_SET_COLUMNS, CREDIBLE_SET_VARIANT_COLUMNS
@@ -47,12 +47,10 @@ def colocalisation(
     )
 
     all_tags = tags(credible_set, credible_set_variant).persist()
-    pairs = overlapping_pairs(all_tags).persist()
-    result = colocalise(aligned_tags(all_tags, pairs), **priors)
+    result = colocalise(all_tags, **priors)
 
     logger.info(f'write colocalisation to {destination["colocalisation"]}')
     maybe_coalesce(result, settings.get('output_partitions')).write.mode('overwrite').parquet(
         destination['colocalisation']
     )
-    pairs.unpersist()
     all_tags.unpersist()
