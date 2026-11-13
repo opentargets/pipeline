@@ -22,7 +22,7 @@ def test_colocalisation_cluster_is_fixed_and_on_the_pts_image():
     assert definition.cluster_type == 'pts_colocalisation'
     assert 'autoscaling_policy' not in spec
     assert not spec.get('num_preemptible_workers')
-    assert spec['num_workers'] == 32
+    assert spec['num_workers'] == 16
     assert spec['image_version'] == pts_default['image_version']
     assert spec['properties']['spark:spark.sql.ansi.enabled'] == 'false'
     assert spec['init_actions_uris'] == pts_default['init_actions_uris']

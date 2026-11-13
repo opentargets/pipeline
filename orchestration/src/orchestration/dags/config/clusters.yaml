@@ -58,7 +58,7 @@ clusters:
     # Spot-worker churn was the dominant failure source at baseline (3,021
     # ExecutorLostFailure); a fixed on-demand pool removes preemption entirely.
     num_masters: 3
-    num_workers: 32
+    num_workers: 16
     master_machine_type: n1-highmem-16
     # n2d-highmem-32 = 32 vCPU / 256 GB. Packs 8 executors/node at cores=4,
     # 22g heap + 4g overhead each (8 x 26 = 208 GB), leaving ~48 GB for the OS
