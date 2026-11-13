@@ -114,13 +114,14 @@ def apply_indication_corrections(
             right_on=['reportId', 'diseaseId'],
             how='left',
         )
-        .filter(pl.col('correctedDiseaseId').fill_null('') != REMOVED)
+        .filter(pl.col('disease').is_not_null(), pl.col('correctedDiseaseId').fill_null('') != REMOVED)
+        .rechunk()
         .select(
             '__row',
-            disease=pl
-            .when(pl.col('correctedDiseaseId').is_not_null())
-            .then(pl.col('disease').struct.with_fields(diseaseId=pl.col('correctedDiseaseId')))
-            .otherwise(pl.col('disease')),
+            disease=pl.struct(
+                pl.col('disease').struct.field('diseaseFromSource').alias('diseaseFromSource'),
+                pl.coalesce('correctedDiseaseId', pl.col('disease').struct.field('diseaseId')).alias('diseaseId'),
+            ),
         )
     )
     added = matched_additions.join(targets, left_on='reportId', right_on='report').select(
@@ -147,6 +148,7 @@ def apply_indication_corrections(
     out = (
         df
         .join(curated, on='__row', how='left', maintain_order='left')
+        .rechunk()
         .with_columns(diseases=pl.when(is_touched).then(pl.col('__curated')).otherwise('diseases'))
     )
     emptied = out.filter(is_touched & (pl.col('diseases').list.len().fill_null(0) == 0))
