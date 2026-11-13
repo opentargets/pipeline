@@ -20,6 +20,7 @@ from pts.transformers.clinical_mira import (
     ClinicalStageCategory,
 )
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.quality_flags import valid_rows
 
 APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
 
@@ -87,16 +88,7 @@ def drug_molecule(
     logger.info(f'Loading data from {source}')
     clinical_report = scan_dataset(source['clinical_report']).collect()
 
-    invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
-    if invalid_qc_reasons and 'qualityControls' in clinical_report.columns:
-        has_invalid_qc = (
-            pl.col('qualityControls').fill_null([]).list.set_intersection(invalid_qc_reasons).list.len() > 0
-        )
-        excluded = clinical_report.filter(has_invalid_qc)
-        clinical_report = clinical_report.filter(~has_invalid_qc)
-    else:
-        excluded = clinical_report.clear()
-
+    clinical_report, excluded = valid_rows(clinical_report, settings.get('invalid_clinical_report_qc', []))
     logger.info(f'Writing {excluded.height} excluded clinical reports to {destination["excluded"]}')
     write_dataset(excluded, str(destination['excluded']))
 
@@ -132,7 +124,7 @@ def process_drug_index(
     Returns:
         Final drug index DataFrame.
     """
-    max_phase = _compute_max_phase_per_drug(clinical_report)
+    max_phase = compute_max_phase_per_drug(clinical_report)
     indications = _process_clinical_report_indications(clinical_report, disease)
 
     # Every chemical probe drug id, for the is_drug filter.
@@ -241,7 +233,7 @@ def _describe() -> pl.Expr:
     )
 
 
-def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
+def compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
     """Compute the overall maximum clinical stage for each drug across all clinical reports.
 
     Explodes the drugs array, maps WITHDRAWAL/PHASE_4 to APPROVAL, ranks stages,

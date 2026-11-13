@@ -326,6 +326,21 @@ def generate_interactions(df: pl.DataFrame, mapping: pl.DataFrame, evidence: pl.
     return pl.concat([mapped, reverse])
 
 
+STRING_PAIR = ['protein1', 'protein2']
+
+
+def compose_string(detailed: pl.LazyFrame, full: pl.LazyFrame) -> pl.LazyFrame:
+    """Combine STRING's detailed and full link files into one frame of per-channel scores.
+
+    The detailed file has the combined channel scores (direct and transferred) and the
+    combined score. The homology channel is only in the full file, so it is joined on the
+    protein pair. A pair missing from the full file gets a homology score of 0.
+    """
+    return detailed.join(
+        full.select(*STRING_PAIR, 'homology'), on=STRING_PAIR, how='left', validate='1:1'
+    ).with_columns(pl.col('homology').fill_null('0'))
+
+
 def transform_string(raw: pl.DataFrame, mapping: pl.DataFrame, score_threshold: int, version: str) -> pl.DataFrame:
     """Turn STRING pairs into interactions with one row per channel whose score is positive."""
     pairs = (
@@ -484,7 +499,8 @@ def interaction(
     """Compute the interaction datasets from IntAct and STRING.
 
     Args:
-        source: paths keyed by targets, rnacentral, humanmapping, ensproteins, intact and strings.
+        source: paths keyed by targets, rnacentral, humanmapping, ensproteins, intact, string_detailed
+            and string_full (STRING's protein.links.detailed and protein.links.full files).
         destination: paths keyed by interactions, interactions_evidence and interactions_unmatched.
         settings: scorethreshold (default 0) and string_version (default '12').
         config: unused.
@@ -514,7 +530,10 @@ def interaction(
     logger.info(f'mapping has {mapping.height} rows, string mapping {string_mapping.height}')
 
     logger.info('transforming string')
-    string_raw = pl.scan_csv(source['strings'], separator=' ', quote_char=None, infer_schema=False).collect()
+    string_raw = compose_string(
+        pl.scan_csv(source['string_detailed'], separator=' ', quote_char=None, infer_schema=False),
+        pl.scan_csv(source['string_full'], separator=' ', quote_char=None, infer_schema=False),
+    ).collect()
     string = transform_string(string_raw, string_mapping, score_threshold, string_version)
     del string_raw, string_mapping
 

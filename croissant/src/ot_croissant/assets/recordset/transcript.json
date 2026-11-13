@@ -12,6 +12,18 @@
     "description": "Chromosome on which the transcript is located"
   },
   {
+    "id": "dbXrefs",
+    "description": "Database cross-references for the transcript"
+  },
+  {
+    "id": "dbXrefs/id",
+    "description": "Cross-reference ID for external databases"
+  },
+  {
+    "id": "dbXrefs/source",
+    "description": "Source database for the cross-reference"
+  },
+  {
     "id": "end",
     "description": "Genomic end position of the transcript"
   },

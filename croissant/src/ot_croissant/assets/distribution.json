@@ -71,6 +71,31 @@
     "description": "Integration of metadata related to tissues, cell types or cell lines (biosamples) derived from the UBERON, CL and EFO ontologies"
   },
   {
+    "id": "biosample_enrichment",
+    "nice_name": "Biosample enrichment",
+    "key": [
+      "diseaseId",
+      "studyId",
+      "biosampleId",
+      "tissueBiosampleId",
+      "biosampleDataset"
+    ],
+    "tags": [
+      "Genetics",
+      "Disease"
+    ],
+    "description": "Biosample enrichment results for genetic association studies and diseases, including source biosample annotations, associated diseases or phenotypes, enrichment methods and statistics. Every row leaves one or two key columns null: exactly one of diseaseId (a disease's studies pooled) and studyId (a single study) is set, and tissueBiosampleId is set only for tissue x cell type biosamples. The key is unique with nulls compared as equal"
+  },
+  {
+    "id": "chembl_bioactivity",
+    "nice_name": "Drug - ChEMBL bioactivity",
+    "tags": [
+      "Drug",
+      "Target"
+    ],
+    "description": "Bioactivity measurements from ChEMBL 37 with a pChEMBL value: affinity, inhibition and functional potency of molecules against human protein targets, mapped to Ensembl gene identifiers, one row per measurement and target. Measurements from homologue assays are included, flagged by confidenceScore. Targeted protein degradation measurements are not included"
+  },
+  {
     "id": "clinical_indication",
     "nice_name": "Clinical indication",
     "tags": [
@@ -111,7 +136,15 @@
     "tags": [
       "Genetics"
     ],
-    "description": "95% credible sets for GWAS and molQTL studies. Credible sets include all variants in the credible set as well as the fine-mapping method and statistics used to estimate the credible set"
+    "description": "95% credible sets for GWAS and molQTL studies: one row per credible set, with its study, lead variant, fine-mapping method, confidence and quality control flags. The variants of each credible set are in the credible set variant dataset"
+  },
+  {
+    "id": "credible_set_variant",
+    "nice_name": "Credible set variant",
+    "tags": [
+      "Genetics"
+    ],
+    "description": "The variants of the 95% credible sets for GWAS and molQTL studies: one row per credible set and variant, with its association statistics, posterior probability, effect allele frequency and rescaled effect size"
   },
   {
     "id": "disease",
@@ -420,14 +453,6 @@
     "description": "Phenotypes of mouse models mapped to human targets"
   },
   {
-    "id": "openfda_significant_adverse_drug_reactions",
-    "nice_name": "Pharmacovigilance (by drug)",
-    "tags": [
-      "Drug"
-    ],
-    "description": "Significant adverse drug reactions (ADRs) associated with drugs. This dataset is based on the FDA's Adverse Event Reporting System (FAERS) reporting post-marketing surveillance data and it's filtered to include only reports submitted by health professionals. The significance of a given drug-ADR is estimated using a Likelihood Ratio Test (LRT) using all reports associated with the given drug"
-  },
-  {
     "id": "otar",
     "nice_name": "Open Targets Projects",
     "tags": [],
@@ -441,6 +466,14 @@
       "Genetics"
     ],
     "description": "Genetic variants influencing individual drug responses. Pharmacogenetics data is integrated from sources including ClinPGx"
+  },
+  {
+    "id": "pharmacovigilance",
+    "nice_name": "Pharmacovigilance (by drug)",
+    "tags": [
+      "Drug"
+    ],
+    "description": "Significant adverse drug reactions (ADRs) associated with drugs. This dataset is based on the FDA's Adverse Event Reporting System (FAERS) reporting post-marketing surveillance data and it's filtered to include only reports submitted by health professionals. The significance of a given drug-ADR is estimated using a Likelihood Ratio Test (LRT) using all reports associated with the given drug"
   },
   {
     "id": "so",

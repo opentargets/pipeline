@@ -25,6 +25,7 @@ import polars_hash as plh
 
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.evidence.utils.hashing import render_for_hash
+from pts.transformers.utils.quality_flags import flag_rows
 from pts.transformers.utils.variant import VARIANT_HASH_LENGTH, hash_long_variant_ids
 
 QC_COLUMN = 'qualityControls'
@@ -40,31 +41,6 @@ class EvidenceFlags(StrEnum):
     DUPLICATED = 'Duplicated'
     NO_VALID_SCORE = 'No valid score'
     INVALID_BIOTYPE = 'Invalid biotype'
-
-
-def _flag(condition: pl.Expr, flag: EvidenceFlags) -> pl.Expr:
-    """Append a flag to the QC list where the condition holds, deduped and sorted.
-
-    A second, expression-based QC helper exists alongside
-    `pts.transformers.utils.quality_flags.update_quality_flag` deliberately: that one is
-    DataFrame-based (this pipeline is lazy end to end) and, measured in precheck-parity.md Q2,
-    shares the same null-qc bug this one fixes -- see the `.fill_null([])` below. Do not
-    "converge" the two; if `update_quality_flag` is ever fixed the same way, this one becomes
-    redundant, not the other way around.
-
-    Spark's `update_quality_flag` (pts/src/pts/pyspark/common/utils.py) normalises a null `qc`
-    to `[]` *before* branching, so the normalised value comes back out of the `otherwise` branch
-    too. A candidate that only normalises inside the `then` branch leaves a null-qc/condition-
-    false row as null -- and `pl.col('qc').list.len()` on a null list is itself null, satisfying
-    neither `== 0` (valid) nor `!= 0` (failed), so that row would vanish from both outputs.
-    """
-    normalised = pl.col(QC_COLUMN).fill_null([])
-    # `nulls_last=True`: polars' `list.sort()` puts a null element first by default, spark's
-    # `array_sort` puts it last. The flag text itself (an `EvidenceFlags` value) is never null --
-    # this guards an incoming `qualityControls` that already carries a null element, not the
-    # flag being appended here.
-    appended = normalised.list.set_union([flag.value]).list.unique().list.sort(nulls_last=True)
-    return pl.when(condition).then(appended).otherwise(normalised)
 
 
 def _harmonise_expr(expr: pl.Expr, source_dtype: Any, target_dtype: Any) -> pl.Expr:
@@ -171,12 +147,8 @@ class Evidence:
             Evidence with `diseaseId` joined in, and `EvidenceFlags.INVALID_DISEASE` set for
             evidence without a match.
         """
-        joined = _join_matching_spark_order(
-            self.lf, disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left'
-        )
-        return Evidence(
-            joined.with_columns(_flag(pl.col('diseaseId').is_null(), EvidenceFlags.INVALID_DISEASE).alias(QC_COLUMN))
-        )
+        joined = _join_matching_spark_order(self.lf, disease_lut.lazy(), on='diseaseFromSourceMappedId', how='left')
+        return Evidence(joined.pipe(flag_rows, pl.col('diseaseId').is_null(), EvidenceFlags.INVALID_DISEASE))
 
     def validate_target(self, target_lut: pl.DataFrame, invalid_biotypes: list[str] | None = None) -> Evidence:
         """Resolve `targetFromSourceId` to `targetId`, flagging unmapped or invalid-biotype rows.
@@ -194,11 +166,9 @@ class Evidence:
             target_lut.lazy().select('targetId', 'biotype', 'targetFromSourceId'),
             on='targetFromSourceId',
             how='left',
-        ).with_columns(_flag(pl.col('targetId').is_null(), EvidenceFlags.INVALID_TARGET).alias(QC_COLUMN))
+        ).pipe(flag_rows, pl.col('targetId').is_null(), EvidenceFlags.INVALID_TARGET)
         if invalid_biotypes:
-            joined = joined.with_columns(
-                _flag(pl.col('biotype').is_in(invalid_biotypes), EvidenceFlags.INVALID_BIOTYPE).alias(QC_COLUMN)
-            )
+            joined = flag_rows(joined, pl.col('biotype').is_in(invalid_biotypes), EvidenceFlags.INVALID_BIOTYPE)
         return Evidence(joined.drop('biotype'))
 
     def validate_datasource(self, datasource_id: str) -> Evidence:
@@ -273,7 +243,7 @@ class Evidence:
             self.lf.with_columns(content.alias('_content'))
             .with_columns(plh.col('_content').chash.sha2_256().alias('_content_hash'))
             .with_columns(pl.int_range(pl.len()).over('id', order_by='_content_hash').alias('_rank'))
-            .with_columns(_flag(pl.col('_rank') != 0, EvidenceFlags.DUPLICATED).alias(QC_COLUMN))
+            .pipe(flag_rows, pl.col('_rank') != 0, EvidenceFlags.DUPLICATED)
             .drop('_rank', '_content', '_content_hash')
         )
 
@@ -348,11 +318,10 @@ class Evidence:
         # Non-strict: spark's cast yields null on an unconvertible value rather than raising.
         score = score_expression.cast(pl.Float64, strict=False)
         return Evidence(
-            self.lf.with_columns(score.alias('score')).with_columns(
-                _flag(
-                    pl.col('score').is_null() | (pl.col('score') < 0) | (pl.col('score') > 1),
-                    EvidenceFlags.NO_VALID_SCORE,
-                ).alias(QC_COLUMN)
+            self.lf.with_columns(score.alias('score')).pipe(
+                flag_rows,
+                pl.col('score').is_null() | (pl.col('score') < 0) | (pl.col('score') > 1),
+                EvidenceFlags.NO_VALID_SCORE,
             )
         )
 
@@ -417,6 +386,10 @@ class Evidence:
 
     def valid(self) -> pl.LazyFrame:
         """Evidence with an empty `qualityControls` list.
+
+        Every flag excludes evidence, so this does not use `valid_rows`, which excludes only the
+        flags it is given. A datasource's input can bring its own `qualityControls` values that
+        are not `EvidenceFlags` members, and those exclude the evidence too.
 
         Returns:
             LazyFrame filtered to evidence that passed every validation.

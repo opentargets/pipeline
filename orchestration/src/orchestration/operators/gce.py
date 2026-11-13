@@ -370,6 +370,8 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             permissions to the disk. The disk will be deleted when the instance is deleted.
         gcp_conn_id: The connection ID to use when connecting to Google Cloud.
         impersonation_chain: Optional service account or chain to impersonate.
+        vm_service_account: Optional service account to attach to the instance. It does not
+            affect the credentials used for API calls.
         deferrable: If True, run the sensor in deferrable mode.
         poll_interval: Time (seconds) to wait between checks for the job status.
     """
@@ -405,6 +407,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         work_disk_size_gb: int = 0,
         gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
+        vm_service_account: str | None = None,
         deferrable: bool = conf.getboolean('operators', 'default_deferrable', fallback=False),
         poll_interval: int = 10,
         **kwargs,
@@ -426,6 +429,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.source_image = source_image
         self.gcp_conn_id = gcp_conn_id
         self.impersonation_chain = impersonation_chain
+        self.vm_service_account = vm_service_account
         self.work_disk_size_gb = work_disk_size_gb
         self.deferrable = deferrable
         self.poll_interval = poll_interval
@@ -588,6 +592,9 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             elif isinstance(self.impersonation_chain, Sequence):
                 service_account_email = self.impersonation_chain[-1]
             self.log.info(f'using service account {service_account_email} from the impersonation chain')
+        if self.vm_service_account:
+            service_account_email = self.vm_service_account
+            self.log.info(f'using service account {service_account_email} as the instance service account')
 
         return compute_v1.Instance(
             name=self.instance_name,

@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.12.0rc33"
+version = "26.12.0rc63"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -10,10 +10,8 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",
-  "pandas>=3.0.6",
   "pyarrow>=22.0.0",
   "polars[connectorx]>=1.41.2",
-  "pyspark>=4.1,<4.2",
   "pydantic>=2.13.4",
   "openpyxl>=3.1.5",
   "numpy>=2.4.4",
@@ -23,18 +21,24 @@ dependencies = [
   "pixeltable-pgserver>=0.6,<0.7",
   "networkx>=3.6.1",
   "pybigwig>=0.3.24",
+  "pysam>=0.23",
+  "scipy>=1.18.1",
 ]
 
 [dependency-groups]
 dev = ["ruff==0.16.10", "ty==0.0.85"]
-test = ["pytest>=9.0.3", "pytest-mock>=3.15.1", "pytest-split>=0.11.0"]
+test = ["pandas>=3.0.6", "pytest>=9.0.3", "pytest-mock>=3.15.1", "pytest-split>=0.11.0", "statsmodels>=0.15.0"]
+spark = ["pyspark>=4.1,<4.2"]
 
 [project.optional-dependencies]
-baseline_expression = ["scanpy>=1.10.0", "cellex", "gcsfs>=2026.2.0"]
+baseline_expression = ["pandas>=3.0.6", "scanpy>=1.10.0", "cellex", "gcsfs>=2026.2.0"]
 # image-only: pts clusters do not install it
 nlp = ["huggingface-hub>=2.0.0", "torch>=2.10.0", "transformers>=5.0.0"]
 # image-only: pts clusters do not install it
-llm = ["openai>=3.26.0"]
+llm = [
+    "anthropic[google-cloud]>=2.5.0",
+    "openai>=3.26.0",
+]
 # image-only: pts clusters do not install it
 # xgboost-cpu has no macos wheels
 l2g = [

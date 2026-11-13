@@ -5,10 +5,18 @@ from pathlib import Path
 import yaml
 
 from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DISEASE_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.staged_outputs import (
+    DISEASE_ENTITIES,
+    DRUG_ENTITIES,
+    EXTRACTION,
+    MOA,
+    MOA_LITERATURE,
+    STOP_REASONS,
+)
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
 
 PIS_CONFIG = Path(__file__).resolve().parents[2] / 'pis' / 'config.yaml'
+PTS_CONFIG = Path(__file__).resolve().parents[1] / 'config.yaml'
 
 KINDS = (STOP_REASONS, DRUG_ENTITIES, DISEASE_ENTITIES)
 HUB_REVISION_KEYS = {
@@ -48,6 +56,7 @@ def test_pinned_tags_equal_the_code() -> None:
         assert scratchpad.get(key) == expected, f'set {key} in pis/config.yaml to {expected}'
     expected = EXTRACTION.release_tag()
     assert scratchpad.get('extraction_tag') == expected, f'set extraction_tag in pis/config.yaml to {expected}'
+    assert scratchpad.get('moa_tag') == MOA.tag(), f'set moa_tag in pis/config.yaml to {MOA.tag()}'
 
 
 def test_release_copy_paths_use_the_pinned_tags() -> None:
@@ -56,19 +65,19 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     sources = _copy_sources()
     expected = {
         'input/clinical_report/aact_stop_reasons': (
-            'gs://clinical_staging/aact/{aact_version}/stop_reasons',
+            'gs://clinical_staging/aact/{staging_version}/stop_reasons',
             STOP_REASONS,
         ),
         'input/clinical_report/aact_drug_entities': (
-            'gs://clinical_staging/aact/{aact_version}/extraction/{extraction_tag}/drug_entities',
+            'gs://clinical_staging/aact/{staging_version}/extraction/{extraction_tag}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_drug_entities': (
-            'gs://clinical_staging/clinical_mining/{clinical_mining_version}/drug_entities',
+            'gs://clinical_staging/clinical_mining/{staging_version}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_disease_entities': (
-            'gs://clinical_staging/clinical_mining/{clinical_mining_version}/disease_entities',
+            'gs://clinical_staging/clinical_mining/{staging_version}/disease_entities',
             DISEASE_ENTITIES,
         ),
     }
@@ -80,6 +89,32 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 def test_release_copies_the_extraction_of_the_pinned_tag() -> None:
     """The extraction the release copies is the one directory named by the pinned extraction tag."""
     scratchpad = _scratchpad()
-    directory = f'gs://clinical_staging/aact/{scratchpad["aact_version"]}/extraction/{scratchpad["extraction_tag"]}'
+    directory = f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
     sources = _copy_sources()['input/clinical_report/aact_trial_extraction']
+    assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
+
+
+def test_release_copies_the_moa_of_the_pinned_tag() -> None:
+    """The MoA snapshot the release copies is the one directory named by the pinned moa tag."""
+    scratchpad = _scratchpad()
+    directory = (
+        f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
+        f'/moa/{scratchpad["moa_tag"]}'
+    )
+    sources = _copy_sources()['input/drug_mechanism_of_action/aact_moa']
+    assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
+
+
+def test_release_copies_the_literature_moa_of_the_pinned_tag() -> None:
+    """The literature snapshot the release copies is the one staging writes for the pinned tag and release."""
+    scratchpad = _scratchpad()
+    tag = MOA_LITERATURE.tag()
+    assert scratchpad.get('moa_literature_tag') == tag, f'set moa_literature_tag in pis/config.yaml to {tag}'
+    staging = yaml.safe_load(PTS_CONFIG.read_text())['steps']['moa_literature'][0]
+    assert scratchpad['moa_literature_input_release'] == staging['settings']['input_release']
+    directory = (
+        f'{staging["destination"]["moa"]}/{scratchpad["moa_literature_input_release"]}'
+        f'/moa_literature/{scratchpad["moa_literature_tag"]}'
+    )
+    sources = _copy_sources()['input/drug_mechanism_of_action/literature_moa']
     assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']

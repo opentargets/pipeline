@@ -4,9 +4,9 @@ log_level: DEBUG
 pool_size: 4
 
 scratchpad:
-  aact_version: '2026-11-01'
+  staging_version: '2026-11-03'
   chembl_version: '37'
-  efo_version: '3.93.0'
+  efo_version: '3.95.0'
   ensembl_version: '116'
   ensembl_core_caenorhabditis_elegans: caenorhabditis_elegans_core_63_116_282
   ensembl_core_canis_lupus_familiaris: canis_lupus_familiaris_core_116_1
@@ -21,16 +21,18 @@ scratchpad:
   ensembl_core_sus_scrofa: sus_scrofa_core_116_111
   ensembl_core_xenopus_tropicalis: xenopus_tropicalis_core_116_10
   ensembl_core_homo_sapiens: homo_sapiens_core_116_38
-  depmap_version: '2026Q1'
-  hpo_version: '2026-06-23'
-  mondo_version: '2026-08-04'
-  ot_curation: '26.09.2'
+  depmap_version: '2026Q3'
+  hpo_version: '2026-09-01'
+  mondo_version: '2026-10-06'
+  ot_curation: '26.11.4'
+  schema_release: '2026-07-15'
+  bipex_release: '2026-08-07'
   probes_drugs_version: '01_2026'
-  gnomad_version: '4.1.1'
+  gnomad_version: '4.1.2'
   gtex_version: '11'
   cell_ontology_version: '2026-06-08'
-  uberon_version: '2026-06-23'
-  clinical_mining_version: '2026-05-27'
+  uberon_version: '2026-10-01'
+  pmda_file: '000281190'
   stop_reasons_model_revision: 5594f9e5cb210524efe8053c25788e5e2bc3bb14
   biobert_diseases_ner_revision: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759
   biobert_chemical_ner_revision: b57181cea10a3943c35cf31bb375ff9217886730
@@ -39,6 +41,9 @@ scratchpad:
   drug_entities_tag: b57181cea10a3943c35cf31bb375ff9217886730+8cd97116de5fdc911817166df8cb41a022874b10-pbd6d0afb
   disease_entities_tag: 0a4ed7dd4fd3e6db7229e5b801b70eefcb253759-p04693f61
   extraction_tag: 82af315af627-pfd3cdab9
+  moa_tag: claude-opus-5-5-p4e6708cf
+  moa_literature_tag: claude-opus-5-5-p15139b69
+  moa_literature_input_release: '26.09'
   gpn_star_revision: 204d08a92bdf07117f5d869db667c45f9029ed48
   literature_lut_version: '2026.08'
   atlas_version: '2025-07-14'
@@ -50,14 +55,28 @@ scratchpad:
   eva_version: '2026-07-23'
   reactome_version: '2026-01-19-v95'
   clinpgx_version: '2026-07-24'
-  string_version: '12.0'
+  string_version: '12.5'
+  intact_version: '2026-11-10'
   aopwiki_version: '2023-01-20'
   toxcast_version: '2021-08-17'
   hpa_subcellular_version: '2021-08-19'
   validation_lab_version: '2024-11-12'
-  l2g_gold_standard_version: '2025-06-25'
-  l2g_test_split_version: '2026-09-02'
+  l2g_otg_gold_standard_version: '2026-09-30'
+  l2g_test_split_version: '2026-10-01'
   encore_version: '2026-09-21'
+  # Credible set source runs: the prod/<timestamp> folder of each source bucket.
+  staging_gcca_ts: '20261111T160107'
+  staging_gcss_pics_ts: '20261111T160107'
+  staging_gcss_susie_ts: '20261101T152321'
+  staging_finngen_gwas_ts: '20261029T152531'
+  staging_finngen_meta_ts: '20261102T181409'
+  staging_eqtl_catalogue_ts: '20261105T130431'
+  staging_ukb_ppp_eur_ts: '20261026T161010'
+  staging_finngen_multiome_ts: '20261029T125742'
+  staging_otar2065_microglia_ts: '20261105T204507'
+  staging_eqtlgen_ts: '20261103T135048'
+  staging_decode_ts: '20261103T122701'
+  staging_sle_map_ts: '20261103T145657'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -138,7 +157,6 @@ steps:
       each_placeholder: dataset
       foreach:
         - GTEx/tissue
-        - PRIDE/tissue
         - tabula_sapiens/celltype
         - tabula_sapiens/tissue
         - tabula_sapiens/tissue_celltype
@@ -150,6 +168,10 @@ steps:
           # - name: copy processed ${dataset} unaggregated expression
           #   source: gs://baseline_expression/processed/unaggregated/${dataset}/parquet
           #   destination: intermediate/baseline_expression/unaggregated/${dataset}/parquet
+
+    - name: copy_many processed PRIDE/tissue aggregated expression
+      sources: gs://baseline_expression/processed/aggregated/PRIDE/tissue/parquet/*-dd5db394-*.parquet
+      destination: intermediate/baseline_expression/aggregated/PRIDE/tissue/parquet
 
     - name: explode parent mapping
       foreach:
@@ -187,7 +209,7 @@ steps:
   # The staging DAG downloads this archive and the models, and stages the extraction and snapshots.
   aact:
     - name: copy aact dump
-      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${aact_version}
+      source: https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/${staging_version}
       destination: input/aact.zip
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
@@ -233,22 +255,26 @@ steps:
 
   #: CLINICAL_MINING STEP :#######################################################################
   # Stages the clinical mining inputs and the models that read them. The staging DAG runs
-  # this with release_uri at gs://clinical_staging/clinical_mining/${clinical_mining_version}.
+  # this with release_uri at gs://clinical_staging/clinical_mining/${staging_version},
+  # where it sets staging_version to the date of the run. TTD, EMA and PMDA are copied
+  # from upstream. pmda_file is the "New Drugs" PDF linked from
+  # https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html
+  # The ChEMBL mapping is frozen at the 2026-05-27 file.
   clinical_mining:
     - name: copy ttd
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ttd.txt
+      source: https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt
       destination: input/ttd.txt
 
     - name: copy ema medicines
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/ema_medicines.xlsx
+      source: https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx
       destination: input/ema_medicines.xlsx
 
     - name: copy pmda
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/pmda.pdf
+      source: https://www.pmda.go.jp/files/${pmda_file}.pdf
       destination: input/pmda.pdf
 
     - name: copy chembl mapping
-      source: gs://ot-team/irene/clinical_mining/${clinical_mining_version}/input/clinical_report/chembl_mapping.parquet
+      source: gs://clinical_staging/frozen/2026-05-27/chembl_mapping.parquet
       destination: input/chembl_mapping.parquet
 
     # hugging face models, laid out as models/<org>/<name>/<revision>/<file>
@@ -291,59 +317,100 @@ steps:
           destination: input/models/BSC-NLP4BIA/bsc-bio-ehr-es-carmen-drugtemist/${drugtemist_ner_revision}/${each}
   ##################################################################################################
 
+  #: MOA_LITERATURE STEP :#########################################################################
+  # Copies the literature match and drug molecules of the published release moa_literature reads
+  # out of the requester-pays release bucket. The staging DAG runs this with release_uri at
+  # gs://clinical_staging/literature/${staging_version}.
+  moa_literature:
+    - name: copy_many literature match
+      sources: gs://open-targets-data-releases/${moa_literature_input_release}/intermediate/literature/match/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/literature/${moa_literature_input_release}/match
+
+    - name: copy_many literature drug molecule
+      sources: gs://open-targets-data-releases/${moa_literature_input_release}/output/drug_molecule/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/literature/${moa_literature_input_release}/drug_molecule
+  ##################################################################################################
+
   #: CLINICAL_REPORT STEP :#########################################################################
-  # Everything is copied from gs://clinical_staging, written by the staging DAG. The tags in the
+  # Everything but the TTD curation is copied from gs://clinical_staging, written by the staging DAG. The tags in the
   # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
   clinical_report:
     - name: copy aact dump
-      source: gs://clinical_staging/aact/${aact_version}/input/aact.zip
+      source: gs://clinical_staging/aact/${staging_version}/input/aact.zip
       destination: input/clinical_report/aact.zip
 
     - name: copy_many aact trial extraction
       sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/metadata.json
       destination: input/clinical_report/aact_trial_extraction
 
+    - name: copy_many aact moa
+      sources:
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/moa/${moa_tag}/metadata.json
+      destination: input/drug_mechanism_of_action/aact_moa
+
+    - name: copy_many literature moa
+      sources:
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/data.parquet
+        - gs://clinical_staging/literature/${moa_literature_input_release}/moa_literature/${moa_literature_tag}/metadata.json
+      destination: input/drug_mechanism_of_action/literature_moa
+
     - name: copy ttd
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ttd.txt
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/ttd.txt
       destination: input/clinical_report/ttd.txt
 
     - name: copy ema medicines
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/ema_medicines.xlsx
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/ema_medicines.xlsx
       destination: input/clinical_report/ema_medicines.xlsx
 
     - name: copy pmda
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/pmda.pdf
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/pmda.pdf
       destination: input/clinical_report/pmda.pdf
 
     - name: copy chembl mapping
-      source: gs://clinical_staging/clinical_mining/${clinical_mining_version}/input/chembl_mapping.parquet
+      source: gs://clinical_staging/clinical_mining/${staging_version}/input/chembl_mapping.parquet
       destination: input/clinical_report/chembl_mapping.parquet
 
     - name: copy_many aact stop reasons
       sources:
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/stop_reasons/${stop_reasons_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/stop_reasons/${stop_reasons_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/stop_reasons/${stop_reasons_tag}/metadata.json
       destination: input/clinical_report/aact_stop_reasons
 
     - name: copy_many aact drug entities
       sources:
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/data.parquet
-        - gs://clinical_staging/aact/${aact_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/metadata.json
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/aact/${staging_version}/extraction/${extraction_tag}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/aact_drug_entities
 
     - name: copy_many mining drug entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/drug_entities/${drug_entities_tag}/metadata.json
+        - gs://clinical_staging/clinical_mining/${staging_version}/drug_entities/${drug_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${staging_version}/drug_entities/${drug_entities_tag}/metadata.json
       destination: input/clinical_report/mining_drug_entities
 
     - name: copy_many mining disease entities
       sources:
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/data.parquet
-        - gs://clinical_staging/clinical_mining/${clinical_mining_version}/disease_entities/${disease_entities_tag}/metadata.json
+        - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/data.parquet
+        - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/metadata.json
       destination: input/clinical_report/mining_disease_entities
+
+    - name: explode ot_curation clinical files
+      foreach:
+        - clinical/ttd/stage_downgrades.tsv
+        - clinical/ttd/link_corrections.tsv
+        - clinical/chembl/indication_corrections.tsv
+        - clinical/ema/indication_corrections.tsv
+      do:
+        - name: copy ${each}
+          source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/${each}
+          destination: input/ot_curation/${each}
   ##################################################################################################
 
   #: DISEASE STEP :#################################################################################
@@ -466,7 +533,7 @@ steps:
       destination: input/evidence/cancerbiomarkers/associations.tsv
 
     - name: copy cancer biomarkers sources
-      source: gs://otar000-evidence_input/CancerBiomarkers/data_files/cancer_biomarker_source.jsonl
+      source: gs://otar000-evidence_input/CancerBiomarkers/data_files/cancer_biomarker_source-2026-11-05.jsonl
       destination: input/evidence/cancerbiomarkers/sources.jsonl
 
     - name: copy cancer biomarkers diseases
@@ -541,6 +608,14 @@ steps:
     - name: copy gene_burden brava
       source: https://www.medrxiv.org/content/medrxiv/early/2026/05/24/2026.05.21.26353759/DC2/embed/media-2.xlsx
       destination: input/evidence/gene_burden/brava.xlsx
+
+    - name: copy gene_burden schema
+      source: https://storage.googleapis.com/exome-results-browsers-public/downloads/${schema_release}/SCHEMA2/SCHEMA2_gene_results.tsv.bgz
+      destination: input/evidence/gene_burden/schema/gene_results.tsv.bgz
+
+    - name: copy gene_burden bipex
+      source: https://storage.googleapis.com/exome-results-browsers-public/downloads/${bipex_release}/BipEx/BipEx_v2_gene_results.tsv.bgz
+      destination: input/evidence/gene_burden/bipex/gene_results.tsv.bgz
 
     - name: explode_glob download genebass
       glob: 'gs://otar000-evidence_input/GeneBurden/data_files/genebass_entries/*.parquet'
@@ -631,7 +706,7 @@ steps:
   #: EVIDENCE_ORPHANET STEP :#######################################################################
   evidence_orphanet:
     - name: copy orphanet
-      source: http://www.orphadata.org/data/xml/en_product6.xml
+      source: https://www.orphadata.com/data/xml/en_product6.xml
       destination: input/evidence/orphanet.xml
   ##################################################################################################
 
@@ -717,16 +792,20 @@ steps:
       destination: input/interaction/HUMAN_9606_idmapping.dat.gz
 
     - name: copy intact interactors
-      source: https://ftp.ebi.ac.uk/pub/databases/intact/various/ot_graphdb/current/data/interactor_pair_interactions.json
+      source: https://ftp.ebi.ac.uk/pub/databases/intact/various/ot_graphdb/${intact_version}/data/interactor_pair_interactions.json
       destination: input/interaction/intact-interactors.json
 
     - name: copy rna central
       source: https://ftp.ebi.ac.uk/pub/databases/RNAcentral/current_release/id_mapping/database_mappings/ensembl.tsv
       destination: input/interaction/rna_central_ensembl.tsv
 
-    - name: copy string interactions
-      source: gs://otar001-core/stringInteractions/9606.protein.links.full_w_homology.v${string_version}.txt.gz
-      destination: input/interaction/string-interactions.txt.gz
+    - name: copy string detailed links
+      source: https://stringdb-downloads.org/download/protein.links.detailed.v${string_version}/9606.protein.links.detailed.v${string_version}.txt.gz
+      destination: input/interaction/string-links-detailed.txt.gz
+
+    - name: copy string full links
+      source: https://stringdb-downloads.org/download/protein.links.full.v${string_version}/9606.protein.links.full.v${string_version}.txt.gz
+      destination: input/interaction/string-links-full.txt.gz
   ##################################################################################################
 
   #: VARIANT STEP :################################################################################
@@ -846,59 +925,85 @@ steps:
   #: GWAS STEP :######################################################################################
   gwas:
     - name: copy_many GCCA study
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/study_index/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcca
+      destination: input/gwas/gcca/study
 
     - name: copy_many GCCA credible sets
-      sources: gs://gwas_catalog_top_hits/prod/20260828T165117/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcca
+      destination: input/gwas/gcca/credible_set
+
+    - name: copy_many GCCA credible set variants
+      sources: gs://gwas_catalog_top_hits/prod/${staging_gcca_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcca/credible_set_variant
 
     - name: copy_many GCSS pics study
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcss_pics
+      destination: input/gwas/gcss_pics/study
 
     - name: copy_many GCSS pics credible sets
-      sources: gs://gwas_catalog_sumstats_pics/prod/20260828T115527/output/credible_sets/*.parquet
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcss_pics
+      destination: input/gwas/gcss_pics/credible_set
+
+    - name: copy_many GCSS pics credible set variants
+      sources: gs://gwas_catalog_sumstats_pics/prod/${staging_gcss_pics_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcss_pics/credible_set_variant
 
     - name: copy_many GCSS susie study
-      sources: gs://gwas_catalog_sumstats_susie/study_index/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/study/gcss_susie
+      destination: input/gwas/gcss_susie/study
 
     - name: copy_many GCSS susie credible sets
-      sources: gs://gwas_catalog_sumstats_susie/credible_set_clean/20260901/*.parquet
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/gwas/credible_set/gcss_susie
+      destination: input/gwas/gcss_susie/credible_set
 
-    - name: copy_many finngen study
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/study_index/*.parquet
-      destination: input/gwas/study/finngen
+    - name: copy_many GCSS susie credible set variants
+      sources: gs://gwas_catalog_sumstats_susie/prod/${staging_gcss_susie_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/gwas/gcss_susie/credible_set_variant
 
-    - name: copy_many finngen credible sets
-      sources: gs://finngen_data/gwas/prod/20260526T131014/output/credible_set_datasets/susie/*.parquet
-      destination: input/gwas/credible_set/finngen
+    - name: copy_many finngen gwas study
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/study/*.parquet
+      destination: input/gwas/finngen_gwas/study
+
+    - name: copy_many finngen gwas credible sets
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set/*.parquet
+      destination: input/gwas/finngen_gwas/credible_set
+
+    - name: copy_many finngen gwas credible set variants
+      sources: gs://finngen_data/gwas/prod/${staging_finngen_gwas_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/finngen_gwas/credible_set_variant
   ##################################################################################################
 
   #: GWAS_PPP STEP :################################################################################
   gwas_ppp:
-    - name: copy_many finngen-UKBB-MVP study
-      sources: gs://finngen_data/meta/three-way/prod/20251027T140104/output/study_index/*.parquet
-      destination: input/gwas/study/finngen_ukb_mvp
+    - name: copy_many finngen meta study
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/study/*.parquet
+      destination: input/gwas/finngen_meta/study
 
-    - name: copy_many finngen-UKBB-MVP credible sets
-      sources: gs://finngen_data/meta/three-way/prod/20251027T140104/output/credible_sets/*.parquet
-      destination: input/gwas/credible_set/finngen_ukb_mvp
+    - name: copy_many finngen meta credible sets
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set/*.parquet
+      destination: input/gwas/finngen_meta/credible_set
+
+    - name: copy_many finngen meta credible set variants
+      sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/finngen_meta/credible_set_variant
   ##################################################################################################
 
   #: HERITABILITY STEP :############################################################################
@@ -919,9 +1024,9 @@ steps:
 
   #: L2G STEP :#####################################################################################
   l2g:
-    - name: copy_many l2g gold standard
-      sources: gs://otar001-core/l2g/goldStandard/${l2g_gold_standard_version}/*.json
-      destination: input/l2g/gold_standard.json
+    - name: copy_many l2g otg gold standard
+      sources: gs://otar001-core/l2g/otgGoldStandard/${l2g_otg_gold_standard_version}/*.json
+      destination: input/l2g/otg_gold_standard.json
   ##################################################################################################
 
   #: L2G_PREDEFINED_TEST_FOR_SPLIT STEP :###########################################################
@@ -949,71 +1054,104 @@ steps:
   #: MOLQTL STEP: ##################################################################################
   molqtl:
     - name: copy_many eQTL Catalogue r8 study
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/study_index/*.parquet
-      destination: input/molqtl/study/eqtl_catalogue/r8
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/study_index/*.parquet
+      destination: input/molqtl/eqtl_catalogue/study
 
     - name: copy_many eQTL Catalogue r8 credible sets
-      sources: gs://eqtl_catalogue_data/r8/prod/20261029T162303/output/credible_set/*.parquet
-      destination: input/molqtl/credible_set/eqtl_catalogue/r8
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/eqtl_catalogue/credible_set
+
+    - name: copy_many eQTL Catalogue r8 credible set variants
+      sources: gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/eqtl_catalogue/credible_set_variant
       max_concurrency: 4
 
     - name: copy_many UKBB PPP EUR study
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/study_index/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/study/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/molqtl/study/ukb_ppp_eur
+      destination: input/molqtl/ukb_ppp_eur/study
 
     - name: copy_many UKBB PPP EUR credible sets
-      sources: gs://ukb_ppp_eur_data/prod/20260526T131650/output/credible_set_clean/20250129/*.parquet
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set/*.parquet
       settings:
         billing_project: open-targets-eu-dev
-      destination: input/molqtl/credible_set/ukb_ppp_eur
+      destination: input/molqtl/ukb_ppp_eur/credible_set
+
+    - name: copy_many UKBB PPP EUR credible set variants
+      sources: gs://ukb_ppp_eur_data/prod/${staging_ukb_ppp_eur_ts}/output/credible_set_variant/*.parquet
+      settings:
+        billing_project: open-targets-eu-dev
+      destination: input/molqtl/ukb_ppp_eur/credible_set_variant
+
+    - name: copy_many finngen multiome study
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/study/*.parquet
+      destination: input/molqtl/finngen_multiome/study
+
+    - name: copy_many finngen multiome credible sets
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/finngen_multiome/credible_set
+
+    - name: copy_many finngen multiome credible set variants
+      sources: gs://finngen_data/multiome/prod/${staging_finngen_multiome_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/finngen_multiome/credible_set_variant
   ##################################################################################################
 
   #: MOLQTL_PPP STEP: ##############################################################################
   molqtl_ppp:
-    - name: explode otar2077 molqtl
-      foreach:
-        - microglia
+    # OTAR2065 neuroinflammation microglia sc-eQTLs (processed by the eQTL Catalogue, OTAR2077):
+    - name: copy_many microglia study
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/study_index/*.parquet
+      destination: input/molqtl/otar2077/microglia/study
 
-      do:
-        - name: copy_many molqtl ${each} study
-          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_index/*/*.parquet
-          destination: input/molqtl/study/otar2077/${each}
+    - name: copy_many microglia credible sets
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/otar2077/microglia/credible_set
 
-        - name: copy_many molqtl ${each} credible sets
-          sources: gs://eqtl_catalogue_processed_otar_internal_data/otar2077/${each}/gentropy/study_locus/*/*.parquet
-          destination: input/molqtl/credible_set/otar2077/${each}
+    - name: copy_many microglia credible set variants
+      sources: gs://eqtl_catalogue_data/otar2065_microglia/prod/${staging_otar2065_microglia_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/otar2077/microglia/credible_set_variant
 
     - name: explode eQTLGen molqtl
       foreach:
         - single_cell_eqtl
         - coeqtl
       do:
-        - name: copy_many molqtl eQTLGen ${each} study
-          sources: gs://eqtlgen_data/prod/20260326T115635/output/${each}/260326/study/*.parquet
-          destination: input/molqtl/study/eQTLGen/${each}
+        - name: copy_many eQTLGen ${each} study
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/study/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/study
 
-        - name: copy_many molqtl eQTLGen ${each} credible sets
-          sources: gs://eqtlgen_data/prod/20260326T115635/output/${each}/260326/credible_set/*.parquet
-          destination: input/molqtl/credible_set/eQTLGen/${each}
+        - name: copy_many eQTLGen ${each} credible sets
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/credible_set/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/credible_set
 
-    - name: copy_many molqtl deCODE proteomics study
-      sources: gs://decode_data/smp/study/*.parquet
-      destination: input/molqtl/study/deCODE_proteomics
+        - name: copy_many eQTLGen ${each} credible set variants
+          sources: gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/${each}/credible_set_variant/*.parquet
+          destination: input/molqtl/eQTLGen/${each}/credible_set_variant
 
-    - name: copy_many molqtl deCODE proteomics credible sets
-      sources: gs://decode_data/smp/credible_set/*.parquet
-      destination: input/molqtl/credible_set/deCODE_proteomics
+    - name: copy_many deCODE proteomics study
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/study/*.parquet
+      destination: input/molqtl/deCODE_proteomics/study
 
-    # SLE-map credible set and study table:
-    - name: copy_many sle_map credible sets
-      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/credible_set/*.parquet
-      destination: input/molqtl/credible_set/sle_map
+    - name: copy_many deCODE proteomics credible sets
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/deCODE_proteomics/credible_set
+
+    - name: copy_many deCODE proteomics credible set variants
+      sources: gs://decode_data/prod/${staging_decode_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/deCODE_proteomics/credible_set_variant
 
     - name: copy_many sle_map study
-      sources: gs://ot-team/tobi/credible_set_datasets/SLEmap_finemap/results/processing/20260923T222644Z/output/study/*.parquet
-      destination: input/molqtl/study/sle_map
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/study/*.parquet
+      destination: input/molqtl/sle_map/study
+
+    - name: copy_many sle_map credible sets
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/credible_set/*.parquet
+      destination: input/molqtl/sle_map/credible_set
+
+    - name: copy_many sle_map credible set variants
+      sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/credible_set_variant/*.parquet
+      destination: input/molqtl/sle_map/credible_set_variant
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
@@ -1358,7 +1496,7 @@ steps:
       destination: input/target/tractability/tractability.tsv
 
     - name: copy uniprot
-      source: https://rest.uniprot.org/uniprotkb/stream?compressed=true&format=txt&query=%28%28reviewed%3Atrue%29%29%20AND%20%28model_organism%3A9606%29
+      source: https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/taxonomic_divisions/uniprot_sprot_human.dat.gz
       destination: input/target/uniprot/uniprot.txt.gz
 
     - name: copy uniprot-ssl

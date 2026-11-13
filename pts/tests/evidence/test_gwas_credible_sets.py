@@ -7,6 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from pts.transformers.evidence.gwas_credible_sets import build_raw_evidence, gwas_credible_sets
+from tests.credible_set_fixtures import published_credible_set
 from tests.evidence.fixtures import write_disease, write_literature, write_target
 
 STUDY_SCHEMA = {
@@ -114,8 +115,8 @@ class TestBuildRawEvidence:
 def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
     src = tmp_path / 'src'
     for name, frame in [
-        ('l2g', pl.DataFrame({'studyLocusId': ['SL1', 'SL1'], 'geneId': ['ENSG1', 'ENSG9'], 'score': [0.8, 0.6]})),
-        ('credible_set', pl.DataFrame(ONE_LOCUS)),
+        ('l2g', pl.DataFrame({'credibleSetId': ['SL1', 'SL1'], 'geneId': ['ENSG1', 'ENSG9'], 'score': [0.8, 0.6]})),
+        ('credible_set', published_credible_set({'id': 'SL1', 'studyId': 'GCST1', 'studyType': 'gwas'})),
         ('study', pl.DataFrame(one_study(pubmedId=['111'], publicationDate=['2019-05-01']), schema=STUDY_SCHEMA)),
     ]:
         (src / name).mkdir(parents=True)

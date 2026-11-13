@@ -2,7 +2,8 @@
 
 Builds the Open Targets molecule format from the raw ChEMBL tables. Synonyms and trade
 names come from ``molecule_synonyms``, cross-references from DrugBank, and clinical-trial
-synonyms from :mod:`pts.transformers.utils.aact_synonyms`.
+synonyms from :mod:`pts.transformers.utils.aact_synonyms`. PAINS structural alerts are added
+for every molecule with a structure; ``drug_molecule`` does not read them.
 """
 
 from pathlib import Path
@@ -13,6 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.drug_molecule import structural_alert_schema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -24,10 +26,16 @@ TABLES = {
     'compound_structures': ['molregno', 'canonical_smiles', 'standard_inchi_key', 'molfile'],
     'molecule_hierarchy': ['molregno', 'parent_molregno'],
     'molecule_synonyms': ['molsyn_id', 'molregno', 'synonyms', 'syn_type'],
+    'compound_structural_alerts': ['molregno', 'alert_id'],
+    'structural_alerts': ['alert_id', 'alert_set_id', 'alert_name'],
+    'structural_alert_sets': ['alert_set_id', 'set_name'],
 }
 """No ``order_by``: every published list sorts at its aggregation site instead."""
 
 CHEMBL_SOURCE = 'ChEMBL'
+
+PAINS_ALERT_SET = 'PAINS'
+"""ChEMBL's name for the pan-assay interference set (Baell and Holloway, J Med Chem 2010)."""
 
 
 def chembl_molecule(
@@ -67,6 +75,9 @@ def chembl_molecule(
         tables['molecule_hierarchy'],
         tables['molecule_synonyms'],
         drugbank_lookup,
+        pains_alerts(
+            tables['compound_structural_alerts'], tables['structural_alerts'], tables['structural_alert_sets']
+        ),
         aact_batch,
     )
 
@@ -80,6 +91,7 @@ def process_molecules(
     molecule_hierarchy: pl.DataFrame,
     molecule_synonyms: pl.DataFrame,
     drugbank_lookup: pl.DataFrame,
+    structural_alerts: pl.DataFrame,
     aact_batch: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Build ChEMBL molecules by joining raw ChEMBL tables.
@@ -90,6 +102,7 @@ def process_molecules(
         molecule_hierarchy: Raw ChEMBL molecule_hierarchy table.
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
+        structural_alerts: The PAINS alerts per molregno, from :func:`pains_alerts`.
         aact_batch: (optional) AACT trial extractions, as published by
             :py:mod:`pts.transformers.clinical_mira.aact_trial_extraction`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
@@ -97,7 +110,8 @@ def process_molecules(
             never become the molecule name.
 
     Returns:
-        Processed molecule DataFrame with the eleven output columns.
+        Processed molecule DataFrame with the columns of
+        :data:`pts.schemas.drug_molecule.chembl_molecule_schema`.
     """
     # Prepare drugbank lookup -- rename columns to match expected format
     drugbank = drugbank_lookup.select(
@@ -123,6 +137,7 @@ def process_molecules(
         .join(synonyms, on='id', how='left')
         .join(cross_references, on='id', how='left')
         .join(hierarchy, on='id', how='left')
+        .join(structural_alerts, on='molregno', how='left', validate='m:1')
     )
 
     # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
@@ -149,6 +164,15 @@ def process_molecules(
         .with_columns(
             synonyms=pl.col('synonyms').fill_null([]),
             tradeNames=pl.col('tradeNames').fill_null([]),
+            # no alert means none matched, but only on a structure ChEMBL could check
+            structuralAlerts=pl
+            .when(
+                pl.col('structuralAlerts').is_null()
+                & pl.all_horizontal(pl.col('canonicalSmiles', 'molblock').is_null())
+            )
+            .then(None)
+            .otherwise(pl.col('structuralAlerts').fill_null([]))
+            .cast(structural_alert_schema),
         )
         .with_columns(
             name=pl.coalesce(
@@ -174,6 +198,45 @@ def process_molecules(
             'synonyms',
             'tradeNames',
             'crossReferences',
+            'structuralAlerts',
+        )
+    )
+
+
+def pains_alerts(
+    compound_structural_alerts: pl.DataFrame,
+    structural_alerts: pl.DataFrame,
+    structural_alert_sets: pl.DataFrame,
+) -> pl.DataFrame:
+    """Collect the PAINS alerts of each molecule that has any; alerts of the other ChEMBL sets are left out.
+
+    Args:
+        compound_structural_alerts: Raw ChEMBL compound_structural_alerts table.
+        structural_alerts: Raw ChEMBL structural_alerts table.
+        structural_alert_sets: Raw ChEMBL structural_alert_sets table.
+
+    Returns:
+        DataFrame with molregno and structuralAlerts, sorted by alert id.
+
+    Raises:
+        ValueError: If no alert set, or more than one, is named `PAINS_ALERT_SET`.
+    """
+    # matched by name: a renamed set in a later release must fail, not empty the column
+    pains = structural_alert_sets.filter(pl.col('set_name') == PAINS_ALERT_SET)
+    if pains.height != 1:
+        raise ValueError(f'expected one alert set named {PAINS_ALERT_SET}, found {pains.height}')
+
+    return (
+        compound_structural_alerts
+        .select('molregno', 'alert_id')
+        .unique()
+        .join(structural_alerts.join(pains, on='alert_set_id', how='semi'), on='alert_id', how='inner')
+        .group_by('molregno')
+        .agg(
+            pl
+            .struct(pl.col('alert_id').alias('alertId'), pl.col('alert_name').alias('alertName'))
+            .sort_by('alert_id')
+            .alias('structuralAlerts')
         )
     )
 
@@ -215,6 +278,7 @@ def _molecule_preprocess(
         .join(parent, on='molregno', how='left')
         .join(synonyms, on='molregno', how='left')
         .select(
+            'molregno',
             'id',
             pl.col('canonical_smiles').alias('canonicalSmiles'),
             pl.col('standard_inchi_key').alias('inchiKey'),

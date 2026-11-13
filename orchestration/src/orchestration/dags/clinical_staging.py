@@ -49,7 +49,7 @@ with DAG(
     config = ClinicalStagingConfig()
     steps: dict[str, dict[str, Any]] = {}  # registry of tasks, used to build dependencies
 
-    logger.info(f'aact {config.aact_version}, clinical_mining {config.clinical_mining_version}, bucket {config.bucket}')
+    logger.info(f'staging_version {config.staging_version}, bucket {config.bucket}')
 
     # ==============================================================================================
     # Every step follows the same shape, whether it is a PIS or a PTS one:
@@ -94,7 +94,9 @@ with DAG(
                 machine_type=config.machine_type_for(step_name),
                 boot_disk_size_gb=config.boot_disk_size,
                 work_disk_size_gb=config.disk_size,
+                vm_service_account=config.service_account_for(step_name),
                 deferrable=True,
+                execution_timeout=config.execution_timeout_for(step_name),
             )
 
             t = DeleteInstanceOperator(

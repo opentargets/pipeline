@@ -59,10 +59,26 @@ def write_literature(path: Path, dates: dict[str, str]) -> str:
     return str(path)
 
 
-def write_ontoma_lut(path: Path, kind: str, label: str, entity_id: str) -> str:
+def write_ontoma_lut(path: Path, kind: str, label: str, entity_id: str, is_acronym: bool = False) -> str:
     """One-row OnToma disease look-up table: `label` is the already normalised key."""
     path.mkdir(parents=True)
     pl.DataFrame(
-        [(kind, 'DS', label, [{'entityId': entity_id, 'entitySource': 'name'}])], schema=ENTITY_LUT, orient='row'
+        [
+            (
+                kind,
+                'DS',
+                label,
+                [
+                    {
+                        'entityId': entity_id,
+                        'entitySource': 'name',
+                        'isAcronym': is_acronym,
+                        'isAllowlistedAcronym': False,
+                    }
+                ],
+            )
+        ],
+        schema=ENTITY_LUT,
+        orient='row',
     ).write_parquet(path / 'part-0.parquet')
     return str(path)

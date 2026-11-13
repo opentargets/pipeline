@@ -7,9 +7,9 @@ environments:
     input:
       gwas_catalog: gs://gwas_catalog_inputs
       gnomad: gs://gnomad_data_2
-    output: gs://gwas_catalog_top_hits/prod/20261028T234317
+    output: gs://gwas_catalog_top_hits/prod/20261111T160107
     scratchpad:
-      gentropy_version: 4.0.0-dev.4
+      gentropy_version: 4.0.0-rc.3
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/v{{gentropy_version}}/utils/install_dependencies_on_cluster.sh
@@ -56,9 +56,9 @@ steps:
       main: '{{output}}/bin/cli.py'
       args: |
         step=gwas_catalog_top_hit_ingestion \
-          "step.catalog_study_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_studies.tsv']" \
-          "step.catalog_ancestry_files=['{{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_download_ancestries.tsv']" \
-          step.catalog_associations_file={{input.gwas_catalog}}/gentroutils/20260802/gwas_catalog_associations_ontology_annotated.tsv \
+          "step.catalog_study_files=['{{input.gwas_catalog}}/gentroutils/20261029/gwas_catalog_download_studies.tsv']" \
+          "step.catalog_ancestry_files=['{{input.gwas_catalog}}/gentroutils/20261029/gwas_catalog_download_ancestries.tsv']" \
+          step.catalog_associations_file={{input.gwas_catalog}}/gentroutils/20261029/gwas_catalog_associations_ontology_annotated.tsv \
           step.variant_annotation_path={{input.gnomad}}/v4.1/variant_index \
           step.catalog_studies_out={{output}}/output/study \
           step.catalog_associations_out={{output}}/output/study_locus \

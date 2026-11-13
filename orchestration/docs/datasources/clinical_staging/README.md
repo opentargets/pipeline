@@ -1,6 +1,6 @@
 # Clinical staging
 
-This document was updated on 2026-10-30.
+This document was updated on 2026-11-03.
 
 The `clinical_report` step needs data that comes from an LLM or from models:
 the trial extraction, the stop reasons, and the drug and disease entities in
@@ -12,13 +12,14 @@ the release by `pis/config.yaml`.
 AACT (Aggregate Analysis of ClinicalTrials.gov) is published as dated
 PostgreSQL archives by CTTI, fetched from
 `https://aact.ctti-clinicaltrials.org/static/static_db_copies/monthly/<version>`.
-The clinical mining inputs (TTD, EMA, PMDA, the ChEMBL mapping) are curated by
-hand under `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/`.
+The clinical mining inputs TTD, EMA and PMDA are copied from their upstream
+sites when the date is staged (see "Upstream sources"). The ChEMBL mapping is a frozen
+file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 
 | Pinned in | Names |
 | --- | --- |
-| `aact_version`, `clinical_mining_version` in `clinical_staging.yaml` | the versions the DAG stages |
-| the same names in `pis/config.yaml` | the versions the release copies |
+| `staging_version` in `clinical_staging.yaml` | the one date the DAG stages, for every source |
+| `staging_version` in `pis/config.yaml` | the date the release copies, for every source |
 | `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
 | `*_tag` in `pis/config.yaml` | the snapshots the release copies |
 | `extraction_tag` in `pis/config.yaml` | the extraction the release copies, and the AACT drug snapshot under it |
@@ -26,22 +27,27 @@ hand under `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/`.
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction}/  # record stores, shared across versions
-gs://clinical_staging/aact/<aact_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
-gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
-gs://clinical_staging/aact/<aact_version>/extraction/<extraction_tag>/drug_entities/<tag>/
-gs://clinical_staging/aact/<aact_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,moa,moa_literature}/  # record stores, shared across versions
+gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
+gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
+gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
+gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/drug_entities/<tag>/
+gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
-gs://clinical_staging/clinical_mining/<clinical_mining_version>/input/                # ttd, ema, pmda, chembl mapping, models
-gs://clinical_staging/clinical_mining/<clinical_mining_version>/{drug_entities,disease_entities}/<tag>/
+gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
+gs://clinical_staging/clinical_mining/<staging_version>/{drug_entities,disease_entities}/<tag>/
+gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/{match,drug_molecule}/  # copies of the published release
+gs://clinical_staging/literature/<input_release>/moa_literature/<tag>/  # data.parquet + drugs.parquet + metadata.json
 ```
 
 ## The DAG
 
 Each step is named `{stage}_{step}`, where the stage is the application that
-runs it, and belongs to a `source` (`aact` or `clinical_mining`). The source
-gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
-and its version. Each step runs on its own short-lived GCE VM.
+runs it, and belongs to a `source` (`aact`, `clinical_mining` or `literature`).
+The source gives the step its release URI, `gs://clinical_staging/<source>/<version>`,
+and its version. `pts_moa_literature` publishes its snapshot under the
+published release it reads instead,
+`gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`. Each step runs on its own short-lived GCE VM.
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
@@ -56,14 +62,59 @@ and its version. Each step runs on its own short-lived GCE VM.
    model on 32 labels per forward pass (`ner_model_batch_size`). It reads the
    extraction of the tag its own code computes, and fails naming the expected
    path if there is none.
-4. `pis_clinical_mining` — copies the TTD, EMA, PMDA and ChEMBL mapping inputs
-   and the chemical, drugtemist and disease models.
+4. `pis_clinical_mining` — copies the TTD, EMA and PMDA inputs from upstream,
+   the frozen ChEMBL mapping, and the chemical, drugtemist and disease models.
 5. `pts_clinical_mining_models` (n2d-standard-16) — runs the drug and disease
    NER over the TTD, EMA and PMDA texts and publishes `drug_entities/<tag>` and
    `disease_entities/<tag>`. The drug NER runs the model on 32 labels per
    forward pass (`ner_model_batch_size`), the disease NER on one text at a
    time. It waits for `pts_aact_trial_models`, because both write the shared
    drug-entity store.
+6. `pis_moa_literature` — copies every parquet file of the literature match
+   (`gs://open-targets-data-releases/<input_release>/intermediate/literature/match`)
+   and the drug molecules (`.../<input_release>/output/drug_molecule`) of the
+   published release `moa_literature_input_release` in `pis/config.yaml` to
+   `input/literature/<input_release>/{match,drug_molecule}`, billing the
+   requester-pays reads to `open-targets-eu-dev`.
+7. `pts_moa_literature` (n2d-highmem-32) — reads those copies, at
+   `gs://clinical_staging/literature/<staging_version>/input/literature/<input_release>/`,
+   and publishes `gs://clinical_staging/literature/<input_release>/moa_literature/<tag>`.
+   Its `input_release` setting in `pts/config.yaml` must equal
+   `moa_literature_input_release`.
+
+## Upstream sources
+
+`staging_version` is set by hand in `clinical_staging.yaml`, normally to the
+day the run is triggered. It names the AACT archive, and it is the date under
+which the other sources are filed.
+
+| Source | Upstream | Staged as |
+| --- | --- | --- |
+| TTD | `https://ttd.idrblab.cn/files/download/P1-05-Drug_disease.txt` | `input/ttd.txt` |
+| EMA | `https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx` | `input/ema_medicines.xlsx` |
+| PMDA | `https://www.pmda.go.jp/files/<pmda_file>.pdf` | `input/pmda.pdf` |
+
+All three are plain `copy` steps, like other sources with no versioned URL.
+
+- TTD and EMA have no version in their URL, so a date holds what upstream
+  served when `pis_clinical_mining` last ran. EMA changes daily. Rerunning
+  `pis_clinical_mining` replaces them with what upstream serves that day. Do
+  that only before any NER snapshot of the date is published; after that,
+  stage a new date instead, because the snapshots are write-once and would no
+  longer match the inputs.
+- `pmda_file` in `pis/config.yaml` pins the PMDA edition: the number of the
+  "New Drugs" PDF linked from
+  `https://www.pmda.go.jp/english/review-services/reviews/approved-information/drugs/0002.html`,
+  today the "April 2004 to February 2026" edition. PMDA removes the previous
+  file when it publishes a new edition, so the copy fails with a 404 until
+  `pmda_file` is bumped to the new number.
+- TTD, EMA and PMDA keep no history upstream, so the staged copy is the only
+  record of what a date held.
+
+The ChEMBL mapping is an export of ChEMBL's private curation tables and cannot
+be fetched. It stays frozen: `pis/config.yaml` copies it from the literal path
+`gs://clinical_staging/frozen/2026-05-27/chembl_mapping.parquet`
+into each date's `input/`.
 
 ChEMBL is not staged. The release fails on any drug label with no id that no
 snapshot covers, whatever its source.
@@ -181,7 +232,7 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    the `settings` of the `aact_trial_extraction` step to
    `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
    under the `settings` of the `aact_trial_models` step to
-   `gs://ot-team/irene/clinical_mining/<clinical_mining_version>/input/clinical_report/ner_cache.parquet`.
+   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`.
    The schema digest is the full 64 hex digest of the response schema, as the
    step computes it; from `pts/`:
 
@@ -199,6 +250,10 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
    sources exists.
 4. Only then move the unified pipeline onto the new pts and pis.
 
+To move the release onto a new date, set `staging_version` in `pis/config.yaml`
+to the date in `clinical_staging.yaml` once that date is staged, in the same
+change.
+
 `gs://aact_data` is kept as history and is no longer read or written, apart
 from the one-off import.
 
@@ -213,6 +268,18 @@ and reads the copy the `clinical_report` step makes.
 Only AACT trials with an extraction row are included in the clinical report.
 
 ## Changelog
+
+### 2026-11-03
+
+- One `staging_version` replaces `aact_version` and `clinical_mining_version`,
+  in `clinical_staging.yaml` and in `pis/config.yaml`, and dates both trees.
+  The release reads 2026-11-03.
+- `pis_clinical_mining` copies TTD, EMA and PMDA from upstream, PMDA by the
+  pinned `pmda_file`. The release block of `pis/config.yaml` is unchanged.
+- The ChEMBL mapping and the one-off NER seed moved from
+  `gs://ot-team/irene/clinical_mining/2026-05-27/` to
+  `gs://clinical_staging/frozen/2026-05-27/`, byte for byte. Nothing in the
+  DAG or the release reads `gs://ot-team` any more.
 
 ### 2026-10-31
 

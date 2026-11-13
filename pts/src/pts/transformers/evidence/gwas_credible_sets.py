@@ -85,8 +85,9 @@ def generate(l2g_predictions: str, credible_set: str, study_index: str, threshol
         Raw GWAS credible set evidence.
     """
     return build_raw_evidence(
-        scan_dataset(l2g_predictions).select('studyLocusId', 'geneId', 'score'),
-        scan_dataset(credible_set).select('studyLocusId', 'studyId'),
+        # L2G predictions and credible sets use the gentropy v4 keys; the evidence keeps `studyLocusId`
+        scan_dataset(l2g_predictions).select(pl.col('credibleSetId').alias('studyLocusId'), 'geneId', 'score'),
+        scan_dataset(credible_set).select(pl.col('id').alias('studyLocusId'), 'studyId'),
         scan_dataset(study_index).select('studyId', 'diseaseIds', 'pubmedId', 'publicationDate'),
         threshold,
     )

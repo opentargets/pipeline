@@ -14,12 +14,14 @@ from otter.config.model import Config
 
 from pts.schemas.gene_burden import GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden.az import parse_az
+from pts.transformers.evidence.gene_burden.bipex import parse_bipex
 from pts.transformers.evidence.gene_burden.brava import parse_brava
 from pts.transformers.evidence.gene_burden.curated import parse_curated
 from pts.transformers.evidence.gene_burden.cvdi import parse_cvdi
 from pts.transformers.evidence.gene_burden.finngen import parse_finngen
 from pts.transformers.evidence.gene_burden.genebass import parse_genebass
 from pts.transformers.evidence.gene_burden.genes_and_health import parse_genes_and_health
+from pts.transformers.evidence.gene_burden.schema import parse_schema
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -71,6 +73,8 @@ def parse_sub_sources(source: dict[str, str], settings: dict[str, Any]) -> list[
         parse_cvdi(source['cvdi']),
         parse_genes_and_health(source['genes_and_health']),
         parse_brava(source['brava']),
+        parse_schema(source['schema'], settings['schema_release']),
+        parse_bipex(source['bipex'], settings['bipex_release']),
     ]
 
 
@@ -147,10 +151,11 @@ def gene_burden(
     Args:
         source: the sub-source inputs (`az_binary`, `az_quantitative`, `az_genes`, `az_phenotypes`,
             `curated_studies`, `genebass`, `finngen`, `finngen_phenotypes`, `cvdi`,
-            `genes_and_health`, `brava`), `ontoma_disease_label_lut`, `ontoma_disease_id_lut`,
+            `genes_and_health`, `brava`, `schema`, `bipex`), `ontoma_disease_label_lut`, `ontoma_disease_id_lut`,
             `disease`, `target` and `literature` locations.
         destination: `evidence` and `failed_evidence` output directories.
-        settings: `finngen_release`, the FinnGen `releaseVersion`.
+        settings: `finngen_release`, `schema_release` and `bipex_release`, each sub-source's
+            `releaseVersion`.
         config: unused.
     """
     logger.info(f'load gene burden sub-sources from {source}')

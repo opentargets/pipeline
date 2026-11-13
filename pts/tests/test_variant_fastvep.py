@@ -191,8 +191,9 @@ def test_run_fastvep_passes_flags_threads_and_cache(tmp_path: Path) -> None:
     threads, *arguments = calls.read_text().split()
     assert threads == '3'
     assert arguments[:2] == ['annotate', '--input']
-    for flag in ('--pick-allele-gene', '--symbol', '--hgvs', '--canonical', '--no-progress'):
+    for flag in ('--pick-allele-gene', '--symbol', '--canonical', '--no-progress'):
         assert flag in arguments
+    assert '--hgvs' not in arguments
     assert arguments[arguments.index('--pick-order') + 1] == 'mane_select,canonical'
     assert arguments[arguments.index('--distance') + 1] == '500000'
     assert arguments[arguments.index('--output-format') + 1] == 'json'

@@ -9,6 +9,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.clinical_mira import (
+    ClinicalProvider,
     ClinicalReport,
     ClinicalReportType,
     ClinicalSource,
@@ -20,13 +21,18 @@ from pts.transformers.clinical_mira import (
     map_entities,
     union_dfs,
 )
+from pts.transformers.clinical_mira.indication_corrections import (
+    apply_indication_corrections,
+    read_indication_corrections,
+)
 from pts.transformers.clinical_mira.mapping import require_staged
 from pts.transformers.clinical_mira.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, known_disease_ids, read_ttd_curation
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
-from pts.transformers.utils import update_quality_flag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.quality_flags import flag_rows
 
 CHEMBL_SCHEMA_NAME = 'public'
 
@@ -122,6 +128,9 @@ def clinical_report(
     )
     disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
+    ttd_downgrades, ttd_corrections = read_ttd_curation(source['ttd_stage_downgrades'], source['ttd_link_corrections'])
+    chembl_corrections = read_indication_corrections(source['chembl_indication_corrections'])
+    ema_corrections = read_indication_corrections(source['ema_indication_corrections'])
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
@@ -192,6 +201,12 @@ def clinical_report(
         molecule_dictionary=chembl_molecule_dictionary,
         indication_refs=chembl_indication_references,
     )
+    chembl_indication_report = apply_indication_corrections(
+        chembl_indication_report,
+        chembl_corrections,
+        disease_ids=known_disease_ids(disease_index),
+        provider=ClinicalProvider.CHEMBL.value,
+    )
     chembl_drug_warning_report = extract_drug_warning_clinical_report(
         drug_warning=chembl_drug_warning,
         molecule_dictionary=chembl_molecule_dictionary,
@@ -215,6 +230,19 @@ def clinical_report(
             drug_index=molecule_index,
             chembl_curation=chembl_curation,
             drug_entities=drug_entities,
+        )
+        .pipe(
+            apply_ttd_curation,
+            ttd_downgrades,
+            ttd_corrections,
+            drug_ids=molecule_index['id'],
+            disease_ids=known_disease_ids(disease_index),
+        )
+        .pipe(
+            apply_indication_corrections,
+            ema_corrections,
+            disease_ids=known_disease_ids(disease_index),
+            provider=ClinicalProvider.EMA.value,
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)
@@ -506,14 +534,12 @@ def flag_phase_iv_not_approved(reports: ClinicalReport) -> ClinicalReport:
     )
 
     return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=(
-                # Flag consists of Phase IV trials that are not approved
-                pl.col('clinicalStage').eq(ClinicalStageCategory.PHASE_4)
-                & pl.col('id').is_in(phase_iv_flagged_ids['id'].to_list())
-            ),
-            flag_text=ClinicalReportFlags.PHASE_IV_NOT_APPROVED.value,
+        df=flag_rows(
+            reports.df,
+            # Flag consists of Phase IV trials that are not approved
+            pl.col('clinicalStage').eq(ClinicalStageCategory.PHASE_4)
+            & pl.col('id').is_in(phase_iv_flagged_ids['id'].to_list()),
+            ClinicalReportFlags.PHASE_IV_NOT_APPROVED,
         )
     )
 
@@ -586,13 +612,11 @@ def flag_unvalidated_indication(
     )
 
     return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=(
-                # Flag consists of reports where any of the indications has not been validated
-                pl.col('id').is_in(flagged_ids['id'].to_list())
-            ),
-            flag_text=ClinicalReportFlags.UNVALIDATED_INDICATION.value,
+        df=flag_rows(
+            reports.df,
+            # Flag consists of reports where any of the indications has not been validated
+            pl.col('id').is_in(flagged_ids['id'].to_list()),
+            ClinicalReportFlags.UNVALIDATED_INDICATION,
         )
     )
 
@@ -623,47 +647,29 @@ def flag_indirect_primary_purpose(
         reports_df = reports.df
         llm_drug_intent_condition = pl.lit(False)
     return ClinicalReport(
-        df=update_quality_flag(
-            df=reports_df,
-            flag_condition=(
-                # Flag consists of reports where the primary purpose is indirect
-                pl.col('trialPrimaryPurpose').is_in(['DEVICE_FEASIBILITY', 'DIAGNOSTIC'])
-                # or the extracted drug_intent is missing or non-therapeutic
-                | llm_drug_intent_condition
-            ),
-            flag_text=ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE.value,
+        df=flag_rows(
+            reports_df,
+            # Flag consists of reports where the primary purpose is indirect
+            pl.col('trialPrimaryPurpose').is_in(['DEVICE_FEASIBILITY', 'DIAGNOSTIC'])
+            # or the extracted drug_intent is missing or non-therapeutic
+            | llm_drug_intent_condition,
+            ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE,
         ).select(pl.all().exclude('drug_intent'))
     )
 
 
 def flag_null_diseases(reports: ClinicalReport) -> ClinicalReport:
     """Flag reports where the diseases column is null."""
-    return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=pl.col('diseases').is_null(),
-            flag_text=ClinicalReportFlags.NO_DISEASE.value,
-        )
-    )
+    return ClinicalReport(df=flag_rows(reports.df, pl.col('diseases').is_null(), ClinicalReportFlags.NO_DISEASE))
 
 
 def flag_null_drugs(reports: ClinicalReport) -> ClinicalReport:
     """Flag reports where the drugs column is null."""
-    return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=pl.col('drugs').is_null(),
-            flag_text=ClinicalReportFlags.NO_DRUGS.value,
-        )
-    )
+    return ClinicalReport(df=flag_rows(reports.df, pl.col('drugs').is_null(), ClinicalReportFlags.NO_DRUGS))
 
 
 def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
     """Flag SAFETY-type reports (mira#57, informational, not a failure)."""
     return ClinicalReport(
-        df=update_quality_flag(
-            df=reports.df,
-            flag_condition=pl.col('type').eq(ClinicalReportType.SAFETY.value),
-            flag_text=ClinicalReportFlags.SAFETY_REPORT.value,
-        )
+        df=flag_rows(reports.df, pl.col('type').eq(ClinicalReportType.SAFETY.value), ClinicalReportFlags.SAFETY_REPORT)
     )

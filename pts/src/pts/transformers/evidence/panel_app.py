@@ -3,7 +3,8 @@ r"""Genomics England PanelApp evidence.
 Parses the PanelApp gene panels into evidence and post-processes it.
 Phenotype strings are cleaned and split with the spark step's regular expressions, rewritten for
 the Rust engine (`\d` as `[0-9]`, `$1` as `${1}`). Diseases are mapped with the OnToma lookup
-tables through `add_efo_mapping`, by label and by OMIM, Orphanet, HP or MONDO id.
+tables through `add_efo_mapping`, by label and by OMIM, Orphanet, HP or MONDO id, keeping acronym
+label mappings.
 """
 
 from __future__ import annotations
@@ -266,6 +267,7 @@ def panel_app(
         parse_panel_app(source['evidence'], source['panels']),
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
+        keep_acronyms=True,
     ).collect()
     run_evidence(
         raw.lazy(),
