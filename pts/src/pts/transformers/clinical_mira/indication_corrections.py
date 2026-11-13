@@ -20,9 +20,6 @@ REMOVED = 'unmapped'
 
 CORRECTION_COLUMNS = ['reportId', 'drugFromSource', 'diseaseFromSource', 'diseaseId', 'correctedDiseaseId', 'reason']
 
-_DISEASE = pl.Struct({'diseaseFromSource': pl.String, 'diseaseId': pl.String})
-
-
 def read_indication_corrections(path: str) -> pl.DataFrame:
     """Read and validate a file of indication disease corrections.
 
@@ -63,34 +60,53 @@ def read_indication_corrections(path: str) -> pl.DataFrame:
 def apply_indication_corrections(
     reports: ClinicalReport,
     corrections: pl.DataFrame,
-    disease_ids: pl.Series,
+    disease_index: pl.DataFrame,
     provider: str,
 ) -> ClinicalReport:
     """Remove, re-ground or add curated diseases of one provider's indication reports.
 
     A replaced disease keeps its `diseaseFromSource`. An added disease is skipped when the report already
     has it. A report left without any disease is dropped. Reports of other providers, and diseases of a
-    report that no row names, are untouched.
+    report that no row names, are untouched. A report's obsolete disease id is matched as the current id
+    that lists it in `obsoleteTerms`, as `validate_disease` later resolves it.
 
     Args:
         reports: the reports, with disease ids.
         corrections: the corrections from :func:`read_indication_corrections`.
-        disease_ids: the disease ids a correction may name, as `known_disease_ids` gives them.
+        disease_index: the disease index's `id` and `obsoleteTerms`; a correction may name a current or an
+            obsolete id.
         provider: the provider whose reports the corrections target.
 
     Returns:
         The curated reports.
 
     Raises:
-        ValueError: if a correction names a disease id missing from `disease_ids`.
+        ValueError: if a correction names a disease id missing from the disease index.
     """
+    aliases = (
+        disease_index
+        .select(currentId='id', obsoleteId='obsoleteTerms')
+        .explode('obsoleteId', empty_as_null=True)
+        .drop_nulls('obsoleteId')
+        .unique('obsoleteId', keep='first', maintain_order=True)
+    )
+    current = disease_index['id'].implode()
     named = set(corrections['correctedDiseaseId'].to_list()) - {REMOVED}
-    if unknown := sorted(named - set(disease_ids.to_list())):
+    if unknown := sorted(named - set(disease_index['id'].to_list()) - set(aliases['obsoleteId'].to_list())):
         raise ValueError(
             f'{provider} indication corrections name disease ids missing from the disease index: {unknown}'
         )
 
     df = reports.df.with_row_index('__row')
+    diseases_type = df.schema['diseases']
+    disease_type = diseases_type.inner if isinstance(diseases_type, pl.List) else None
+    if not isinstance(disease_type, pl.Struct):
+        raise TypeError(f'reports have diseases of type {diseases_type}, expected a list of structs')
+    field_order = [field.name for field in disease_type.fields]
+
+    def disease(fields: dict[str, pl.Expr]) -> pl.Expr:
+        return pl.struct(*[fields[name].alias(name) for name in field_order]).cast(disease_type)
+
     targets = df.filter(pl.col('provider') == provider).select('__row', report=pl.col('id').str.to_lowercase())
     links = (
         df
@@ -98,10 +114,17 @@ def apply_indication_corrections(
         .select('__row', 'report', disease=pl.col('diseases'))
         .explode('disease', empty_as_null=True)
         .with_columns(diseaseId=pl.col('disease').struct.field('diseaseId'))
+        .join(aliases, left_on='diseaseId', right_on='obsoleteId', how='left', maintain_order='left')
+        .with_columns(
+            matchId=pl
+            .when(pl.col('diseaseId').is_in(current))
+            .then(pl.col('diseaseId'))
+            .otherwise(pl.coalesce('currentId', 'diseaseId'))
+        )
     )
     edits = corrections.filter(pl.col('diseaseId').is_not_null())
     additions = corrections.filter(pl.col('diseaseId').is_null())
-    matched_edits = edits.join(links, left_on=['reportId', 'diseaseId'], right_on=['report', 'diseaseId'], how='semi')
+    matched_edits = edits.join(links, left_on=['reportId', 'diseaseId'], right_on=['report', 'matchId'], how='semi')
     matched_additions = additions.join(targets, left_on='reportId', right_on='report', how='semi')
     matched = matched_edits.height + matched_additions.height
     logger.info(f'{provider} indication corrections: matched {matched}, unmatched {corrections.height - matched}')
@@ -110,7 +133,7 @@ def apply_indication_corrections(
         links
         .join(
             edits.select('reportId', 'diseaseId', 'correctedDiseaseId'),
-            left_on=['report', 'diseaseId'],
+            left_on=['report', 'matchId'],
             right_on=['reportId', 'diseaseId'],
             how='left',
         )
@@ -118,26 +141,26 @@ def apply_indication_corrections(
         .rechunk()
         .select(
             '__row',
-            disease=pl.struct(
-                pl.col('disease').struct.field('diseaseFromSource').alias('diseaseFromSource'),
-                pl.coalesce('correctedDiseaseId', pl.col('disease').struct.field('diseaseId')).alias('diseaseId'),
-            ),
+            disease=disease({
+                'diseaseFromSource': pl.col('disease').struct.field('diseaseFromSource'),
+                'diseaseId': pl.coalesce('correctedDiseaseId', pl.col('disease').struct.field('diseaseId')),
+            }),
         )
     )
     added = matched_additions.join(targets, left_on='reportId', right_on='report').select(
         '__row',
-        disease=pl.struct(
-            pl.col('diseaseFromSource').str.to_lowercase().alias('diseaseFromSource'),
-            pl.col('correctedDiseaseId').alias('diseaseId'),
-        ).cast(_DISEASE),
+        disease=disease({
+            'diseaseFromSource': pl.col('diseaseFromSource').str.to_lowercase(),
+            'diseaseId': pl.col('correctedDiseaseId'),
+        }),
     )
     touched = pl.concat([
-        matched_edits.join(links, left_on=['reportId', 'diseaseId'], right_on=['report', 'diseaseId']).select('__row'),
+        matched_edits.join(links, left_on=['reportId', 'diseaseId'], right_on=['report', 'matchId']).select('__row'),
         added.select('__row'),
     ])['__row']
     curated = (
         pl
-        .concat([kept.with_columns(pl.col('disease').cast(_DISEASE)), added])
+        .concat([kept, added])
         .drop_nulls('disease')
         .with_columns(__disease_id=pl.col('disease').struct.field('diseaseId'))
         .unique(['__row', '__disease_id'], keep='first', maintain_order=True)

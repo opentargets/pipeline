@@ -15,7 +15,13 @@ from pts.transformers.clinical_mira.providers.chembl_indications import extract_
 HEADER = 'reportId\tdrugFromSource\tdiseaseFromSource\tdiseaseId\tcorrectedDiseaseId\treason'
 LABEL = '188815dd-9d1c-4e0f-934e-972dce0d4599'
 OTHER = 'aaaaaaaa-0000-0000-0000-000000000000'
-DISEASE_IDS = pl.Series(['EFO_0000637', 'EFO_0005842', 'MONDO_0002280', 'MONDO_0001046'])
+DISEASE_INDEX = pl.DataFrame(
+    {
+        'id': ['MONDO_0009807', 'EFO_0005842', 'MONDO_0002280', 'MONDO_0001046'],
+        'obsoleteTerms': [['EFO_0000637'], [], [], []],
+    },
+    schema={'id': pl.String, 'obsoleteTerms': pl.List(pl.String)},
+)
 
 
 def _reports() -> ClinicalReport:
@@ -47,7 +53,7 @@ def _apply(tmp_path: Path, rows: list[str]) -> pl.DataFrame:
     (tmp_path / 'c.tsv').write_text('\n'.join([HEADER, *rows]) + '\n')
     corrections = read_indication_corrections(str(tmp_path / 'c.tsv'))
     return apply_indication_corrections(
-        _reports(), corrections, disease_ids=DISEASE_IDS, provider=ClinicalProvider.CHEMBL.value
+        _reports(), corrections, disease_index=DISEASE_INDEX, provider=ClinicalProvider.CHEMBL.value
     ).df
 
 
@@ -115,6 +121,19 @@ def test_other_providers_are_untouched(tmp_path: Path) -> None:
     (tmp_path / 'c.tsv').write_text('\n'.join([HEADER, f'{OTHER}\tx\tanemia\tMONDO_0002280\tunmapped\tr']) + '\n')
     corrections = read_indication_corrections(str(tmp_path / 'c.tsv'))
     out = apply_indication_corrections(
-        _reports(), corrections, disease_ids=DISEASE_IDS, provider=ClinicalProvider.EMA.value
+        _reports(), corrections, disease_index=DISEASE_INDEX, provider=ClinicalProvider.EMA.value
     ).df
     assert _diseases(out, OTHER) == ['MONDO_0002280']
+
+
+def test_obsolete_report_id_matches_its_current_id(tmp_path: Path) -> None:
+    out = _apply(tmp_path, [f'{LABEL}\tx\tosteosarcoma\tMONDO_0009807\tunmapped\tr'])
+    assert _diseases(out, LABEL) == ['EFO_0005842', 'MONDO_0002280']
+
+
+def test_corrected_reports_keep_the_input_disease_type(tmp_path: Path) -> None:
+    reports = _reports().df
+    rows = [f'{OTHER}\tx\tanemia\tMONDO_0002280\tMONDO_0001046\tr', f'{LABEL}\tx\tx\t\tMONDO_0001046\tr']
+    out = _apply(tmp_path, rows)
+    assert out.schema['diseases'] == reports.schema['diseases']
+    assert pl.concat([reports, out]).height == reports.height + out.height
