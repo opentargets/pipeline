@@ -38,9 +38,9 @@ def overlapping() -> tuple[np.ndarray, np.ndarray]:
 
 
 def test_default_hyperparameters_match_the_pinned_model() -> None:
-    assert DEFAULT_HYPERPARAMETERS['n_estimators'] == 200
-    assert DEFAULT_HYPERPARAMETERS['max_depth'] == 4
-    assert DEFAULT_HYPERPARAMETERS['eta'] == 0.025
+    assert DEFAULT_HYPERPARAMETERS['n_estimators'] == 300
+    assert DEFAULT_HYPERPARAMETERS['max_depth'] == 5
+    assert DEFAULT_HYPERPARAMETERS['eta'] == 0.05
     assert DEFAULT_HYPERPARAMETERS['random_state'] == 777
     assert DEFAULT_HYPERPARAMETERS['max_delta_step'] == 1
     assert DEFAULT_HYPERPARAMETERS['gamma'] == 0
