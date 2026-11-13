@@ -723,6 +723,10 @@ def _release_source(
     )
     source['ttd_stage_downgrades'] = str(tmp_path / 'stage_downgrades.tsv')
     source['ttd_link_corrections'] = str(tmp_path / 'link_corrections.tsv')
+    (tmp_path / 'indication_corrections.tsv').write_text(
+        'reportId\tdrugFromSource\tdiseaseFromSource\tdiseaseId\tcorrectedDiseaseId\treason\n'
+    )
+    source['chembl_indication_corrections'] = str(tmp_path / 'indication_corrections.tsv')
     return source
 
 
