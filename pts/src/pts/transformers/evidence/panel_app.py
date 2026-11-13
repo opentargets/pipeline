@@ -268,7 +268,6 @@ def panel_app(
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
         keep_acronyms=True,
-        spelling_variants=True,
     ).collect()
     run_evidence(
         raw.lazy(),

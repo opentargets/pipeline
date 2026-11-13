@@ -23,7 +23,7 @@ def add_efo_mapping(
     id_col_name: str | None = 'diseaseFromSourceId',
     *,
     keep_acronyms: bool = False,
-    spelling_variants: bool = False,
+    spelling_variants: bool = True,
 ) -> pl.LazyFrame:
     """Add `diseaseFromSourceMappedId`, the disease the evidence maps to, one row per mapping.
 
@@ -31,8 +31,8 @@ def add_efo_mapping(
     lookup table are given, the disease id with the id table too; the two sets of mappings are
     merged. Evidence with several mappings is exploded into one row each, and evidence without any
     is kept with a null mapping. Label mappings flagged as acronyms in the lookup table are dropped
-    unless `keep_acronyms` is set. With `spelling_variants`, evidence that neither its label nor its
-    id maps is retried with the label in American spelling and without bracketed single tokens.
+    unless `keep_acronyms` is set. Unless `spelling_variants` is off, evidence that neither its label nor
+    its id maps is retried with the label in American spelling and without bracketed single tokens.
     Identical evidence rows come out once.
 
     Args:
@@ -61,6 +61,7 @@ def add_efo_mapping(
         'label',
         type_col=pl.lit('DS'),
         include_entity_source=True,
+        spelling_variants=False,
     )
     all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId'))
     if keep_acronyms:

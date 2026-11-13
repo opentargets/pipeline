@@ -8,8 +8,8 @@ structs, the flags read from the lookup table; `non_acronym_ids` drops the flagg
 * **Identical input rows collapse into one.**
 * **Each label is tried in two spellings**, translated with and without accented letters, and
   the identifiers found for either are merged.
-* **With `spelling_variants`, a disease label that finds nothing is retried** in American spelling and
-  without bracketed single tokens. Off by default, so callers keep OnToma's behaviour unless they ask.
+* **A disease label that finds nothing is retried** in American spelling and without bracketed single
+  tokens, unless `spelling_variants` is off. Not an OnToma behaviour.
 * **No identifier means null, not an empty list.**
 * The identifier lists are sorted, and rows keep their input order.
 * **A label's NLP pipeline track is decided on the trimmed label**, here and in the lookup tables, so
@@ -156,7 +156,7 @@ def map_entities(
     *,
     include_normalised_entities: bool = False,
     include_entity_source: bool = False,
-    spelling_variants: bool = False,
+    spelling_variants: bool = True,
 ) -> pl.LazyFrame:
     """Map the labels or ids in a column to entity identifiers, as `OnToma.map_entities` does.
 

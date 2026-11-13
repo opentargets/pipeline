@@ -289,8 +289,7 @@ def map_entities(
             'label',
             type_col_name='entity_type',
             include_entity_source=True,
-            spelling_variants=True,
-        )
+            )
         .collect()
         .pipe(_disease_ids_with_acronym_flag)
     )

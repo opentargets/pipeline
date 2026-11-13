@@ -149,7 +149,6 @@ def gene2phenotype(
         parse_gene2phenotype([source[p] for p in PANELS]),
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
-        spelling_variants=True,
     ).collect()
     luts = build_luts(raw.lazy(), disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (

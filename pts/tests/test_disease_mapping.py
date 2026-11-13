@@ -338,8 +338,13 @@ def _map_variants(labels: list[str | None], **kwargs) -> list[list[str] | None]:
     return out.collect()['ids'].to_list()
 
 
-def test_spelling_variants_are_off_by_default() -> None:
-    assert _map_variants(['Chronic Myeloid Leukaemia', 'coronavirus disease 2019 (COVID-19)']) == [None, None]
+def test_spelling_variants_can_be_turned_off() -> None:
+    labels = ['Chronic Myeloid Leukaemia', 'coronavirus disease 2019 (COVID-19)']
+    assert _map_variants(labels, spelling_variants=False) == [None, None]
+
+
+def test_spelling_variants_are_on_by_default() -> None:
+    assert _map_variants(['Chronic Myeloid Leukaemia']) == [['MONDO_0011996']]
 
 
 @pytest.mark.parametrize(

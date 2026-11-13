@@ -132,7 +132,6 @@ def map_diseases(union: pl.DataFrame, disease_label_lut: str, disease_id_lut: st
         union.lazy(),
         disease_label_lut_path=disease_label_lut,
         disease_id_lut_path=disease_id_lut,
-        spelling_variants=True,
     ).collect()
     mapped_id, curated_id = pl.col(MAPPED_ID_COLUMN), pl.col(CURATED_ID_COLUMN)
     overridden = mapped_id.is_not_null() & curated_id.is_not_null() & (mapped_id != curated_id)
