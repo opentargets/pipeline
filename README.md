@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Open Targets Data Pipeline logo" width="480">
+</p>
+
 # Open Targets Data Pipeline
 
 Generates an Open Targets Data Release.
