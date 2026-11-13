@@ -1,6 +1,6 @@
 """Croissant distribution metadata for an Open Targets Platform data release."""
 
-from mlcroissant import FileObject, FileSet
+from mlcroissant import Context, FileObject, FileSet
 
 from ot_croissant.curation import DistributionCuration
 from ot_croissant.schema import partition_columns
@@ -12,7 +12,8 @@ class PlatformOutputDistribution:
     distribution: list[FileSet | FileObject]
     contained_in: list[str]
 
-    def __init__(self) -> None:
+    def __init__(self, ctx: Context | None = None) -> None:
+        self.ctx = ctx or Context()
         self.distribution = []
         self.contained_in = []
         self.curation = DistributionCuration()
@@ -23,12 +24,12 @@ class PlatformOutputDistribution:
         """Return the distribution metadata."""
         return self.distribution
 
-    def add_ftp_location(self, ftp_location: str | None, data_integrity_hash: str):
+    def add_ftp_location(self, ftp_location: str | None, data_integrity_hash: str | None):
         """Add the FTP location of the distribution IF ftp location is not None.
 
         Args:
             ftp_location: The FTP location of the distribution.
-            data_integrity_hash: The data integrity hash of the distribution.
+            data_integrity_hash: The sha256 of the distribution, or None if it has none.
 
         Returns:
             The PlatformOutputDistribution object.
@@ -36,6 +37,7 @@ class PlatformOutputDistribution:
         if ftp_location:
             self.distribution.append(
                 FileObject(
+                    ctx=self.ctx,
                     id='ftp-location',
                     name='FTP location',
                     description='FTP location of the Open Targets Platform data.',
@@ -48,10 +50,11 @@ class PlatformOutputDistribution:
 
         return self
 
-    def add_gcp_location(self, gcp_location: str, data_integrity_hash: str):
+    def add_gcp_location(self, gcp_location: str, data_integrity_hash: str | None):
         """Add the GCP location of the distribution."""
         self.distribution.append(
             FileObject(
+                ctx=self.ctx,
                 id='gcp-location',
                 name='GCP location',
                 description=('Location of the Open Targets Platform data in Google Cloud Storage.'),
@@ -63,12 +66,12 @@ class PlatformOutputDistribution:
         self.contained_in.append('gcp-location')
         return self
 
-    def add_aws_location(self, aws_location: str | None, data_integrity_hash: str):
+    def add_aws_location(self, aws_location: str | None, data_integrity_hash: str | None):
         """Add the AWS location of the distribution IF aws_location is not None.
 
         Args:
             aws_location: The AWS location of the distribution.
-            data_integrity_hash: The data integrity hash of the distribution.
+            data_integrity_hash: The sha256 of the distribution, or None if it has none.
 
         Returns:
             The PlatformOutputDistribution object.
@@ -76,6 +79,7 @@ class PlatformOutputDistribution:
         if aws_location:
             self.distribution.append(
                 FileObject(
+                    ctx=self.ctx,
                     id='aws-location',
                     name='AWS location',
                     description=('Location of the Open Targets Platform data in Amazon Web Services.'),
