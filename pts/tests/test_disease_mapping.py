@@ -11,6 +11,7 @@ from pts.transformers.ontoma_lut.build import build_lut
 from pts.transformers.utils.disease_mapping import map_entities
 from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids, read_entity_lut
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
+from pts.transformers.utils.disease_mapping.query import spelling_variant
 
 LUT_SCHEMA = {
     'entityKind': pl.String,
@@ -320,3 +321,72 @@ def test_non_acronym_ids() -> None:
     )
     out = pl.DataFrame({'s': structs}).select(non_acronym_ids(pl.col('s')))['s'].to_list()
     assert out == [['B'], None, ['C'], None, None]
+
+
+SPELLING_LUT = _lut([
+    ('label', 'DS', normalise_term('chronic myeloid leukemia'), [('MONDO_0011996', 'name')]),
+    ('label', 'DS', normalise_term('coronavirus disease 2019'), [('MONDO_0100096', 'name')]),
+    ('label', 'DS', normalise_term('diabetes'), [('EFO_0000400', 'name')]),
+    ('label', 'DS', normalise_term('anaemia'), [('EFO_BRITISH', 'exact_synonym')]),
+    ('label', 'DS', normalise_term('anemia'), [('EFO_AMERICAN', 'name')]),
+])
+
+
+def _map_variants(labels: list[str | None], **kwargs) -> list[list[str] | None]:
+    df = pl.DataFrame({'label': labels}, schema={'label': pl.String})
+    out = map_entities(df.lazy(), SPELLING_LUT.lazy(), 'ids', 'label', 'label', type_col=pl.lit('DS'), **kwargs)
+    return out.collect()['ids'].to_list()
+
+
+def test_spelling_variants_can_be_turned_off() -> None:
+    labels = ['Chronic Myeloid Leukaemia', 'coronavirus disease 2019 (COVID-19)']
+    assert _map_variants(labels, spelling_variants=False) == [None, None]
+
+
+def test_spelling_variants_are_on_by_default() -> None:
+    assert _map_variants(['Chronic Myeloid Leukaemia']) == [['MONDO_0011996']]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('Chronic Myeloid Leukaemia', ['MONDO_0011996']),
+        ('coronavirus disease 2019 (COVID-19)', ['MONDO_0100096']),
+        ('chronic myeloid leukaemia (CML)', ['MONDO_0011996']),
+    ],
+)
+def test_spelling_variants_map_british_spellings_and_bracketed_acronyms(label: str, expected: list[str]) -> None:
+    assert _map_variants([label], spelling_variants=True) == [expected]
+
+
+def test_spelling_variants_keep_brackets_of_several_words() -> None:
+    assert _map_variants(['diabetes (type 2)'], spelling_variants=True) == [None]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('(T2D) diabetes', '(T2D) diabetes'),
+        (' (CML) leukaemia', '(CML) leukemia'),
+        (') (COVID-19) infection', ') (COVID-19) infection'),
+        ('-insulin-dependent (type-2) diabetes', '-insulin-dependent (type-2) diabetes'),
+    ],
+)
+def test_spelling_variant_keeps_brackets_of_a_label_not_opening_with_a_word(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('peroxisome biogenesis disorder 13A (Zellweger) (biallelic)', 'peroxisome biogenesis disorder 13A'),
+        ('Chronic Otitis Media(COM) media', 'Chronic Otitis Media media'),
+        ('coronavirus disease 2019 (COVID-19)', 'coronavirus disease 2019'),
+    ],
+)
+def test_spelling_variant_removes_brackets_after_text(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
+
+
+def test_spelling_variants_are_only_tried_when_the_label_finds_nothing() -> None:
+    assert _map_variants(['anaemia', None, 'unknown disease'], spelling_variants=True) == [['EFO_BRITISH'], None, None]

@@ -4,7 +4,7 @@ Parses the PanelApp gene panels into evidence and post-processes it.
 Phenotype strings are cleaned and split with the spark step's regular expressions, rewritten for
 the Rust engine (`\d` as `[0-9]`, `$1` as `${1}`). Diseases are mapped with the OnToma lookup
 tables through `add_efo_mapping`, by label and by OMIM, Orphanet, HP or MONDO id, keeping acronym
-label mappings.
+label mappings and retrying the label of a disease neither maps in American spelling.
 """
 
 from __future__ import annotations

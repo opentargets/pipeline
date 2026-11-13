@@ -222,7 +222,8 @@ def map_entities(
 
     In order of precedence:
     1. ids already in `df`, then ids curated by ChEMBL for the study and label;
-    2. the disease and drug label dictionaries, for labels still without an id;
+    2. the disease and drug label dictionaries, for labels still without an id; a disease label that finds
+       nothing is retried in American spelling and without bracketed single tokens;
     3. drug NER, for drug labels still without an id: the staged names of the label mapped with the drug dictionary.
 
     A disease id the dictionary flags as acronym-only is kept only when another row of the same record has it
@@ -288,7 +289,7 @@ def map_entities(
             'label',
             type_col_name='entity_type',
             include_entity_source=True,
-        )
+            )
         .collect()
         .pipe(_disease_ids_with_acronym_flag)
     )

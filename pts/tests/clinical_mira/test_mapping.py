@@ -258,3 +258,15 @@ def test_logs_dropped_acronym_ids() -> None:
         logger.remove(sink)
     dropped = [m for m in messages if 'without report context' in m]
     assert dropped == ['dropped 3 acronym disease ids without report context']
+
+
+def test_disease_labels_are_retried_in_american_spelling() -> None:
+    disease = pl.DataFrame(
+        [('MONDO_0011996', 'chronic myeloid leukemia', 'd', [], [], [], [], [], [], [])],
+        schema=DISEASE_SCHEMA,
+        orient='row',
+    )
+    reports = _reports(('ttd1', 'aspirin', 'Chronic myeloid leukaemia (CML)', None, None))
+    mapped = map_entities(reports, disease, DRUG, None, STAGED_DRUG_ENTITIES)
+    expected = [('Chronic myeloid leukaemia (CML)', 'MONDO_0011996')]
+    assert mapped.select('diseaseFromSource', 'diseaseId').rows() == expected

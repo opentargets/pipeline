@@ -23,6 +23,7 @@ def add_efo_mapping(
     id_col_name: str | None = 'diseaseFromSourceId',
     *,
     keep_acronyms: bool = False,
+    spelling_variants: bool = True,
 ) -> pl.LazyFrame:
     """Add `diseaseFromSourceMappedId`, the disease the evidence maps to, one row per mapping.
 
@@ -30,7 +31,9 @@ def add_efo_mapping(
     lookup table are given, the disease id with the id table too; the two sets of mappings are
     merged. Evidence with several mappings is exploded into one row each, and evidence without any
     is kept with a null mapping. Label mappings flagged as acronyms in the lookup table are dropped
-    unless `keep_acronyms` is set. Identical evidence rows come out once.
+    unless `keep_acronyms` is set. Unless `spelling_variants` is off, evidence that neither its label nor
+    its id maps is retried with the label in American spelling and without bracketed single tokens.
+    Identical evidence rows come out once.
 
     Args:
         evidence: Evidence holding the disease label and, optionally, id columns.
@@ -39,13 +42,15 @@ def add_efo_mapping(
         disease_id_lut_path: OnToma disease id lookup table.
         id_col_name: Column holding the disease id.
         keep_acronyms: Keep label mappings flagged as acronyms.
+        spelling_variants: Retry the label of evidence left without any mapping
+            (`map_entities`' `spelling_variants`).
 
     Returns:
         The evidence with `diseaseFromSourceMappedId` added.
     """
     # the per-lookup results are working columns, kept clear of every evidence column
     prefix = temporary_prefix(evidence.collect_schema().names())
-    label_result, id_result = f'{prefix}label', f'{prefix}id'
+    label_result, id_result, retry_result = f'{prefix}label', f'{prefix}id', f'{prefix}retry'
 
     logger.info(f'load disease label lookup table from {disease_label_lut_path}')
     mapped = map_entities(
@@ -56,6 +61,7 @@ def add_efo_mapping(
         'label',
         type_col=pl.lit('DS'),
         include_entity_source=True,
+        spelling_variants=False,
     )
     all_ids = pl.col(label_result).list.eval(pl.element().struct.field('entityId'))
     if keep_acronyms:
@@ -79,6 +85,25 @@ def add_efo_mapping(
             type_col=pl.lit('DS'),
         )
         mapped_ids = pl.concat_list(mapped_ids, pl.col(id_result).fill_null([])).list.unique().list.sort()
+
+    if spelling_variants:
+        mapped = map_entities(
+            mapped,
+            read_entity_lut(disease_label_lut_path),
+            retry_result,
+            label_col_name,
+            'label',
+            type_col=pl.lit('DS'),
+            include_entity_source=True,
+            spelling_variants=True,
+        )
+        retry_structs = pl.col(retry_result)
+        retry_ids = (
+            retry_structs.list.eval(pl.element().struct.field('entityId')).list.unique().list.sort()
+            if keep_acronyms
+            else non_acronym_ids(retry_structs)
+        )
+        mapped_ids = pl.when(mapped_ids.list.len() > 0).then(mapped_ids).otherwise(retry_ids.fill_null([]))
 
     return (
         mapped
