@@ -443,8 +443,8 @@ steps:
         - pyspark baseline expression specificity gtex
 
   baseline_expression:
-    - name: pyspark baseline expression aggregated
-      pyspark: baseline_expression
+    - name: transform baseline_expression
+      transformer: baseline_expression
       source:
         baseline_expression: intermediate/baseline_expression
         target_index: output/target
@@ -455,7 +455,6 @@ steps:
         valid: output/baseline_expression
         failed: excluded/baseline_expression
       settings:
-        partition_count: 39
         aggregation: aggregated
         datasets:
           - GTEx/tissue
