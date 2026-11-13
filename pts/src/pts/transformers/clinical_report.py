@@ -9,6 +9,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.transformers.clinical_mira import (
+    ClinicalProvider,
     ClinicalReport,
     ClinicalReportType,
     ClinicalSource,
@@ -19,6 +20,10 @@ from pts.transformers.clinical_mira import (
     filter_df,
     map_entities,
     union_dfs,
+)
+from pts.transformers.clinical_mira.indication_corrections import (
+    apply_indication_corrections,
+    read_indication_corrections,
 )
 from pts.transformers.clinical_mira.mapping import require_staged
 from pts.transformers.clinical_mira.mining import mining_reports, read_mining_inputs, staged_lookup
@@ -124,6 +129,8 @@ def clinical_report(
     disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
     ttd_downgrades, ttd_corrections = read_ttd_curation(source['ttd_stage_downgrades'], source['ttd_link_corrections'])
+    chembl_corrections = read_indication_corrections(source['chembl_indication_corrections'])
+    ema_corrections = read_indication_corrections(source['ema_indication_corrections'])
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
@@ -194,6 +201,12 @@ def clinical_report(
         molecule_dictionary=chembl_molecule_dictionary,
         indication_refs=chembl_indication_references,
     )
+    chembl_indication_report = apply_indication_corrections(
+        chembl_indication_report,
+        chembl_corrections,
+        disease_ids=known_disease_ids(disease_index),
+        provider=ClinicalProvider.CHEMBL.value,
+    )
     chembl_drug_warning_report = extract_drug_warning_clinical_report(
         drug_warning=chembl_drug_warning,
         molecule_dictionary=chembl_molecule_dictionary,
@@ -224,6 +237,12 @@ def clinical_report(
             ttd_corrections,
             drug_ids=molecule_index['id'],
             disease_ids=known_disease_ids(disease_index),
+        )
+        .pipe(
+            apply_indication_corrections,
+            ema_corrections,
+            disease_ids=known_disease_ids(disease_index),
+            provider=ClinicalProvider.EMA.value,
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
         .pipe(create_title)

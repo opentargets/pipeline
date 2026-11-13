@@ -1,6 +1,6 @@
 [project]
 name = "PTS"
-version = "26.12.0rc57"
+version = "26.12.0rc63"
 description = "Open Targets Pipeline Transformation Stage"
 authors = [{ name = "Open Targets Core Team", email = "devs@opentargets.net" }]
 readme = "README.md"
@@ -21,6 +21,7 @@ dependencies = [
   "pixeltable-pgserver>=0.6,<0.7",
   "networkx>=3.6.1",
   "pybigwig>=0.3.24",
+  "pysam>=0.23",
   "scipy>=1.18.1",
 ]
 

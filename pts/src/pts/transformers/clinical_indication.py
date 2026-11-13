@@ -9,6 +9,7 @@ from otter.config.model import Config
 
 from pts.transformers.clinical_mira import ClinicalIndication
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.quality_flags import valid_rows
 
 
 def clinical_indication(
@@ -32,15 +33,7 @@ def clinical_indication(
     reports = scan_dataset(str(source)).collect()
 
     # Filter out clinical reports that fail QC
-    invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
-    if invalid_qc_reasons:
-        has_invalid_qc = (
-            pl.col('qualityControls').fill_null([]).list.set_intersection(invalid_qc_reasons).list.len() > 0
-        )
-        excluded = reports.filter(has_invalid_qc)
-        reports = reports.filter(~has_invalid_qc)
-    else:
-        excluded = reports.filter(pl.lit(False))
+    reports, excluded = valid_rows(reports, settings.get('invalid_clinical_report_qc', []))
 
     logger.info(f'Writing excluded clinical reports to {destination["excluded"]}')
     write_dataset(excluded, str(destination['excluded']))

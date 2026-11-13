@@ -1,0 +1,77 @@
+---
+description: Open Targets Genetics — eQTLGen single-cell eQTL and co-eQTL ingestion
+env: prod
+
+environments:
+  prod:
+    input:
+      # the SuSiE results provided by eQTLGen, at the top level of the bucket
+      eqtlgen: gs://eqtlgen_data/raw_data
+      # the platform run whose target index maps the co-eQTL gene symbols
+      platform_release: gs://open-targets-pipeline-runs/do/platform-2610-2
+    output: gs://eqtlgen_data/prod/20261103T135048
+    scratchpad:
+      # a gentropy git ref: the commit of opentargets/gentropy#1342 until it is released
+      gentropy_ref: 9f32c7fc76b06165c20f71e6a2cca046bb6713be
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/src/gentropy/cli.py
+    to: '{{output}}/bin/cli.py'
+
+infrastructure:
+  clusters:
+    otg-eqtlgen:
+      project_id: open-targets-genetics-dev
+      # a fixed cluster, with no secondary workers. The inputs are about 19 GB of plain
+      # TSVs: 132 single-cell eQTL files and 97 co-eQTL files
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 4
+      worker_machine_type: n2d-highmem-16
+      worker_disk_size: 256
+      idle_delete_ttl: 1800
+      metadata:
+        GENTROPY_REF: '{{gentropy_ref}}'
+      properties:
+        # as the gentropy clusters of the unified pipeline
+        'spark:spark.shuffle.service.enabled': 'true'
+        'spark:spark.sql.adaptive.enabled': 'true'
+        'spark:spark.sql.parquet.compression.codec': 'zstd'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  single_cell_eqtl:
+    kind: dataproc
+    definition:
+      cluster: otg-eqtlgen
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=eqtlgen_ingestion \
+          step.dataset=single_cell_eqtl \
+          "step.finemapping_files={{input.eqtlgen}}/finemap_*/*.txt" \
+          step.study_index_output_path={{output}}/output/single_cell_eqtl/study \
+          step.credible_set_output_path={{output}}/output/single_cell_eqtl/credible_set \
+          step.credible_set_variant_output_path={{output}}/output/single_cell_eqtl/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=10 \
+          step.session.spark_uri=yarn
+
+  coeqtl:
+    kind: dataproc
+    definition:
+      cluster: otg-eqtlgen
+      main: '{{output}}/bin/cli.py'
+      args: |
+        step=eqtlgen_ingestion \
+          step.dataset=coeqtl \
+          "step.finemapping_files={{input.eqtlgen}}/joint_co_eQTL_fine_mapping_*/*.txt" \
+          step.target_index_path={{input.platform_release}}/output/target \
+          step.study_index_output_path={{output}}/output/coeqtl/study \
+          step.credible_set_output_path={{output}}/output/coeqtl/credible_set \
+          step.credible_set_variant_output_path={{output}}/output/coeqtl/credible_set_variant \
+          step.session.write_mode=overwrite \
+          step.session.output_partitions=10 \
+          step.session.spark_uri=yarn

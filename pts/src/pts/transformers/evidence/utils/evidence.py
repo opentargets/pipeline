@@ -387,6 +387,10 @@ class Evidence:
     def valid(self) -> pl.LazyFrame:
         """Evidence with an empty `qualityControls` list.
 
+        Every flag excludes evidence, so this does not use `valid_rows`, which excludes only the
+        flags it is given. A datasource's input can bring its own `qualityControls` values that
+        are not `EvidenceFlags` members, and those exclude the evidence too.
+
         Returns:
             LazyFrame filtered to evidence that passed every validation.
         """

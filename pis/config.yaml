@@ -24,7 +24,7 @@ scratchpad:
   depmap_version: '2026Q3'
   hpo_version: '2026-09-01'
   mondo_version: '2026-10-06'
-  ot_curation: '26.11.2'
+  ot_curation: '26.11.4'
   schema_release: '2026-07-15'
   bipex_release: '2026-08-07'
   probes_drugs_version: '01_2026'
@@ -157,7 +157,6 @@ steps:
       each_placeholder: dataset
       foreach:
         - GTEx/tissue
-        - PRIDE/tissue
         - tabula_sapiens/celltype
         - tabula_sapiens/tissue
         - tabula_sapiens/tissue_celltype
@@ -169,6 +168,10 @@ steps:
           # - name: copy processed ${dataset} unaggregated expression
           #   source: gs://baseline_expression/processed/unaggregated/${dataset}/parquet
           #   destination: intermediate/baseline_expression/unaggregated/${dataset}/parquet
+
+    - name: copy_many processed PRIDE/tissue aggregated expression
+      sources: gs://baseline_expression/processed/aggregated/PRIDE/tissue/parquet/*-dd5db394-*.parquet
+      destination: intermediate/baseline_expression/aggregated/PRIDE/tissue/parquet
 
     - name: explode parent mapping
       foreach:
@@ -398,10 +401,12 @@ steps:
         - gs://clinical_staging/clinical_mining/${staging_version}/disease_entities/${disease_entities_tag}/metadata.json
       destination: input/clinical_report/mining_disease_entities
 
-    - name: explode ot_curation ttd files
+    - name: explode ot_curation clinical files
       foreach:
         - clinical/ttd/stage_downgrades.tsv
         - clinical/ttd/link_corrections.tsv
+        - clinical/chembl/indication_corrections.tsv
+        - clinical/ema/indication_corrections.tsv
       do:
         - name: copy ${each}
           source: https://raw.githubusercontent.com/opentargets/curation/refs/tags/${ot_curation}/${each}

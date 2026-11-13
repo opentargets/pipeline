@@ -443,8 +443,8 @@ steps:
         - pyspark baseline expression specificity gtex
 
   baseline_expression:
-    - name: pyspark baseline expression aggregated
-      pyspark: baseline_expression
+    - name: transform baseline_expression
+      transformer: baseline_expression
       source:
         baseline_expression: intermediate/baseline_expression
         target_index: output/target
@@ -455,7 +455,6 @@ steps:
         valid: output/baseline_expression
         failed: excluded/baseline_expression
       settings:
-        partition_count: 39
         aggregation: aggregated
         datasets:
           - GTEx/tissue
@@ -1151,6 +1150,8 @@ steps:
         mining_disease_entities: input/clinical_report/mining_disease_entities
         ttd_stage_downgrades: input/ot_curation/clinical/ttd/stage_downgrades.tsv
         ttd_link_corrections: input/ot_curation/clinical/ttd/link_corrections.tsv
+        chembl_indication_corrections: input/ot_curation/clinical/chembl/indication_corrections.tsv
+        ema_indication_corrections: input/ot_curation/clinical/ema/indication_corrections.tsv
       destination:
         output: output/clinical_report
   ##################################################################################################
@@ -1601,10 +1602,9 @@ steps:
         l2g_table: output/l2g_prediction
         biosample: output/biosample
       destination:
-        vep_data_header: intermediate/vep_view/vep_view_header.tsv
-        vep_data_all: intermediate/vep_view/vep_view
-        vep_data_gwas: intermediate/vep_view/vep_view_gwas
-        vep_data_qtl: intermediate/vep_view/vep_view_qtl
+        vep_data_all: etc/export/vep_data/open_targets_vep.tsv.bgz
+        vep_data_gwas: etc/export/vep_data/open_targets_vep_gwas.tsv.bgz
+        vep_data_qtl: etc/export/vep_data/open_targets_vep_qtl.tsv.bgz
   ##################################################################################################
 
   #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
