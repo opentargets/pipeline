@@ -204,7 +204,7 @@ def clinical_report(
     chembl_indication_report = apply_indication_corrections(
         chembl_indication_report,
         chembl_corrections,
-        disease_ids=known_disease_ids(disease_index),
+        disease_index=disease_index.select('id', 'obsoleteTerms'),
         provider=ClinicalProvider.CHEMBL.value,
     )
     chembl_drug_warning_report = extract_drug_warning_clinical_report(
@@ -241,7 +241,7 @@ def clinical_report(
         .pipe(
             apply_indication_corrections,
             ema_corrections,
-            disease_ids=known_disease_ids(disease_index),
+            disease_index=disease_index.select('id', 'obsoleteTerms'),
             provider=ClinicalProvider.EMA.value,
         )
         .pipe(validate_disease, disease_index=disease_index.select('id', 'obsoleteTerms'))
