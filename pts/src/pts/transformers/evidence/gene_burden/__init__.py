@@ -2,6 +2,7 @@
 
 Parses every sub-source into one union, maps diseases with the OnToma lookup tables through
 `add_efo_mapping`, by label and by id, falling back to the id the source gives, and post-processes it.
+The label of a disease neither maps is retried in American spelling and without its field code.
 """
 
 from __future__ import annotations
@@ -128,7 +129,10 @@ def map_diseases(union: pl.DataFrame, disease_label_lut: str, disease_id_lut: st
     and logged.
     """
     mapped = add_efo_mapping(
-        union.lazy(), disease_label_lut_path=disease_label_lut, disease_id_lut_path=disease_id_lut
+        union.lazy(),
+        disease_label_lut_path=disease_label_lut,
+        disease_id_lut_path=disease_id_lut,
+        spelling_variants=True,
     ).collect()
     mapped_id, curated_id = pl.col(MAPPED_ID_COLUMN), pl.col(CURATED_ID_COLUMN)
     overridden = mapped_id.is_not_null() & curated_id.is_not_null() & (mapped_id != curated_id)

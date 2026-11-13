@@ -103,12 +103,15 @@ BRITISH_TO_AMERICAN = (
     (r'(?i)colour', 'color'),
     (r'(?i)isation', 'ization'),
 )
-#: A bracketed single token, such as an acronym: `(COVID-19)` but not `(type 2)`.
-_BRACKETED_WORD = r'\s*\([^\s()]{1,12}\)'
+#: Bracketed single tokens after a letter or digit, such as an acronym: `(COVID-19)` but not `(type 2)`.
+_BRACKETED_WORD = r'(\w)((?:\s*\([^\s()]{1,12}\))+)'
+#: A label that starts with a letter or digit, the only kind whose bracketed tokens are removed.
+_STARTS_WITH_WORD = r'^\s*\w'
 
 
 def spelling_variant(label: pl.Expr) -> pl.Expr:
     """The label in American spelling, without bracketed single tokens; equal to the label when neither applies."""
     for pattern, replacement in BRITISH_TO_AMERICAN:
         label = label.str.replace_all(pattern, replacement)
-    return label.str.replace_all(_BRACKETED_WORD, '').str.strip_chars()
+    unbracketed = label.str.replace_all(_BRACKETED_WORD, '${1}')
+    return pl.when(label.str.contains(_STARTS_WITH_WORD)).then(unbracketed).otherwise(label).str.strip_chars()

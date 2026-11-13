@@ -2,7 +2,7 @@
 
 Parses the Gene2Phenotype panels into evidence and post-processes it.
 Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by
-MONDO or OMIM id.
+MONDO or OMIM id, retrying the label of a disease neither maps in American spelling.
 """
 
 from __future__ import annotations
@@ -149,6 +149,7 @@ def gene2phenotype(
         parse_gene2phenotype([source[p] for p in PANELS]),
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
+        spelling_variants=True,
     ).collect()
     luts = build_luts(raw.lazy(), disease=source['disease'], target=source['target'], literature=source['literature'])
     evidence = (

@@ -11,6 +11,7 @@ from pts.transformers.ontoma_lut.build import build_lut
 from pts.transformers.utils.disease_mapping import map_entities
 from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids, read_entity_lut
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
+from pts.transformers.utils.disease_mapping.query import spelling_variant
 
 LUT_SCHEMA = {
     'entityKind': pl.String,
@@ -355,6 +356,31 @@ def test_spelling_variants_map_british_spellings_and_bracketed_acronyms(label: s
 
 def test_spelling_variants_keep_brackets_of_several_words() -> None:
     assert _map_variants(['diabetes (type 2)'], spelling_variants=True) == [None]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('(T2D) diabetes', '(T2D) diabetes'),
+        (' (CML) leukaemia', '(CML) leukemia'),
+        (') (COVID-19) infection', ') (COVID-19) infection'),
+        ('-insulin-dependent (type-2) diabetes', '-insulin-dependent (type-2) diabetes'),
+    ],
+)
+def test_spelling_variant_keeps_brackets_of_a_label_not_opening_with_a_word(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('peroxisome biogenesis disorder 13A (Zellweger) (biallelic)', 'peroxisome biogenesis disorder 13A'),
+        ('Chronic Otitis Media(COM) media', 'Chronic Otitis Media media'),
+        ('coronavirus disease 2019 (COVID-19)', 'coronavirus disease 2019'),
+    ],
+)
+def test_spelling_variant_removes_brackets_after_text(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
 
 
 def test_spelling_variants_are_only_tried_when_the_label_finds_nothing() -> None:
