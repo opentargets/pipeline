@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise
+from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise, colocalise_tags
 from pts.pyspark.colocalisation_utils.overlap import aligned_tags, overlapping_pairs, tags
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
@@ -47,12 +47,17 @@ def colocalisation(
     )
 
     all_tags = tags(credible_set, credible_set_variant).persist()
-    pairs = overlapping_pairs(all_tags).persist()
-    result = colocalise(aligned_tags(all_tags, pairs), **priors)
+    pairs = None
+    if settings.get('algorithm', 'shared') == 'aligned':
+        pairs = overlapping_pairs(all_tags).persist()
+        result = colocalise(aligned_tags(all_tags, pairs), **priors)
+    else:
+        result = colocalise_tags(all_tags, **priors)
 
     logger.info(f'write colocalisation to {destination["colocalisation"]}')
     maybe_coalesce(result, settings.get('output_partitions')).write.mode('overwrite').parquet(
         destination['colocalisation']
     )
-    pairs.unpersist()
+    if pairs is not None:
+        pairs.unpersist()
     all_tags.unpersist()

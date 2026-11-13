@@ -38,6 +38,41 @@ def tags(credible_set: DataFrame, credible_set_variant: DataFrame) -> DataFrame:
     )
 
 
+def overlapping_tags(tags: DataFrame) -> DataFrame:
+    """Join the tags of each GWAS locus to the tags of the loci it overlaps, on the shared variant.
+
+    The left locus is a GWAS. A right locus is any molecular trait locus, or a GWAS locus with a
+    smaller id.
+
+    Args:
+        tags: The output of `tags`.
+
+    Returns:
+        One row per pair and shared tag variant: `leftLocusId`, `rightLocusId`, `rightStudyType`,
+        `chromosome`, `tagVariantId`, and `left_` and `right_` `posteriorProbability` and `beta`.
+    """
+    left = tags.alias('left')
+    right = tags.alias('right')
+    return left.join(
+        right,
+        on=[
+            f.col('left.chromosome') == f.col('right.chromosome'),
+            f.col('left.tagVariantId') == f.col('right.tagVariantId'),
+            (f.col('right.studyType') != 'gwas') | (f.col('left.locusId') > f.col('right.locusId')),
+            f.col('left.studyType') == f.lit('gwas'),
+        ],
+        how='inner',
+    ).select(
+        f.col('left.locusId').alias('leftLocusId'),
+        f.col('right.locusId').alias('rightLocusId'),
+        f.col('right.studyType').alias('rightStudyType'),
+        f.col('left.chromosome').alias('chromosome'),
+        f.col('left.tagVariantId').alias('tagVariantId'),
+        *[f.col(f'left.{c}').alias(f'left_{c}') for c in _STATISTICS],
+        *[f.col(f'right.{c}').alias(f'right_{c}') for c in _STATISTICS],
+    )
+
+
 def overlapping_pairs(tags: DataFrame) -> DataFrame:
     """Find the pairs of loci that share a tag variant on a chromosome.
 
