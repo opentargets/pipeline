@@ -1151,6 +1151,7 @@ steps:
         ttd_stage_downgrades: input/ot_curation/clinical/ttd/stage_downgrades.tsv
         ttd_link_corrections: input/ot_curation/clinical/ttd/link_corrections.tsv
         chembl_indication_corrections: input/ot_curation/clinical/chembl/indication_corrections.tsv
+        ema_indication_corrections: input/ot_curation/clinical/ema/indication_corrections.tsv
       destination:
         output: output/clinical_report
   ##################################################################################################

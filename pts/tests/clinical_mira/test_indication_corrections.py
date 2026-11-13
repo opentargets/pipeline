@@ -1,12 +1,15 @@
-"""Tests for the curated fixes to ChEMBL indication reports."""
+"""Tests for the curated fixes to the diseases of indication reports."""
 
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from pts.transformers.clinical_mira import ClinicalReport
-from pts.transformers.clinical_mira.chembl_curation import apply_chembl_curation, read_chembl_curation
+from pts.transformers.clinical_mira import ClinicalProvider, ClinicalReport
+from pts.transformers.clinical_mira.indication_corrections import (
+    apply_indication_corrections,
+    read_indication_corrections,
+)
 from pts.transformers.clinical_mira.providers.chembl_indications import extract_clinical_report
 
 HEADER = 'reportId\tdrugFromSource\tdiseaseFromSource\tdiseaseId\tcorrectedDiseaseId\treason'
@@ -42,8 +45,10 @@ def _reports() -> ClinicalReport:
 
 def _apply(tmp_path: Path, rows: list[str]) -> pl.DataFrame:
     (tmp_path / 'c.tsv').write_text('\n'.join([HEADER, *rows]) + '\n')
-    corrections = read_chembl_curation(str(tmp_path / 'c.tsv'))
-    return apply_chembl_curation(_reports(), corrections, disease_ids=DISEASE_IDS).df
+    corrections = read_indication_corrections(str(tmp_path / 'c.tsv'))
+    return apply_indication_corrections(
+        _reports(), corrections, disease_ids=DISEASE_IDS, provider=ClinicalProvider.CHEMBL.value
+    ).df
 
 
 def _diseases(df: pl.DataFrame, report_id: str) -> list[str]:
@@ -85,6 +90,7 @@ def test_unknown_replacement_id_is_refused(tmp_path: Path) -> None:
     ('rows', 'message'),
     [
         ([f'{LABEL}\tx\tanemia\tMONDO_0002280\t\tr'], 'need reportId'),
+        ([f'{LABEL}\tx\tanemia\t\tunmapped\tr'], 'remove without a diseaseId'),
         ([f'{LABEL}\tx\tanemia\tMONDO_0002280\tunmapped\tr', f'{LABEL.upper()}\ty\tAnemia\tMONDO_0002280\tunmapped\ts'],
          'duplicate keys'),
     ],
@@ -92,4 +98,23 @@ def test_unknown_replacement_id_is_refused(tmp_path: Path) -> None:
 def test_invalid_files_are_refused(tmp_path: Path, rows: list[str], message: str) -> None:
     (tmp_path / 'c.tsv').write_text('\n'.join([HEADER, *rows]) + '\n')
     with pytest.raises(ValueError, match=message):
-        read_chembl_curation(str(tmp_path / 'c.tsv'))
+        read_indication_corrections(str(tmp_path / 'c.tsv'))
+
+
+def test_addition_appends_a_disease_once(tmp_path: Path) -> None:
+    out = _apply(
+        tmp_path,
+        [f'{OTHER}\tx\tAnemia Of Something\t\tMONDO_0001046\tr', f'{LABEL}\tx\tosteosarcoma\t\tEFO_0000637\tr'],
+    )
+    added = [d for d in out.filter(pl.col('id') == OTHER)['diseases'].item() if d['diseaseId'] == 'MONDO_0001046']
+    assert added == [{'diseaseFromSource': 'anemia of something', 'diseaseId': 'MONDO_0001046'}]
+    assert _diseases(out, LABEL) == ['EFO_0000637', 'EFO_0005842', 'MONDO_0002280']
+
+
+def test_other_providers_are_untouched(tmp_path: Path) -> None:
+    (tmp_path / 'c.tsv').write_text('\n'.join([HEADER, f'{OTHER}\tx\tanemia\tMONDO_0002280\tunmapped\tr']) + '\n')
+    corrections = read_indication_corrections(str(tmp_path / 'c.tsv'))
+    out = apply_indication_corrections(
+        _reports(), corrections, disease_ids=DISEASE_IDS, provider=ClinicalProvider.EMA.value
+    ).df
+    assert _diseases(out, OTHER) == ['MONDO_0002280']

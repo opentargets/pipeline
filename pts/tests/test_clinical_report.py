@@ -727,6 +727,7 @@ def _release_source(
         'reportId\tdrugFromSource\tdiseaseFromSource\tdiseaseId\tcorrectedDiseaseId\treason\n'
     )
     source['chembl_indication_corrections'] = str(tmp_path / 'indication_corrections.tsv')
+    source['ema_indication_corrections'] = str(tmp_path / 'indication_corrections.tsv')
     return source
 
 
