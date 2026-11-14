@@ -22,3 +22,19 @@ def association_schema(evidence_count_dtype: pl.DataType) -> pl.Schema:
         ),
         'currentNovelty': pl.Float64(),
     })
+
+
+def association_otf_schema() -> pl.Schema:
+    """The association_otf output: one row per evidence with its disease and target labels and novelties."""
+    return pl.Schema({
+        'rowId': pl.String(),
+        'diseaseId': pl.String(),
+        'targetId': pl.String(),
+        'datasourceId': pl.String(),
+        'datatypeId': pl.String(),
+        'rowScore': pl.Float64(),
+        'diseaseData': pl.String(),
+        'targetData': pl.String(),
+        'noveltyDirect': pl.Float64(),
+        'noveltyIndirect': pl.Float64(),
+    })
