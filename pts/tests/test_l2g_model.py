@@ -6,6 +6,7 @@ import pytest
 
 from pts.transformers.l2g.model import (
     DEFAULT_HYPERPARAMETERS,
+    association_unit_weights,
     evaluate,
     fit,
     load_model,
@@ -13,6 +14,7 @@ from pts.transformers.l2g.model import (
     save_model,
     to_labels,
     to_matrix,
+    top_one_accuracy,
 )
 
 
@@ -82,18 +84,86 @@ def test_evaluate_reports_the_seven_metrics(separable) -> None:
         'accuracy',
         'weightedPrecision',
         'averagePrecision',
-        'averagePrecisionFromScores',
+        'averagePrecisionFromLabels',
         'weightedRecall',
         'f1',
     }
     assert metrics['accuracy'] == pytest.approx(1.0)
 
 
-def test_average_precision_and_average_precision_from_scores_differ(overlapping) -> None:
+def test_average_precision_is_computed_from_scores_as_gentropy_does(overlapping) -> None:
+    """gentropy#1283 moved `averagePrecision` to the scores; the hard-label value is kept apart."""
+    from sklearn.metrics import average_precision_score
+
     x, y = overlapping
     model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
     metrics = evaluate(model, x, y)
-    assert metrics['averagePrecision'] != metrics['averagePrecisionFromScores']
+    assert metrics['averagePrecision'] == pytest.approx(average_precision_score(y, model.predict_proba(x)[:, 1]))
+    assert metrics['averagePrecisionFromLabels'] == pytest.approx(average_precision_score(y, model.predict(x)))
+    assert metrics['averagePrecision'] != metrics['averagePrecisionFromLabels']
+
+
+def test_association_unit_weights_keep_small_units_and_damp_large_ones() -> None:
+    """min(1, sqrt(5 / n)): a unit of 2 keeps full weight, a unit of 20 gets sqrt(5 / 20) = 0.5."""
+    frame = pl.DataFrame({
+        'credibleSetId': ['a', 'b'] + [f'r{i}' for i in range(20)],
+        'associationUnitId': ['small', 'small'] + ['large'] * 20,
+    })
+    weights = association_unit_weights(frame)
+    assert weights.mean() == pytest.approx(1.0)
+    assert weights[0] / weights[2] == pytest.approx(2.0)
+
+
+def test_association_unit_weights_with_k_none_count_each_unit_once() -> None:
+    frame = pl.DataFrame({
+        'credibleSetId': ['a', 'a', 'b', 'b', 'b', 'c', 'd', 'd'],
+        'associationUnitId': ['u1', 'u1', 'u1', 'u1', 'u1', 'u1', 'u2', 'u2'],
+    })
+    weights = association_unit_weights(frame, None)
+    assert weights.mean() == pytest.approx(1.0)
+    per_locus = dict(zip(frame['credibleSetId'], weights, strict=True))
+    assert per_locus['a'] + per_locus['b'] + per_locus['c'] == pytest.approx(per_locus['d'])
+
+
+def test_association_unit_weights_with_k_none_match_gentropy_example() -> None:
+    """The doctest of gentropy `LocusToGeneTrainer.association_unit_weights` (gentropy#1314), which uses 1/n."""
+    frame = pl.DataFrame({
+        'credibleSetId': ['cs1', 'cs1', 'cs2', 'cs2', 'cs3', 'cs3'],
+        'associationUnitId': ['u1', 'u1', 'u1', 'u1', 'u2', 'u2'],
+    })
+    assert association_unit_weights(frame, None).round(2).tolist() == [0.75, 0.75, 0.75, 0.75, 1.5, 1.5]
+
+
+def test_a_credible_set_without_a_unit_is_its_own_unit() -> None:
+    frame = pl.DataFrame(
+        {'credibleSetId': ['a', 'b'], 'associationUnitId': [None, None]},
+        schema={'credibleSetId': pl.String, 'associationUnitId': pl.String},
+    )
+    assert association_unit_weights(frame).tolist() == [1.0, 1.0]
+
+
+def test_top_one_accuracy_counts_positives_ranked_first() -> None:
+    ids = ['a', 'a', 'b', 'b']
+    y = np.array([1, 0, 1, 0])
+    scores = np.array([0.9, 0.1, 0.2, 0.8])
+    assert top_one_accuracy(ids, y, scores) == pytest.approx(0.5)
+    assert top_one_accuracy(ids, y, scores, np.array([3.0, 3.0, 1.0, 1.0])) == pytest.approx(0.75)
+
+
+def test_evaluate_applies_the_sample_weights(overlapping) -> None:
+    x, y = overlapping
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    weights = np.where(np.arange(len(y)) % 2 == 0, 5.0, 1.0)
+    assert evaluate(model, x, y)['averagePrecision'] != evaluate(model, x, y, weights)['averagePrecision']
+
+
+def test_fit_uses_the_sample_weights(overlapping) -> None:
+    x, y = overlapping
+    hyperparameters = {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7}
+    weights = np.where(y == 1, 5.0, 1.0)
+    unweighted = fit(x, y, hyperparameters).predict_proba(x)[:, 1]
+    weighted = fit(x, y, hyperparameters, weights).predict_proba(x)[:, 1]
+    assert not np.allclose(unweighted, weighted)
 
 
 def test_save_and_load_round_trip(separable, tmp_path) -> None:

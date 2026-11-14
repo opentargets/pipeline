@@ -22,6 +22,7 @@ from sklearn.metrics import (
 from xgboost import XGBClassifier
 
 from pts.transformers.l2g.gold_standard import LABEL_COLUMN
+from pts.transformers.l2g.split import UNIT_COLUMN
 
 DEFAULT_HYPERPARAMETERS: dict[str, Any] = {
     'objective': 'binary:logistic',
@@ -68,53 +69,123 @@ def to_labels(frame: pl.DataFrame, column: str = LABEL_COLUMN) -> np.ndarray:
     return frame[column].to_numpy().astype(np.int32)
 
 
-def fit(x: np.ndarray, y: np.ndarray, hyperparameters: dict[str, Any]) -> XGBClassifier:
+def fit(
+    x: np.ndarray,
+    y: np.ndarray,
+    hyperparameters: dict[str, Any],
+    sample_weight: np.ndarray | None = None,
+) -> XGBClassifier:
     """Fit the classifier.
 
     Args:
         x: feature matrix.
         y: integer labels.
         hyperparameters: passed straight to `XGBClassifier`.
+        sample_weight: one weight per row, or None to fit unweighted.
 
     Returns:
         The fitted classifier.
     """
     model = XGBClassifier(**hyperparameters)
-    model.fit(X=x, y=y)
+    model.fit(X=x, y=y, sample_weight=sample_weight)
     return model
 
 
-def evaluate(model: XGBClassifier, x: np.ndarray, y: np.ndarray) -> dict[str, float]:
-    """Evaluate a fitted model, reporting the six metrics gentropy reports plus one it should.
+DEFAULT_UNIT_WEIGHT_K = 5.0
+"""Credible sets per association unit counted at full weight; see `association_unit_weights`."""
 
-    `averagePrecision` is computed exactly as gentropy's `L2GTrainer.evaluate` computes it -- from
-    the hard 0/1 predictions, not from scores -- purely so it stays comparable with the average
-    precision values already recorded from earlier runs (e.g. in W&B). Average precision
-    conventionally takes continuous scores rather than hard labels; `averagePrecisionFromScores`
-    reports that conventional form. On the real 26.09-2 test split, with the released model, the two
-    differ by roughly 0.15 (0.781 vs 0.934) -- they must never be conflated, or a future edit that
-    silently redefines `averagePrecision` would read as a 15-point model improvement instead of a
-    formula change.
+
+def association_unit_weights(frame: pl.DataFrame, k: float | None = DEFAULT_UNIT_WEIGHT_K) -> np.ndarray:
+    """Down-weight credible sets that repeat the same association.
+
+    The same association is fine-mapped in many studies, so the labelled set repeats near-identical
+    credible sets. With n credible sets in a unit, each gets min(1, sqrt(k / n)): units of up to k
+    credible sets keep full weight and larger ones are down-weighted gently, so a unit of 50 counts
+    about 3 times one credible set rather than 50 times. `k=None` gives 1/n, so each unit counts
+    once, as in gentropy `LocusToGeneTrainer.association_unit_weights` (opentargets/gentropy#1314).
+    On the 26.09 labels 1/n raised scores of far genes with no functional evidence and moved feature
+    importance to gene density and E2G, while min(1, sqrt(5 / n)) kept the full feature-matrix
+    score distribution and feature importance close to the unweighted model.
+
+    All candidate-gene rows of a credible set share its weight. The weights are rescaled to a mean of
+    1 over rows, so `min_child_weight` keeps its meaning. A credible set without a unit is its own
+    unit.
+
+    Args:
+        frame: rows with `credibleSetId` and `associationUnitId`.
+        k: credible sets per unit counted at full weight, or None for 1/n.
+
+    Returns:
+        One `float64` weight per row, in row order.
+    """
+    unit = pl.col(UNIT_COLUMN).fill_null(pl.col('credibleSetId'))
+    n = frame.select(pl.col('credibleSetId').n_unique().over(unit).cast(pl.Float64).alias('n'))['n'].to_numpy()
+    weights = 1.0 / n if k is None else np.minimum(1.0, np.sqrt(k / n))
+    return weights / weights.mean()
+
+
+def top_one_accuracy(
+    credible_set_ids: Sequence[str], y: np.ndarray, scores: np.ndarray, sample_weight: np.ndarray | None = None
+) -> float:
+    """Share of positives that score highest among the genes of their credible set.
+
+    Args:
+        credible_set_ids: credible set of each row.
+        y: true integer labels.
+        scores: predicted probabilities of the positive class.
+        sample_weight: one weight per row, or None for equal weights.
+
+    Returns:
+        The weighted share of positive rows ranked first in their credible set.
+    """
+    frame = pl.DataFrame({'cs': list(credible_set_ids), 'y': y, 's': scores})
+    first = frame.select(pl.col('s').rank('ordinal', descending=True).over('cs') == 1)['s'].to_numpy()
+    positive = y == 1
+    weights = None if sample_weight is None else sample_weight[positive]
+    return float(np.average(first[positive], weights=weights))
+
+
+def evaluate(
+    model: XGBClassifier,
+    x: np.ndarray,
+    y: np.ndarray,
+    sample_weight: np.ndarray | None = None,
+    credible_set_ids: Sequence[str] | None = None,
+) -> dict[str, float]:
+    """Evaluate a fitted model.
+
+    `averagePrecision` is computed from the predicted scores, as gentropy computes it since
+    opentargets/gentropy#1283. Before that change both gentropy and this module computed it from the
+    hard 0/1 predictions, which gives one interior point on the precision-recall curve and an area
+    far below the model's real value (0.485 vs 0.709 on the 2612-2 test split). That old value is
+    still reported as `averagePrecisionFromLabels`, so it can be compared with metrics recorded
+    before the change (W&B runs, 26.09 and earlier `metrics.json`).
 
     Args:
         model: a fitted classifier.
         x: feature matrix.
         y: true integer labels.
+        sample_weight: one weight per row applied to every metric, or None for equal weights.
+        credible_set_ids: credible set of each row; when given, `topOneAccuracy` is added.
 
     Returns:
         Metric name to value.
     """
     predicted = model.predict(x)
-    probabilities = model.predict_proba(x)
-    return {
-        'areaUnderROC': float(roc_auc_score(y, probabilities[:, 1], average='weighted')),
-        'accuracy': float(accuracy_score(y, predicted)),
-        'weightedPrecision': float(precision_score(y, predicted, average='weighted', zero_division=0)),
-        'averagePrecision': float(average_precision_score(y, predicted, average='weighted')),
-        'averagePrecisionFromScores': float(average_precision_score(y, probabilities[:, 1], average='weighted')),
-        'weightedRecall': float(recall_score(y, predicted, average='weighted', zero_division=0)),
-        'f1': float(f1_score(y, predicted, average='weighted', zero_division=0)),
+    scores = model.predict_proba(x)[:, 1]
+    w = sample_weight
+    metrics = {
+        'areaUnderROC': float(roc_auc_score(y, scores, average='weighted', sample_weight=w)),
+        'accuracy': float(accuracy_score(y, predicted, sample_weight=w)),
+        'weightedPrecision': float(precision_score(y, predicted, average='weighted', zero_division=0, sample_weight=w)),
+        'averagePrecision': float(average_precision_score(y, scores, sample_weight=w)),
+        'averagePrecisionFromLabels': float(average_precision_score(y, predicted, sample_weight=w)),
+        'weightedRecall': float(recall_score(y, predicted, average='weighted', zero_division=0, sample_weight=w)),
+        'f1': float(f1_score(y, predicted, average='weighted', zero_division=0, sample_weight=w)),
     }
+    if credible_set_ids is not None:
+        metrics['topOneAccuracy'] = top_one_accuracy(credible_set_ids, y, scores, w)
+    return metrics
 
 
 def save_model(model: Any, path: str) -> None:
