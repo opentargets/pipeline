@@ -51,6 +51,7 @@ class ClinicalSource(str, Enum):
     EMA_HUMAN_DRUGS = 'EMA Human Drugs'
     TTD = 'TTD'
     PMDA = 'PMDA'
+    DRUGS_AT_FDA = 'Drugs@FDA'
 
 
 CLINICALTRIALS_URL = 'https://clinicaltrials.gov/study/'
@@ -90,6 +91,7 @@ class ClinicalProvider(str, Enum):
     AACT = 'AACT'
     CHEMBL = 'ChEMBL'
     EMA = 'EMA'
+    FDA = 'FDA'
     PMDA = 'PMDA'
     TTD = 'TTD'
 
@@ -107,6 +109,7 @@ class ClinicalProvider(str, Enum):
             cls.AACT.value: {ClinicalSource.CLINICAL_TRIALS_GOV.value},
             cls.CHEMBL.value: set(),
             cls.EMA.value: {ClinicalSource.EMA_HUMAN_DRUGS.value},
+            cls.FDA.value: {ClinicalSource.DRUGS_AT_FDA.value},
             cls.PMDA.value: {ClinicalSource.PMDA.value},
             cls.TTD.value: {ClinicalSource.TTD.value},
         }

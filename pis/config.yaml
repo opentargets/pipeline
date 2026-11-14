@@ -336,9 +336,13 @@ steps:
   ##################################################################################################
 
   #: CLINICAL_REPORT STEP :#########################################################################
-  # Everything but the TTD curation is copied from gs://clinical_staging, written by the staging DAG. The tags in the
-  # snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
+  # Everything but the curation files and Drugs@FDA is copied from gs://clinical_staging, written by the staging DAG.
+  # The tags in the snapshot paths are the pinned *_tag values, which pts/tests/test_release_copy_paths.py checks.
   clinical_report:
+    - name: copy drugs at fda
+      source: https://download.open.fda.gov/drug/drugsfda/drug-drugsfda-0001-of-0001.json.zip
+      destination: input/clinical_report/drugs_at_fda.json.zip
+
     - name: copy aact dump
       source: gs://clinical_staging/aact/${staging_version}/input/aact.zip
       destination: input/clinical_report/aact.zip

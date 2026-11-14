@@ -1152,6 +1152,7 @@ steps:
         ttd_link_corrections: input/ot_curation/clinical/ttd/link_corrections.tsv
         chembl_indication_corrections: input/ot_curation/clinical/chembl/indication_corrections.tsv
         ema_indication_corrections: input/ot_curation/clinical/ema/indication_corrections.tsv
+        drugs_at_fda: input/clinical_report/drugs_at_fda.json.zip
       destination:
         output: output/clinical_report
   ##################################################################################################
