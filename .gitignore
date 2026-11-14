@@ -30,3 +30,7 @@ logs
 
 # holds the generated airflow api/jwt secrets; seeded from .env.example
 orchestration/.env
+
+# local Claude Code state (.claude/skills is a tracked symlink to .agents/skills)
+.claude/settings.local.json
+.claude/worktrees/
