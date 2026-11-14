@@ -20,7 +20,7 @@ from airflow.providers.google.common.hooks.base_google import GoogleBaseHook
 from airflow.sdk import BaseSensorOperator, Context
 from airflow.sdk.exceptions import AirflowException
 from airflow.triggers.base import BaseTrigger, TriggerEvent
-from google.api_core.exceptions import ResourceExhausted, RetryError
+from google.api_core.exceptions import NotFound, ResourceExhausted, RetryError
 from google.api_core.extended_operation import ExtendedOperation
 from google.cloud import compute_v1, logging_v2
 from google.cloud import logging as google_logging
@@ -43,6 +43,7 @@ OUTPUT_FILTER = r"""tr '\r' '\n' | awk '!/^ *[0-9]+%\|/'"""
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 LOGGING_RETRY_MAX_WAIT = 600
+DEFAULT_MAX_RUN_DURATION = datetime.timedelta(hours=8)
 
 # COS LTS family; supported until November 2028.
 COS_IMAGE_FAMILY = 'projects/cos-cloud/global/images/family/cos-133-lts'
@@ -364,6 +365,9 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         machine_type: Machine type to use for the instance (default e2-standard-2).
         boot_disk_size_gb: Size of the boot disk in GB (default 10).
         source_image: Boot image (default the newest image in `COS_IMAGE_FAMILY`).
+        max_run_duration: How long the instance may run before Compute Engine deletes it,
+            whether or not Airflow is still watching. Also bounds the deferral when the
+            task has no `execution_timeout`.
         work_disk_size_gb: If present, a second disk with the specified size in GB will be
             attached to the instance besides the boot disk, to be used by the workload. The disk will
             be formatted with ext4 and mounted under `/mnt/disks/work`. The instance will have write
@@ -405,6 +409,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         boot_disk_size_gb: int = 10,
         source_image: str = COS_IMAGE_FAMILY,
         work_disk_size_gb: int = 0,
+        max_run_duration: datetime.timedelta = DEFAULT_MAX_RUN_DURATION,
         gcp_conn_id: str = 'google_cloud_default',
         impersonation_chain: str | Sequence[str] | None = None,
         vm_service_account: str | None = None,
@@ -431,6 +436,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         self.impersonation_chain = impersonation_chain
         self.vm_service_account = vm_service_account
         self.work_disk_size_gb = work_disk_size_gb
+        self.max_run_duration = max_run_duration
         self.deferrable = deferrable
         self.poll_interval = poll_interval
 
@@ -553,6 +559,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         - The startup script.
         - Network configuration.
         - Service account and scopes.
+        - Deletion by Compute Engine once `max_run_duration` has elapsed.
         """
         boot_disk = compute_v1.AttachedDisk(
             auto_delete=True,
@@ -602,6 +609,10 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             machine_type=f'zones/{self.zone}/machineTypes/{self.machine_type}',
             disks=disks,
             labels=self.labels,
+            scheduling=types.Scheduling(
+                max_run_duration=types.Duration(seconds=int(self.max_run_duration.total_seconds())),
+                instance_termination_action='DELETE',
+            ),
             metadata=types.Metadata(
                 items=[
                     {
@@ -727,7 +738,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         elif not self.poke(context):
             self.log.info('Deferring the sensor execution.')
             self.defer(
-                timeout=self.execution_timeout,
+                timeout=self.execution_timeout or self.max_run_duration,
                 trigger=ComputeEngineExitCodeTrigger(
                     instance_name=self.instance_name,
                     project=self.project,
@@ -873,4 +884,7 @@ class DeleteInstanceOperator(ComputeEngineDeleteInstanceOperator):
         super().__init__(zone=zone, project_id=project_id, **kwargs)
 
     def execute(self, context: Context) -> None:
-        super().execute(context)
+        try:
+            super().execute(context)
+        except NotFound:
+            self.log.info('instance %s is already gone', self.resource_id)
