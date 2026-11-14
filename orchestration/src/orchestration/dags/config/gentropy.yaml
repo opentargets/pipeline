@@ -52,7 +52,6 @@ steps:
       step.clinical_evidence_path: '{{release_uri}}/output/evidence_clinical_precedence'
       # Approved stages only; see #333.
       step.approved_clinical_phases:
-        - PHASE_4
         - APPROVAL
         - PREAPPROVAL
       # Legacy OTG gold standard curation with remapped disease ids; pis_l2g stages it.
