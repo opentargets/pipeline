@@ -32,10 +32,15 @@ def expand_disease(evidence: pl.LazyFrame, disease: pl.LazyFrame, weights: pl.Da
     propagated = flagged.filter(pl.col('toPropagate')).drop('toPropagate')
     direct = flagged.filter(~pl.col('toPropagate')).drop('toPropagate')
 
-    lineage = disease.select(
-        pl.col('id').alias('diseaseId'),
-        pl.concat_list(pl.col('id'), pl.col('ancestors')).list.unique().alias('specificDiseaseId'),
-    ).explode('specificDiseaseId')
+    lineage = (
+        disease
+        .select(
+            pl.col('id').alias('diseaseId'),
+            pl.concat_list(pl.col('id'), pl.col('ancestors')).list.unique().alias('specificDiseaseId'),
+        )
+        .explode('specificDiseaseId')
+        .drop_nulls('specificDiseaseId')
+    )
     expanded = (
         propagated
         .join(lineage, on='diseaseId', how='inner')

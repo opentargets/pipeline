@@ -109,3 +109,11 @@ def test_expand_disease_unknown_datasource_propagates() -> None:
 def test_expand_disease_drops_propagated_evidence_on_unknown_disease() -> None:
     ev = _evidence([('t1', 'dX', 'ds', 'dt', 0.5, 2020)])
     assert expand_disease(ev, DISEASE, WEIGHTS).collect().height == 0
+
+
+def test_expand_disease_null_ancestors_drops_propagated_evidence() -> None:
+    disease = pl.LazyFrame(
+        {'id': ['d3'], 'ancestors': [None]}, schema={'id': pl.String, 'ancestors': pl.List(pl.String)}
+    )
+    ev = _evidence([('t1', 'd3', 'ds', 'dt', 0.5, 2020)])
+    assert expand_disease(ev, disease, WEIGHTS).collect().height == 0

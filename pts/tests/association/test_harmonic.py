@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import reduce
 from math import isclose
 
 import polars as pl
@@ -32,4 +31,4 @@ def test_harmonic_sum_empty_is_zero() -> None:
 
 
 def test_max_harmonic_sum_value() -> None:
-    assert reduce(lambda acc, iv: acc + iv[1] / iv[0] ** 2, enumerate([1] * 1000, start=1), 0.0) == MAX_HARMONIC_SUM
+    assert MAX_HARMONIC_SUM == 1.6439345666815615
