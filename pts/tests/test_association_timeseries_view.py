@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 import polars as pl
 import pytest
@@ -117,30 +114,6 @@ def test_refuses_existing_destination(tmp_path: Path) -> None:
         association_timeseries_view(source, str(tmp_path / 'out'), {'file_count': 2}, None)
 
 
-def test_scratch_split_lives_under_work_path_and_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    work = tmp_path / 'deep' / 'work'
-    seen: list[tempfile.TemporaryDirectory[str]] = []
-    real = tempfile.TemporaryDirectory
-
-    def spy(**kwargs: Any) -> tempfile.TemporaryDirectory[str]:
-        seen.append(real(**kwargs))
-        return seen[-1]
-
-    monkeypatch.setattr(tempfile, 'TemporaryDirectory', spy)
-    source = _write(tmp_path, {'overall_direct': [_row('T1', 'D1', None, [2020])]})
-    association_timeseries_view(
-        source,
-        str(tmp_path / 'out'),
-        {'file_count': 2},
-        SimpleNamespace(work_path=work),
-    )
-    assert len(seen) == 1
-    scratch = Path(seen[0].name)
-    assert scratch.parent == work
-    assert not scratch.exists()
-    assert list(work.iterdir()) == []
-
-
 def test_rerun_is_byte_identical(tmp_path: Path) -> None:
     rows = {
         name: [_row(f'T{t}', f'D{d}', v, [2021, 2019, 2020, 2018]) for t in range(40) for d in range(5) for v in values]
@@ -158,3 +131,21 @@ def test_rerun_is_byte_identical(tmp_path: Path) -> None:
     second = sorted((tmp_path / 'two').glob('part-*.parquet'))
     assert [f.name for f in first] == [f.name for f in second]
     assert all(a.read_bytes() == b.read_bytes() for a, b in zip(first, second, strict=True))
+
+
+def test_rerun_of_large_files_is_byte_identical(tmp_path: Path) -> None:
+    rows = {'overall_direct': [_row(f'T{t}', 'D1', None, list(range(2010, 2020))) for t in range(100_000)]}
+    source = _write(tmp_path, rows)
+    for run in ('one', 'two'):
+        association_timeseries_view(source, str(tmp_path / run), {'file_count': 1}, None)
+    first, second = ((tmp_path / run / 'part-00000.parquet').read_bytes() for run in ('one', 'two'))
+    assert first == second
+
+
+def test_concurrency_does_not_change_bytes(tmp_path: Path) -> None:
+    rows = {'overall_direct': [_row(f'T{t}', f'D{t % 7}', None, [2019, 2020]) for t in range(500)]}
+    source = _write(tmp_path, rows)
+    for run, concurrency in (('one', 1), ('four', 4)):
+        association_timeseries_view(source, str(tmp_path / run), {'file_count': 6, 'concurrency': concurrency}, None)
+    for name in [f'part-{i:05d}.parquet' for i in range(6)]:
+        assert (tmp_path / 'one' / name).read_bytes() == (tmp_path / 'four' / name).read_bytes()

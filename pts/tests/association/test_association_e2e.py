@@ -101,6 +101,27 @@ def test_rerun_is_byte_identical(tmp_path: Path) -> None:
         assert [f.read_bytes() for f in a_files] == [f.read_bytes() for f in b_files]
 
 
+def test_rerun_of_large_parts_is_byte_identical(tmp_path: Path) -> None:
+    rows = [(f't{i}', 'd_leaf', 'ds1', 'dt1', 0.5, '2020-01-01', None) for i in range(100_000)]
+    digests = []
+    for run in ('a', 'b'):
+        source, destination = _stage(tmp_path / run, rows)
+        association(source, destination, _settings(2), None)
+        digests.append([p.read_bytes() for name in OUTPUTS for p in sorted(Path(destination[name]).glob('*.parquet'))])
+    assert len(digests[0]) == 2 * len(OUTPUTS)
+    assert digests[0] == digests[1]
+
+
+def test_concurrency_does_not_change_bytes(tmp_path: Path) -> None:
+    digests = []
+    for run, concurrency in (('one', 1), ('four', 4)):
+        source, destination = _stage(tmp_path / run)
+        association(source, destination, {**_settings(5), 'concurrency': concurrency}, None)
+        digests.append([p.read_bytes() for name in OUTPUTS for p in sorted(Path(destination[name]).glob('*.parquet'))])
+    assert len(digests[0]) == 5 * len(OUTPUTS)
+    assert digests[0] == digests[1]
+
+
 def test_empty_bucket_is_handled(tmp_path: Path) -> None:
     source, destination = _stage(tmp_path / 'sparse')
     ref_source, ref_dest = _stage(tmp_path / 'ref')

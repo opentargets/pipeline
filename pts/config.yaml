@@ -1222,6 +1222,7 @@ steps:
         by_datatype_indirect: output/association_by_datatype_indirect
       settings:
         bucket_count: 64
+        concurrency: 8
         novelty_scale: 2 # 2 for long tailed slow decays
         novelty_shift: 3 # 3 for long tailed slow decays
         novelty_window: 10
@@ -1608,6 +1609,7 @@ steps:
       destination: view/association_timeseries
       settings:
         file_count: 300
+        concurrency: 8
   ##################################################################################################
 
   #: GENE_SETS STEP :###############################################################################
