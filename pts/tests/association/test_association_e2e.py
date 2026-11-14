@@ -27,7 +27,7 @@ EVIDENCE_SCHEMA = {
 }
 ROWS = [
     (f't{i}', d, ds, dt, 0.3 + 0.1 * (i % 5), f'{2015 + i % 6}-01-01', None)
-    for i in range(12)
+    for i in range(150)
     for d in ('d_leaf', 'd_other')
     for ds, dt in (('ds1', 'dt1'), ('ds2', 'dt2'))
 ]
@@ -35,11 +35,12 @@ ROWS = [
 
 def _stage(root: Path, rows: list[tuple] = ROWS) -> tuple[dict, dict]:
     frame = pl.DataFrame(rows, schema=EVIDENCE_SCHEMA, orient='row')
-    half = max(len(rows) // 2, 1)
-    for i, part in enumerate((frame.slice(0, half), frame.slice(half))):
-        directory = root / 'output' / f'evidence_{i}'
-        directory.mkdir(parents=True)
-        part.write_parquet(directory / 'part-0.parquet')
+    size = max(-(-len(rows) // 6), 1)
+    chunks = [frame.slice(i, size) for i in range(0, max(len(rows), 1), size)]
+    for i, part in enumerate(pl.concat(chunks, rechunk=False).iter_slices(size) if rows else [frame]):
+        directory = root / 'output' / f'evidence_{i % 2}'
+        directory.mkdir(parents=True, exist_ok=True)
+        part.write_parquet(directory / f'part-{i}.parquet')
     disease = root / 'output' / 'disease'
     disease.mkdir()
     pl.DataFrame(
@@ -102,7 +103,7 @@ def test_rerun_is_byte_identical(tmp_path: Path) -> None:
 def test_empty_bucket_is_handled(tmp_path: Path) -> None:
     source, destination = _stage(tmp_path / 'sparse')
     ref_source, ref_dest = _stage(tmp_path / 'ref')
-    association(source, destination, _settings(40), None)
+    association(source, destination, _settings(200), None)
     association(ref_source, ref_dest, _settings(1), None)
     for name in OUTPUTS:
         assert scan_dataset(destination[name]).collect().height == scan_dataset(ref_dest[name]).collect().height

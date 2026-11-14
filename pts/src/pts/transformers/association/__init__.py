@@ -49,7 +49,12 @@ def association(
         if '://' not in path:
             os.makedirs(path)
 
-    raw = scan_datasets(source['evidence']).select(EVIDENCE_COLUMNS)
+    raw = scan_datasets(source['evidence']).select(EVIDENCE_COLUMNS).collect()
+    buckets = raw.with_columns((pl.col('targetId').hash(seed=0) % bucket_count).alias('bucket')).partition_by(
+        'bucket', as_dict=True, include_key=False
+    )
+    schema = raw.schema
+    del raw
     disease = scan_dataset(source['disease'])
 
     def novelty_of(frame: pl.LazyFrame, dtype: pl.DataType) -> pl.LazyFrame:
@@ -59,7 +64,7 @@ def association(
 
     for bucket in range(bucket_count):
         logger.info(f'association bucket {bucket + 1}/{bucket_count}')
-        in_bucket = raw.filter(pl.col('targetId').hash(seed=0) % bucket_count == bucket)
+        in_bucket = buckets.pop((bucket,), pl.DataFrame(schema=schema)).lazy()
         evidence = prepare_evidence(in_bucket, current_year + 1)
         sinks = []
         for way, frame in (('direct', evidence), ('indirect', expand_disease(evidence, disease, weights))):
