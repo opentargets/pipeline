@@ -43,7 +43,7 @@ OUTPUT_FILTER = r"""tr '\r' '\n' | awk '!/^ *[0-9]+%\|/'"""
 LOGGING_REQUEST_INTERVAL = 2
 LOGGING_REQUEST_MAX_INTERVAL = 180
 LOGGING_RETRY_MAX_WAIT = 600
-DEFAULT_MAX_RUN_DURATION = datetime.timedelta(hours=12)
+DEFAULT_MAX_RUN_DURATION = datetime.timedelta(hours=8)
 
 # COS LTS family; supported until November 2028.
 COS_IMAGE_FAMILY = 'projects/cos-cloud/global/images/family/cos-133-lts'
