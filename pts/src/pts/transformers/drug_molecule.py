@@ -124,7 +124,9 @@ def process_drug_index(
     Returns:
         Final drug index DataFrame.
     """
-    max_phase = compute_max_phase_per_drug(clinical_report)
+    max_phase = roll_up_to_parents(
+        compute_max_phase_per_drug(clinical_report), molecule.select('id', 'parentId').collect()
+    )
     indications = _process_clinical_report_indications(clinical_report, disease)
 
     # Every chemical probe drug id, for the is_drug filter.
@@ -256,6 +258,33 @@ def compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
         .filter(pl.col('id').is_not_null())
         .group_by('id')
         .agg(_stage_rank(pl.col('clinicalStage')).min().alias('bestRank'))
+        .select('id', maximumClinicalStage=_stage_name_from_rank(pl.col('bestRank')))
+    )
+
+
+def roll_up_to_parents(stages: pl.DataFrame, molecules: pl.DataFrame) -> pl.DataFrame:
+    """Give each parent molecule the most advanced stage among itself and its children.
+
+    Children keep their own stage, as in ChEMBL's `max_phase`.
+
+    Args:
+        stages: ``id`` and ``maximumClinicalStage``, as :func:`compute_max_phase_per_drug` returns them.
+        molecules: ``id`` and ``parentId``; a parent's ``parentId`` is null or its own id.
+
+    Returns:
+        ``id`` and ``maximumClinicalStage``, one row per id.
+    """
+    to_parent = (
+        stages
+        .join(molecules.select('id', 'parentId'), on='id', how='inner')
+        .filter(pl.col('parentId').is_not_null() & (pl.col('parentId') != pl.col('id')))
+        .select(id='parentId', maximumClinicalStage='maximumClinicalStage')
+    )
+    return (
+        pl
+        .concat([stages, to_parent])
+        .group_by('id')
+        .agg(_stage_rank(pl.col('maximumClinicalStage')).min().alias('bestRank'))
         .select('id', maximumClinicalStage=_stage_name_from_rank(pl.col('bestRank')))
     )
 

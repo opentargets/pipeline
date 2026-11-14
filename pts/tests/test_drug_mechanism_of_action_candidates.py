@@ -191,6 +191,18 @@ def test_salt_link_publishes_under_the_parent() -> None:
     assert row['maximumClinicalStage'] == 'PHASE_1'
 
 
+def test_candidate_stage_is_the_best_of_the_parents_family() -> None:
+    report = _report([
+        ('NCT1', 'CHEMBL1', 'PHASE_2'),
+        ('NCT2', 'CHEMBL1', 'PHASE_2'),
+        ('NCT3', 'CHEMBL1SALT', 'APPROVAL'),
+    ])
+
+    row = _build(_moa(), report).row(0, named=True)
+
+    assert row['maximumClinicalStage'] == 'APPROVAL'
+
+
 def test_a_parent_absent_from_the_molecules_still_lists_itself_in_chembl_ids() -> None:
     molecule = pl.concat([
         _molecule(),
