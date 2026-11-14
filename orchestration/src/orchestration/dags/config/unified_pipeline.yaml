@@ -366,6 +366,7 @@ steps:
       - pts_baseline_expression
   pts_association:
     ppp_only: false
+    machine_type: n2d-highmem-32
     depends_on:
       - pts_evidence_impc
       - pts_evidence_europepmc
