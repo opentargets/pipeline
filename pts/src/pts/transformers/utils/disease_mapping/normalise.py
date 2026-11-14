@@ -8,6 +8,9 @@ diffed against the real pipeline over 484,017 labels -- every disease name, syno
 reference and id of the disease index, the 236k words of `/usr/share/dict/words` and hand-made
 edge cases -- with no mismatch on either track.
 
+One deliberate divergence: the term track joins `non` to the token after it (`non-squamous` ->
+`nonsquamous`), so a label keeps each word it negates.
+
 What the pipeline stages reduce to:
 
 * **Tokenizer.** Candidates are runs of non-whitespace, where whitespace is Java's ASCII `\s`
@@ -238,10 +241,24 @@ def stem(word: str) -> str:
 # --- tracks -----------------------------------------------------------------------------------
 
 
+def _join_negations(tokens: list[str]) -> list[str]:
+    """Join each `non` to the token after it, so `non-squamous` and `nonsquamous` give one token."""
+    joined: list[str] = []
+    for token in tokens:
+        if joined and joined[-1] == 'non':
+            joined[-1] += token
+        else:
+            joined.append(token)
+    return joined
+
+
 def normalise_term(label: str) -> str:
-    """Normalise a label on the term track: the distinct stems, sorted and concatenated."""
-    tokens = (_clean_token(t) for t in _term_tokens(label) if t not in STOP_WORDS)
-    stems = {stem(t) for t in tokens if t}
+    """Normalise a label on the term track: the distinct stems, sorted and concatenated.
+
+    Unlike spark-nlp, `non` is joined to the next token before stemming.
+    """
+    tokens = _join_negations([t for t in (_clean_token(t) for t in _term_tokens(label) if t not in STOP_WORDS) if t])
+    stems = {stem(t) for t in tokens}
     stems.discard('')
     return ''.join(sorted(stems))
 
