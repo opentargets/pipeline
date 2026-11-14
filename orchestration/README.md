@@ -94,9 +94,9 @@ gcloud auth application-default login
 make cloud-airflow
 ```
 
-This will set up and/or connect you to an airflow dev instance in
-Google Cloud; and open vscode into that instance code as well as a the Airflow UI
-in a browser automatically. The default credentials are `airflow`/`airflow`.
+This will set up and/or connect you to an airflow dev instance in Google Cloud
+and open the Airflow UI in a browser automatically. The default credentials are
+`airflow`/`airflow`.
 
 The port `8081` is used for the remote Airflow UI. This port is forwarded from
 the machine to your local host. In case you lose the connection to the remote
@@ -105,10 +105,6 @@ instance, you can re-run the `make` command or setup the tunnel directly with:
 ```sh
 make tunnel
 ```
-
-> [!TIP]
-> You should accept the prompt to install the recommended extensions in vscode,
-> those are very helpful for working with Airflow DAGs and code.
 
 
 ## Development
