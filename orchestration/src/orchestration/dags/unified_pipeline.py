@@ -6,7 +6,6 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
-from airflow.providers.google.cloud.operators.compute import ComputeEngineDeleteInstanceOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import DAG, Param, chain, task_group
 from airflow.sdk.definitions.param import ParamsDict
@@ -29,7 +28,7 @@ from orchestration.operators.differs.step_result_differ import StepResultDiffer
 from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
 from orchestration.operators.gcs import UploadFileOperator, UploadStringOperator
 from orchestration.utils import resource_name, strhash, to_yaml
-from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
+from orchestration.utils.common import GCP_PROJECT_PLATFORM, shared_dag_args
 from orchestration.utils.labels import Labels
 
 if TYPE_CHECKING:
@@ -194,10 +193,8 @@ with DAG(
                         deferrable=True,
                     )
 
-                    t = ComputeEngineDeleteInstanceOperator(
+                    t = DeleteInstanceOperator(
                         task_id=f'delete_vm_{step_name}',
-                        project_id=GCP_PROJECT_PLATFORM,
-                        zone=GCP_ZONE,
                         resource_id=vm_name,
                         trigger_rule=TriggerRule.NONE_SKIPPED,
                     )
