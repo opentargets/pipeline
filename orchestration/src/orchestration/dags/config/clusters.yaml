@@ -51,25 +51,25 @@ clusters:
       # this results in /var/run/secrets/hfhub-key.json with {"HF_TOKEN": "hfhub-key_value"} as content
       HF_TOKEN: hfhub-key
 
-  gentropy_colocalisation:
-    image_version: '{{dataproc_image_version_gentropy}}'
+  pts_colocalisation:
+    image_version: '{{dataproc_image_version_pts}}'
     zone: 'europe-west1-b'
     # Fixed non-preemptible primary pool (no autoscaling, no spot secondaries).
     # Spot-worker churn was the dominant failure source at baseline (3,021
     # ExecutorLostFailure); a fixed on-demand pool removes preemption entirely.
     num_masters: 3
-    num_workers: 32
+    num_workers: 16
     master_machine_type: n1-highmem-16
     # n2d-highmem-32 = 32 vCPU / 256 GB. Packs 8 executors/node at cores=4,
     # 22g heap + 4g overhead each (8 x 26 = 208 GB), leaving ~48 GB for the OS
     # and YARN -- packing that n1-highmem-32 (208 GB) cannot fit. Executor sizing
-    # itself comes from the colocalisation step's extended_spark_conf in gentropy.yaml.
+    # itself comes from the properties of the pyspark colocalisation task in pts/config.yaml.
     worker_machine_type: n2d-highmem-32
     worker_disk_type: 'pd-ssd'
     worker_disk_size: 1024
     internal_ip_only: false
     metadata:
-      GENTROPY_REF: 'v{{gentropy_version}}'
+      PTS_REF: 'pts%40v{{pts_version}}'
     properties:
       # EFM and the spot-era band-aids (shuffle.io retries, extended network
       # timeout, speculation) are gone: with no preemption there is no shuffle to
@@ -85,9 +85,10 @@ clusters:
       'spark:spark.sql.shuffle.partitions': '8000'
       'spark:spark.sql.files.maxPartitionBytes': '268435456'
       'spark:spark.task.maxFailures': '10'
+      'spark:spark.sql.ansi.enabled': 'false'
 
     init_actions_uris:
-      - 'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
+      - '{{pts_init_action_uri}}'
     idle_delete_ttl: 1800
 
   pts_association:
