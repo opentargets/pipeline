@@ -158,3 +158,24 @@ def test_future_dated_evidence_counts_as_current_year(tmp_path: Path) -> None:
     assert out['associationScore'][0] > 0
     assert out['timeseries'][0].struct.field('year').drop_nulls().max() == current_year
     assert out['currentNovelty'][0] > 0
+
+
+def test_worker_failure_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pts.transformers import association as module
+
+    real = module.compute_novelty
+    calls = []
+
+    def failing(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 7:
+            msg = 'bucket boom'
+            raise RuntimeError(msg)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'compute_novelty', failing)
+    source, destination = _stage(tmp_path)
+    with pytest.raises(RuntimeError, match='bucket boom'):
+        association(source, destination, {**_settings(3), 'concurrency': 1}, None)
+    for name in OUTPUTS:
+        assert not (Path(destination[name]) / 'part-00001.parquet').exists()

@@ -149,3 +149,20 @@ def test_concurrency_does_not_change_bytes(tmp_path: Path) -> None:
         association_timeseries_view(source, str(tmp_path / run), {'file_count': 6, 'concurrency': concurrency}, None)
     for name in [f'part-{i:05d}.parquet' for i in range(6)]:
         assert (tmp_path / 'one' / name).read_bytes() == (tmp_path / 'four' / name).read_bytes()
+
+
+def test_worker_failure_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = {'overall_direct': [_row(f'T{t}', 'D1', None, [2019, 2020]) for t in range(100)]}
+    source = _write(tmp_path, rows)
+    real = pl.DataFrame.write_parquet
+
+    def failing(self: pl.DataFrame, file: object, *args: object, **kwargs: object) -> None:
+        if str(file).endswith('part-00001.parquet'):
+            msg = 'file boom'
+            raise RuntimeError(msg)
+        return real(self, file, *args, **kwargs)
+
+    monkeypatch.setattr(pl.DataFrame, 'write_parquet', failing)
+    with pytest.raises(RuntimeError, match='file boom'):
+        association_timeseries_view(source, str(tmp_path / 'out'), {'file_count': 3, 'concurrency': 1}, None)
+    assert not (tmp_path / 'out' / 'part-00001.parquet').exists()
