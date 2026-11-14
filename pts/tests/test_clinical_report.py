@@ -2,6 +2,7 @@ import datetime
 import json
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from pts.transformers.clinical_mira import (
 from pts.transformers.clinical_mira.mining import read_ema_sheet
 from pts.transformers.clinical_mira.providers import aact as aact_provider
 from pts.transformers.clinical_mira.providers.aact import replace_with_llm_indications
+from pts.transformers.clinical_mira.providers.drugs_at_fda import extract_clinical_report as extract_fda_clinical_report
 from pts.transformers.clinical_mira.providers.ema import extract_clinical_report as extract_ema_clinical_report
 from pts.transformers.clinical_mira.record_store import publish_snapshot
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema, ClinicalReportOrigin
@@ -35,6 +37,7 @@ from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,
     flag_indirect_primary_purpose,
+    flag_null_diseases,
     map_report_entities,
     order_output_columns,
     require_staged,
@@ -728,6 +731,9 @@ def _release_source(
     )
     source['chembl_indication_corrections'] = str(tmp_path / 'indication_corrections.tsv')
     source['ema_indication_corrections'] = str(tmp_path / 'indication_corrections.tsv')
+    with zipfile.ZipFile(tmp_path / 'drugs_at_fda.json.zip', 'w') as archive:
+        archive.writestr('drug-drugsfda-0001-of-0001.json', json.dumps({'results': []}))
+    source['drugs_at_fda'] = str(tmp_path / 'drugs_at_fda.json.zip')
     return source
 
 
@@ -823,6 +829,14 @@ def test_release_fails_before_restoring_dumps_on_an_invalid_ttd_curation(tmp_pat
 
 
 @pytest.mark.usefixtures('no_dump')
+def test_release_fails_before_restoring_dumps_on_an_unreadable_drugs_at_fda_file(tmp_path: Path) -> None:
+    source = _release_source(tmp_path)
+    Path(source['drugs_at_fda']).write_text('not a zip')
+    with pytest.raises(zipfile.BadZipFile):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
 def test_release_fails_on_an_aact_drug_snapshot_without_an_extraction_tag(tmp_path: Path) -> None:
     source = _release_source(tmp_path)
     metadata_path = Path(source['aact_drug_entities']) / 'metadata.json'
@@ -889,3 +903,21 @@ def test_release_imports_no_torch_or_openai() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1] == '[]'
+
+
+def test_fda_reports_keep_their_drug_without_reaching_ner() -> None:
+    application = {
+        'application_number': 'NDA017001',
+        'products': [{'marketing_status': 'Prescription', 'active_ingredients': [{'name': 'ASPIRIN'}]}],
+        'submissions': [{'submission_type': 'ORIG', 'submission_status': 'AP', 'submission_status_date': '20240314'}],
+    }
+    fda = extract_fda_clinical_report([application], DRUG).df.with_columns(
+        drugs=pl.col('drugs').list.eval(pl.element().struct.with_fields(drugFromSource=pl.lit('no dictionary name')))
+    )
+
+    mapped = map_report_entities(fda, DISEASE, DRUG, chembl_curation=None, drug_entities=_staged_drug_entities())
+    flagged = flag_null_diseases(mapped)
+
+    (row,) = flagged.df.iter_rows(named=True)
+    assert row['drugs'] == [{'drugFromSource': 'no dictionary name', 'drugId': 'CHEMBL25'}]
+    assert 'NO_DISEASE' in row['qualityControls']

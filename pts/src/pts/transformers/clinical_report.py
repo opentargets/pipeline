@@ -28,6 +28,8 @@ from pts.transformers.clinical_mira.indication_corrections import (
 from pts.transformers.clinical_mira.mapping import require_staged
 from pts.transformers.clinical_mira.mining import mining_reports, read_mining_inputs, staged_lookup
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
+from pts.transformers.clinical_mira.providers.drugs_at_fda import extract_clinical_report as extract_fda_clinical_report
+from pts.transformers.clinical_mira.providers.drugs_at_fda import read_applications as read_fda_applications
 from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, known_disease_ids, read_ttd_curation
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
@@ -131,6 +133,7 @@ def clinical_report(
     ttd_downgrades, ttd_corrections = read_ttd_curation(source['ttd_stage_downgrades'], source['ttd_link_corrections'])
     chembl_corrections = read_indication_corrections(source['chembl_indication_corrections'])
     ema_corrections = read_indication_corrections(source['ema_indication_corrections'])
+    fda_applications = read_fda_applications(source['drugs_at_fda'])
 
     logger.info(f'restoring chembl tables from {source["chembl"]}')
     chembl_tables = read_dump_tables(
@@ -221,6 +224,7 @@ def clinical_report(
         chembl_drug_warning_report.df,
         mining['ttd'].df,
         mining['ema'].df,
+        extract_fda_clinical_report(fda_applications, molecule_index).df,
     ])
     logger.info('reports generated. map entities...')
     output = (
