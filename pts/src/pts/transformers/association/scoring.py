@@ -10,6 +10,7 @@ from pts.transformers.association.harmonic import MAX_HARMONIC_SUM, harmonic_sum
 KEY = ['targetId', 'diseaseId', 'datasourceId', 'datatypeId']
 MAX_SCORES = 50
 YEAR_SPAN = '100000i'
+ORDINAL_SPAN = 2**32
 
 
 def aggregate_by_datasource(evidence: pl.LazyFrame) -> pl.LazyFrame:
@@ -102,24 +103,31 @@ def _aggregate(
             'yearlyEvidenceCount',
         )
         .sort([*part, 'year', 'datasourceId'])
-        .with_columns(pl.int_range(pl.len()).over(part).alias('idx'))
+        .with_columns(
+            pl.int_range(pl.len()).over(part).alias('idx'),
+            pl.struct([*part, 'datasourceId']).rank('dense').cast(pl.Int64).alias('gid'),
+        )
     )
     states = (
         rows
-        .with_columns(pl.col('associationScore').cum_max().over([*part, 'datasourceId']).alias('best'))
-        .select(*part, 'datasourceId', 'idx', 'best')
-        .sort('idx')
+        .with_columns(
+            pl.col('associationScore').cum_max().over([*part, 'datasourceId']).alias('best'),
+            (pl.col('gid') * ORDINAL_SPAN + pl.col('idx')).alias('state_key'),
+        )
+        .select('state_key', 'best')
+        .sort('state_key')
     )
     probes = (
         rows
         .select(*part, 'idx', 'year', 'yearlyEvidenceCount')
-        .join(rows.select(*part, 'datasourceId').unique(), on=part)
-        .sort('idx')
+        .join(rows.select(*part, 'datasourceId', 'gid').unique(), on=part)
+        .with_columns((pl.col('gid') * ORDINAL_SPAN + pl.col('idx')).alias('key'))
+        .sort('key')
     )
     return (
         probes
-        .join_asof(states, on='idx', by=[*part, 'datasourceId'], strategy='backward')
-        .drop_nulls('best')
+        .join_asof(states.with_columns(pl.col('state_key').alias('matched')), left_on='key', right_on='state_key')
+        .filter(pl.col('matched') // ORDINAL_SPAN == pl.col('gid'))
         .group_by([*part, 'idx', 'year', 'yearlyEvidenceCount'])
         .agg(pl.col('best').alias('maxes'))
         .with_columns(association.alias('associationScore'))
