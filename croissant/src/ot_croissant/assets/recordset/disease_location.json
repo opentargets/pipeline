@@ -1,0 +1,14 @@
+[
+  {
+    "id": "biosampleId",
+    "description": "Anatomical location of the disease, as a biosample identifier",
+    "foreign_key": "biosample/biosampleId",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "diseaseId",
+    "description": "Disease identifier",
+    "foreign_key": "disease/id",
+    "isPrimaryKey": true
+  }
+]
