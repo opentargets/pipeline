@@ -38,3 +38,19 @@ def association_otf_schema() -> pl.Schema:
         'noveltyDirect': pl.Float64(),
         'noveltyIndirect': pl.Float64(),
     })
+
+
+def association_timeseries_schema() -> pl.Schema:
+    """The association_timeseries_view output: one row per association, aggregation value and year."""
+    return pl.Schema({
+        'diseaseId': pl.String(),
+        'targetId': pl.String(),
+        'aggregationType': pl.String(),
+        'aggregationValue': pl.String(),
+        'year': pl.Int32(),
+        'associationScore': pl.Float64(),
+        'novelty': pl.Float64(),
+        'yearlyEvidenceCount': pl.Int64(),
+        'isDirect': pl.Boolean(),
+        'partitionKey': pl.String(),
+    })
