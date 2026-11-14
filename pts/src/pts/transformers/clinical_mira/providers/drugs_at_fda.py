@@ -35,7 +35,7 @@ APPLICATION_URL = 'https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?eve
 _DRUG = pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String})
 _DISEASES = pl.List(pl.Struct({'diseaseId': pl.String, 'diseaseFromSource': pl.String}))
 
-_SEPARATOR = r'\s*(?:,|/|;|\sAND\s)\s*'
+_SEPARATOR = r'\s*(?:,\s*AND\s|,|/|;|\sAND\s)\s*'
 _BIOLOGIC_SUFFIX = r'-[A-Z]{4}$'
 
 
@@ -143,13 +143,21 @@ def extract_clinical_report(applications: list[dict], drug: pl.DataFrame) -> Cli
         .explode('name')
         .drop_nulls('name')
     )
+    split_mapped = _map_names(split, lut)
+    incomplete = (
+        split
+        .join(split_mapped.filter(pl.col('drugIds').is_null()), on='name', how='semi')
+        .select('application', 'ingredient')
+        .unique()
+    )
+    split = split.join(incomplete, on=['application', 'ingredient'], how='anti')
     names = pl.concat([ingredients.join(unmapped_whole, left_on='name', right_on='whole', how='anti'), split])
-    mapped = pl.concat([whole.drop_nulls('drugIds'), _map_names(split, lut)]).unique('name', keep='first')
-    unmapped = names.join(mapped.filter(pl.col('drugIds').is_null()), on='name', how='semi')
+    mapped = pl.concat([whole.drop_nulls('drugIds'), split_mapped.drop_nulls('drugIds')]).unique('name', keep='first')
+    unmapped = ingredients.join(incomplete, on=['application', 'ingredient'], how='semi')
     if unmapped.height:
-        commonest = unmapped.group_by('name').len().sort(['len', 'name'], descending=[True, False]).head(20)
-        count = unmapped['name'].n_unique()
-        logger.info(f'drugs@fda: {count} ingredient names unmapped, e.g. {commonest["name"].to_list()}')
+        commonest = unmapped.group_by('ingredient').len().sort(['len', 'ingredient'], descending=[True, False]).head(20)
+        count = unmapped['ingredient'].n_unique()
+        logger.info(f'drugs@fda: {count} ingredient names unmapped, e.g. {commonest["ingredient"].to_list()}')
     drugs = (
         names
         .join(mapped.drop_nulls('drugIds'), on='name', how='inner')

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.schemas.drug_molecule import molecule_schema
 from pts.transformers.clinical_mira.providers.drugs_at_fda import (
@@ -88,6 +89,7 @@ def test_ingredients_are_upper_case_and_trimmed() -> None:
     [
         ('ELEXACAFTOR, IVACAFTOR, TEZACAFTOR', ['ELEXACAFTOR', 'IVACAFTOR', 'TEZACAFTOR']),
         ('DARUNAVIR AND COBICISTAT', ['DARUNAVIR', 'COBICISTAT']),
+        ('PERTUZUMAB, TRASTUZUMAB, AND HYALURONIDASE-ZZXF', ['PERTUZUMAB', 'TRASTUZUMAB', 'HYALURONIDASE']),
         ('CONJUGATED ESTROGENS/MEDROXYPROGESTERONE ACETATE', ['CONJUGATED ESTROGENS', 'MEDROXYPROGESTERONE ACETATE']),
         ('NARSOPLIMAB-WUUG', ['NARSOPLIMAB']),
         ('TELISOTUZUMAB VEDOTIN-TLLV', ['TELISOTUZUMAB VEDOTIN']),
@@ -152,3 +154,29 @@ def test_a_name_that_maps_whole_is_not_split() -> None:
         for r in extract_clinical_report(apps, drug).df.iter_rows(named=True)
     }
     assert reports == {'nda017001': ['CHEMBL_CONJ'], 'nda017002': ['CHEMBL25', 'CHEMBL_ESTR']}
+
+
+def test_a_split_is_kept_only_when_every_piece_maps() -> None:
+    drug = pl.DataFrame(
+        [_molecule('CHEMBL_UREA', 'UREA', [], []), _molecule('CHEMBL25', 'ASPIRIN', [], [])],
+        schema=molecule_schema,
+    )
+    apps = [
+        _app('NDA017001', orig_ap='20240314', ingredients=['UREA, C-14']),
+        _app('NDA017002', orig_ap='20240314', ingredients=['UREA, ASPIRIN']),
+    ]
+    reports = {
+        r['id']: sorted(d['drugId'] for d in r['drugs'])
+        for r in extract_clinical_report(apps, drug).df.iter_rows(named=True)
+    }
+    assert reports == {'nda017002': ['CHEMBL25', 'CHEMBL_UREA']}
+
+
+def test_unmapped_ingredients_are_logged() -> None:
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level='INFO')
+    try:
+        extract_clinical_report([_app('NDA017001', orig_ap='20240314', ingredients=['ASPIRIN', 'UNKNOWNIUM'])], DRUG)
+    finally:
+        logger.remove(sink)
+    assert any('1 ingredient names unmapped' in m and 'UNKNOWNIUM' in m for m in messages)
