@@ -192,7 +192,6 @@ steps:
       - pts_literature_publication_match
   # Evidence not processed by PTS
   pts_evidence_europepmc:
-    machine_type: n2d-highmem-32
     depends_on:
       - pts_literature_cooccurrence
   pts_evidence_expression_atlas:
@@ -366,7 +365,6 @@ steps:
       - pts_baseline_expression
   pts_association:
     ppp_only: false
-    machine_type: n2d-highmem-32
     depends_on:
       - pts_evidence_impc
       - pts_evidence_europepmc

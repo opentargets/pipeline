@@ -20,5 +20,5 @@ def test_association_steps_run_on_a_vm(config: UnifiedPipelineConfig, step: str)
     assert not isinstance(resolved, PTSDataprocStep)
 
 
-def test_association_gets_a_highmem_vm(config: UnifiedPipelineConfig) -> None:
-    assert pts_step_from_config('pts_association', config).machine_type == 'n2d-highmem-32'
+def test_association_runs_on_the_default_pts_machine(config: UnifiedPipelineConfig) -> None:
+    assert pts_step_from_config('pts_association', config).machine_type == config.pts_machine_type
