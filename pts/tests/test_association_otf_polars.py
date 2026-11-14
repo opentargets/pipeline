@@ -9,7 +9,7 @@ import pytest
 
 from pts.schemas.association import association_otf_schema
 from pts.transformers.association_otf import association_otf
-from pts.transformers.utils.dataset import scan_dataset
+from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 
 EVIDENCE = {'id': pl.String, 'diseaseId': pl.String, 'targetId': pl.String, 'datasourceId': pl.String,
             'datatypeId': pl.String, 'score': pl.Float64, 'extra': pl.String}  # fmt: skip
@@ -102,3 +102,46 @@ def test_refuses_existing_destination(source: dict[str, str], tmp_path: Path) ->
     _run(source, tmp_path)
     with pytest.raises(ValueError, match='exist'):
         _run(source, tmp_path)
+
+
+def test_rerun_is_byte_identical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr('pts.transformers.association_otf.sink_dataset', _small_parts)
+    rows = 200_000
+    evidence = pl.DataFrame({
+        'id': [f'e{i:07d}' for i in range(rows)],
+        'diseaseId': [f'EFO_{i % 500}' for i in range(rows)],
+        'targetId': [f'ENSG{i % 700}' for i in range(rows)],
+        'datasourceId': ['ds'] * rows,
+        'datatypeId': ['dt'] * rows,
+        'score': [i / rows for i in range(rows)],
+    })
+    disease = pl.DataFrame({'id': [f'EFO_{i}' for i in range(500)], 'name': [f'name {i}' for i in range(500)]})
+    target = pl.DataFrame({
+        'id': [f'ENSG{i}' for i in range(700)],
+        'approvedName': [f'n{i}' for i in range(700)],
+        'approvedSymbol': [f's{i}' for i in range(700)],
+    })
+    novelty = pl.DataFrame({
+        'targetId': [f'ENSG{i % 700}' for i in range(1000)],
+        'diseaseId': [f'EFO_{i % 500}' for i in range(1000)],
+        'currentNovelty': [i / 10 for i in range(1000)],
+    }).unique(['targetId', 'diseaseId'])
+    _write(tmp_path / 'evidence_big', evidence)
+    paths = {
+        'evidence': str(tmp_path / 'evidence_*'),
+        'disease': _write(tmp_path / 'disease', disease),
+        'target': _write(tmp_path / 'target', target),
+        'association_direct': _write(tmp_path / 'direct', novelty),
+        'association_indirect': _write(tmp_path / 'indirect', novelty),
+    }
+    for name in ('a', 'b'):
+        association_otf(paths, str(tmp_path / name), None, None)
+    files_a = sorted(p.name for p in (tmp_path / 'a').rglob('*.parquet'))
+    assert len(files_a) > 1
+    assert files_a == sorted(p.name for p in (tmp_path / 'b').rglob('*.parquet'))
+    for name in files_a:
+        assert (tmp_path / 'a' / name).read_bytes() == (tmp_path / 'b' / name).read_bytes()
+
+
+def _small_parts(frame: pl.LazyFrame, path: str) -> pl.LazyFrame:
+    return sink_dataset(frame, path, approximate_bytes_per_file=200_000)
