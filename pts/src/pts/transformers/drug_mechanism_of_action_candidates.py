@@ -18,7 +18,7 @@ from pts.transformers.clinical_mira.moa.grounding import (
     build_label_index,
     ground_mechanisms,
 )
-from pts.transformers.drug_molecule import compute_max_phase_per_drug
+from pts.transformers.drug_molecule import compute_max_phase_per_drug, roll_up_to_parents
 
 LABEL_COLUMNS = ['id', *FIELDS, *LOCATION_FIELDS]
 
@@ -74,14 +74,14 @@ def stage_excluded(candidates: pl.DataFrame, exclude_stages: dict[str, list[str]
 def _linking_molecules(chembl_molecule: pl.DataFrame, clinical_report: pl.DataFrame) -> pl.DataFrame:
     """Each ChEMBL molecule with the stage and drug type of its parent.
 
-    The stage is the parent's maximum clinical stage in the clinical report, or the molecule's own
-    when the parent has none.
+    The stage is the most advanced one in the clinical report across the parent's family, or the
+    molecule's own when the family has none.
 
     Returns:
         pl.DataFrame: ``id``, ``parentId``, ``maximumClinicalStage``, ``drugType``.
     """
     molecules = chembl_molecule.select('id', parentId=pl.coalesce('parentId', 'id'), drugType='drugType')
-    stages = compute_max_phase_per_drug(clinical_report)
+    stages = roll_up_to_parents(compute_max_phase_per_drug(clinical_report), chembl_molecule.select('id', 'parentId'))
     parent_types = molecules.select(parentId='id', parentType='drugType').unique('parentId')
     return (
         molecules

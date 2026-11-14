@@ -15,6 +15,7 @@ from pts.transformers.drug_molecule import (
     compute_max_phase_per_drug,
     drug_molecule,
     process_drug_index,
+    roll_up_to_parents,
 )
 
 # --- Schemas used to build test DataFrames ---
@@ -211,6 +212,51 @@ class TestComputeMaxPhasePerDrug:
         )
         stages = _by_id(compute_max_phase_per_drug(report), 'maximumClinicalStage')
         assert stages['CHEMBL_U'] == 'UNKNOWN'
+
+
+# --- Tests for roll_up_to_parents ---
+
+
+def _stages(rows):
+    return pl.DataFrame(rows, schema={'id': pl.String, 'maximumClinicalStage': pl.String}, orient='row')
+
+
+def _family(rows):
+    return pl.DataFrame(rows, schema={'id': pl.String, 'parentId': pl.String}, orient='row')
+
+
+class TestRollUpToParents:
+    def test_parent_takes_the_best_stage_of_its_family(self):
+        stages = _stages([('P', 'UNKNOWN'), ('SALT', 'APPROVAL'), ('HYDRATE', 'PHASE_3')])
+        family = _family([('P', None), ('SALT', 'P'), ('HYDRATE', 'P')])
+        assert _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')['P'] == 'APPROVAL'
+
+    def test_children_keep_their_own_stage(self):
+        stages = _stages([('P', 'APPROVAL'), ('SALT', 'PHASE_3')])
+        family = _family([('P', None), ('SALT', 'P')])
+        rolled = _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')
+        assert rolled == {'P': 'APPROVAL', 'SALT': 'PHASE_3'}
+
+    def test_parent_without_reports_gets_its_childs_stage(self):
+        stages = _stages([('SALT', 'PHASE_2')])
+        family = _family([('P', None), ('SALT', 'P')])
+        rolled = _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')
+        assert rolled == {'P': 'PHASE_2', 'SALT': 'PHASE_2'}
+
+    def test_parent_better_than_its_children_keeps_its_stage(self):
+        stages = _stages([('P', 'APPROVAL'), ('SALT', 'PHASE_1')])
+        family = _family([('P', 'P'), ('SALT', 'P')])
+        assert _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')['P'] == 'APPROVAL'
+
+    def test_ids_outside_the_molecules_keep_their_stage(self):
+        stages = _stages([('ORPHAN', 'PHASE_1')])
+        rolled = _by_id(roll_up_to_parents(stages, _family([('P', None)])), 'maximumClinicalStage')
+        assert rolled == {'ORPHAN': 'PHASE_1'}
+
+    def test_one_row_per_id(self):
+        stages = _stages([('P', 'PHASE_1'), ('A', 'APPROVAL'), ('B', 'PHASE_2')])
+        family = _family([('P', None), ('A', 'P'), ('B', 'P')])
+        assert roll_up_to_parents(stages, family)['id'].sort().to_list() == ['A', 'B', 'P']
 
 
 # --- Tests for _process_clinical_report_indications ---
@@ -434,6 +480,27 @@ class TestProcessDrugIndex:
         assert 'CHEMBL999' in result['id'].to_list()
         assert _by_id(result, 'maximumClinicalStage')['CHEMBL999'] == 'UNKNOWN'
         assert dict(result.schema) == drug_molecule_schema
+
+    def test_parent_stage_is_rolled_up_from_its_salt(self, chemical_probes_df, mechanism_df, disease_df):
+        drugbank = [{'source': 'drugbank', 'ids': ['DB1']}]
+        molecules = pl.DataFrame(
+            [
+                _molecule('CHEMBL_P', parentId=None, childChemblIds=['CHEMBL_S'], crossReferences=drugbank),
+                _molecule('CHEMBL_S', parentId='CHEMBL_P'),
+            ],
+            schema=MOLECULE_SCHEMA,
+            orient='row',
+        )
+        reports = pl.DataFrame(
+            [
+                _report('r1', 'APPROVAL', [('Salt', 'CHEMBL_S')], [('Disease X', 'EFO_0001')]),
+                _report('r2', 'PHASE_2', [('Parent', 'CHEMBL_P')], [('Disease Y', 'EFO_0002')]),
+            ],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        result = process_drug_index(molecules.lazy(), chemical_probes_df, mechanism_df, reports, disease_df)
+        assert _by_id(result, 'maximumClinicalStage') == {'CHEMBL_P': 'APPROVAL', 'CHEMBL_S': 'APPROVAL'}
 
     def test_output_matches_the_declared_schema(self, drug_index_result):
         assert dict(drug_index_result.schema) == drug_molecule_schema
