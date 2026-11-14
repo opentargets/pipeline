@@ -1208,8 +1208,8 @@ steps:
 
   #: ASSOCIATION STEP :#############################################################################
   association:
-    - name: pyspark association
-      pyspark: association
+    - name: transform association
+      transformer: association
       source:
         evidence: output/evidence_*
         disease: output/disease
@@ -1220,17 +1220,8 @@ steps:
         by_datasource_indirect: output/association_by_datasource_indirect
         by_datatype_direct: output/association_by_datatype_direct
         by_datatype_indirect: output/association_by_datatype_indirect
-        temporary: intermediate/indirect_association_intermediate
-      properties:
-        spark.driver.memory: '12g'
       settings:
-        partition_count:
-          overall_direct: 14
-          overall_indirect: 39
-          by_datasource_direct: 14
-          by_datasource_indirect: 43
-          by_datatype_direct: 15
-          by_datatype_indirect: 41
+        bucket_count: 64
         novelty_scale: 2 # 2 for long tailed slow decays
         novelty_shift: 3 # 3 for long tailed slow decays
         novelty_window: 10
