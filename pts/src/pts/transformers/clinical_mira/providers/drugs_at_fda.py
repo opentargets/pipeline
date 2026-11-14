@@ -98,6 +98,13 @@ def approved_ingredients(applications: list[dict]) -> pl.DataFrame:
     ).unique(maintain_order=True)
 
 
+def _map_names(names: pl.DataFrame, lut: pl.LazyFrame) -> pl.DataFrame:
+    """The drug ids of each distinct `name`, null when the dictionary has none."""
+    return map_entities(
+        names.select('name').unique().lazy(), lut, 'drugIds', 'name', 'label', type_col=pl.lit('CD')
+    ).collect()
+
+
 def query_names(ingredient: pl.Expr) -> pl.Expr:
     """The names to match for an ingredient: combinations split, the biologic suffix dropped."""
     return (
@@ -123,16 +130,21 @@ def extract_clinical_report(applications: list[dict], drug: pl.DataFrame) -> Cli
     Returns:
         The reports, with `diseases` null.
     """
-    names = (
-        approved_ingredients(applications)
+    lut = build_lut([drug_label_lut(drug.select(DRUG_COLUMNS))]).lazy()
+    ingredients = approved_ingredients(applications).with_columns(
+        name=pl.col('ingredient').str.replace(_BIOLOGIC_SUFFIX, '').str.strip_chars()
+    )
+    whole = _map_names(ingredients, lut)
+    unmapped_whole = whole.filter(pl.col('drugIds').is_null()).select(pl.col('name').alias('whole'))
+    split = (
+        ingredients
+        .join(unmapped_whole, left_on='name', right_on='whole', how='semi')
         .with_columns(name=query_names(pl.col('ingredient')))
         .explode('name')
         .drop_nulls('name')
     )
-    lut = build_lut([drug_label_lut(drug.select(DRUG_COLUMNS))]).lazy()
-    mapped = map_entities(
-        names.select('name').unique().lazy(), lut, 'drugIds', 'name', 'label', type_col=pl.lit('CD')
-    ).collect()
+    names = pl.concat([ingredients.join(unmapped_whole, left_on='name', right_on='whole', how='anti'), split])
+    mapped = pl.concat([whole.drop_nulls('drugIds'), _map_names(split, lut)]).unique('name', keep='first')
     unmapped = names.join(mapped.filter(pl.col('drugIds').is_null()), on='name', how='semi')
     if unmapped.height:
         commonest = unmapped.group_by('name').len().sort(['len', 'name'], descending=[True, False]).head(20)

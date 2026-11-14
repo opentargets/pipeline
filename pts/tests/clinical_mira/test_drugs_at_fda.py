@@ -8,13 +8,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.schemas.drug_molecule import molecule_schema
 from pts.transformers.clinical_mira.providers.drugs_at_fda import (
     approved_ingredients,
     extract_clinical_report,
     query_names,
     read_applications,
 )
-from tests.clinical_mira.mapping_fixtures import DRUG
+from tests.clinical_mira.mapping_fixtures import DRUG, _molecule
 
 
 def _app(
@@ -131,3 +132,23 @@ def test_unmapped_names_are_dropped_and_empty_reports_skipped() -> None:
 
 def test_no_approved_application_gives_no_report() -> None:
     assert extract_clinical_report([_app('ANDA070001', orig_ap='19900101')], DRUG).df.is_empty()
+
+
+def test_a_name_that_maps_whole_is_not_split() -> None:
+    drug = pl.DataFrame(
+        [
+            _molecule('CHEMBL_CONJ', 'ESTROGENS, CONJUGATED', [], []),
+            _molecule('CHEMBL_ESTR', 'ESTROGENS', [], []),
+            _molecule('CHEMBL25', 'ASPIRIN', [], []),
+        ],
+        schema=molecule_schema,
+    )
+    apps = [
+        _app('NDA017001', orig_ap='20240314', ingredients=['ESTROGENS, CONJUGATED']),
+        _app('NDA017002', orig_ap='20240314', ingredients=['ESTROGENS, ASPIRIN']),
+    ]
+    reports = {
+        r['id']: sorted(d['drugId'] for d in r['drugs'])
+        for r in extract_clinical_report(apps, drug).df.iter_rows(named=True)
+    }
+    assert reports == {'nda017001': ['CHEMBL_CONJ'], 'nda017002': ['CHEMBL25', 'CHEMBL_ESTR']}
