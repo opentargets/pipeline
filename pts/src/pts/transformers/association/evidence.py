@@ -5,13 +5,13 @@ from __future__ import annotations
 import polars as pl
 
 
-def evidence_year(evidence_date: pl.Expr, next_year: int) -> pl.Expr:
-    """Leading four-digit year of the evidence date; `next_year` when there is none."""
-    year = evidence_date.str.extract(r'^([0-9]{4})(?:[^0-9]|$)', 1).str.strip_chars(' ')
-    return year.cast(pl.Int32, strict=False).fill_null(pl.lit(next_year, dtype=pl.Int32))
+def evidence_year(evidence_date: pl.Expr, current_year: int) -> pl.Expr:
+    """Leading four-digit year capped at `current_year`; `current_year + 1` when there is none."""
+    year = evidence_date.str.extract(r'^([0-9]{4})(?:[^0-9]|$)', 1).str.strip_chars(' ').cast(pl.Int32, strict=False)
+    return year.clip(upper_bound=current_year).fill_null(pl.lit(current_year + 1, dtype=pl.Int32))
 
 
-def prepare_evidence(raw: pl.LazyFrame, next_year: int) -> pl.LazyFrame:
+def prepare_evidence(raw: pl.LazyFrame, current_year: int) -> pl.LazyFrame:
     """Keep positive-score evidence with its year."""
     return raw.filter(pl.col('score') > 0).select(
         'targetId',
@@ -19,7 +19,7 @@ def prepare_evidence(raw: pl.LazyFrame, next_year: int) -> pl.LazyFrame:
         'datasourceId',
         'datatypeId',
         pl.col('score').cast(pl.Float64),
-        evidence_year(pl.col('evidenceDate'), next_year).alias('year'),
+        evidence_year(pl.col('evidenceDate'), current_year).alias('year'),
     )
 
 

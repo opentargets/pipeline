@@ -7,7 +7,8 @@ import pytest
 
 from pts.transformers.association.evidence import evidence_year, expand_disease, prepare_evidence
 
-NEXT_YEAR = 2027
+CURRENT_YEAR = 2026
+NEXT_YEAR = CURRENT_YEAR + 1
 
 
 @pytest.mark.parametrize(
@@ -15,6 +16,10 @@ NEXT_YEAR = 2027
     [
         ('1999-12-31', 1999),
         ('2021-02-11', 2021),
+        ('2026-12-31', CURRENT_YEAR),
+        ('2027-05-01', CURRENT_YEAR),
+        ('2030-01-01', CURRENT_YEAR),
+        ('2099', CURRENT_YEAR),
         (None, NEXT_YEAR),
         ('Batman-Robin', NEXT_YEAR),
         ('2021', 2021),
@@ -24,7 +29,7 @@ NEXT_YEAR = 2027
 )
 def test_evidence_year(date: str | None, expected: int) -> None:
     df = pl.DataFrame({'date': [date]}, schema={'date': pl.String}).select(
-        evidence_year(pl.col('date'), NEXT_YEAR).alias('year')
+        evidence_year(pl.col('date'), CURRENT_YEAR).alias('year')
     )
     assert df.schema['year'] == pl.Int32
     assert df['year'].to_list() == [expected]
@@ -51,7 +56,7 @@ def test_prepare_evidence_drops_non_positive_scores() -> None:
         ('t1', 'd1', 'ds', 'dt', -1.0, '2020-01-01'),
         ('t1', 'd1', 'ds', 'dt', 0.1, '2020-01-01'),
     ])
-    out = prepare_evidence(raw, NEXT_YEAR).collect()
+    out = prepare_evidence(raw, CURRENT_YEAR).collect()
     assert out.columns == ['targetId', 'diseaseId', 'datasourceId', 'datatypeId', 'score', 'year']
     assert out['score'].to_list() == [0.1]
     assert out['year'].to_list() == [2020]

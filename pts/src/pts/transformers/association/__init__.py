@@ -65,7 +65,7 @@ def association(
     for bucket in range(bucket_count):
         logger.info(f'association bucket {bucket + 1}/{bucket_count}')
         in_bucket = buckets.pop((bucket,), pl.DataFrame(schema=schema)).lazy()
-        evidence = prepare_evidence(in_bucket, current_year + 1)
+        evidence = prepare_evidence(in_bucket, current_year)
         sinks = []
         for way, frame in (('direct', evidence), ('indirect', expand_disease(evidence, disease, weights))):
             by_datasource = aggregate_by_datasource(frame).collect().lazy()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import polars as pl
@@ -124,3 +125,15 @@ def test_refuses_existing_destination(tmp_path: Path) -> None:
     Path(destination['overall_direct']).mkdir(parents=True)
     with pytest.raises(ValueError, match='already exists'):
         association(source, destination, _settings(2), None)
+
+
+def test_future_dated_evidence_counts_as_current_year(tmp_path: Path) -> None:
+    rows = [('t_future', 'd_other', 'ds1', 'dt1', 0.8, '2040-01-01', None)]
+    source, destination = _stage(tmp_path, rows=rows)
+    association(source, destination, _settings(2), None)
+    current_year = datetime.now().year
+    out = scan_dataset(destination['overall_direct']).filter(pl.col('targetId') == 't_future').collect()
+    assert out.height == 1
+    assert out['associationScore'][0] > 0
+    assert out['timeseries'][0].struct.field('year').drop_nulls().max() == current_year
+    assert out['currentNovelty'][0] > 0
