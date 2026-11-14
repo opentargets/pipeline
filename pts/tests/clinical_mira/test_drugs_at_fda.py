@@ -10,9 +10,11 @@ import pytest
 
 from pts.transformers.clinical_mira.providers.drugs_at_fda import (
     approved_ingredients,
+    extract_clinical_report,
     query_names,
     read_applications,
 )
+from tests.clinical_mira.mapping_fixtures import DRUG
 
 
 def _app(
@@ -95,3 +97,37 @@ def test_ingredients_are_upper_case_and_trimmed() -> None:
 )
 def test_query_names(raw: str, expected: list[str]) -> None:
     assert pl.select(query_names(pl.lit(raw))).item().to_list() == expected
+
+
+def test_report_fields() -> None:
+    reports = extract_clinical_report([_app('NDA017001', orig_ap='20240314', ingredients=['ASPIRIN'])], DRUG).df
+    (row,) = reports.iter_rows(named=True)
+    assert row['id'] == 'nda017001'
+    assert (row['provider'], row['source'], row['type']) == ('FDA', 'Drugs@FDA', 'INDICATION')
+    assert (row['phaseFromSource'], row['clinicalStage'], row['year']) == ('approved', 'APPROVAL', 2024)
+    assert row['origin'] == 'REGULATORY_AGENCY'
+    assert row['diseases'] is None
+    assert row['url'] == (
+        'https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=017001'
+    )
+    assert row['drugs'] == [{'drugFromSource': 'aspirin', 'drugId': 'CHEMBL25'}]
+
+
+def test_combination_maps_each_ingredient_once() -> None:
+    apps = [_app('NDA017001', orig_ap='20240314', ingredients=['ASPIRIN, IVACAFTOR', 'ASPIRIN'])]
+    ids = sorted(d['drugId'] for d in extract_clinical_report(apps, DRUG).df['drugs'][0])
+    assert ids == ['CHEMBL2010601', 'CHEMBL25']
+
+
+def test_unmapped_names_are_dropped_and_empty_reports_skipped() -> None:
+    apps = [
+        _app('NDA017001', orig_ap='20240314', ingredients=['ASPIRIN', 'UNKNOWNIUM']),
+        _app('NDA017002', orig_ap='20240314', ingredients=['UNKNOWNIUM']),
+    ]
+    reports = extract_clinical_report(apps, DRUG).df
+    assert reports['id'].to_list() == ['nda017001']
+    assert len(reports['drugs'][0]) == 1
+
+
+def test_no_approved_application_gives_no_report() -> None:
+    assert extract_clinical_report([_app('ANDA070001', orig_ap='19900101')], DRUG).df.is_empty()

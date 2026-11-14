@@ -10,13 +10,30 @@ import zipfile
 from io import BytesIO
 
 import polars as pl
+from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
+
+from pts.transformers.clinical_mira.datasets import ClinicalReport
+from pts.transformers.clinical_mira.schemas import (
+    ClinicalProvider,
+    ClinicalReportOrigin,
+    ClinicalReportType,
+    ClinicalSource,
+)
+from pts.transformers.ontoma_lut.build import DRUG_COLUMNS, build_lut, drug_label_lut
+from pts.transformers.utils.disease_mapping import map_entities
 
 APPLICATION_KINDS = ('NDA', 'BLA')
 """Application types that make a report."""
 
 TENTATIVE = 'None (Tentative Approval)'
 """The marketing status of a product that is only tentatively approved."""
+
+APPLICATION_URL = 'https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo='
+"""Drugs@FDA overview page of an application; the application's digits complete it."""
+
+_DRUG = pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String})
+_DISEASES = pl.List(pl.Struct({'diseaseId': pl.String, 'diseaseFromSource': pl.String}))
 
 _SEPARATOR = r'\s*(?:,|/|;|\sAND\s)\s*'
 _BIOLOGIC_SUFFIX = r'-[A-Z]{4}$'
@@ -91,3 +108,66 @@ def query_names(ingredient: pl.Expr) -> pl.Expr:
             pl.element().str.replace(_BIOLOGIC_SUFFIX, '').str.strip_chars().filter(pl.element().str.len_chars() > 0)
         )
     )
+
+
+def extract_clinical_report(applications: list[dict], drug: pl.DataFrame) -> ClinicalReport:
+    """One FDA report per approved NDA or BLA, its ingredients mapped to drugs with the drug dictionary.
+
+    Names the dictionary does not map are logged and dropped; an application left without a drug gives no
+    report. The drug ids are set here, so the reports' names never reach drug NER.
+
+    Args:
+        applications: Drugs@FDA applications, as :func:`read_applications` returns them.
+        drug: Drug molecules, with the `DRUG_COLUMNS` of `intermediate/chembl_molecule`.
+
+    Returns:
+        The reports, with `diseases` null.
+    """
+    names = (
+        approved_ingredients(applications)
+        .with_columns(name=query_names(pl.col('ingredient')))
+        .explode('name')
+        .drop_nulls('name')
+    )
+    lut = build_lut([drug_label_lut(drug.select(DRUG_COLUMNS))]).lazy()
+    mapped = map_entities(
+        names.select('name').unique().lazy(), lut, 'drugIds', 'name', 'label', type_col=pl.lit('CD')
+    ).collect()
+    unmapped = names.join(mapped.filter(pl.col('drugIds').is_null()), on='name', how='semi')
+    if unmapped.height:
+        commonest = unmapped.group_by('name').len().sort(['len', 'name'], descending=[True, False]).head(20)
+        count = unmapped['name'].n_unique()
+        logger.info(f'drugs@fda: {count} ingredient names unmapped, e.g. {commonest["name"].to_list()}')
+    drugs = (
+        names
+        .join(mapped.drop_nulls('drugIds'), on='name', how='inner')
+        .explode('drugIds')
+        .select(
+            'application',
+            'year',
+            drug=pl.struct(
+                pl.col('name').str.to_lowercase().alias('drugFromSource'),
+                pl.col('drugIds').alias('drugId'),
+            ),
+        )
+        .unique(maintain_order=True)
+    )
+    reports = (
+        drugs
+        .group_by('application', maintain_order=True)
+        .agg(pl.col('year').first(), pl.col('drug').alias('drugs'))
+        .select(
+            id='application',
+            phaseFromSource=pl.lit('approved'),
+            year=pl.col('year'),
+            origin=pl.lit(ClinicalReportOrigin.REGULATORY.value),
+            url=pl.lit(APPLICATION_URL) + pl.col('application').str.replace(r'^[a-z]+', ''),
+            type=pl.lit(ClinicalReportType.INDICATION.value),
+            source=pl.lit(ClinicalSource.DRUGS_AT_FDA.value),
+            provider=pl.lit(ClinicalProvider.FDA.value),
+            drugs=pl.col('drugs').cast(pl.List(_DRUG)),
+            diseases=pl.lit(None, dtype=_DISEASES),
+        )
+    )
+    logger.info(f'drugs@fda: {reports.height} reports')
+    return ClinicalReport(df=reports)
