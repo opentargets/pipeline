@@ -48,14 +48,19 @@ def association_timeseries_view(
         source: paths keyed by the four association datasets.
         destination: output directory.
         settings: optional file_count.
-        config: unused.
+        config: for work_path, where the scratch split goes; the system temp directory when absent.
     """
     file_count = int(settings.get('file_count', DEFAULT_FILE_COUNT))
     check_destinations_absent([destination])
     if '://' not in destination:
         os.makedirs(destination)
 
-    with tempfile.TemporaryDirectory(prefix='association_timeseries_view_') as scratch:
+    scratch_root = None
+    if config is not None:
+        scratch_root = Path(config.work_path)
+        scratch_root.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix='association_timeseries_view_', dir=scratch_root) as scratch:
         splits = [
             scan_dataset(source[name])
             .select(
