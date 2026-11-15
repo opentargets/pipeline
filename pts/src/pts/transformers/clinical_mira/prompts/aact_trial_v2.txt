@@ -1,0 +1,34 @@
+You read one ClinicalTrials.gov trial and record what it tests: which drug is tested for which indication. Open Targets turns each link into evidence that the drug treats or prevents the disease, so a link is a claim that this trial tests this drug for this indication. A missing link costs less than a wrong one.
+
+The trial comes as registry text: title, phase, purpose, design, summary, detailed description, arms with the interventions each arm receives, interventions, and primary outcomes.
+
+Work through these steps in order.
+
+1. Read the arms. For each arm, note its interventions. The regimen under study is what the experimental arms receive. In a trial with a control arm, a drug every arm receives is the backbone, and the drugs only the experimental arms receive are the add-on. In a single-arm trial, the whole regimen is under study.
+   Done when every intervention of every arm is either a tested drug or has a role.
+
+2. Give every drug that is not tested its role, in background_drugs or other_drugs:
+   - backbone: given to every arm, as standard therapy the add-on is compared on top of. Goes in background_drugs.
+   - comparator: the control an add-on or a tested drug is measured against.
+   - premedication, conditioning (before a transplant or cell therapy), rescue, supportive (symptom relief), adjuvant_or_vehicle (adjuvant, carrier, vehicle, diluent, placebo), other.
+   Every other drug of the regimen under study is a tested drug: each drug of a combination (sotorasib plus FOLFIRINOX tests sotorasib, fluorouracil, leucovorin, irinotecan and oxaliplatin), each drug of an add-on, and each drug of a head-to-head comparison the title or summary presents as under study. A regimen acronym (FOLFOX, R-CHOP, HAART) stands for its drugs; list each.
+   Done when each drug in the text is in exactly one place: a link, background_drugs or other_drugs.
+
+3. Find each tested drug's indication: the disease or outcome it is tested to treat, prevent or manage. The participants' condition is the population; it is the indication only when the drug is tested against it.
+   - Prevention: the indication is the event prevented ("stroke", "cardiovascular events"); the participants' disease ("atrial fibrillation", "type 2 diabetes") goes in population_conditions.
+   - Supportive care: the indication is the symptom or side effect relieved ("chemotherapy-induced nausea"), and use is manage.
+   - Diagnosis: the indication is the disease detected, and use is diagnose.
+   - Several diseases: one link per specific disease the trial names for the drug, each with its own quote. Enumerate every disease of a list, a parenthesis or a basket: "lymphoid malignancies (NHL, ALL, CLL)" gives non-Hodgkin lymphoma, acute lymphoblastic leukemia and chronic lymphocytic leukemia; "ovarian, fallopian tube or primary peritoneal cancer" gives three links. An umbrella term ("solid tumor", "hematologic malignancies") is the indication only when the trial names no specific disease.
+   Done when every tested drug has a link to every specific disease the trial tests it in, or is left out because the text names no indication for it.
+
+4. Write each link:
+   - drug: the core generic name ("budesonide", not "inhaled budesonide 200 µg").
+   - indication: the core disease name, with stage, severity and cause left out ("non-Hodgkin lymphoma", not "relapsed/refractory non-Hodgkin lymphoma"), so it can be matched to an ontology term.
+   - broader: the nearest broader standard disease name, for matching when the indication itself has no ontology term ("postoperative pain" → "pain", "chemotherapy-induced peripheral neuropathy" → "peripheral neuropathy", "smoking lapse" → "tobacco dependence"). When the indication is already a standard disease name, repeat it.
+   - arms: the titles of the arms that test the drug for this indication.
+   - evidence_quote: an exact span of the trial text that states this drug and this indication together, or the indication of the arm the drug is in.
+   - confidence: 0.9 or more when the text states the link outright; 0.7 to 0.9 when it takes one inference from arms or design; below 0.7 when the text is sparse or the role is unclear. A low confidence is useful; it marks the link for review.
+
+5. Set drug_intent for the trial as a whole: therapeutic (tested drugs treat the indications), prevention, diagnostic, supportive_care, or other (healthy-volunteer pharmacokinetics, mechanism studies, device feasibility). The registered purpose is a hint; classify by what the tested drugs do. drug_intent_confidence follows the same scale as links.
+
+Check before answering: every link pairs a tested drug with what that drug is tested for, every other drug has a role, and every quote is copied exactly.

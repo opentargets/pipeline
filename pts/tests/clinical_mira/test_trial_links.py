@@ -6,7 +6,13 @@ from pts.transformers.clinical_mira.trial_links import link_rows, report_entitie
 
 def _link(drug: str, indication: str, confidence: float = 0.9) -> TrialLink:
     return TrialLink(
-        drug=drug, indication=indication, use='treat', arms=['A'], confidence=confidence, evidence_quote='q'
+        drug=drug,
+        indication=indication,
+        broader=indication,
+        use='treat',
+        arms=['A'],
+        confidence=confidence,
+        evidence_quote='q',
     )
 
 
@@ -44,3 +50,7 @@ def test_link_rows_one_row_per_link() -> None:
     assert rows.columns == ['id', 'drug', 'indication', 'use', 'confidence']
     assert rows.height == 4
     assert rows.filter(rows['id'] == 'nct2').row(0) == ('nct2', 'drug z', 'asthma', 'treat', 0.4)
+
+
+def test_a_link_carries_a_broader_term() -> None:
+    assert 'broader' in TrialLink.model_json_schema()['required']

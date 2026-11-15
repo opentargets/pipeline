@@ -483,6 +483,7 @@ class TrialLink(BaseModel):
 
     drug: str = Field(description='The tested drug, as the trial names it.')
     indication: str = Field(description='The disease or outcome the drug is tested to treat, prevent or manage.')
+    broader: str = Field(description='The nearest broader standard disease name; the indication itself when it is one.')
     use: Literal['treat', 'prevent', 'manage', 'diagnose', 'other']
     arms: list[str] = Field(description='Titles of the arms that test the drug for this indication.')
     confidence: float = Field(description='Between 0 and 1: how directly the text states this link.')
