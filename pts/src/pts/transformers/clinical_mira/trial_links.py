@@ -46,9 +46,18 @@ def report_entities_frame(extractions: pl.DataFrame, min_confidence: float) -> p
     """Per trial, the distinct sorted drugs and indications of links at or above ``min_confidence``.
 
     Trials with no such link keep a row with empty lists. ``diseaseBroader`` holds one ``{indication, broader}``
-    struct per distinct indication, with the first broader seen.
+    struct per distinct indication, with the first broader seen. A confidence in (1, 100] is read as a percentage;
+    a null one, or one outside [0, 100], is below any threshold.
     """
-    kept = _links(extractions).filter(pl.col('confidence') >= min_confidence)
+    confidence = pl.col('confidence')
+    fraction = (
+        pl
+        .when(confidence.is_between(0, 1))
+        .then(confidence)
+        .when((confidence > 1) & (confidence <= 100))
+        .then(confidence / 100)
+    )
+    kept = _links(extractions).filter(fraction >= min_confidence)
     ids = extractions.select('id')
     grouped = kept.group_by('id').agg(
         pl.col('drug').unique().sort().alias('drugFromSource'),

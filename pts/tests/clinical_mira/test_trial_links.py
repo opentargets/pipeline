@@ -168,3 +168,31 @@ def test_single_drug_trials_count_distinct_link_drugs():
     out = single_drug_trials(df)
     assert out.columns == ['id', 'drug']
     assert out.rows() == [('N1', 'Aspirin')]
+
+
+def test_report_entities_read_a_percentage_confidence_as_a_fraction():
+    df = v2_frame({
+        'N1': {'links': [v2_link('a', 'asthma', 85.0), v2_link('b', 'copd', 79.0), v2_link('c', 'gout', 100.0)]}
+    })
+
+    out = report_entities_frame(df, 0.8)
+
+    assert out['drugFromSource'].to_list() == [['a', 'c']]
+    assert out['diseaseFromSource'].to_list() == [['asthma', 'gout']]
+
+
+def test_report_entities_drop_confidences_outside_a_percentage():
+    df = v2_frame({
+        'N1': {
+            'links': [
+                v2_link('a', 'asthma', -0.9),
+                v2_link('b', 'copd', 850.0),
+                v2_link('c', 'gout', None),
+                v2_link('d', 'acne', 1.0),
+            ]
+        }
+    })
+
+    out = report_entities_frame(df, 0.8)
+
+    assert out['drugFromSource'].to_list() == [['d']]
