@@ -73,10 +73,12 @@ class AactTrialExtractionV2Settings(BaseModel):
     system_prompt: str | None = None
     """Path to a system prompt overriding the packaged one, relative to the release root. Part of the records'
         revision."""
-    shard_size: int = 5000
-    """Trials per shard. Each shard is written to the store as it finishes."""
+    shard_size: int = 50000
+    """Trials per shard, submitted as batches of ``max_batch_requests`` polled together. Each shard is written to
+        the store as it finishes."""
     max_attempts: int = 3
-    """Attempts per trial, within a run and across runs, before it is left out."""
+    """Attempts per trial within a run. A trial that fails every attempt is left out, and a rerun of the same AACT
+        version does not retry it."""
     sample_size: int | None = None
     """Extract a random sample only. For dry runs; leave unset in production."""
     max_batch_requests: int = MAX_BATCH_REQUESTS

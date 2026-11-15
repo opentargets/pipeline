@@ -237,23 +237,24 @@ def test_resumes_a_submitted_batch(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert json.loads(_state(tmp_path).read_text()) == {'pending': []}
 
 
-def test_failed_trials_are_left_out_and_retried(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    refusing = frozenset({'NCT2'})
-    stats = _stage(monkeypatch, tmp_path, FakeBatches(refuse=refusing), max_attempts=1)
+def test_failed_trials_are_left_out_and_not_retried_by_a_rerun(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches(refuse=frozenset({'NCT2'}))
+    stats = _stage(monkeypatch, tmp_path, batches)
 
+    assert batches.trials.count('NCT2') == 3
     assert stats['extracted'] == 2
     assert stats['failed'] == 1
     published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
     assert published['id'].to_list() == ['NCT1', 'NCT3']
-    cached = (tmp_path / 'work' / 'extraction_v2_cache.jsonl').read_text().splitlines()
-    assert sorted(json.loads(line)['request_id'] for line in cached) == ['NCT1', 'NCT3']
+    snapshot = {path.name: path.read_bytes() for path in _snapshot(tmp_path).iterdir()}
+    submitted = len(batches.created)
 
-    batches = FakeBatches(refuse=refusing)
-    again = _stage(monkeypatch, tmp_path, batches, run_id='v1-run2', max_attempts=2)
+    again = _stage(monkeypatch, tmp_path, batches, run_id='v1-run2')
 
-    assert batches.trials == ['NCT2']
-    assert again['computed'] == 1
+    assert len(batches.created) == submitted
+    assert again['computed'] == 0
     assert again['published'] is False
+    assert {path.name: path.read_bytes() for path in _snapshot(tmp_path).iterdir()} == snapshot
 
 
 def test_a_refusal_is_retried_within_the_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
