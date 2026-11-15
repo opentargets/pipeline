@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from importlib import resources
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -37,9 +38,10 @@ from pts.transformers.clinical_mira.ner import (
     DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical_mira.providers.aact_context import CONTEXT_TABLES, RENDER_VERSION
 from pts.transformers.clinical_mira.providers.aact_llm import TRIAL_FIELDS
 from pts.transformers.clinical_mira.record_store import LIST_OUTPUT, map_texts, publish_snapshot
-from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema, TrialExtractionV2
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL, STOP_REASONS_THRESHOLD
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -298,6 +300,83 @@ class ExtractionOutput:
         return scan_dataset(uri).collect()
 
 
+EXTRACTION_V2_MODEL = 'aact_trial_extraction_v2'
+"""Model name of the v2 extraction records."""
+EXTRACTION_V2_DEFAULT_MODEL = 'claude-haiku-5-5'
+"""Claude model of a release extraction."""
+EXTRACTION_V2_PROMPT = ('pts.transformers.clinical_mira.prompts', 'aact_trial_v2.txt')
+"""Packaged system prompt of the v2 extraction."""
+
+
+def extraction_v2_revision(model: str, system_prompt: str, render_version: int) -> str:
+    """The sha256 hex of the response schema digest, ``system_prompt``, ``model`` and ``render_version``."""
+    document = json.dumps(
+        {
+            'schema': schema_digest(TrialExtractionV2),
+            'prompt': system_prompt,
+            'model': model,
+            'render_version': render_version,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(document.encode('utf-8')).hexdigest()
+
+
+@dataclass(frozen=True)
+class ExtractionV2Output:
+    """The Claude extraction of the AACT trials, tagged by its model, prompt, schema and trial renderer.
+
+    Its tag is the first 12 hex of the revision (see ``extraction_v2_revision``), then ``-p`` and the
+    first 8 hex of the sha256 of ``logic_version``, ``params`` and ``sample_size``.
+    """
+
+    name: str
+    model: str
+    params: dict[str, Any]
+    logic_version: int
+
+    def tag(self, revision: str, sample_size: int | None) -> str:
+        """The output revision of an extraction at ``revision`` of ``sample_size`` trials, or all if None."""
+        document = json.dumps(
+            {'logic_version': self.logic_version, 'params': self.params, 'sample_size': sample_size},
+            sort_keys=True,
+        )
+        return f'{revision[:12]}-p{hashlib.sha256(document.encode("utf-8")).hexdigest()[:8]}'
+
+    def release_tag(self) -> str:
+        """The tag of a full extraction by the packaged prompt and default model, the only one a release reads."""
+        package, filename = EXTRACTION_V2_PROMPT
+        prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
+        return self.tag(extraction_v2_revision(EXTRACTION_V2_DEFAULT_MODEL, prompt, RENDER_VERSION), None)
+
+    def metadata(self, revision: str, sample_size: int | None) -> dict[str, Any]:
+        """The snapshot metadata of an extraction at ``revision`` of ``sample_size`` trials."""
+        return {
+            'kind': 'extraction_v2',
+            'model': self.model,
+            'tag': self.tag(revision, sample_size),
+            'model_revisions': {self.model: revision},
+        }
+
+    def read(self, uri: str, expect_tag: str | None = None) -> pl.DataFrame:
+        """The extraction snapshot ``uri``.
+
+        Args:
+            uri: The snapshot directory.
+            expect_tag: The tag it must hold; ``release_tag()`` if None.
+
+        Raises:
+            ValueError: if its metadata lacks a key, is not of kind ``extraction_v2``, or has another tag.
+        """
+        metadata = read_metadata('extraction_v2', uri)
+        if metadata['kind'] != 'extraction_v2':
+            raise ValueError(f"snapshot extraction_v2 is of kind {metadata['kind']!r}, not 'extraction_v2'")
+        expected = expect_tag or self.release_tag()
+        if metadata['tag'] != expected:
+            raise ValueError(f'snapshot extraction_v2 has tag {metadata["tag"]!r}, this code expects {expected!r}')
+        return scan_dataset(uri).collect()
+
+
 @dataclass(frozen=True)
 class MoaOutput:
     """The LLM mechanism-of-action extraction, tagged by its model and the code around it.
@@ -383,6 +462,13 @@ EXTRACTION = ExtractionOutput(
     name='extraction',
     model='aact_llm_extraction',
     params={'trial_fields': TRIAL_FIELDS},
+    logic_version=1,
+)
+
+EXTRACTION_V2 = ExtractionV2Output(
+    name='extraction_v2',
+    model=EXTRACTION_V2_MODEL,
+    params={'context_tables': CONTEXT_TABLES},
     logic_version=1,
 )
 

@@ -12,6 +12,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from pts.transformers.clinical_mira import staged_outputs
 from pts.transformers.clinical_mira.moa import literature, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
@@ -32,11 +33,13 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
+    EXTRACTION_V2,
     MOA,
     MOA_LITERATURE,
     STOP_REASONS,
     MoaOutput,
     StagedOutput,
+    extraction_v2_revision,
     schema_digest,
 )
 from pts.transformers.clinical_mira.stop_reasons import (
@@ -454,3 +457,61 @@ def test_moa_literature_tag() -> None:
         assert MOA_LITERATURE.params[key] == value
         changed = {**MOA_LITERATURE.params, key: [value, 'changed']}
         assert dataclasses.replace(MOA_LITERATURE, params=changed).tag() != MOA_LITERATURE.tag()
+
+
+def extraction_v2_snapshot(tmp_path: Path, name: str, **overrides: object) -> str:
+    metadata = {**EXTRACTION_V2.metadata('a' * 64, None), **overrides}
+    return snapshot(tmp_path, name, pl.DataFrame({'id': ['NCT1']}), metadata)
+
+
+def test_revision_changes_with_prompt_schema_model_and_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    base = extraction_v2_revision('m', 'prompt', 1)
+
+    assert extraction_v2_revision('m', 'prompt 2', 1) != base
+    assert extraction_v2_revision('m2', 'prompt', 1) != base
+    assert extraction_v2_revision('m', 'prompt', 2) != base
+    monkeypatch.setattr(staged_outputs, 'schema_digest', lambda _: 'other')
+    assert extraction_v2_revision('m', 'prompt', 1) != base
+
+
+def test_revision_is_stable_for_the_same_inputs() -> None:
+    revision = extraction_v2_revision('m', 'prompt', 1)
+
+    assert revision == extraction_v2_revision('m', 'prompt', 1)
+    assert re.fullmatch(r'[0-9a-f]{64}', revision)
+
+
+def test_extraction_v2_tag_and_metadata() -> None:
+    revision = 'ab' * 32
+
+    assert re.fullmatch(r'abababababab-p[0-9a-f]{8}', EXTRACTION_V2.tag(revision, None))
+    assert EXTRACTION_V2.tag(revision, None) != EXTRACTION_V2.tag(revision, 5)
+    assert EXTRACTION_V2.metadata(revision, 5) == {
+        'kind': 'extraction_v2',
+        'model': 'aact_trial_extraction_v2',
+        'tag': EXTRACTION_V2.tag(revision, 5),
+        'model_revisions': {'aact_trial_extraction_v2': revision},
+    }
+
+
+def test_extraction_v2_read_accepts_the_release_tag_and_an_expected_tag(tmp_path: Path) -> None:
+    release = extraction_v2_snapshot(tmp_path, 'release', tag=EXTRACTION_V2.release_tag())
+    sampled = extraction_v2_snapshot(tmp_path, 'sampled', tag=EXTRACTION_V2.tag('c' * 64, 5))
+
+    assert EXTRACTION_V2.read(release).height == 1
+    assert EXTRACTION_V2.read(sampled, EXTRACTION_V2.tag('c' * 64, 5)).height == 1
+
+
+def test_read_refuses_a_snapshot_of_another_kind(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'v1')
+
+    with pytest.raises(ValueError, match="kind 'extraction'"):
+        EXTRACTION_V2.read(uri)
+
+
+def test_read_refuses_another_tag(tmp_path: Path) -> None:
+    uri = extraction_v2_snapshot(tmp_path, 'other', tag='abcdef012345-p00000000')
+
+    with pytest.raises(ValueError, match='abcdef012345-p00000000') as error:
+        EXTRACTION_V2.read(uri)
+    assert EXTRACTION_V2.release_tag() in str(error.value)

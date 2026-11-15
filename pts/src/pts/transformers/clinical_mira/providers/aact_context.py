@@ -28,6 +28,9 @@ CONTEXT_TABLES = {
 }
 """AACT tables and columns of the trial context; separate from the release catalogue `AACT_TABLES`."""
 
+RENDER_VERSION = 1
+"""Bump when `render_trial`'s output changes."""
+
 MAX_CHARS = 12000
 """Character budget of a rendered trial."""
 
