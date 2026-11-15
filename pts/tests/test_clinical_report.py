@@ -38,6 +38,7 @@ from pts.transformers.clinical_report import (
     attach_stop_reasons,
     flag_indirect_primary_purpose,
     flag_null_diseases,
+    flag_observational_studies,
     map_report_entities,
     order_output_columns,
     require_staged,
@@ -131,6 +132,23 @@ def _report(id_: str, source: str, primary_purpose: str | None = None) -> dict:
 def _flagged(reports: ClinicalReport, report_id: str) -> bool:
     qc = reports.df.filter(pl.col('id') == report_id).select('qualityControls').to_series().to_list()[0]
     return qc is not None and ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE.value in qc
+
+
+def test_flag_observational_studies() -> None:
+    entries = [
+        _report('obs', ClinicalSource.CLINICAL_TRIALS_GOV.value) | {'trialStudyType': 'OBSERVATIONAL'},
+        _report('int', ClinicalSource.CLINICAL_TRIALS_GOV.value) | {'trialStudyType': 'INTERVENTIONAL'},
+        _report('ea', ClinicalSource.CLINICAL_TRIALS_GOV.value) | {'trialStudyType': 'EXPANDED_ACCESS'},
+        _report('none', ClinicalSource.CLINICAL_TRIALS_GOV.value) | {'trialStudyType': None},
+        _report('label', ClinicalSource.DailyMed.value) | {'trialStudyType': None},
+    ]
+    result = flag_observational_studies(_build_reports(entries)).df
+    flagged = {
+        row['id']
+        for row in result.iter_rows(named=True)
+        if ClinicalReportFlags.OBSERVATIONAL_STUDY.value in (row['qualityControls'] or [])
+    }
+    assert flagged == {'obs'}
 
 
 def test_flag_indirect_primary_purpose_device_feasibility() -> None:
