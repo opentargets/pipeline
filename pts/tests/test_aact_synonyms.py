@@ -23,7 +23,7 @@ from pts.transformers.utils.aact_synonyms import (
     mine_aact_synonyms,
     parse_aact_entries,
 )
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link, v2_role
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link, v2_role
 
 _ENTRIES_SCHEMA = {'nct_id': pl.Utf8, 'members': pl.List(pl.Utf8)}
 _INDEX_SCHEMA = {'name_norm': pl.Utf8, 'ids': pl.List(pl.Utf8)}

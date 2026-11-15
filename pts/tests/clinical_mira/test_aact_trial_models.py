@@ -33,7 +33,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
 from pts.transformers.clinical_mira.trial_links import link_drug_labels, report_entities_frame
 from pts.transformers.clinical_report import attach_stop_reasons
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 STOP_TAG = STOP_REASONS.tag(REVISIONS)

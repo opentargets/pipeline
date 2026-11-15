@@ -1,8 +1,5 @@
 import json
 
-import polars as pl
-
-from pts.transformers.clinical_mira.model_frames import polars_schema
 from pts.transformers.clinical_mira.schemas import RoleDrug, TrialExtractionV2, TrialLink
 from pts.transformers.clinical_mira.trial_links import (
     drug_synonym_entries,
@@ -12,6 +9,7 @@ from pts.transformers.clinical_mira.trial_links import (
     report_entities_frame,
     single_drug_trials,
 )
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link, v2_role
 
 
 def _link(drug: str, indication: str, confidence: float = 0.9) -> TrialLink:
@@ -71,44 +69,6 @@ def test_the_drug_field_asks_for_the_generic_name() -> None:
 
 def test_a_link_carries_a_broader_term() -> None:
     assert 'broader' in TrialLink.model_json_schema()['required']
-
-
-SCHEMA = pl.Schema({'id': pl.String, 'prompt_sha256': pl.String, **polars_schema(TrialExtractionV2)})
-
-
-def v2_link(drug, indication, confidence=0.9, broader=None, synonyms=()):
-    return {
-        'drug': drug,
-        'synonyms': list(synonyms),
-        'indication': indication,
-        'broader': broader or indication,
-        'use': 'treat',
-        'arms': [],
-        'confidence': confidence,
-        'evidence_quote': 'q',
-    }
-
-
-def v2_role(drug, kind, synonyms=()):
-    return {'drug': drug, 'synonyms': list(synonyms), 'role': kind, 'evidence_quote': 'q'}
-
-
-def v2_frame(rows: dict[str, dict]) -> pl.DataFrame:
-    full = [
-        {
-            'id': trial_id,
-            'prompt_sha256': 'x',
-            'drug_intent': 'therapeutic',
-            'drug_intent_confidence': 0.9,
-            'links': [],
-            'background_drugs': [],
-            'other_drugs': [],
-            'population_conditions': [],
-            **row,
-        }
-        for trial_id, row in rows.items()
-    ]
-    return pl.DataFrame(full, schema=SCHEMA)
 
 
 def test_report_entities_drop_links_below_threshold():

@@ -51,8 +51,8 @@ from pts.transformers.clinical_report import (
     trial_drug_intents,
     validate_disease,
 )
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 from tests.clinical_mira.mapping_fixtures import DISEASE, DRUG
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
 
 def _build_reports(entries) -> ClinicalReport:

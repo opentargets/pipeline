@@ -17,7 +17,7 @@ from pts.transformers.clinical_mira.moa.staging import import_run_id
 from pts.transformers.clinical_mira.record_store import ComputeAborted, publish_snapshot, read_records, run_exists
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION_V2, MOA
 from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 EXTRACTION_TAG = EXTRACTION_V2.release_tag()
 KRAS_QUOTE = 'Sotorasib is a selective KRAS G12C inhibitor'

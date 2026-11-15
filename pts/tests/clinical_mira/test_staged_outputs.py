@@ -53,7 +53,7 @@ from pts.transformers.clinical_mira.stop_reasons import (
     STOP_REASONS_THRESHOLD,
     predict_trial_stop_reasons,
 )
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
 

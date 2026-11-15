@@ -7,7 +7,7 @@ from pts.transformers.clinical_mira.moa.pooling import (
     single_drug_names,
     texts_by_id,
 )
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 DRUG = pl.Struct({'drug': pl.String, 'synonyms': pl.List(pl.String)})
 

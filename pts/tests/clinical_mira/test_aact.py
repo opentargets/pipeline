@@ -106,7 +106,7 @@ def test_replace_with_llm_indications():
     """Extracted trials take the drugs and diseases of their confident links; trials not extracted are dropped."""
     from pts.transformers.clinical_mira.providers.aact import replace_with_llm_indications
     from pts.transformers.clinical_mira.trial_links import report_entities_frame
-    from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+    from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
     studies = pl.DataFrame({
         'nct_id': ['NCT1', 'NCT1', 'NCT2', 'NCT3', 'NCT4'],

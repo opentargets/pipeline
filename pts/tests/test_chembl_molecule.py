@@ -13,7 +13,7 @@ from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecu
 from pts.transformers.clinical_mira.record_store import publish_snapshot
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
 from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, EXTRACTION_V2, schema_digest
-from tests.clinical_mira.test_trial_links import v2_frame, v2_link
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 # A short but structurally valid MDL molblock (single carbon atom), with no
 # terminator newline of its own -- the raw variants below add zero, one, or two
