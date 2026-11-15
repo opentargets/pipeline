@@ -6,7 +6,7 @@ from typing import cast
 from airflow.models import DagBag
 
 from orchestration.operators.dataproc import CreateClusterOperator
-from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor
+from orchestration.operators.gce import DEFAULT_MAX_RUN_DURATION, ComputeEngineRunContainerizedWorkloadSensor
 from orchestration.operators.gcs import UploadFileOperator
 
 
@@ -135,3 +135,15 @@ def test_only_the_llm_steps_carry_a_vm_service_account(dag_bag: DagBag) -> None:
     assert len(runs) > 2
     for task in runs:
         assert task.vm_service_account == (account if task.task_id in llm_runs else None), task.task_id
+
+
+def test_a_clinical_staging_vm_runs_as_long_as_its_step_may(dag_bag: DagBag) -> None:
+    """A step with an execution timeout keeps its VM that long; the others keep the default VM lifetime."""
+    dag = dag_bag.dags['clinical_staging']
+    runs = {t.task_id: t for t in dag.tasks if isinstance(t, ComputeEngineRunContainerizedWorkloadSensor)}
+    for step in ('pts_aact_trial_extraction_v2', 'pts_aact_moa'):
+        assert runs[f'{step}.run_{step}'].max_run_duration == timedelta(hours=30)
+    for task in runs.values():
+        expected = task.execution_timeout or DEFAULT_MAX_RUN_DURATION
+        assert task.max_run_duration == expected, task.task_id
+    assert runs['pts_aact_trial_models.run_pts_aact_trial_models'].max_run_duration == DEFAULT_MAX_RUN_DURATION
