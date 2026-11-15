@@ -1,6 +1,6 @@
 # Clinical staging
 
-This document was updated on 2026-11-03.
+This document was updated on 2026-11-15.
 
 The `clinical_report` step needs data that comes from an LLM or from models:
 the trial extraction, the stop reasons, and the drug and disease entities in
@@ -27,11 +27,12 @@ file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,moa,moa_literature}/  # record stores, shared across versions
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,extraction_v2,moa,moa_literature}/  # record stores, shared across versions
+gs://clinical_staging/store/batches/                                  # Claude batch ids, so a rerun collects them instead of resubmitting
 gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
 gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
-gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
-gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/drug_entities/<tag>/
+gs://clinical_staging/aact/<staging_version>/extraction_v2/<extraction_v2_tag>/  # data.parquet + metadata.json
+gs://clinical_staging/aact/<staging_version>/extraction_v2/<extraction_v2_tag>/drug_entities/<tag>/
 gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
@@ -52,13 +53,22 @@ published release it reads instead,
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
 2. `pts_aact_trial_extraction_v2` (n1-highmem-8) — asks Claude, through Message Batches, to read every trial the record
-   store does not already hold, and publishes the extraction. A trial that
-   fails all 3 attempts is published without, with a warning giving the count;
-   a rerun of the version computes nothing.
+   store does not already hold, and publishes the extraction at
+   `extraction_v2/<extraction_v2_tag>`. A trial a batch leaves unanswered for a
+   systemic reason (`expired`, `canceled`, `overloaded_error` or `api_error`)
+   uses up no attempt, and the step refuses to publish while any such trial
+   remains; a rerun resubmits only those trials. A content failure
+   (`refusal`, `max_tokens`, `invalid_json` or `invalid_request_error`) uses up
+   an attempt. A trial that fails all 3 is left out of the snapshot for that
+   AACT version, with a warning giving the count, and a rerun does not retry it.
+   `<extraction_v2_tag>` is the tag the pts code computes
+   (`EXTRACTION_V2.release_tag()` in `staged_outputs.py`) from the Claude
+   model, the prompt, the schema, the renderer, the effort and the output-token
+   limit.
 3. `pts_aact_trial_models` (n2d-standard-16) — runs the stop-reasons model over
    the distinct `why_stopped` texts and the drug NER over the distinct drug
    labels, and publishes `stop_reasons/<tag>` and
-   `extraction/<extraction_tag>/drug_entities/<tag>`. The drug NER runs the
+   `extraction_v2/<extraction_v2_tag>/drug_entities/<tag>`. The drug NER runs the
    model on 32 labels per forward pass (`ner_model_batch_size`). It reads the
    extraction of the tag its own code computes, and fails naming the expected
    path if there is none.
@@ -259,6 +269,14 @@ and reads the copy the `clinical_report` step makes.
 Only AACT trials with an extraction row are included in the clinical report.
 
 ## Changelog
+
+### 2026-11-15
+
+- The trial extraction runs on Claude as `pts_aact_trial_extraction_v2`, with
+  its record store at `store/extraction_v2` and its snapshot at
+  `extraction_v2/<extraction_v2_tag>`, the AACT drug snapshot under it. A
+  systemic batch failure stops the snapshot from publishing until a rerun
+  answers the trial.
 
 ### 2026-11-03
 
