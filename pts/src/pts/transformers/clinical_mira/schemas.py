@@ -482,6 +482,7 @@ class TrialLink(BaseModel):
     """A drug the trial tests, and what it is tested for."""
 
     drug: str = Field(description='The core generic name of the tested drug.')
+    synonyms: list[str] = Field(description='Other names the trial gives the drug (codes, brand names).')
     indication: str = Field(description='The disease or outcome the drug is tested to treat, prevent or manage.')
     broader: str = Field(description='The nearest broader standard disease name; the indication itself when it is one.')
     use: Literal['treat', 'prevent', 'manage', 'diagnose', 'other']
@@ -494,6 +495,7 @@ class RoleDrug(BaseModel):
     """A drug in the trial that is not tested, with its role."""
 
     drug: str
+    synonyms: list[str] = Field(description='Other names the trial gives the drug (codes, brand names).')
     role: Literal[
         'backbone',
         'comparator',

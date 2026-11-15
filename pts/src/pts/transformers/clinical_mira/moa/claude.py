@@ -22,8 +22,7 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
-from pts.transformers.clinical_mira.llm_workflow import _patch_schema
-from pts.transformers.clinical_mira.moa.llm import _read_cache, _start_on_a_new_line, result_key
+from pts.transformers.clinical_mira.llm_schema import _read_cache, _start_on_a_new_line, patch_schema, result_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -186,7 +185,7 @@ def run_batch_cached(
     if not pending:
         return results, errors
 
-    schema = _patch_schema(response_model.model_json_schema(by_alias=True))
+    schema = patch_schema(response_model.model_json_schema(by_alias=True))
     batch_requests = [
         {'custom_id': custom_id(request_id), 'params': _params(text, system_prompt, schema, model, effort)}
         for request_id, text in pending

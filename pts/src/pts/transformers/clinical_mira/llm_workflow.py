@@ -10,7 +10,6 @@ back to ``auto`` on capacity shortage.
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -18,6 +17,8 @@ from dataclasses import dataclass
 from loguru import logger
 from openai import APIError, APIStatusError, AsyncOpenAI, BadRequestError, UnprocessableEntityError
 from pydantic import BaseModel
+
+from pts.transformers.clinical_mira.llm_schema import patch_schema as _patch_schema
 
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
@@ -91,32 +92,6 @@ async def extract_prompts(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
-
-
-def _patch_schema(schema: dict) -> dict:
-    """Patch a JSON schema for OpenAI structured-output compatibility.
-
-    OpenAI's structured-output mode requires every object node to declare
-    ``additionalProperties: false`` and enumerate all properties under
-    ``required``. Pydantic's ``model_json_schema`` does not emit these by
-    default, so we add them in a single recursive pass.
-    """
-    schema = copy.deepcopy(schema)
-
-    def _walk(node: object) -> None:
-        if isinstance(node, dict):
-            if node.get('type') == 'object' or 'properties' in node:
-                node['additionalProperties'] = False
-                if 'properties' in node:
-                    node['required'] = list(node['properties'].keys())
-            for v in node.values():
-                _walk(v)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(schema)
-    return schema
 
 
 async def _extract_all(

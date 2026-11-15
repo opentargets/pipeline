@@ -24,6 +24,7 @@ Work through these steps in order.
 
 4. Write each link:
    - drug: the core generic name ("budesonide", not "inhaled budesonide 200 µg").
+   - synonyms: other names the trial gives the drug (codes, brand names), copied from the text; empty when it gives none.
    - indication: the core disease name, with stage, severity and cause left out ("non-Hodgkin lymphoma", not "relapsed/refractory non-Hodgkin lymphoma"), so it can be matched to an ontology term.
    - broader: the nearest broader standard disease name, for matching when the indication itself has no ontology term ("postoperative pain" → "pain", "chemotherapy-induced peripheral neuropathy" → "peripheral neuropathy", "smoking lapse" → "tobacco dependence"). When the indication is already a standard disease name, repeat it.
    - arms: the titles of the arms that test the drug for this indication.

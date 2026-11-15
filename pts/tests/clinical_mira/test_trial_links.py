@@ -7,6 +7,7 @@ from pts.transformers.clinical_mira.trial_links import link_rows, report_entitie
 def _link(drug: str, indication: str, confidence: float = 0.9) -> TrialLink:
     return TrialLink(
         drug=drug,
+        synonyms=[],
         indication=indication,
         broader=indication,
         use='treat',
@@ -22,8 +23,10 @@ def _extraction(**changes) -> TrialExtractionV2:
         'drug_intent': 'therapeutic',
         'drug_intent_confidence': 0.9,
         'links': [_link('drug x', 'lung cancer'), _link('drug x', 'mesothelioma'), _link('drug y', 'lung cancer')],
-        'background_drugs': [RoleDrug(drug='cisplatin', role='backbone', evidence_quote='all arms')],
-        'other_drugs': [RoleDrug(drug='dexamethasone', role='premedication', evidence_quote='premedication')],
+        'background_drugs': [RoleDrug(drug='cisplatin', role='backbone', synonyms=[], evidence_quote='all arms')],
+        'other_drugs': [
+            RoleDrug(drug='dexamethasone', role='premedication', synonyms=[], evidence_quote='premedication')
+        ],
         'population_conditions': ['hypertension'],
     }
     return TrialExtractionV2(**(fields | changes))
