@@ -12,6 +12,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.transformers.clinical_mira import staged_outputs
 from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings
@@ -52,6 +53,7 @@ from pts.transformers.clinical_mira.stop_reasons import (
     STOP_REASONS_THRESHOLD,
     predict_trial_stop_reasons,
 )
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
 
@@ -464,9 +466,9 @@ def test_moa_literature_tag() -> None:
         assert dataclasses.replace(MOA_LITERATURE, params=changed).tag() != MOA_LITERATURE.tag()
 
 
-def extraction_v2_snapshot(tmp_path: Path, name: str, **overrides: object) -> str:
+def extraction_v2_snapshot(tmp_path: Path, name: str, df: pl.DataFrame | None = None, **overrides: object) -> str:
     metadata = {**EXTRACTION_V2.metadata('a' * 64, None), **overrides}
-    return snapshot(tmp_path, name, pl.DataFrame({'id': ['NCT1']}), metadata)
+    return snapshot(tmp_path, name, v2_frame({'NCT1': {}}) if df is None else df, metadata)
 
 
 def test_revision_changes_with_prompt_schema_model_renderer_effort_and_max_tokens(
@@ -533,3 +535,35 @@ def test_read_refuses_another_tag(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='abcdef012345-p00000000') as error:
         EXTRACTION_V2.read(uri)
     assert EXTRACTION_V2.release_tag() in str(error.value)
+
+
+def test_extraction_v2_read_gives_confidences_as_fractions_and_drops_the_rest(tmp_path: Path) -> None:
+    links = [
+        v2_link('a', 'asthma', 85.0),
+        v2_link('b', 'copd', 0.79),
+        v2_link('c', 'gout', 100.0),
+        v2_link('d', 'acne', 1.0),
+        v2_link('e', 'flu', -0.9),
+        v2_link('f', 'cold', 850.0),
+        v2_link('g', 'rash', None),
+    ]
+    frame = v2_frame({'NCT1': {'links': links}, 'NCT2': {}, 'NCT3': {'links': [v2_link('h', 'pain', 0.5)]}})
+    uri = extraction_v2_snapshot(tmp_path, 'percent', frame, tag=EXTRACTION_V2.release_tag())
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(message.record['message']), level='INFO')
+    try:
+        read = EXTRACTION_V2.read(uri)
+    finally:
+        logger.remove(sink)
+
+    confidences = {
+        row['id']: [(link['drug'], link['confidence']) for link in row['links']]
+        for row in read.select('id', 'links').to_dicts()
+    }
+    assert confidences == {
+        'NCT1': [('a', 0.85), ('b', 0.79), ('c', 1.0), ('d', 1.0), ('g', None)],
+        'NCT2': [],
+        'NCT3': [('h', 0.5)],
+    }
+    assert read.drop('links').equals(frame.drop('links'))
+    assert any('2 link confidences' in m and '2 links' in m for m in messages), messages

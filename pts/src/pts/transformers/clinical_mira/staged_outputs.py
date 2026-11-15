@@ -21,6 +21,7 @@ from importlib import resources
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
+from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
@@ -330,6 +331,29 @@ def extraction_v2_revision(model: str, system_prompt: str, render_version: int, 
     return hashlib.sha256(document.encode('utf-8')).hexdigest()
 
 
+def confidences_as_fractions(extractions: pl.DataFrame) -> pl.DataFrame:
+    """``extractions`` with each link confidence in [0, 1].
+
+    A confidence in (1, 100] is read as a percentage and divided by 100; a link whose confidence is outside
+    [0, 100] is dropped. A null confidence is kept.
+    """
+    confidences = extractions.select(pl.col('links').list.eval(pl.element().struct.field('confidence')).explode())
+    confidence = confidences.to_series()
+    rescaled = ((confidence > 1) & (confidence <= 100)).sum()
+    dropped = (~confidence.is_between(0, 100)).sum()
+    logger.info(f'{rescaled} link confidences rescaled from percentages, {dropped} links dropped as out of range')
+    kept = pl.element().struct.field('confidence')
+    field = pl.field('confidence')
+    return extractions.with_columns(
+        pl.col('links').list.eval(
+            pl
+            .element()
+            .filter(kept.is_null() | kept.is_between(0, 100))
+            .struct.with_fields(pl.when(field > 1).then(field / 100).otherwise(field).alias('confidence'))
+        )
+    )
+
+
 @dataclass(frozen=True)
 class ExtractionV2Output:
     """The Claude extraction of the AACT trials, tagged by its model, prompt, schema, renderer, effort and max tokens.
@@ -370,7 +394,7 @@ class ExtractionV2Output:
         }
 
     def read(self, uri: str, expect_tag: str | None = None) -> pl.DataFrame:
-        """The extraction snapshot ``uri``.
+        """The extraction snapshot ``uri``, its link confidences as fractions (see ``confidences_as_fractions``).
 
         Args:
             uri: The snapshot directory.
@@ -385,7 +409,7 @@ class ExtractionV2Output:
         expected = expect_tag or self.release_tag()
         if metadata['tag'] != expected:
             raise ValueError(f'snapshot extraction_v2 has tag {metadata["tag"]!r}, this code expects {expected!r}')
-        return scan_dataset(uri).collect()
+        return confidences_as_fractions(scan_dataset(uri).collect())
 
 
 @dataclass(frozen=True)
