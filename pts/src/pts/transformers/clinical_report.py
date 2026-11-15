@@ -627,6 +627,32 @@ def flag_unvalidated_indication(
     )
 
 
+PREVENTION_EVIDENCE_PURPOSES = ('PREVENTION', 'TREATMENT')
+"""Registered primary purposes under which a prevention trial counts as evidence."""
+
+DISEASE_RECURRENCE = 'EFO_0004952'
+"""A prevention trial linked to "disease recurrence" names no disease, so it stays flagged."""
+
+
+def _prevention_trial_as_evidence() -> pl.Expr:
+    """A prevention trial of one drug, with a phase and a registered prevention or treatment purpose.
+
+    Unmapped drugs count towards the one drug, so a second unmapped intervention keeps the flag.
+    """
+    drug = pl.element().struct.field('drugId')
+    mapped = pl.col('drugs').list.eval(drug.drop_nulls().unique()).list.len()
+    unmapped_names = pl.element().filter(drug.is_null()).struct.field('drugFromSource').unique()
+    unmapped = pl.col('drugs').list.eval(unmapped_names).list.len()
+    disease_ids = pl.col('diseases').list.eval(pl.element().struct.field('diseaseId'))
+    return (
+        (pl.col('drug_intent') == 'prevention')
+        & (mapped + unmapped == 1)
+        & (pl.col('clinicalStage').fill_null('UNKNOWN') != 'UNKNOWN')
+        & pl.col('trialPrimaryPurpose').is_in(PREVENTION_EVIDENCE_PURPOSES)
+        & ~disease_ids.list.contains(DISEASE_RECURRENCE)
+    ).fill_null(False)
+
+
 def flag_indirect_primary_purpose(
     reports: ClinicalReport, llm_drug_intent: pl.DataFrame | None = None
 ) -> ClinicalReport:
@@ -646,8 +672,9 @@ def flag_indirect_primary_purpose(
             (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
             &
             # Non-therapeutic intents (supportive_care, prevention, diagnostic, other)
-            # or when LLM was not able to infer the intent (null)
+            # or when LLM was not able to infer the intent (null), except prevention trials that count as evidence
             ((pl.col('drug_intent') != 'therapeutic') | pl.col('drug_intent').is_null())
+            & ~_prevention_trial_as_evidence()
         )
     else:
         reports_df = reports.df
