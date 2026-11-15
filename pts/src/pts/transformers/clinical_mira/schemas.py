@@ -481,7 +481,7 @@ class ClinicalReportExtractionSchema(BaseModel):
 class TrialLink(BaseModel):
     """A drug the trial tests, and what it is tested for."""
 
-    drug: str = Field(description='The tested drug, as the trial names it.')
+    drug: str = Field(description='The core generic name of the tested drug.')
     indication: str = Field(description='The disease or outcome the drug is tested to treat, prevent or manage.')
     broader: str = Field(description='The nearest broader standard disease name; the indication itself when it is one.')
     use: Literal['treat', 'prevent', 'manage', 'diagnose', 'other']

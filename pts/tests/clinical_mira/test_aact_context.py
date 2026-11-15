@@ -34,7 +34,7 @@ def _tables(**overrides: pl.DataFrame) -> dict[str, pl.DataFrame]:
         }),
         'design_outcomes': pl.DataFrame({
             'nct_id': ['NCT1', 'NCT1'],
-            'outcome_type': ['PRIMARY', 'SECONDARY'],
+            'outcome_type': ['primary', 'secondary'],
             'measure': ['Overall survival', 'Toxicity'],
         }),
         'designs': pl.DataFrame({
@@ -116,3 +116,21 @@ def test_interventions_without_a_name_are_left_out() -> None:
     text = _rendered(interventions=interventions)
     assert 'Interventions: Cisplatin\n' in text
     assert 'None' not in text
+
+
+def test_arms_with_the_same_title_render_in_one_order() -> None:
+    groups = pl.DataFrame({
+        'id': [10, 11],
+        'nct_id': ['NCT1', 'NCT1'],
+        'group_type': ['EXPERIMENTAL', 'EXPERIMENTAL'],
+        'title': ['Cohort', 'Cohort'],
+        'description': ['first dose level', 'second dose level'],
+    })
+    links = pl.DataFrame({
+        'id': [100, 101],
+        'nct_id': ['NCT1', 'NCT1'],
+        'design_group_id': [10, 11],
+        'intervention_id': [1, 2],
+    })
+    texts = {_rendered(design_groups=g, design_group_interventions=links) for g in (groups, groups.reverse())}
+    assert len(texts) == 1

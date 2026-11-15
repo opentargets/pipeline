@@ -76,7 +76,8 @@ def trial_context(
         design_groups
         .join(arm_interventions, left_on='id', right_on='design_group_id', how='left')
         .with_columns(pl.col('interventions').fill_null(pl.lit([], dtype=pl.List(pl.String))))
-        .sort('nct_id', 'title', 'group_type')
+        .with_columns(order=pl.col('interventions').list.join('; '))
+        .sort('nct_id', 'title', 'group_type', 'description', 'order', nulls_last=True)
         .group_by('nct_id', maintain_order=True)
         .agg(arms=pl.struct(type='group_type', title='title', description='description', interventions='interventions'))
     )
@@ -88,7 +89,7 @@ def trial_context(
     )
     outcomes = (
         design_outcomes
-        .filter(pl.col('outcome_type') == 'PRIMARY')
+        .filter(pl.col('outcome_type').str.to_lowercase() == 'primary')
         .group_by('nct_id')
         .agg(pl.col('measure').drop_nulls().unique().sort().alias('primary_outcomes'))
     )

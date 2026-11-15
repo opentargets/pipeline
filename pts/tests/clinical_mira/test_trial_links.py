@@ -47,9 +47,13 @@ def test_schema_has_no_numeric_bounds() -> None:
 
 def test_link_rows_one_row_per_link() -> None:
     rows = link_rows({'nct1': _extraction(), 'nct2': _extraction(links=[_link('drug z', 'asthma', 0.4)])})
-    assert rows.columns == ['id', 'drug', 'indication', 'use', 'confidence']
+    assert rows.columns == ['id', 'drug', 'indication', 'broader', 'use', 'arms', 'confidence']
     assert rows.height == 4
-    assert rows.filter(rows['id'] == 'nct2').row(0) == ('nct2', 'drug z', 'asthma', 'treat', 0.4)
+    assert rows.filter(rows['id'] == 'nct2').row(0) == ('nct2', 'drug z', 'asthma', 'asthma', 'treat', ['A'], 0.4)
+
+
+def test_the_drug_field_asks_for_the_generic_name() -> None:
+    assert 'generic name' in TrialLink.model_json_schema()['properties']['drug']['description']
 
 
 def test_a_link_carries_a_broader_term() -> None:

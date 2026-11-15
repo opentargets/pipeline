@@ -9,7 +9,15 @@ import polars as pl
 if TYPE_CHECKING:
     from pts.transformers.clinical_mira.schemas import TrialExtractionV2
 
-LINK_SCHEMA = {'id': pl.String, 'drug': pl.String, 'indication': pl.String, 'use': pl.String, 'confidence': pl.Float64}
+LINK_SCHEMA = {
+    'id': pl.String,
+    'drug': pl.String,
+    'indication': pl.String,
+    'broader': pl.String,
+    'use': pl.String,
+    'arms': pl.List(pl.String),
+    'confidence': pl.Float64,
+}
 
 
 def report_entities(extraction: TrialExtractionV2) -> tuple[list[str], list[str]]:
@@ -22,7 +30,7 @@ def report_entities(extraction: TrialExtractionV2) -> tuple[list[str], list[str]
 def link_rows(extractions: dict[str, TrialExtractionV2]) -> pl.DataFrame:
     """One row per link, keyed by the trial id the extractions are keyed by."""
     rows = [
-        (trial_id, link.drug, link.indication, link.use, link.confidence)
+        (trial_id, link.drug, link.indication, link.broader, link.use, link.arms, link.confidence)
         for trial_id, extraction in extractions.items()
         for link in extraction.links
     ]
