@@ -76,7 +76,7 @@ def report_entities_frame(extractions: pl.DataFrame, min_confidence: float) -> p
     )
 
 
-def tested_drug_labels(extractions: pl.DataFrame) -> pl.DataFrame:
+def link_drug_labels(extractions: pl.DataFrame) -> pl.DataFrame:
     """The distinct, non-null link drugs per trial, whatever their confidence."""
     return (
         _links(extractions).select('id', pl.col('drug').alias('label')).drop_nulls('label').unique(maintain_order=True)

@@ -2,11 +2,11 @@ import json
 
 import polars as pl
 
-from pts.transformers.clinical_mira import trial_links
 from pts.transformers.clinical_mira.model_frames import polars_schema
 from pts.transformers.clinical_mira.schemas import RoleDrug, TrialExtractionV2, TrialLink
 from pts.transformers.clinical_mira.trial_links import (
     drug_synonym_entries,
+    link_drug_labels,
     link_rows,
     report_entities,
     report_entities_frame,
@@ -137,9 +137,9 @@ def test_trial_with_no_link_above_threshold_has_empty_lists():
     assert out['diseaseBroader'].to_list()[:2] == [[], []]
 
 
-def test_tested_drug_labels_ignore_confidence_and_dedupe():
+def test_link_drug_labels_ignore_confidence_and_dedupe():
     df = v2_frame({'N1': {'links': [v2_link('a', 'x', 0.1), v2_link('a', 'y'), v2_link('b', 'x')]}, 'N2': {}})
-    out = trial_links.tested_drug_labels(df)
+    out = link_drug_labels(df)
     assert out.columns == ['id', 'label']
     assert sorted(out.rows()) == [('N1', 'a'), ('N1', 'b')]
 
