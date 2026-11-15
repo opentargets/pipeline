@@ -4,7 +4,7 @@ from pts.transformers.clinical_mira.moa.pooling import (
     build_pools,
     link_single_drug_trials,
     match_texts,
-    single_drug_trials,
+    single_drug_names,
     texts_by_id,
 )
 from tests.clinical_mira.test_trial_links import v2_frame, v2_link
@@ -30,7 +30,7 @@ def test_match_texts_excludes_hash_mismatches():
     assert counts == {'matched': 1, 'hash_mismatch': 1, 'missing_text': 1, 'missing_hash': 0}
 
 
-def test_single_drug_trials_keeps_only_one_investigated_drug():
+def test_single_drug_names_keep_only_one_investigated_drug():
     extraction = pl.DataFrame(
         {
             'id': ['nct1', 'nct2', 'nct3', 'nct4'],
@@ -39,7 +39,7 @@ def test_single_drug_trials_keeps_only_one_investigated_drug():
         schema={'id': pl.String, 'investigated_drugs': pl.List(DRUG)},
     )
 
-    assert single_drug_trials(extraction).to_dicts() == [{'nct_id': 'nct1', 'drug_name': 'sotorasib'}]
+    assert single_drug_names(extraction).to_dicts() == [{'nct_id': 'nct1', 'drug_name': 'sotorasib'}]
 
 
 def _texts(rows: dict[str, str]) -> pl.DataFrame:
@@ -90,7 +90,7 @@ def test_punctuation_variants_of_a_name_share_a_pool():
         schema={'id': pl.String, 'investigated_drugs': pl.List(DRUG)},
     )
 
-    assert single_drug_trials(extraction)['drug_name'].to_list() == ['mk3475', 'mk3475']
+    assert single_drug_names(extraction)['drug_name'].to_list() == ['mk3475', 'mk3475']
 
 
 def test_rows_without_a_hash_are_counted():
@@ -117,7 +117,7 @@ def test_class_names_are_not_pools():
         schema={'id': pl.String, 'investigated_drugs': pl.List(DRUG)},
     )
 
-    assert single_drug_trials(extraction)['drug_name'].to_list() == ['pembrolizumab']
+    assert single_drug_names(extraction)['drug_name'].to_list() == ['pembrolizumab']
 
 
 def test_content_key_ignores_formatting_but_not_content():

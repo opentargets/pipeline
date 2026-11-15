@@ -133,7 +133,7 @@ def normalised_drug_trials(trials: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
+def single_drug_names(extraction: pl.DataFrame) -> pl.DataFrame:
     """Trials whose v1 extraction names exactly one investigated drug, with its normalised name.
 
     Returns:

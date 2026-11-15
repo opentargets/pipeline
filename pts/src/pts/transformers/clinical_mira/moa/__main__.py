@@ -101,7 +101,7 @@ def cmd_texts(run: Path, args: argparse.Namespace) -> None:
 def cmd_pools(run: Path, args: argparse.Namespace) -> None:
     extraction = _read(args.extraction, ['id', 'investigated_drugs'])
     texts = pl.read_parquet(run / 'texts.parquet')
-    trials = pooling.single_drug_trials(extraction)
+    trials = pooling.single_drug_names(extraction)
     pools = pooling.build_pools(trials, texts, char_budget=args.char_budget)
     pools.write_parquet(run / 'pools.parquet')
     counts = {
