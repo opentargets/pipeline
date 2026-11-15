@@ -1,7 +1,17 @@
 import json
 
+import polars as pl
+
+from pts.transformers.clinical_mira import trial_links
+from pts.transformers.clinical_mira.model_frames import polars_schema
 from pts.transformers.clinical_mira.schemas import RoleDrug, TrialExtractionV2, TrialLink
-from pts.transformers.clinical_mira.trial_links import link_rows, report_entities
+from pts.transformers.clinical_mira.trial_links import (
+    drug_synonym_entries,
+    link_rows,
+    report_entities,
+    report_entities_frame,
+    single_drug_trials,
+)
 
 
 def _link(drug: str, indication: str, confidence: float = 0.9) -> TrialLink:
@@ -61,3 +71,100 @@ def test_the_drug_field_asks_for_the_generic_name() -> None:
 
 def test_a_link_carries_a_broader_term() -> None:
     assert 'broader' in TrialLink.model_json_schema()['required']
+
+
+SCHEMA = pl.Schema({'id': pl.String, 'prompt_sha256': pl.String, **polars_schema(TrialExtractionV2)})
+
+
+def v2_link(drug, indication, confidence=0.9, broader=None, synonyms=()):
+    return {
+        'drug': drug,
+        'synonyms': list(synonyms),
+        'indication': indication,
+        'broader': broader or indication,
+        'use': 'treat',
+        'arms': [],
+        'confidence': confidence,
+        'evidence_quote': 'q',
+    }
+
+
+def v2_role(drug, kind, synonyms=()):
+    return {'drug': drug, 'synonyms': list(synonyms), 'role': kind, 'evidence_quote': 'q'}
+
+
+def v2_frame(rows: dict[str, dict]) -> pl.DataFrame:
+    full = [
+        {
+            'id': trial_id,
+            'prompt_sha256': 'x',
+            'drug_intent': 'therapeutic',
+            'drug_intent_confidence': 0.9,
+            'links': [],
+            'background_drugs': [],
+            'other_drugs': [],
+            'population_conditions': [],
+            **row,
+        }
+        for trial_id, row in rows.items()
+    ]
+    return pl.DataFrame(full, schema=SCHEMA)
+
+
+def test_report_entities_drop_links_below_threshold():
+    df = v2_frame({
+        'N1': {
+            'links': [
+                v2_link('b', 'asthma', 0.8, broader='lung disease'),
+                v2_link('a', 'copd', 0.79),
+                v2_link('b', 'asthma', 0.95, broader='other'),
+            ]
+        }
+    })
+    out = report_entities_frame(df, 0.8)
+    assert out['nct_id'].to_list() == ['N1']
+    assert out['drugFromSource'].to_list() == [['b']]
+    assert out['diseaseFromSource'].to_list() == [['asthma']]
+    assert out['diseaseBroader'].to_list() == [[{'indication': 'asthma', 'broader': 'lung disease'}]]
+
+
+def test_trial_with_no_link_above_threshold_has_empty_lists():
+    df = v2_frame({'N1': {'links': [v2_link('a', 'x', 0.1)]}, 'N2': {}, 'N3': {'links': [v2_link('a', 'x')]}})
+    out = report_entities_frame(df, 0.8)
+    assert out['nct_id'].to_list() == ['N1', 'N2', 'N3']
+    assert out['drugFromSource'].to_list() == [[], [], ['a']]
+    assert out['diseaseFromSource'].to_list() == [[], [], ['x']]
+    assert out['diseaseBroader'].to_list()[:2] == [[], []]
+
+
+def test_tested_drug_labels_ignore_confidence_and_dedupe():
+    df = v2_frame({'N1': {'links': [v2_link('a', 'x', 0.1), v2_link('a', 'y'), v2_link('b', 'x')]}, 'N2': {}})
+    out = trial_links.tested_drug_labels(df)
+    assert out.columns == ['id', 'label']
+    assert sorted(out.rows()) == [('N1', 'a'), ('N1', 'b')]
+
+
+def test_synonym_entries_cover_tested_and_role_drugs():
+    df = v2_frame({
+        'N1': {
+            'links': [v2_link('a', 'x', synonyms=['A1']), v2_link('a', 'y', synonyms=['A1', 'A2'])],
+            'background_drugs': [v2_role('bg', 'backbone', ['B1'])],
+            'other_drugs': [v2_role('ot', 'rescue')],
+        },
+        'N2': {},
+    })
+    out = drug_synonym_entries(df)
+    assert out.columns == ['id', 'drug', 'synonyms', 'role']
+    rows = {(i, d, r): sorted(s) for i, d, s, r in out.rows()}
+    assert rows == {('N1', 'a', 'tested'): ['A1', 'A2'], ('N1', 'bg', 'backbone'): ['B1'], ('N1', 'ot', 'rescue'): []}
+
+
+def test_single_drug_trials_count_distinct_link_drugs():
+    df = v2_frame({
+        'N1': {'links': [v2_link('Aspirin', 'x'), v2_link(' aspirin ', 'y')]},
+        'N2': {'links': [v2_link('a', 'x'), v2_link('b', 'x')]},
+        'N3': {},
+    })
+    out = single_drug_trials(df)
+    assert out.columns == ['id', 'drug']
+    assert out.rows() == [('N1', 'Aspirin')]
