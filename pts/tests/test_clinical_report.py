@@ -205,11 +205,54 @@ def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> Non
     ])
     llm_batch_results = pl.DataFrame({
         'id': ['r1', 'r2'],
-        'drug_intent': ['therapeutic', 'prevention'],
+        'drug_intent': ['therapeutic', 'supportive_care'],
     })
     result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
     assert not _flagged(result, 'r1')
     assert _flagged(result, 'r2')
+
+
+BENAZEPRIL = {'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}
+
+
+def _prevention_trial(id_: str, **changes: Any) -> dict:
+    return _report(id_, ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='PREVENTION') | changes
+
+
+def _flag_as_prevention(entries: list[dict]) -> ClinicalReport:
+    intents = pl.DataFrame({'id': [e['id'] for e in entries], 'drug_intent': ['prevention'] * len(entries)})
+    return flag_indirect_primary_purpose(_build_reports(entries), llm_drug_intent=intents)
+
+
+def test_prevention_trial_of_one_drug_is_not_flagged() -> None:
+    result = _flag_as_prevention([
+        _prevention_trial('prevention'),
+        _prevention_trial('treatment', trialPrimaryPurpose='TREATMENT'),
+        _prevention_trial(
+            'same drug twice',
+            drugs=[
+                {'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'},
+                {'drugFromSource': 'benazepril hydrochloride', 'drugId': 'CHEMBL1694'},
+            ],
+        ),
+    ])
+    assert not any(_flagged(result, id_) for id_ in ('prevention', 'treatment', 'same drug twice'))
+
+
+@pytest.mark.parametrize(
+    'changes',
+    [
+        {'drugs': [BENAZEPRIL, {'drugFromSource': 'X', 'drugId': 'CHEMBL2'}]},
+        {'drugs': [BENAZEPRIL, {'drugFromSource': 'unmapped', 'drugId': None}]},
+        {'phaseFromSource': 'NA'},
+        {'trialPrimaryPurpose': 'BASIC_SCIENCE'},
+        {'trialPrimaryPurpose': None},
+        {'diseases': [{'diseaseFromSource': 'relapse', 'diseaseId': 'EFO_0004952'}]},
+    ],
+    ids=['two drugs', 'an unmapped second drug', 'no phase', 'basic science', 'no purpose', 'disease recurrence'],
+)
+def test_prevention_trial_stays_flagged(changes: dict) -> None:
+    assert _flagged(_flag_as_prevention([_prevention_trial('r1', **changes)]), 'r1')
 
 
 def test_flag_indirect_primary_purpose_drops_drug_intent() -> None:
