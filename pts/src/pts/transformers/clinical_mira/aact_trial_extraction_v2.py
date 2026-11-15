@@ -109,12 +109,19 @@ def _system_prompt(settings: AactTrialExtractionV2Settings, config: Config) -> s
 
 
 def rendered_trials(archive: str, ids: list[str], scratch_root: str | Path) -> pl.DataFrame:
-    """Render the trials ``ids`` of an AACT dump.
+    """Render the trials ``ids`` of an AACT dump, matched to its ``nct_id`` whatever the case.
 
     Returns:
-        pl.DataFrame: ``id``, ``prompt`` and ``prompt_sha256``, one row per trial of ``ids`` in the dump, by id.
+        pl.DataFrame: ``id``, the dump's ``nct_id``, ``prompt`` and ``prompt_sha256``, one row per trial of
+        ``ids`` in the dump, by id.
     """
-    context = trial_context(**read_context_tables(archive, scratch_root)).filter(pl.col('nct_id').is_in(ids))
+    wanted = {i.lower() for i in ids}
+    context = trial_context(**read_context_tables(archive, scratch_root)).filter(
+        pl.col('nct_id').str.to_lowercase().is_in(sorted(wanted))
+    )
+    missing = wanted - set(context['nct_id'].str.to_lowercase().to_list())
+    if missing:
+        logger.warning(f'{len(missing)} of {len(wanted)} trials have no AACT context, e.g. {sorted(missing)[:5]}')
     prompts = [(row['nct_id'], render_trial(row)) for row in context.iter_rows(named=True)]
     return pl.DataFrame(prompts, schema={'id': pl.String, 'prompt': pl.String}, orient='row').with_columns(
         prompt_sha256=pl.col('prompt').map_elements(text_sha256, return_dtype=pl.String),

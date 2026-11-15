@@ -161,7 +161,9 @@ def _stage(
     run_id: str = 'v1-run1',
     **settings: Any,
 ) -> dict[str, Any]:
-    monkeypatch.setattr(extraction, 'trial_report', lambda *args: pl.DataFrame({'id': report_ids}))
+    """Stage ``report_ids`` lowercased, as ``trial_report`` gives them, against context tables with AACT ids."""
+    report = pl.DataFrame({'id': [i.lower() for i in report_ids]})
+    monkeypatch.setattr(extraction, 'trial_report', lambda *args: report)
     monkeypatch.setattr(v2, 'read_context_tables', lambda *args: _tables())
     monkeypatch.setattr(v2, 'new_run_id', lambda snapshot: run_id)
     return stage_extraction_v2(
@@ -302,3 +304,15 @@ def test_a_system_prompt_override_is_sent_and_tags_the_snapshot(
     tag = EXTRACTION_V2.tag(revision, 2)
     metadata = json.loads((tmp_path / 'extraction_v2' / tag / 'metadata.json').read_text())
     assert metadata == EXTRACTION_V2.metadata(revision, 2)
+
+
+def test_report_ids_match_context_ids_whatever_the_case(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches()
+
+    stats = _stage(monkeypatch, tmp_path, batches, report_ids=['NCT1', 'NCT2', 'NCT4'])
+
+    assert sorted(batches.trials) == ['NCT1', 'NCT2']
+    assert stats['trials'] == 3
+    assert stats['prompts'] == 2
+    published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
+    assert published['id'].to_list() == ['NCT1', 'NCT2']
