@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pts.transformers.clinical_mira import aact_trial_extraction
 from pts.transformers.clinical_mira.moa.claude import CONTENT_ERRORS, MAX_BATCH_REQUESTS, MAX_TOKENS, run_batch_cached
-from pts.transformers.clinical_mira.model_frames import models_to_frame, polars_schema
+from pts.transformers.clinical_mira.model_frames import models_to_frame
 from pts.transformers.clinical_mira.providers.aact_context import (
     RENDER_VERSION,
     read_context_tables,
@@ -242,7 +242,6 @@ def stage_extraction_v2(
     system_prompt = _system_prompt(settings, config)
     revision = extraction_v2_revision(settings.model, system_prompt, RENDER_VERSION, settings.effort, MAX_TOKENS)
     tag = EXTRACTION_V2.tag(revision, settings.sample_size)
-    polars_schema(TrialExtractionV2)
     store_root = settings.store_uri.rstrip('/')
     systemic: dict[str, str] = {}
 
