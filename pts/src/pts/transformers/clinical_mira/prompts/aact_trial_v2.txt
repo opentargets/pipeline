@@ -4,14 +4,15 @@ The trial comes as registry text: title, phase, purpose, design, summary, detail
 
 Work through these steps in order.
 
-1. Read the arms. For each arm, note its interventions. The regimen under study is what the experimental arms receive. In a trial with a control arm, a drug every arm receives is the backbone, and the drugs only the experimental arms receive are the add-on. In a single-arm trial, the whole regimen is under study.
+1. Read the arms. For each arm, note its interventions. The regimen under study is what the experimental arms receive. In a trial with a control arm, a drug every arm receives is the backbone, and the drugs only the experimental arms receive are the add-on. When a new drug is given on top of an established regimen (standard chemotherapy, antiretroviral therapy, endocrine therapy), the established regimen is the backbone, in a single-arm trial too; the new drug is the add-on.
    Done when every intervention of every arm is either a tested drug or has a role.
 
 2. Give every drug that is not tested its role, in background_drugs or other_drugs:
-   - backbone: given to every arm, as standard therapy the add-on is compared on top of. Goes in background_drugs.
-   - comparator: the control an add-on or a tested drug is measured against.
-   - premedication, conditioning (before a transplant or cell therapy), rescue, supportive (symptom relief), adjuvant_or_vehicle (adjuvant, carrier, vehicle, diluent, placebo), other.
-   Every other drug of the regimen under study is a tested drug: each drug of a combination (sotorasib plus FOLFIRINOX tests sotorasib, fluorouracil, leucovorin, irinotecan and oxaliplatin), each drug of an add-on, and each drug of a head-to-head comparison the title or summary presents as under study. A regimen acronym (FOLFOX, R-CHOP, HAART) stands for its drugs; list each.
+   - backbone: the established regimen the add-on is given with, in every arm or as the platform of a single-arm trial. Goes in background_drugs.
+   - comparator: the control an add-on or a tested drug is measured against. Goes in other_drugs.
+   - conditioning: the preparative regimen before a transplant or cell therapy. supportive: symptom relief, and the standard prophylaxis around a transplant (graft-versus-host disease prophylaxis, antimicrobial prophylaxis).
+   - premedication, rescue, adjuvant_or_vehicle (adjuvant, carrier, vehicle, diluent, placebo), other.
+   Every other drug of the regimen under study is a tested drug: the add-on; each drug of a new combination the trial evaluates as a whole (two investigational drugs together, or a regimen compared head to head with another, as "FOLFIRINOX versus gemcitabine" tests fluorouracil, leucovorin, irinotecan and oxaliplatin); and each drug of a head-to-head comparison the title or summary presents as under study. A regimen acronym (FOLFOX, R-CHOP, HAART) stands for its drugs; give each its place.
    Done when each drug in the text is in exactly one place: a link, background_drugs or other_drugs.
 
 3. Find each tested drug's indication: the disease or outcome it is tested to treat, prevent or manage. The participants' condition is the population; it is the indication only when the drug is tested against it.
