@@ -12,6 +12,7 @@ join semantics silently diverge.
 
 import polars as pl
 
+from pts.transformers.clinical_mira.trial_links import drug_synonym_entries
 from pts.transformers.utils.aact_synonyms import (
     _anchor_candidates,
     _apply_cleanup_rules,
@@ -22,6 +23,7 @@ from pts.transformers.utils.aact_synonyms import (
     mine_aact_synonyms,
     parse_aact_entries,
 )
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link, v2_role
 
 _ENTRIES_SCHEMA = {'nct_id': pl.Utf8, 'members': pl.List(pl.Utf8)}
 _INDEX_SCHEMA = {'name_norm': pl.Utf8, 'ids': pl.List(pl.Utf8)}
@@ -64,40 +66,27 @@ class TestNormalizeName:
 
 
 class TestParseAactEntries:
-    def _batch(self, investigated: list[dict], comparator: list[dict], supportive: list[dict]) -> pl.DataFrame:
-        drug_struct = pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)})
-        schema = {
-            'id': pl.Utf8,
-            'investigated_drugs': pl.List(drug_struct),
-            'comparator_drugs': pl.List(drug_struct),
-            'supportive_drugs': pl.List(drug_struct),
-        }
-        return pl.DataFrame(
-            {
-                'id': ['NCT01'],
-                'investigated_drugs': [investigated],
-                'comparator_drugs': [comparator],
-                'supportive_drugs': [supportive],
-            },
-            schema=schema,
-        )
-
-    def test_parse_extracts_all_roles(self):
-        batch = self._batch(
-            investigated=[{'drug': 'Lenalidomide', 'synonyms': ['Revlimid', 'CC-5013']}],
-            comparator=[{'drug': 'Dexamethasone', 'synonyms': []}],
-            supportive=[{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
-        )
-        out = parse_aact_entries(batch)
+    def test_parse_extracts_tested_and_role_drugs(self):
+        batch = v2_frame({
+            'NCT01': {
+                'links': [v2_link('Lenalidomide', 'myeloma', synonyms=['Revlimid', 'CC-5013'])],
+                'background_drugs': [v2_role('Dexamethasone', 'backbone')],
+                'other_drugs': [v2_role('Filgrastim', 'supportive', ['G-CSF'])],
+            }
+        })
+        out = parse_aact_entries(drug_synonym_entries(batch))
         member_sets = [set(m) for m in out['members'].to_list()]
         assert {'cc-5013', 'lenalidomide', 'revlimid'} in member_sets
         assert {'filgrastim', 'g-csf'} in member_sets
         assert {'dexamethasone'} in member_sets
         assert all(x == 'NCT01' for x in out['nct_id'].to_list())
 
+    def test_members_are_normalized_and_deduped(self):
+        batch = v2_frame({'NCT01': {'links': [v2_link('Revlimid®', 'myeloma', synonyms=['  revlimid ', ''])]}})
+        assert parse_aact_entries(drug_synonym_entries(batch))['members'].to_list() == [['revlimid']]
+
     def test_no_drug_entries_yields_no_rows(self):
-        batch = self._batch(investigated=[], comparator=[], supportive=[])
-        assert parse_aact_entries(batch).height == 0
+        assert parse_aact_entries(drug_synonym_entries(v2_frame({'NCT01': {}}))).height == 0
 
 
 class TestChemblIndexes:

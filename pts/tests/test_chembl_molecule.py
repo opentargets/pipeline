@@ -12,7 +12,8 @@ from pts.transformers import chembl_molecule as chembl_molecule_module
 from pts.transformers.chembl_molecule import _molecule_preprocess, chembl_molecule, pains_alerts, process_molecules
 from pts.transformers.clinical_mira.record_store import publish_snapshot
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
-from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, schema_digest
+from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, EXTRACTION_V2, schema_digest
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
 # A short but structurally valid MDL molblock (single carbon atom), with no
 # terminator newline of its own -- the raw variants below add zero, one, or two
@@ -342,23 +343,10 @@ class TestMergeAndTwoSource:
             orient='row',
         )
 
-        batch = pl.DataFrame(
-            {
-                'id': ['NCT1', 'NCT2'],
-                'investigated_drugs': [
-                    [{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
-                    [{'drug': 'Filgrastim', 'synonyms': ['G-CSF']}],
-                ],
-                'comparator_drugs': [[], []],
-                'supportive_drugs': [[], []],
-            },
-            schema={
-                'id': pl.Utf8,
-                'investigated_drugs': pl.List(pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)})),
-                'comparator_drugs': pl.List(pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)})),
-                'supportive_drugs': pl.List(pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)})),
-            },
-        )
+        batch = v2_frame({
+            'NCT1': {'links': [v2_link('Filgrastim', 'neutropenia', synonyms=['G-CSF'])]},
+            'NCT2': {'links': [v2_link('Filgrastim', 'neutropenia', synonyms=['G-CSF'])]},
+        })
 
         result = process_molecules(
             molecule_dictionary,
@@ -464,7 +452,7 @@ class TestOrderIsDeterministic:
 
 
 class TestStepExtraction:
-    """The step reads its optional AACT extraction through `EXTRACTION.read`."""
+    """The step reads its optional AACT extraction through `EXTRACTION_V2.read`."""
 
     @staticmethod
     def _source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
@@ -475,30 +463,20 @@ class TestStepExtraction:
         return {'chembl': tmp_path / 'dump', 'drugbank': drugbank_file}
 
     @staticmethod
-    def _publish(directory: Path, digest: str) -> Path:
-        synonyms = pl.List(pl.Struct({'drug': pl.Utf8, 'synonyms': pl.List(pl.Utf8)}))
-        batch = pl.DataFrame(
-            schema={
-                'id': pl.Utf8,
-                'investigated_drugs': synonyms,
-                'comparator_drugs': synonyms,
-                'supportive_drugs': synonyms,
-            },
-        )
-        publish_snapshot(batch, str(directory), EXTRACTION.metadata(digest, None), None)
+    def _publish(directory: Path, metadata: dict) -> Path:
+        publish_snapshot(v2_frame({}), str(directory), metadata, None)
         return directory
 
     def test_a_matching_extraction_is_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         source = self._source(tmp_path, monkeypatch)
-        source['aact_trial_extraction'] = self._publish(
-            tmp_path / 'extraction', schema_digest(ClinicalReportExtractionSchema)
-        )
+        metadata = {**EXTRACTION_V2.metadata('0' * 64, None), 'tag': EXTRACTION_V2.release_tag()}
+        source['aact_trial_extraction'] = self._publish(tmp_path / 'extraction', metadata)
         chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
         assert pl.read_parquet(tmp_path / 'out').height == tables()['molecule_dictionary'].height
 
     def test_an_extraction_of_another_tag_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         source = self._source(tmp_path, monkeypatch)
-        source['aact_trial_extraction'] = self._publish(tmp_path / 'extraction', 'f' * 64)
+        source['aact_trial_extraction'] = self._publish(tmp_path / 'extraction', EXTRACTION_V2.metadata('f' * 64, None))
         with pytest.raises(ValueError, match='this code expects'):
             chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
 
@@ -506,6 +484,14 @@ class TestStepExtraction:
         source = self._source(tmp_path, monkeypatch)
         chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
         assert pl.read_parquet(tmp_path / 'out').height == tables()['molecule_dictionary'].height
+
+
+def test_chembl_molecule_refuses_a_v1_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = TestStepExtraction._source(tmp_path, monkeypatch)
+    v1 = EXTRACTION.metadata(schema_digest(ClinicalReportExtractionSchema), None)
+    source['aact_trial_extraction'] = TestStepExtraction._publish(tmp_path / 'extraction', v1)
+    with pytest.raises(ValueError, match=r"kind 'extraction', not 'extraction_v2'"):
+        chembl_molecule(source, tmp_path / 'out', {}, SimpleNamespace(work_path=tmp_path))
 
 
 # --- Tests for pains_alerts ---

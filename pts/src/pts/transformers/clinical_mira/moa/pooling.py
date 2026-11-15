@@ -1,6 +1,6 @@
 """Per-trial texts and the per-drug pools built from them.
 
-A pool is every AACT trial whose extraction names exactly one investigated drug, grouped by
+A pool is every AACT trial whose extraction names exactly one tested drug, grouped by
 that drug's normalised name. Its text is the trials' rendered prompts, mechanism-bearing
 trials first, cut at a character budget.
 """
@@ -12,6 +12,7 @@ import re
 
 import polars as pl
 
+from pts.transformers.clinical_mira import trial_links
 from pts.transformers.utils.aact_synonyms import EXACT_MATCH_BLOCKLIST, _normalize_name
 
 MOA_VOCAB = (
@@ -96,19 +97,29 @@ def match_texts(texts: pl.DataFrame, extraction: pl.DataFrame) -> tuple[pl.DataF
     return matched.select(texts.columns), counts
 
 
-def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
-    """Trials whose extraction names exactly one investigated drug, with its normalised name.
+def texts_by_id(texts: pl.DataFrame, extraction: pl.DataFrame) -> tuple[pl.DataFrame, dict[str, int]]:
+    """Keep the texts of the extraction's trials, ids matched case-insensitively; each text keeps its own id.
+
+    Returns:
+        The matching texts, and counts of ``matched`` and ``missing_text`` over the extraction's trials.
+    """
+    wanted = extraction.select(pl.col('id').str.to_uppercase()).unique()['id']
+    matched = texts.filter(pl.col('id').str.to_uppercase().is_in(wanted.implode()))
+    return matched, {'matched': matched.height, 'missing_text': wanted.len() - matched.height}
+
+
+def normalised_drug_trials(trials: pl.DataFrame) -> pl.DataFrame:
+    """Normalise each trial's drug to its pool name, dropping blocklisted, empty and class names.
+
+    Args:
+        trials: ``nct_id`` and ``drug``.
 
     Returns:
         pl.DataFrame: ``nct_id``, ``drug_name``.
     """
     return (
-        extraction
-        .filter(pl.col('investigated_drugs').list.len() == 1)
-        .select(
-            pl.col('id').alias('nct_id'),
-            _normalize_name(pl.col('investigated_drugs').list.first().struct.field('drug')).alias('normalised'),
-        )
+        trials
+        .select('nct_id', _normalize_name(pl.col('drug')).alias('normalised'))
         .filter(pl.col('normalised').is_not_null() & ~pl.col('normalised').is_in(sorted(EXACT_MATCH_BLOCKLIST)))
         .with_columns(
             drug_name=pl
@@ -120,6 +131,37 @@ def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
         .filter((pl.col('drug_name').str.len_chars() > 0) & ~pl.col('drug_name').str.contains(CLASS_NAME))
         .select('nct_id', 'drug_name')
     )
+
+
+def single_drug_trials(extraction: pl.DataFrame) -> pl.DataFrame:
+    """Trials whose v1 extraction names exactly one investigated drug, with its normalised name.
+
+    Returns:
+        pl.DataFrame: ``nct_id``, ``drug_name``.
+    """
+    return normalised_drug_trials(
+        extraction.filter(pl.col('investigated_drugs').list.len() == 1).select(
+            pl.col('id').alias('nct_id'),
+            pl.col('investigated_drugs').list.first().struct.field('drug'),
+        )
+    )
+
+
+def link_single_drug_trials(extraction: pl.DataFrame, texts: pl.DataFrame) -> pl.DataFrame:
+    """Trials whose v2 links name one drug and that have a text, keyed by the text's id, with the normalised name.
+
+    Returns:
+        pl.DataFrame: ``nct_id``, ``drug_name``.
+    """
+    ids = texts.select(pl.col('id').alias('nct_id'), _key=pl.col('id').str.to_uppercase())
+    trials = (
+        trial_links
+        .single_drug_trials(extraction)
+        .select('drug', _key=pl.col('id').str.to_uppercase())
+        .join(ids, on='_key', how='inner', maintain_order='left')
+        .select('nct_id', 'drug')
+    )
+    return normalised_drug_trials(trials)
 
 
 def build_pools(trials: pl.DataFrame, texts: pl.DataFrame, char_budget: int = 60_000) -> pl.DataFrame:

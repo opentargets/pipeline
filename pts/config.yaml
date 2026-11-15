@@ -1012,7 +1012,7 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
-        aact_trial_extraction: input/clinical_report/aact_trial_extraction
+        aact_trial_extraction: input/clinical_report/aact_trial_extraction_v2
       destination: intermediate/chembl_molecule
   ##################################################################################################
 
@@ -1081,7 +1081,7 @@ steps:
       transformer: clinical_mira.aact_trial_models
       source:
         aact: input/aact.zip
-        extraction: extraction
+        extraction: extraction_v2
         models: input/models
       destination:
         stop_reasons: stop_reasons
@@ -1098,9 +1098,9 @@ steps:
       transformer: clinical_mira.aact_moa
       source:
         aact: input/aact.zip
-        extraction: extraction
+        extraction: extraction_v2
       destination:
-        moa: extraction
+        moa: extraction_v2
       settings:
         store_uri: gs://clinical_staging/store
         snapshot: '{{snapshot}}'

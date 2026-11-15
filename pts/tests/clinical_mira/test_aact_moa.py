@@ -14,12 +14,12 @@ from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira.aact_moa import AactMoaSettings, aact_moa, stage_moa
 from pts.transformers.clinical_mira.moa import schemas
 from pts.transformers.clinical_mira.moa.staging import import_run_id
-from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, run_exists
-from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
-from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA, schema_digest
+from pts.transformers.clinical_mira.record_store import ComputeAborted, publish_snapshot, read_records, run_exists
+from pts.transformers.clinical_mira.staged_outputs import EXTRACTION_V2, MOA
 from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
-EXTRACTION_TAG = EXTRACTION.release_tag()
+EXTRACTION_TAG = EXTRACTION_V2.release_tag()
 KRAS_QUOTE = 'Sotorasib is a selective KRAS G12C inhibitor'
 MEK_QUOTE = 'Sotorasib is a MEK pathway modulator'
 COX_QUOTE = 'Aspirinx is a COX inhibitor'
@@ -141,20 +141,13 @@ def _stage(
         'trialDetailedDescription': [world[i][2] for i in ids],
     })
     monkeypatch.setattr(extraction, 'trial_report', lambda *args: report)
-    prompts = extraction.prompts_for(report)
-    drug = pl.Struct({'drug': pl.String})
-    table = prompts.select('id', 'prompt_sha256').with_columns(
-        investigated_drugs=pl.Series([[{'drug': world[i][0]}] for i in ids], dtype=pl.List(drug))
-    )
-    directory = tmp_path / snapshot / 'extraction' / EXTRACTION_TAG
-    directory.mkdir(parents=True, exist_ok=True)
-    table.write_parquet(directory / 'data.parquet')
-    digest = schema_digest(ClinicalReportExtractionSchema)
-    (directory / 'metadata.json').write_text(json.dumps(EXTRACTION.metadata(digest, None)))
+    table = v2_frame({i.upper(): {'links': [v2_link(world[i][0], 'cancer')]} for i in ids})
+    directory = tmp_path / snapshot / 'extraction_v2' / EXTRACTION_TAG
+    publish_snapshot(table, str(directory), {**EXTRACTION_V2.metadata('0' * 64, None), 'tag': EXTRACTION_TAG}, None)
     return stage_moa(
         str(tmp_path / 'aact.zip'),
-        str(tmp_path / snapshot / 'extraction'),
-        str(tmp_path / snapshot / 'extraction'),
+        str(tmp_path / snapshot / 'extraction_v2'),
+        str(tmp_path / snapshot / 'extraction_v2'),
         AactMoaSettings(store_uri=str(tmp_path / 'store'), snapshot=snapshot, **settings),
         _config(tmp_path, work),
         client=None if batches is None else _client(batches),
@@ -162,7 +155,7 @@ def _stage(
 
 
 def _snapshot(tmp_path: Path, snapshot: str = 'v1') -> Path:
-    return tmp_path / snapshot / 'extraction' / EXTRACTION_TAG / 'moa' / MOA.tag()
+    return tmp_path / snapshot / 'extraction_v2' / EXTRACTION_TAG / 'moa' / MOA.tag()
 
 
 def _rows(tmp_path: Path, snapshot: str = 'v1') -> list[tuple[str, str]]:
@@ -461,7 +454,7 @@ def test_import_for_another_tag_raises_before_reading_inputs(monkeypatch: pytest
     def unread(*args: Any) -> None:
         raise AssertionError('inputs read')
 
-    monkeypatch.setattr(aact_moa_module, 'EXTRACTION', SimpleNamespace(release_tag=unread, read=unread))
+    monkeypatch.setattr(aact_moa_module, 'EXTRACTION_V2', SimpleNamespace(release_tag=unread, read=unread))
     monkeypatch.setattr(aact_moa_module.pooling, 'trial_texts', unread)
     settings = AactMoaSettings(
         store_uri=str(tmp_path / 'store'),

@@ -15,7 +15,8 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.drug_molecule import structural_alert_schema
-from pts.transformers.clinical_mira.staged_outputs import EXTRACTION
+from pts.transformers.clinical_mira.staged_outputs import EXTRACTION_V2
+from pts.transformers.clinical_mira.trial_links import drug_synonym_entries
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -50,8 +51,8 @@ def chembl_molecule(
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
             - drugbank: DrugBank-to-ChEMBL id mapping (tab-separated, ``.csv.gz``).
-            - aact_trial_extraction: (optional) extracted AACT trial results for
-              clinical-trial synonym mining; when present, AACT synonyms are
+            - aact_trial_extraction: (optional) the v2 AACT trial extraction snapshot,
+              for clinical-trial synonym mining; when present, AACT synonyms are
               appended to the molecules.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
@@ -60,7 +61,7 @@ def chembl_molecule(
     aact_batch = None
     if 'aact_trial_extraction' in source:
         logger.info(f'Reading AACT extraction from {source["aact_trial_extraction"]}')
-        aact_batch = EXTRACTION.read(str(source['aact_trial_extraction']))
+        aact_batch = EXTRACTION_V2.read(str(source['aact_trial_extraction']))
 
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
@@ -103,8 +104,8 @@ def process_molecules(
         molecule_synonyms: Raw ChEMBL molecule_synonyms table.
         drugbank_lookup: Drugbank to ChEMBL id mapping, as read from the raw file.
         structural_alerts: The PAINS alerts per molregno, from :func:`pains_alerts`.
-        aact_batch: (optional) AACT trial extractions, as published by
-            :py:mod:`pts.transformers.clinical_mira.aact_trial_extraction`.
+        aact_batch: (optional) v2 AACT trial extractions, as published by
+            :py:mod:`pts.transformers.clinical_mira.aact_trial_extraction_v2`.
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.
@@ -143,7 +144,7 @@ def process_molecules(
     # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
-        entries = parse_aact_entries(aact_batch)
+        entries = parse_aact_entries(drug_synonym_entries(aact_batch))
         # `mine_aact_synonyms` documents a non-null contract on these list columns. The
         # fills satisfy it explicitly rather than relying on the mining internals to
         # tolerate nulls.

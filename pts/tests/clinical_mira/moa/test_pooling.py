@@ -1,6 +1,13 @@
 import polars as pl
 
-from pts.transformers.clinical_mira.moa.pooling import build_pools, match_texts, single_drug_trials
+from pts.transformers.clinical_mira.moa.pooling import (
+    build_pools,
+    link_single_drug_trials,
+    match_texts,
+    single_drug_trials,
+    texts_by_id,
+)
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
 DRUG = pl.Struct({'drug': pl.String, 'synonyms': pl.List(pl.String)})
 
@@ -126,3 +133,29 @@ def test_content_key_ignores_formatting_but_not_content():
 
     assert build_pools(trials, _texts(reordered))['content_key'][0] == key
     assert build_pools(trials, _texts(edited))['content_key'][0] != key
+
+
+def test_texts_by_id_match_ids_whatever_the_case_and_ignore_the_hash():
+    texts = pl.DataFrame({
+        'id': ['nct1', 'nct2', 'nct4'],
+        'prompt': ['a', 'b', 'd'],
+        'prompt_sha256': ['h1', 'h2', 'h4'],
+    })
+    extraction = v2_frame({'NCT1': {}, 'NCT2': {}, 'NCT3': {}})
+
+    kept, counts = texts_by_id(texts, extraction)
+
+    assert kept['id'].to_list() == ['nct1', 'nct2']
+    assert counts == {'matched': 2, 'missing_text': 1}
+
+
+def test_link_single_drug_trials_take_the_text_id_and_the_normalised_drug():
+    texts = _texts({'nct1': 'a', 'nct2': 'b', 'nct3': 'c'})
+    extraction = v2_frame({
+        'NCT1': {'links': [v2_link('Sotorasib ', 'x'), v2_link('sotorasib', 'y')]},
+        'NCT2': {'links': [v2_link('a', 'x'), v2_link('b', 'x')]},
+        'NCT3': {'links': [v2_link('Placebo', 'x')]},
+        'NCT9': {'links': [v2_link('aspirin', 'x')]},
+    })
+
+    assert link_single_drug_trials(extraction, texts).to_dicts() == [{'nct_id': 'nct1', 'drug_name': 'sotorasib'}]

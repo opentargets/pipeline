@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pts.transformers.clinical_mira.helpers import sanitise_text
 from pts.transformers.clinical_mira.hf_models import offline_hf_models, staged_model_revisions
 from pts.transformers.clinical_mira.ner import drug_entities_with_status
-from pts.transformers.clinical_mira.providers.aact import llm_drug_labels, read_aact_tables
+from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.record_store import (
     RECORD_SCHEMA,
     import_run,
@@ -27,8 +27,9 @@ from pts.transformers.clinical_mira.record_store import (
     read_parquet,
     text_sha256,
 )
-from pts.transformers.clinical_mira.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.staged_outputs import DRUG_ENTITIES, EXTRACTION_V2, STOP_REASONS
 from pts.transformers.clinical_mira.stop_reasons import stop_reasons_with_status
+from pts.transformers.clinical_mira.trial_links import link_drug_labels
 
 if TYPE_CHECKING:
     from otter.config.model import Config
@@ -97,16 +98,17 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
 
 
 def read_extraction(extraction_uri: str, config: Config) -> pl.DataFrame:
-    """Read the extraction of this code's response schema, published under ``extraction_uri``.
+    """Read the v2 extraction of the release tag, published under ``extraction_uri``.
 
     Raises:
-        FileNotFoundError: if there is none under the current tag, naming the path it looked for.
+        FileNotFoundError: if there is none under the release tag, naming the path it looked for.
+        ValueError: if the snapshot there is not a v2 extraction of the release tag.
     """
-    uri = f'{extraction_uri.rstrip("/")}/{EXTRACTION.release_tag()}/data.parquet'
+    uri = f'{extraction_uri.rstrip("/")}/{EXTRACTION_V2.release_tag()}'
     try:
-        return read_parquet(uri, config)
+        return EXTRACTION_V2.read(uri)
     except NotFoundError as e:
-        msg = f'no extraction under the current tag, expected {uri}; run aact_trial_extraction first'
+        msg = f'no v2 extraction under the release tag, expected {uri}; run aact_trial_extraction_v2 first'
         raise FileNotFoundError(msg) from e
 
 
@@ -133,7 +135,7 @@ def stage_trial_models(
     STOP_REASONS.require(revisions)
     DRUG_ENTITIES.require(revisions)
     stop_texts = why_stopped_texts(studies)
-    drug_texts = llm_drug_labels(extractions)
+    drug_texts = link_drug_labels(extractions)['label'].unique().sort()
 
     with offline_hf_models(models_uri):
         stop = STOP_REASONS.stage(
@@ -167,7 +169,7 @@ def aact_trial_models(
     """Stage stop reasons and drug entities for the texts of one AACT version.
 
     Args:
-        source: Keys ``aact`` (the dump archive), ``extraction`` (the directory of tagged extractions) and
+        source: Keys ``aact`` (the dump archive), ``extraction`` (the directory of tagged v2 extractions) and
             ``models`` (the staged Hugging Face models).
         destination: Key ``stop_reasons``, where to publish that snapshot. The drug entities go under the
             extraction they were staged from.
@@ -194,7 +196,7 @@ def aact_trial_models(
     extractions = read_extraction(extraction_dir, config)
 
     run_id = new_run_id(s.snapshot)
-    extraction_tag = EXTRACTION.release_tag()
+    extraction_tag = EXTRACTION_V2.release_tag()
     staged = {
         'stop_reasons': destination['stop_reasons'],
         'drug_entities': f'{extraction_dir}/{extraction_tag}/drug_entities',
