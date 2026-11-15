@@ -48,6 +48,7 @@ from pts.transformers.clinical_report import (
     order_output_columns,
     require_staged,
     trial_broader_terms,
+    trial_drug_intents,
     validate_disease,
 )
 from tests.clinical_mira.mapping_fixtures import DISEASE, DRUG
@@ -217,6 +218,26 @@ def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> Non
     result = flag_indirect_primary_purpose(reports, llm_drug_intent=llm_batch_results)
     assert not _flagged(result, 'r1')
     assert _flagged(result, 'r2')
+
+
+def test_trial_drug_intents_match_reports_whose_ids_clinical_report_lowercased() -> None:
+    """A v2 extraction keyed by the AACT NCT id reaches the lowercased AACT reports: a therapeutic trial is kept."""
+    extractions = v2_frame({
+        'NCT0001': {'drug_intent': 'therapeutic'},
+        'NCT0002': {'drug_intent': 'supportive_care'},
+    })
+    reports = _build_reports([
+        _report('NCT0001', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+        _report('NCT0002', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+    ])
+
+    intents = trial_drug_intents(extractions)
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=intents)
+
+    assert intents.columns == ['id', 'drug_intent']
+    assert sorted(intents['id'].to_list()) == ['nct0001', 'nct0002']
+    assert not _flagged(result, 'nct0001')
+    assert _flagged(result, 'nct0002')
 
 
 BENAZEPRIL = {'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}

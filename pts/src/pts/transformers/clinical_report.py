@@ -266,7 +266,7 @@ def clinical_report(
         .pipe(flag_phase_iv_not_approved)
         .pipe(
             flag_indirect_primary_purpose,
-            llm_drug_intent=llm_extractions.select(pl.col('id').str.to_lowercase(), 'drug_intent'),
+            llm_drug_intent=trial_drug_intents(llm_extractions),
         )
         .pipe(flag_observational_studies)
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
@@ -369,6 +369,11 @@ def map_report_entities(
             .with_columns(pl.when(pl.col(c).list.len() > 0).then(pl.col(c)) for c in ['diseases', 'drugs'])
         )
     )
+
+
+def trial_drug_intents(extractions: pl.DataFrame) -> pl.DataFrame:
+    """The drug intent of each extracted trial, as `id` (lowercase, as the reports') and `drug_intent`."""
+    return extractions.select(pl.col('id').str.to_lowercase(), 'drug_intent')
 
 
 def trial_broader_terms(entities: pl.DataFrame) -> pl.DataFrame:
