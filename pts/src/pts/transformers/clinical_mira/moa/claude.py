@@ -3,7 +3,8 @@
 Requests are sent as batches (half price, results within 24 hours), each held to the
 response model's JSON schema. Submitted batch ids are recorded in ``state_uri`` before
 polling, so an interrupted run resumes the batches it already paid for instead of
-submitting them again. Results land in the cache :py:func:`.llm.cached_results` reads.
+submitting them again. Results land in a local, append-only cache, keyed on everything
+that can change them: the input text, the system prompt, the response schema and the model.
 
 The client defaults to ``anthropic.AnthropicGoogleCloud()`` (Claude Models on Google
 Cloud, Anthropic managed), configured by ``ANTHROPIC_GOOGLE_CLOUD_PROJECT`` and
@@ -12,6 +13,7 @@ Cloud, Anthropic managed), configured by ``ANTHROPIC_GOOGLE_CLOUD_PROJECT`` and
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -21,8 +23,6 @@ from typing import TYPE_CHECKING, Any, cast
 from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
-
-from pts.transformers.clinical_mira.llm_schema import _read_cache, _start_on_a_new_line, patch_schema, result_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,8 +39,101 @@ MAX_BATCH_BYTES = 200_000_000
 
 POLL_SECONDS = 60
 
+KEY_SEPARATOR = '\x1f'
+
 USAGE_FIELDS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 """Token counts recorded with every cached result, so a run's real cost can be summed."""
+
+CONTENT_ERRORS = frozenset({'refusal', 'max_tokens', 'invalid_json', 'invalid_request_error'})
+"""Errors caused by a request or its answer. Any other error is systemic: an expired or canceled request, an
+overloaded or failing API."""
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def patch_schema(schema: dict) -> dict:
+    """Patch a JSON schema for structured-output compatibility.
+
+    Structured-output modes require every object node to declare
+    ``additionalProperties: false`` and enumerate all properties under
+    ``required``. Pydantic's ``model_json_schema`` does not emit these by
+    default, so we add them in a single recursive pass.
+    """
+    schema = copy.deepcopy(schema)
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            if node.get('type') == 'object' or 'properties' in node:
+                node['additionalProperties'] = False
+                if 'properties' in node:
+                    node['required'] = list(node['properties'].keys())
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(schema)
+    return schema
+
+
+def result_key(input_text: str, system_prompt: str, response_model: type[BaseModel], model: str) -> str:
+    """Return the cache key of one call."""
+    schema = json.dumps(response_model.model_json_schema(by_alias=True), sort_keys=True)
+    parts = (_sha256(input_text), _sha256(system_prompt), _sha256(schema), model)
+    return _sha256(KEY_SEPARATOR.join(parts))
+
+
+def read_cache(cache_path: Path) -> dict[str, dict]:
+    """The cached response per cache key, skipping unreadable lines."""
+    if not cache_path.exists():
+        return {}
+    cached = {}
+    for number, line in enumerate(cache_path.read_text(encoding='utf-8').splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning(f'skipping unreadable line {number} of {cache_path}')
+            continue
+        cached[row['key']] = row['response']
+    return cached
+
+
+def start_on_a_new_line(cache_path: Path) -> None:
+    """End a cache torn mid-line with a newline, so the next row is readable."""
+    if cache_path.exists() and cache_path.stat().st_size:
+        with cache_path.open('rb') as cache:
+            cache.seek(-1, 2)
+            torn = cache.read(1) != b'\n'
+        if torn:
+            with cache_path.open('a', encoding='utf-8') as cache:
+                cache.write('\n')
+
+
+def cached_results(
+    requests: list[tuple[str, str]],
+    *,
+    system_prompt: str,
+    response_model: type[BaseModel],
+    model: str,
+    cache_path: Path,
+) -> tuple[dict[str, BaseModel], dict[str, str]]:
+    """Return the cached result of each ``(request_id, input_text)``, calling no model.
+
+    Returns:
+        The validated response per cached request id, and no errors.
+    """
+    cached = read_cache(cache_path)
+    results = {}
+    for request_id, text in requests:
+        key = result_key(text, system_prompt, response_model, model)
+        if key in cached:
+            results[request_id] = response_model.model_validate(cached[key])
+    return results, {}
 
 
 def custom_id(request_id: str) -> str:
@@ -135,7 +228,7 @@ def run_batch_cached(
 
         client = cast('Any', AnthropicGoogleCloud())
 
-    cached = _read_cache(cache_path)
+    cached = read_cache(cache_path)
     keys = {request_id: result_key(text, system_prompt, response_model, model) for request_id, text in requests}
     results = {
         request_id: response_model.model_validate(cached[key]) for request_id, key in keys.items() if key in cached
@@ -143,7 +236,7 @@ def run_batch_cached(
     by_custom_id = {custom_id(request_id): request_id for request_id, _ in requests}
     errors: dict[str, str] = {}
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    _start_on_a_new_line(cache_path)
+    start_on_a_new_line(cache_path)
 
     def collect(batch_id: str) -> None:
         while (batch := client.messages.batches.retrieve(batch_id)).processing_status != 'ended':

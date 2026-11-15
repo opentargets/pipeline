@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from types import SimpleNamespace
 
@@ -7,8 +9,19 @@ import pytest
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from pts.transformers.clinical_mira.moa.claude import custom_id, run_batch_cached
+from pts.transformers.clinical_mira.moa.claude import (
+    cached_results,
+    custom_id,
+    patch_schema,
+    read_cache,
+    result_key,
+    run_batch_cached,
+    start_on_a_new_line,
+)
 from pts.transformers.clinical_mira.moa.staging import moa_compute, parse_output
+from pts.transformers.clinical_mira.schemas import TrialExtractionV2
+
+RESULT_KEY_AT_6CC4F479 = '46ff62b2c249d78d19fd69e2bc8cc81afc7205e70e95c8d1584ebefcedcd8573'
 
 
 class Echo(BaseModel):
@@ -282,3 +295,61 @@ def test_an_errored_result_reports_the_api_error_type(tmp_path):
     _, errors = _run(batches, tmp_path)
 
     assert errors == {'a': 'overloaded_error'}
+
+
+def test_claude_batches_import_no_openai() -> None:
+    code = "import sys; import pts.transformers.clinical_mira.moa.claude; print('openai' in sys.modules)"
+    out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == 'False'
+
+
+def test_patch_schema_closes_every_object() -> None:
+    schema = patch_schema(TrialExtractionV2.model_json_schema(by_alias=True))
+    objects = [schema, *schema['$defs'].values()]
+    for node in objects:
+        if 'properties' in node:
+            assert node['additionalProperties'] is False
+            assert node['required'] == list(node['properties'])
+
+
+def test_result_key_is_unchanged_so_cached_results_stay_valid() -> None:
+    assert result_key('NCT01 text', 'system prompt', Echo, 'claude-opus-5-5') == RESULT_KEY_AT_6CC4F479
+
+
+def _cache(path, *texts: str, system_prompt: str = 'i', model: str = 'm') -> None:
+    rows = [{'key': result_key(t, system_prompt, Echo, model), 'response': {'value': t}} for t in texts]
+    path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+
+def _cached(path, system_prompt: str = 'i'):
+    return cached_results(
+        [('a', 'x'), ('c', 'new')], system_prompt=system_prompt, response_model=Echo, model='m', cache_path=path
+    )
+
+
+def test_cached_results_returns_only_cached_requests(tmp_path):
+    _cache(tmp_path / 'c.jsonl', 'x', 'y')
+
+    results, errors = _cached(tmp_path / 'c.jsonl')
+
+    assert results == {'a': Echo(value='x')}
+    assert errors == {}
+
+
+def test_changed_system_prompt_misses_the_cache(tmp_path):
+    _cache(tmp_path / 'c.jsonl', 'x')
+
+    assert _cached(tmp_path / 'c.jsonl', system_prompt='other') == ({}, {})
+
+
+def test_missing_cache_returns_nothing(tmp_path):
+    assert _cached(tmp_path / 'absent.jsonl') == ({}, {})
+
+
+def test_a_torn_cache_line_is_skipped_and_the_next_write_starts_a_new_line(tmp_path):
+    path = tmp_path / 'c.jsonl'
+    path.write_text('{"key": "k1", "response": {"value": "x"}}\n{"key": "k2", "resp')
+
+    assert read_cache(path) == {'k1': {'value': 'x'}}
+    start_on_a_new_line(path)
+    assert path.read_text().endswith('\n')

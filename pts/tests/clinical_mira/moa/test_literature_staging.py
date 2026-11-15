@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 from loguru import logger
 
-from pts.transformers.clinical_mira.moa import literature, literature_staging, llm, schemas
+from pts.transformers.clinical_mira.moa import claude, literature, literature_staging, schemas
 from pts.transformers.clinical_mira.moa.literature_staging import (
     carry_forward,
     import_experiment_cache,
@@ -383,7 +383,7 @@ def test_compute_records_usage_and_prompt_sha(monkeypatch: pytest.MonkeyPatch, t
         })
         with cache_path.open('w') as f:
             for _, text in requests:
-                key = llm.result_key(text, system_prompt, response_model, model)
+                key = claude.result_key(text, system_prompt, response_model, model)
                 f.write(json.dumps({'key': key, 'usage': {'input_tokens': len(text)}}) + '\n')
         extraction = schemas.MoaExtraction.model_validate(EXTRACTION)
         return {r[0]: extraction for r in requests[:1]}, {requests[1][0]: 'boom'}

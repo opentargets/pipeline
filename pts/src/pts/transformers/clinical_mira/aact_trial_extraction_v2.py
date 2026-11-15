@@ -22,7 +22,7 @@ from otter.util.errors import TaskRunError
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pts.transformers.clinical_mira import aact_trial_extraction
-from pts.transformers.clinical_mira.moa.claude import MAX_BATCH_REQUESTS, MAX_TOKENS, run_batch_cached
+from pts.transformers.clinical_mira.moa.claude import CONTENT_ERRORS, MAX_BATCH_REQUESTS, MAX_TOKENS, run_batch_cached
 from pts.transformers.clinical_mira.model_frames import models_to_frame, polars_schema
 from pts.transformers.clinical_mira.providers.aact_context import (
     RENDER_VERSION,
@@ -57,9 +57,6 @@ if TYPE_CHECKING:
 
 WORKSPACE_ID_ENV = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
 """Environment variable holding the Claude workspace id of the default client."""
-CONTENT_ERRORS = frozenset({'refusal', 'max_tokens', 'invalid_json', 'invalid_request_error'})
-"""Errors caused by a trial's request or answer, which use up an attempt. Any other error is systemic (an expired
-or canceled request, an overloaded or failing API) and leaves the trial unrecorded."""
 
 
 class AactTrialExtractionV2Settings(BaseModel):
@@ -143,7 +140,8 @@ def extraction_v2_compute(
 ) -> Compute:
     """Build the ``compute`` of :py:func:`map_texts` that extracts trials with Claude.
 
-    A trial failing with an error outside :py:data:`CONTENT_ERRORS` is left out, so it uses up no attempt.
+    A trial failing with an error outside :py:data:`.moa.claude.CONTENT_ERRORS` is left out, so it uses up no
+    attempt.
 
     Args:
         prompts: Output of :py:func:`rendered_trials`.
