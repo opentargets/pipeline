@@ -7,6 +7,7 @@ from typing import Any
 import polars as pl
 import pytest
 from otter.config.model import Config
+from otter.util.errors import TaskRunError
 
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira import aact_trial_extraction_v2 as v2
@@ -95,14 +96,20 @@ def _answer(text: str) -> dict:
 class FakeBatches:
     """Message Batches stand-in answering every trial, refusing those in ``refuse`` up to ``refusals`` times each.
 
-    With ``interrupt`` the first ``retrieve`` raises, as a run killed while polling.
+    With ``interrupt`` the first ``retrieve`` raises, as a run killed while polling. ``unanswered`` maps a trial
+    to the result it gets instead of an answer.
     """
 
     def __init__(
-        self, refuse: frozenset[str] = frozenset(), refusals: int | None = None, interrupt: bool = False
+        self,
+        refuse: frozenset[str] = frozenset(),
+        refusals: int | None = None,
+        interrupt: bool = False,
+        unanswered: dict[str, SimpleNamespace] | None = None,
     ) -> None:
         self.refuse = {custom_id(i): refusals for i in refuse}
         self.interrupt = interrupt
+        self.unanswered = {custom_id(i): result for i, result in (unanswered or {}).items()}
         self.created: list[list[dict]] = []
 
     def create(self, *, requests: list[dict]) -> SimpleNamespace:
@@ -118,6 +125,9 @@ class FakeBatches:
 
     def results(self, batch_id: str):
         for request in self.created[int(batch_id.split('_')[1]) - 1]:
+            if request['custom_id'] in self.unanswered:
+                yield SimpleNamespace(custom_id=request['custom_id'], result=self.unanswered[request['custom_id']])
+                continue
             text = request['params']['messages'][0]['content']
             stop = 'end_turn'
             left = self.refuse.get(request['custom_id'], 0)
@@ -143,6 +153,11 @@ class FakeBatches:
             for requests in self.created
             for r in requests
         ]
+
+
+def _errored(error_type: str) -> SimpleNamespace:
+    """An errored batch result, shaped as the API returns it."""
+    return SimpleNamespace(type='errored', error=SimpleNamespace(type='error', error=SimpleNamespace(type=error_type)))
 
 
 def _client(batches: FakeBatches) -> Any:
@@ -316,3 +331,41 @@ def test_report_ids_match_context_ids_whatever_the_case(monkeypatch: pytest.Monk
     assert stats['prompts'] == 2
     published = pl.read_parquet(_snapshot(tmp_path) / 'data.parquet')
     assert published['id'].to_list() == ['NCT1', 'NCT2']
+
+
+def test_systemic_failures_use_no_attempt_and_block_the_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    batches = FakeBatches(
+        unanswered={'NCT1': SimpleNamespace(type='expired'), 'NCT2': _errored('overloaded_error')},
+        refuse=frozenset({'NCT3'}),
+    )
+
+    with pytest.raises(TaskRunError, match='2 trials'):
+        _stage(monkeypatch, tmp_path, batches)
+
+    assert sorted(batches.trials) == ['NCT1', 'NCT2', 'NCT3', 'NCT3', 'NCT3']
+    records = read_records(str(tmp_path / 'store' / 'extraction_v2'), _config(tmp_path), pl.String())
+    assert records['status'].to_list() == ['failed'] * 3
+    assert set(records['error']) == {'refusal'}
+    assert not _snapshot(tmp_path).exists()
+
+    again = FakeBatches()
+    stats = _stage(monkeypatch, tmp_path, again, run_id='v1-run2')
+
+    assert sorted(again.trials) == ['NCT1', 'NCT2']
+    assert stats['extracted'] == 2
+    assert stats['failed'] == 1
+    assert stats['published'] is True
+
+
+def test_an_invalid_request_uses_an_attempt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches(unanswered={'NCT2': _errored('invalid_request_error')})
+
+    stats = _stage(monkeypatch, tmp_path, batches)
+
+    assert batches.trials.count('NCT2') == 3
+    assert stats['failed'] == 1
+    assert stats['published'] is True
+    records = read_records(str(tmp_path / 'store' / 'extraction_v2'), _config(tmp_path), pl.String())
+    assert records.filter(pl.col('status') == 'failed')['error'].to_list() == ['invalid_request_error'] * 3

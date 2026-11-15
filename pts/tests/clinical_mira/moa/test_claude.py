@@ -264,3 +264,21 @@ def test_compute_returns_record_outputs_in_input_order(tmp_path):
     assert parsed['usage']['input_tokens'] > 0
     assert parsed['carried_from'] is None
     assert parse_output(out[2][0])['drug_name'] == 'a'
+
+
+def test_an_errored_result_reports_the_api_error_type(tmp_path):
+    batches = FakeBatches()
+    error = SimpleNamespace(type='error', error=SimpleNamespace(type='overloaded_error'))
+    original = batches.results
+
+    def results(batch_id):
+        for item in original(batch_id):
+            if item.custom_id == custom_id('a'):
+                item = SimpleNamespace(custom_id=item.custom_id, result=SimpleNamespace(type='errored', error=error))
+            yield item
+
+    batches.results = results  # ty: ignore[invalid-assignment]
+
+    _, errors = _run(batches, tmp_path)
+
+    assert errors == {'a': 'overloaded_error'}

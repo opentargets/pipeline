@@ -99,6 +99,13 @@ def _chunks(requests: list[dict[str, Any]], max_requests: int, max_bytes: int) -
     return [chunk for chunk in chunks if chunk]
 
 
+def _error_type(result: Any) -> str:
+    """The API error type of an errored batch result, else the result type (``expired``, ``canceled``)."""
+    error = getattr(result, 'error', None)
+    nested = getattr(error, 'error', None)
+    return getattr(nested, 'type', None) or getattr(error, 'type', None) or result.type
+
+
 def run_batch_cached(
     requests: list[tuple[str, str]],
     *,
@@ -118,8 +125,10 @@ def run_batch_cached(
 
     Returns:
         The validated response per request id that succeeded, and the error type per
-        request id that failed (an API error type, ``refusal``, ``max_tokens`` or
-        ``invalid_json``). Failures are not cached, so a rerun retries them.
+        request id that failed (an API error type such as ``overloaded_error``, the
+        result type ``expired`` or ``canceled``, ``refusal``, ``max_tokens`` or
+        ``invalid_json``). Failures are not written to the result cache; whether a
+        caller retries them is up to the caller.
     """
     if client is None:
         from anthropic import AnthropicGoogleCloud
@@ -150,7 +159,7 @@ def run_batch_cached(
                 if request_id in results:
                     continue
                 if item.result.type != 'succeeded':
-                    errors[request_id] = getattr(getattr(item.result, 'error', None), 'type', item.result.type)
+                    errors[request_id] = _error_type(item.result)
                     continue
                 message = item.result.message
                 if message.stop_reason in ('refusal', 'max_tokens'):

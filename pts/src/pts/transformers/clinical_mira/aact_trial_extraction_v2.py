@@ -52,8 +52,13 @@ if TYPE_CHECKING:
 
     from otter.config.model import Config
 
+    Compute = Callable[[list[str]], list[tuple[str | None, str | None] | None]]
+
 WORKSPACE_ID_ENV = 'ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID'
 """Environment variable holding the Claude workspace id of the default client."""
+CONTENT_ERRORS = frozenset({'refusal', 'max_tokens', 'invalid_json', 'invalid_request_error'})
+"""Errors caused by a trial's request or answer, which use up an attempt. Any other error is systemic (an expired
+or canceled request, an overloaded or failing API) and leaves the trial unrecorded."""
 
 
 class AactTrialExtractionV2Settings(BaseModel):
@@ -85,12 +90,10 @@ class AactTrialExtractionV2Settings(BaseModel):
     """Requests per submitted batch."""
 
 
-def _guarded(
-    compute: Callable[[list[str]], list[tuple[str | None, str | None]]],
-) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
+def _guarded(compute: Compute) -> Compute:
     """Wrap ``compute`` so it aborts the run when the workspace id variable is unset."""
 
-    def guarded(texts: list[str]) -> list[tuple[str | None, str | None]]:
+    def guarded(texts: list[str]) -> list[tuple[str | None, str | None] | None]:
         if not os.environ.get(WORKSPACE_ID_ENV):
             msg = f'{WORKSPACE_ID_ENV} is not set, so {len(texts)} trials cannot be sent to Claude'
             raise ComputeAborted(msg)
@@ -135,8 +138,11 @@ def extraction_v2_compute(
     state_uri: str,
     scratch: Path,
     client: Any = None,
-) -> Callable[[list[str]], list[tuple[str | None, str | None]]]:
+    systemic: dict[str, str] | None = None,
+) -> Compute:
     """Build the ``compute`` of :py:func:`map_texts` that extracts trials with Claude.
+
+    A trial failing with an error outside :py:data:`CONTENT_ERRORS` is left out, so it uses up no attempt.
 
     Args:
         prompts: Output of :py:func:`rendered_trials`.
@@ -145,14 +151,26 @@ def extraction_v2_compute(
         state_uri: Where the submitted batch ids are recorded, a path or URI.
         scratch: Local directory for the result cache.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
+        systemic: Filled with the error of each trial left out, by trial id.
 
     Returns:
-        A function from rendered trials to ``(output, error)`` in the order of the trials.
+        A function from rendered trials to ``(output, error)``, or ``None`` for a trial left out, in the order
+        of the trials.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
     cache_path = scratch / 'extraction_v2_cache.jsonl'
 
-    def compute(texts: list[str]) -> list[tuple[str | None, str | None]]:
+    def outcome(trial_id: str, results: dict, errors: dict[str, str]) -> tuple[str | None, str | None] | None:
+        if trial_id in results:
+            return results[trial_id].model_dump_json(), None
+        error = errors.get(trial_id, 'missing')
+        if error in CONTENT_ERRORS:
+            return None, error
+        if systemic is not None:
+            systemic[trial_id] = error
+        return None
+
+    def compute(texts: list[str]) -> list[tuple[str | None, str | None] | None]:
         results, errors = run_batch_cached(
             [(ids[text], text) for text in texts],
             system_prompt=system_prompt,
@@ -164,12 +182,7 @@ def extraction_v2_compute(
             client=client,
             max_batch_requests=settings.max_batch_requests,
         )
-        return [
-            (results[ids[text]].model_dump_json(), None)
-            if ids[text] in results
-            else (None, errors.get(ids[text], 'missing'))
-            for text in texts
-        ]
+        return [outcome(ids[text], results, errors) for text in texts]
 
     return compute
 
@@ -224,13 +237,15 @@ def stage_extraction_v2(
 
     Raises:
         ComputeAborted: If there are trials to extract, no client is given and the workspace id variable is unset.
-        TaskRunError: If no trial of a non-empty set was extracted.
+        TaskRunError: If a trial was left out for a systemic error, after its shard's records are written, or no
+            trial of a non-empty set was extracted.
     """
     system_prompt = _system_prompt(settings, config)
     revision = extraction_v2_revision(settings.model, system_prompt, RENDER_VERSION)
     tag = EXTRACTION_V2.tag(revision, settings.sample_size)
     polars_schema(TrialExtractionV2)
     store_root = settings.store_uri.rstrip('/')
+    systemic: dict[str, str] = {}
 
     report = aact_trial_extraction.trial_report(archive, config.work_path, settings.sample_size)
     ids = report['id'].unique().to_list()
@@ -244,6 +259,7 @@ def stage_extraction_v2(
         f'{store_root}/batches/{EXTRACTION_V2.name}-{settings.snapshot}-{tag}.json',
         config.work_path,
         client=client,
+        systemic=systemic,
     )
     mapped = map_texts(
         prompts['prompt'],
@@ -259,6 +275,11 @@ def stage_extraction_v2(
         shard_size=settings.shard_size,
     )
     extractions = extractions_from_records(mapped.frame, prompts)
+    unanswered = sorted(set(systemic) - set(extractions['id']))
+    if unanswered:
+        examples = ', '.join(f'{i}: {systemic[i]}' for i in unanswered[:5])
+        msg = f'{len(unanswered)} trials got no answer for systemic reasons, e.g. {examples}; rerun to submit them'
+        raise TaskRunError(msg)
     if prompts.height and extractions.is_empty():
         msg = f'no trial of {prompts.height} was extracted, so no snapshot is published'
         raise TaskRunError(msg)
