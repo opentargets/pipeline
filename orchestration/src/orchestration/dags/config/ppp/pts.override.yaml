@@ -94,8 +94,6 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
-        deprecated_project_ids:
-          - GTEx
 
   # PPP runs the platform credible set step on the platform and the PPP sources. Keep it identical
   # to the platform step apart from the sources; orchestration tests check it.

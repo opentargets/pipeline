@@ -121,8 +121,6 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
-        deprecated_project_ids:
-          - GTEx
 
   #: GO STEP :######################################################################################
   go:

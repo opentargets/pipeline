@@ -78,7 +78,6 @@ scratchpad:
   staging_decode_ts: '20261103T122701'
   staging_sle_map_ts: '20261103T145657'
   staging_pgc_ts: '20261113T192257'
-  # The DAG run 20261029T125742 with the publication fields of its study indexes patched.
   staging_bigbrain_ts: '20261029T162943'
 
 steps:
