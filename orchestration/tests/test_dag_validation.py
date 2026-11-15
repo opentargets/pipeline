@@ -80,7 +80,7 @@ def test_aact_moa_runs_after_the_extraction(dag_bag: DagBag) -> None:
     """aact_moa waits for the extraction, runs with its timeout and the Claude workspace, and gates nothing else."""
     dag = dag_bag.dags['clinical_staging']
     start = dag.get_task('pts_aact_moa.upload_config_pts_aact_moa')
-    assert start.upstream_task_ids == {'pts_aact_trial_extraction.end_pts_aact_trial_extraction'}
+    assert start.upstream_task_ids == {'pts_aact_trial_extraction_v2.end_pts_aact_trial_extraction_v2'}
     run = cast(ComputeEngineRunContainerizedWorkloadSensor, dag.get_task('pts_aact_moa.run_pts_aact_moa'))
     assert run.execution_timeout == timedelta(hours=30)
     assert run.container_env is not None
@@ -125,7 +125,11 @@ def test_moa_literature_waits_for_its_copies_with_its_timeout_and_env(dag_bag: D
 def test_only_the_llm_steps_carry_a_vm_service_account(dag_bag: DagBag) -> None:
     """The two LLM tasks attach the dedicated account; every other VM task keeps the default."""
     account = 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
-    llm_runs = {'pts_aact_moa.run_pts_aact_moa', 'pts_moa_literature.run_pts_moa_literature'}
+    llm_runs = {
+        'pts_aact_trial_extraction_v2.run_pts_aact_trial_extraction_v2',
+        'pts_aact_moa.run_pts_aact_moa',
+        'pts_moa_literature.run_pts_moa_literature',
+    }
     dag = dag_bag.dags['clinical_staging']
     runs = [t for t in dag.tasks if isinstance(t, ComputeEngineRunContainerizedWorkloadSensor)]
     assert len(runs) > 2

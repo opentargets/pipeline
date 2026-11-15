@@ -23,29 +23,30 @@ steps:
   pis_aact:
     source: aact
 
-  pts_aact_trial_extraction:
+  # Extracts the drugs and indications of the AACT trials with Claude.
+  pts_aact_trial_extraction_v2:
     source: aact
     depends_on:
       - pis_aact
     machine_type: 'n1-highmem-8'
-    # Fetched from Secret Manager onto the VM and mounted into the container at
-    # this path — which is what AactTrialExtractionSettings.openai_key_path defaults to. The
-    # key itself never appears in config or in code.
-    gce_secret_files:
-      openai-token: /var/run/secrets/openai-api-key
+    execution_timeout_hours: 30
+    service_account: clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com
+    container_env:
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: wrkspc_01PEuYsbEifFUZBttcpwP49Q
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: open-targets-eu-dev
 
   # Runs the stop-reasons and drug NER models over the AACT texts.
   pts_aact_trial_models:
     source: aact
     depends_on:
-      - pts_aact_trial_extraction
+      - pts_aact_trial_extraction_v2
     machine_type: 'n2d-standard-16'
 
   # Extracts the mechanisms of action of the drugs in the AACT trials with Claude.
   pts_aact_moa:
     source: aact
     depends_on:
-      - pts_aact_trial_extraction
+      - pts_aact_trial_extraction_v2
     machine_type: 'n1-highmem-8'
     execution_timeout_hours: 30
     service_account: clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com

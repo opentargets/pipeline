@@ -51,7 +51,7 @@ published release it reads instead,
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
-2. `pts_aact_trial_extraction` (n1-highmem-8) — asks the LLM to read every trial the record
+2. `pts_aact_trial_extraction_v2` (n1-highmem-8) — asks Claude, through Message Batches, to read every trial the record
    store does not already hold, and publishes the extraction. A trial that
    fails all 3 attempts is published without, with a warning giving the count;
    a rerun of the version computes nothing.
@@ -121,8 +121,11 @@ snapshot covers, whatever its source.
 
 There is no Airflow dependency between this DAG and `unified_pipeline`. The
 release names the versions in `pis/config.yaml`; if it names one that was
-never staged, its copy fails on a missing path. The OpenAI key is fetched from
-Secret Manager onto the VM and mounted into the container.
+never staged, its copy fails on a missing path. The Claude steps (`pts_aact_trial_extraction_v2`,
+`pts_aact_moa`, `pts_moa_literature`) run as
+`clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com`, with
+`ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID` and `ANTHROPIC_GOOGLE_CLOUD_PROJECT` set
+in their `container_env`. No step mounts a secret.
 
 ## Record stores, snapshots and revision tags
 
@@ -160,7 +163,7 @@ The extraction is tagged too:
 
 The schema digest is that of `ClinicalReportExtractionSchema`. A schema change,
 a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or any
-`sample_size` gives a new tag. The OpenAI model and the
+`sample_size` gives a new tag. The Claude model and the
 system prompt are not in it, because they do not change what is published.
 The extraction store keeps the full schema digest as its revision. The AACT
 drug snapshot is published under the extraction it was computed from and

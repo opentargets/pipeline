@@ -44,7 +44,7 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
     """Only direct dependencies are listed, and each source stages its own models."""
     assert config.steps() == [
         'pis_aact',
-        'pts_aact_trial_extraction',
+        'pts_aact_trial_extraction_v2',
         'pts_aact_trial_models',
         'pts_aact_moa',
         'pis_clinical_mining',
@@ -52,8 +52,8 @@ def test_steps_and_dependencies(config: ClinicalStagingConfig) -> None:
         'pis_moa_literature',
         'pts_moa_literature',
     ]
-    assert config.step_definition('pts_aact_trial_extraction')['depends_on'] == ['pis_aact']
-    assert config.step_definition('pts_aact_trial_models')['depends_on'] == ['pts_aact_trial_extraction']
+    assert config.step_definition('pts_aact_trial_extraction_v2')['depends_on'] == ['pis_aact']
+    assert config.step_definition('pts_aact_trial_models')['depends_on'] == ['pts_aact_trial_extraction_v2']
     assert config.step_definition('pts_clinical_mining_models')['depends_on'] == [
         'pis_clinical_mining',
         'pts_aact_trial_models',
@@ -68,7 +68,7 @@ def test_release_uri_per_source(config: ClinicalStagingConfig) -> None:
     literature = f'gs://clinical_staging/literature/{config.staging_version}'
     for step_name, uri in [
         ('pis_aact', aact),
-        ('pts_aact_trial_extraction', aact),
+        ('pts_aact_trial_extraction_v2', aact),
         ('pts_aact_trial_models', aact),
         ('pts_aact_moa', aact),
         ('pis_clinical_mining', mining),
@@ -97,7 +97,7 @@ def test_machine_type_override_and_default(config: ClinicalStagingConfig) -> Non
     """A step's own machine type wins; the others keep the global one."""
     assert config.machine_type_for('pts_aact_trial_models') == 'n2d-standard-16'
     assert config.machine_type_for('pts_clinical_mining_models') == 'n2d-standard-16'
-    assert config.machine_type_for('pts_aact_trial_extraction') == 'n1-highmem-8'
+    assert config.machine_type_for('pts_aact_trial_extraction_v2') == 'n1-highmem-8'
     assert config.machine_type_for('pis_aact') == config.machine_type
     assert config.machine_type_for('pis_clinical_mining') == config.machine_type
 
@@ -106,7 +106,7 @@ def test_pts_steps_run_the_nlp_image(config: ClinicalStagingConfig) -> None:
     """Staging pts steps run pts-nlp, the image with the nlp and llm extras; pis steps run pis."""
     registry = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
     pts_version = yaml.safe_load(STAGING_CONFIG.read_text())['pts_version']
-    for step in ('pts_aact_moa', 'pts_moa_literature', 'pts_aact_trial_extraction'):
+    for step in ('pts_aact_moa', 'pts_moa_literature', 'pts_aact_trial_extraction_v2'):
         assert config.step_image(step) == f'{registry}/pts-nlp:{pts_version}'
     assert config.step_image('pis_aact').startswith(f'{registry}/pis:')
 
@@ -148,7 +148,7 @@ def test_step_execution_timeout_is_read_from_the_step(config: ClinicalStagingCon
     """Only a step that declares ``execution_timeout_hours`` has a timeout."""
     assert config.execution_timeout_for('pts_aact_moa') == timedelta(hours=30)
     for step_name in config.steps():
-        if step_name not in ('pts_aact_moa', 'pts_moa_literature'):
+        if step_name not in ('pts_aact_trial_extraction_v2', 'pts_aact_moa', 'pts_moa_literature'):
             assert config.execution_timeout_for(step_name) is None
 
 
@@ -233,9 +233,21 @@ def test_moa_literature_snapshot_lands_under_the_literature_root(config: Clinica
 
 def test_service_account_is_declared_by_the_llm_steps_only(config: ClinicalStagingConfig) -> None:
     account = 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
-    llm_steps = {'pts_aact_moa', 'pts_moa_literature'}
+    llm_steps = {'pts_aact_trial_extraction_v2', 'pts_aact_moa', 'pts_moa_literature'}
     for step_name in llm_steps:
         assert config.service_account_for(step_name) == account
     for step_name in config.steps():
         if step_name not in llm_steps:
             assert config.service_account_for(step_name) is None, step_name
+
+
+def test_trial_extraction_runs_on_claude_without_openai_secret(config: ClinicalStagingConfig) -> None:
+    """The v2 extraction runs the aact_trial_extraction_v2 step as the llm account; no step mounts the OpenAI token."""
+    step = 'pts_aact_trial_extraction_v2'
+    assert config.step_env_vars(step) == config.step_env_vars('pts_aact_moa') | {'PTS_STEP': 'aact_trial_extraction_v2'}
+    assert config.service_account_for(step) == 'clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com'
+    assert config.execution_timeout_for(step) == timedelta(hours=30)
+    assert list(config.step_config(step)['steps']) == ['aact_trial_extraction_v2']
+    for step_name in config.steps():
+        assert 'openai-token' not in (config.step_definition(step_name).get('gce_secret_files') or {}), step_name
+        assert step_name != 'pts_aact_trial_extraction'
