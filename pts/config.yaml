@@ -738,6 +738,7 @@ steps:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
+          - OBSERVATIONAL_STUDY
   ##################################################################################################
 
   #: EVIDENCE_CANCER_BIOMARKERS STEP :################################################################
@@ -1169,6 +1170,7 @@ steps:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
+          - OBSERVATIONAL_STUDY
   ##################################################################################################
 
   #: CLINICAL_TARGET STEP :#########################################################################
@@ -1185,6 +1187,7 @@ steps:
         invalid_clinical_report_qc:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
+          - OBSERVATIONAL_STUDY
   ##################################################################################################
 
   #: TARGET_PRIORITISATION STEP :###################################################################

@@ -98,6 +98,7 @@ class ClinicalReportFlags(StrEnum):
     PHASE_IV_NOT_APPROVED = 'PHASE_IV_NOT_APPROVED'
     UNVALIDATED_INDICATION = 'UNVALIDATED_INDICATION'
     INDIRECT_PRIMARY_PURPOSE = 'INDIRECT_PRIMARY_PURPOSE'
+    OBSERVATIONAL_STUDY = 'OBSERVATIONAL_STUDY'
     NO_DISEASE = 'NO_DISEASE'
     NO_DRUGS = 'NO_DRUGS'
     SAFETY_REPORT = 'SAFETY_REPORT'
@@ -255,6 +256,7 @@ def clinical_report(
         .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
         .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_extractions.select('id', 'drug_intent'))
+        .pipe(flag_observational_studies)
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
 
@@ -659,6 +661,18 @@ def flag_indirect_primary_purpose(
             | llm_drug_intent_condition,
             ClinicalReportFlags.INDIRECT_PRIMARY_PURPOSE,
         ).select(pl.all().exclude('drug_intent'))
+    )
+
+
+def flag_observational_studies(reports: ClinicalReport) -> ClinicalReport:
+    """Flag ClinicalTrials.gov observational studies, which do not test the drug."""
+    return ClinicalReport(
+        df=flag_rows(
+            reports.df,
+            (pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
+            & (pl.col('trialStudyType') == 'OBSERVATIONAL'),
+            ClinicalReportFlags.OBSERVATIONAL_STUDY,
+        )
     )
 
 
