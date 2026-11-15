@@ -476,3 +476,43 @@ class ClinicalReportExtractionSchema(BaseModel):
             'in the trial data. Do not describe the study design, purpose, or objectives.'
         ),
     )
+
+
+class TrialLink(BaseModel):
+    """A drug the trial tests, and what it is tested for."""
+
+    drug: str = Field(description='The tested drug, as the trial names it.')
+    indication: str = Field(description='The disease or outcome the drug is tested to treat, prevent or manage.')
+    use: Literal['treat', 'prevent', 'manage', 'diagnose', 'other']
+    arms: list[str] = Field(description='Titles of the arms that test the drug for this indication.')
+    confidence: float = Field(description='Between 0 and 1: how directly the text states this link.')
+    evidence_quote: str = Field(description='An exact span of the trial text that states the link.')
+
+
+class RoleDrug(BaseModel):
+    """A drug in the trial that is not tested, with its role."""
+
+    drug: str
+    role: Literal[
+        'backbone',
+        'comparator',
+        'premedication',
+        'conditioning',
+        'rescue',
+        'supportive',
+        'adjuvant_or_vehicle',
+        'other',
+    ]
+    evidence_quote: str = Field(description='An exact span of the trial text that shows the role.')
+
+
+class TrialExtractionV2(BaseModel):
+    """What a clinical trial tests: tested drug-indication links, and the drugs and conditions around them."""
+
+    id: str = Field(description='The trial id, e.g. NCT04012606.')
+    drug_intent: Literal['therapeutic', 'diagnostic', 'prevention', 'supportive_care', 'other']
+    drug_intent_confidence: float = Field(description='Between 0 and 1.')
+    links: list[TrialLink]
+    background_drugs: list[RoleDrug] = Field(description='Drugs every arm receives.')
+    other_drugs: list[RoleDrug] = Field(description='Drugs given for a purpose other than the tested indication.')
+    population_conditions: list[str] = Field(description="The participants' conditions that are not an indication.")
