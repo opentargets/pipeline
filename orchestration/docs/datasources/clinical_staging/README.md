@@ -231,23 +231,11 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
 
 1. Release pts and pis, and bump `pts_version` and `pis_version` in
    `clinical_staging.yaml`, and the pins in `pis/config.yaml`.
-2. First run only, in `pts/config.yaml`: set `import_extraction_cache` under
-   the `settings` of the `aact_trial_extraction` step to
-   `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
-   under the `settings` of the `aact_trial_models` step to
-   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`.
-   The schema digest is the full 64 hex digest of the response schema, as the
-   step computes it; from `pts/`:
-
-   ```bash
-   uv run python -c "from pts.transformers.clinical_mira.staged_outputs import schema_digest; from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
-   ```
-
-   Remove both afterwards: once the schema changes, an `import_extraction_cache`
-   left set names another schema's namespace, and the step fails. The mining
-   disease NER (about 3k texts) is computed in full on the first run. Without
-   the import and the seed the first run pays for every trial and every label
-   again.
+2. First run only, in `pts/config.yaml`: set `seed_ner_cache` under the
+   `settings` of the `aact_trial_models` step to
+   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`. Remove it
+   afterwards. The mining disease NER (about 3k texts) is computed in full on
+   the first run. Without the seed the first run pays for every label again.
 3. Trigger the DAG. It runs `clinical_mining_models` after `aact_trial_models`,
    so the seed covers the mining labels. Check that every snapshot of both
    sources exists.
