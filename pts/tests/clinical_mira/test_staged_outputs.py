@@ -7,13 +7,16 @@ import json
 import re
 import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from pts.transformers.clinical_mira import staged_outputs
+from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings
 from pts.transformers.clinical_mira.moa import literature, schemas
+from pts.transformers.clinical_mira.moa.claude import MAX_TOKENS
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -26,6 +29,7 @@ from pts.transformers.clinical_mira.ner import (
     DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical_mira.providers.aact_context import RENDER_VERSION
 from pts.transformers.clinical_mira.providers.aact_llm import TRIAL_FIELDS
 from pts.transformers.clinical_mira.record_store import publish_snapshot, read_records
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
@@ -34,6 +38,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DRUG_ENTITIES,
     EXTRACTION,
     EXTRACTION_V2,
+    EXTRACTION_V2_PROMPT,
     MOA,
     MOA_LITERATURE,
     STOP_REASONS,
@@ -464,21 +469,34 @@ def extraction_v2_snapshot(tmp_path: Path, name: str, **overrides: object) -> st
     return snapshot(tmp_path, name, pl.DataFrame({'id': ['NCT1']}), metadata)
 
 
-def test_revision_changes_with_prompt_schema_model_and_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
-    base = extraction_v2_revision('m', 'prompt', 1)
+def test_revision_changes_with_prompt_schema_model_renderer_effort_and_max_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
 
-    assert extraction_v2_revision('m', 'prompt 2', 1) != base
-    assert extraction_v2_revision('m2', 'prompt', 1) != base
-    assert extraction_v2_revision('m', 'prompt', 2) != base
+    assert extraction_v2_revision('m', 'prompt 2', 1, 'medium', 16000) != base
+    assert extraction_v2_revision('m2', 'prompt', 1, 'medium', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 2, 'medium', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 1, 'high', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 1, 'medium', 8000) != base
     monkeypatch.setattr(staged_outputs, 'schema_digest', lambda _: 'other')
-    assert extraction_v2_revision('m', 'prompt', 1) != base
+    assert extraction_v2_revision('m', 'prompt', 1, 'medium', 16000) != base
 
 
 def test_revision_is_stable_for_the_same_inputs() -> None:
-    revision = extraction_v2_revision('m', 'prompt', 1)
+    revision = extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
 
-    assert revision == extraction_v2_revision('m', 'prompt', 1)
+    assert revision == extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
     assert re.fullmatch(r'[0-9a-f]{64}', revision)
+
+
+def test_extraction_v2_release_tag_is_the_default_step_extraction() -> None:
+    package, filename = EXTRACTION_V2_PROMPT
+    prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
+    settings = AactTrialExtractionV2Settings(store_uri='gs://b/store', snapshot='v1')
+    revision = extraction_v2_revision(settings.model, prompt, RENDER_VERSION, settings.effort, MAX_TOKENS)
+
+    assert EXTRACTION_V2.release_tag() == EXTRACTION_V2.tag(revision, None)
 
 
 def test_extraction_v2_tag_and_metadata() -> None:

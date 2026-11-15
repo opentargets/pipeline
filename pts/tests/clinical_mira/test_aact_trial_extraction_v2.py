@@ -12,7 +12,7 @@ from otter.util.errors import TaskRunError
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira import aact_trial_extraction_v2 as v2
 from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings, stage_extraction_v2
-from pts.transformers.clinical_mira.moa.claude import custom_id
+from pts.transformers.clinical_mira.moa.claude import MAX_TOKENS, custom_id
 from pts.transformers.clinical_mira.model_frames import polars_schema
 from pts.transformers.clinical_mira.providers.aact_context import RENDER_VERSION, render_trial, trial_context
 from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, text_sha256
@@ -193,7 +193,7 @@ def _stage(
 def _revision() -> str:
     package, filename = EXTRACTION_V2_PROMPT
     prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
-    return extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION)
+    return extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'medium', MAX_TOKENS)
 
 
 def _snapshot(tmp_path: Path) -> Path:
@@ -315,7 +315,9 @@ def test_a_system_prompt_override_is_sent_and_tags_the_snapshot(
     _stage(monkeypatch, tmp_path, batches, system_prompt=str(prompt), sample_size=2)
 
     assert batches.created[0][0]['params']['system'][0]['text'] == 'a different system prompt'
-    revision = extraction_v2_revision('claude-haiku-5-5', 'a different system prompt', RENDER_VERSION)
+    revision = extraction_v2_revision(
+        'claude-haiku-5-5', 'a different system prompt', RENDER_VERSION, 'medium', MAX_TOKENS
+    )
     tag = EXTRACTION_V2.tag(revision, 2)
     metadata = json.loads((tmp_path / 'extraction_v2' / tag / 'metadata.json').read_text())
     assert metadata == EXTRACTION_V2.metadata(revision, 2)
@@ -369,3 +371,18 @@ def test_an_invalid_request_uses_an_attempt(monkeypatch: pytest.MonkeyPatch, tmp
     assert stats['published'] is True
     records = read_records(str(tmp_path / 'store' / 'extraction_v2'), _config(tmp_path), pl.String())
     assert records.filter(pl.col('status') == 'failed')['error'].to_list() == ['invalid_request_error'] * 3
+
+
+def test_effort_is_sent_and_tags_the_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    batches = FakeBatches()
+
+    _stage(monkeypatch, tmp_path, batches, effort='high')
+
+    assert batches.created[0][0]['params']['output_config']['effort'] == 'high'
+    package, filename = EXTRACTION_V2_PROMPT
+    prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
+    revision = extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'high', MAX_TOKENS)
+    tag = EXTRACTION_V2.tag(revision, None)
+    assert tag != EXTRACTION_V2.release_tag()
+    metadata = json.loads((tmp_path / 'extraction_v2' / tag / 'metadata.json').read_text())
+    assert metadata == EXTRACTION_V2.metadata(revision, None)

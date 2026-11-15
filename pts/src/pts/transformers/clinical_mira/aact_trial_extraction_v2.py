@@ -1,11 +1,11 @@
 """Transformer that extracts what each AACT trial tests with Claude, through the Message Batches API.
 
 The trials are those :py:func:`.aact_trial_extraction.trial_report` gives, each rendered with
-:py:func:`.providers.aact_context.render_trial`. Each trial's extraction is a record in the store: the text is
-the rendered trial, the model ``aact_trial_extraction_v2``, the revision the digest of the Claude model, the
-system prompt, the response schema and the renderer, and the output the JSON of the validated
-:py:class:`.schemas.TrialExtractionV2`. Requests go to Claude in batches whose ids are recorded under the store,
-so an interrupted run collects the batches it submitted instead of paying for them again. The extraction is
+:py:func:`.providers.aact_context.render_trial`. Each trial's extraction is a record in the store: the text is the
+rendered trial, the model ``aact_trial_extraction_v2``, the revision the digest of the Claude model, the system
+prompt, the response schema, the renderer, the effort and the output-token limit, and the output the JSON of the
+validated :py:class:`.schemas.TrialExtractionV2`. Requests go to Claude in batches whose ids are recorded under the
+store, so an interrupted run collects the batches it submitted instead of paying for them again. The extraction is
 published as a write-once snapshot; a trial that fails every attempt is left out of it.
 """
 
@@ -22,7 +22,7 @@ from otter.util.errors import TaskRunError
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pts.transformers.clinical_mira import aact_trial_extraction
-from pts.transformers.clinical_mira.moa.claude import MAX_BATCH_REQUESTS, run_batch_cached
+from pts.transformers.clinical_mira.moa.claude import MAX_BATCH_REQUESTS, MAX_TOKENS, run_batch_cached
 from pts.transformers.clinical_mira.model_frames import models_to_frame, polars_schema
 from pts.transformers.clinical_mira.providers.aact_context import (
     RENDER_VERSION,
@@ -40,6 +40,7 @@ from pts.transformers.clinical_mira.record_store import (
 from pts.transformers.clinical_mira.schemas import TrialExtractionV2
 from pts.transformers.clinical_mira.staged_outputs import (
     EXTRACTION_V2,
+    EXTRACTION_V2_DEFAULT_EFFORT,
     EXTRACTION_V2_DEFAULT_MODEL,
     EXTRACTION_V2_MODEL,
     EXTRACTION_V2_PROMPT,
@@ -73,8 +74,8 @@ class AactTrialExtractionV2Settings(BaseModel):
     """The AACT version. Prefixes the id of the runs this step writes and names the batch state file."""
     model: str = EXTRACTION_V2_DEFAULT_MODEL
     """Claude model. Part of the records' revision."""
-    effort: str = 'medium'
-    """Claude effort."""
+    effort: str = EXTRACTION_V2_DEFAULT_EFFORT
+    """Claude effort. Part of the records' revision."""
     system_prompt: str | None = None
     """Path to a system prompt overriding the packaged one, relative to the release root. Part of the records'
         revision."""
@@ -241,7 +242,7 @@ def stage_extraction_v2(
             trial of a non-empty set was extracted.
     """
     system_prompt = _system_prompt(settings, config)
-    revision = extraction_v2_revision(settings.model, system_prompt, RENDER_VERSION)
+    revision = extraction_v2_revision(settings.model, system_prompt, RENDER_VERSION, settings.effort, MAX_TOKENS)
     tag = EXTRACTION_V2.tag(revision, settings.sample_size)
     polars_schema(TrialExtractionV2)
     store_root = settings.store_uri.rstrip('/')
