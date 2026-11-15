@@ -1,12 +1,11 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import polars as pl
 import pytest
 
 from pts.transformers.clinical_mira.moa import __main__ as cli
-from pts.transformers.clinical_mira.moa import llm
+from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict
 
 DRUG = pl.Struct({'drug': pl.String, 'synonyms': pl.List(pl.String)})
 LABELS = pl.List(pl.Struct({'label': pl.String, 'source': pl.String}))
@@ -27,15 +26,12 @@ TRIALS = {
 JUDGE_INPUTS: list[str] = []
 
 
-class FakeClient:
+def fake_batch(requests, *, response_model, **_):
     """Extracts KRAS from every pool; the judge agrees with every mechanism."""
-
-    def __init__(self, *_: object, **__: object) -> None:
-        self.responses = SimpleNamespace(create=self._create)
-
-    async def _create(self, *, instructions: str, input: str, **_: object) -> SimpleNamespace:
-        if 'pharmacologist' in instructions:
-            JUDGE_INPUTS.append(input)
+    results = {}
+    for request_id, text in requests:
+        if response_model is JudgeVerdict:
+            JUDGE_INPUTS.append(text)
             body = {
                 'targetSupported': 'yes',
                 'actionSupported': 'yes',
@@ -43,7 +39,7 @@ class FakeClient:
                 'rationale': 'stated',
             }
         else:
-            nct = input.split('Trial ID: ')[1].split('\n', maxsplit=1)[0]
+            nct = text.split('Trial ID: ')[1].split('\n', maxsplit=1)[0]
             body = {
                 'drugName': 'x',
                 'notStated': False,
@@ -63,10 +59,8 @@ class FakeClient:
                     }
                 ],
             }
-        return SimpleNamespace(output_text=json.dumps(body))
-
-    async def close(self) -> None:
-        return None
+        results[request_id] = response_model.model_validate_json(json.dumps(body))
+    return results, {}
 
 
 @pytest.fixture
@@ -117,8 +111,8 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
     return {'dir': d}
 
 
-def test_cli_end_to_end_with_fake_client(tmp_path, inputs, monkeypatch):
-    monkeypatch.setattr(llm, 'AsyncOpenAI', FakeClient)
+def test_cli_end_to_end_with_fake_batches(tmp_path, inputs, monkeypatch):
+    monkeypatch.setattr(cli, 'run_batch_cached', fake_batch)
     run = tmp_path / 'run'
     run.mkdir()
     pl.DataFrame({
@@ -167,7 +161,7 @@ def test_cli_end_to_end_with_fake_client(tmp_path, inputs, monkeypatch):
 
 
 def test_extract_limit_runs_only_that_many_pools(tmp_path, inputs, monkeypatch):
-    monkeypatch.setattr(llm, 'AsyncOpenAI', FakeClient)
+    monkeypatch.setattr(cli, 'run_batch_cached', fake_batch)
     run = tmp_path / 'run'
     run.mkdir()
     pl.DataFrame({
@@ -208,31 +202,6 @@ def test_texts_creates_its_scratch_directory(tmp_path, monkeypatch):
     assert seen == {'exists': True}
 
 
-def test_vertex_provider_uses_chat_api_and_gpt_oss(tmp_path, inputs, monkeypatch):
-    seen = {}
-
-    def fake_run_cached(requests, **kwargs):
-        seen.update(kwargs, n=len(requests))
-        return {}, {}
-
-    monkeypatch.setattr(cli, 'run_cached', fake_run_cached)
-    run = tmp_path / 'run'
-    run.mkdir()
-    pl.DataFrame({
-        'id': list(TRIALS),
-        'prompt': [t[1] for t in TRIALS.values()],
-        'prompt_sha256': ['h'] * 3,
-    }).write_parquet(run / 'texts.parquet')
-    cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
-
-    cli.main(['extract', '--run-dir', str(run), '--all', '--provider', 'vertex'])
-
-    assert seen['api'] == 'chat'
-    assert seen['model'] == 'openai/gpt-oss-120b-maas'
-    assert callable(seen['client_factory'])
-    assert seen['n'] == 3
-
-
 def test_extract_request_is_the_staging_request_text(tmp_path, inputs, monkeypatch):
     seen = {}
 
@@ -251,7 +220,7 @@ def test_extract_request_is_the_staging_request_text(tmp_path, inputs, monkeypat
     }).write_parquet(run / 'texts.parquet')
     cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
 
-    cli.main(['extract', '--run-dir', str(run), '--all', '--provider', 'anthropic'])
+    cli.main(['extract', '--run-dir', str(run), '--all'])
 
     pools = pl.read_parquet(run / 'pools.parquet').sort('pool_id')
     assert seen['requests'] == [
@@ -259,7 +228,7 @@ def test_extract_request_is_the_staging_request_text(tmp_path, inputs, monkeypat
     ]
 
 
-def test_anthropic_provider_uses_batches_with_opus_by_default(tmp_path, inputs, monkeypatch):
+def test_extract_uses_batches_with_opus_by_default(tmp_path, inputs, monkeypatch):
     seen = {}
 
     def fake_batch(requests, **kwargs):
@@ -276,9 +245,28 @@ def test_anthropic_provider_uses_batches_with_opus_by_default(tmp_path, inputs, 
     }).write_parquet(run / 'texts.parquet')
     cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
 
-    cli.main(['extract', '--run-dir', str(run), '--all', '--provider', 'anthropic', '--effort', 'low'])
+    cli.main(['extract', '--run-dir', str(run), '--all', '--effort', 'low'])
 
     assert seen['model'] == 'claude-opus-5-5'
     assert seen['effort'] == 'low'
     assert seen['state_uri'] == str(run / 'extract_batches.json')
     assert seen['n'] == 3
+
+
+def test_cached_only_extract_submits_no_batch(tmp_path, inputs, monkeypatch):
+    def no_batch(*_, **__):
+        raise AssertionError('a cached-only run submitted a batch')
+
+    monkeypatch.setattr(cli, 'run_batch_cached', no_batch)
+    run = tmp_path / 'run'
+    run.mkdir()
+    pl.DataFrame({
+        'id': list(TRIALS),
+        'prompt': [t[1] for t in TRIALS.values()],
+        'prompt_sha256': ['h'] * 3,
+    }).write_parquet(run / 'texts.parquet')
+    cli.main(['pools', '--run-dir', str(run), '--extraction', str(inputs['dir'] / 'extraction.parquet')])
+
+    cli.main(['extract', '--run-dir', str(run), '--all', '--cached-only'])
+
+    assert pl.read_parquet(run / 'statuses.parquet').height == 3

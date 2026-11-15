@@ -1034,27 +1034,6 @@ steps:
           - PHASE_IV_NOT_APPROVED
   ##################################################################################################
 
-  #: AACT_TRIAL_EXTRACTION STEP :##################################################################
-  # Not part of a release. The `clinical_staging` DAG runs this step with
-  # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below
-  # resolves inside that snapshot, except for the record store
-  aact_trial_extraction:
-    - name: transform aact_trial_extraction
-      transformer: clinical_mira.aact_trial_extraction
-      source:
-        aact: input/aact.zip
-      destination:
-        extraction: extraction
-      settings:
-        store_uri: gs://clinical_staging/store
-        # the AACT version, prefixing the store runs this step writes
-        snapshot: '{{snapshot}}'
-        model: gpt-5-nano-2025-08-07
-        service_tier: auto
-        concurrency: 75
-        shard_size: 200
-  ##################################################################################################
-
   #: AACT_TRIAL_EXTRACTION_V2 STEP :###############################################################
   # Not part of a release. The `clinical_staging` DAG runs this step with
   # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below

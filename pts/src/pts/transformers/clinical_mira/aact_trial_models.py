@@ -97,7 +97,7 @@ def seed_drug_entities(ner_cache_uri: str, store_uri: str, model: str, model_rev
     return import_run(records, drug_store, SEED_RUN_ID, config)
 
 
-def read_extraction(extraction_uri: str, config: Config) -> pl.DataFrame:
+def read_extraction(extraction_uri: str) -> pl.DataFrame:
     """Read the v2 extraction of the release tag, published under ``extraction_uri``.
 
     Raises:
@@ -193,7 +193,7 @@ def aact_trial_models(
 
     studies = read_aact_tables(source['aact'], ['studies'], config.work_path)['studies']
     extraction_dir = source['extraction'].rstrip('/')
-    extractions = read_extraction(extraction_dir, config)
+    extractions = read_extraction(extraction_dir)
 
     run_id = new_run_id(s.snapshot)
     extraction_tag = EXTRACTION_V2.release_tag()

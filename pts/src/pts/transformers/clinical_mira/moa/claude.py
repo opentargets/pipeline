@@ -3,7 +3,7 @@
 Requests are sent as batches (half price, results within 24 hours), each held to the
 response model's JSON schema. Submitted batch ids are recorded in ``state_uri`` before
 polling, so an interrupted run resumes the batches it already paid for instead of
-submitting them again. Results land in the same cache as :py:func:`.llm.run_cached`.
+submitting them again. Results land in the cache :py:func:`.llm.cached_results` reads.
 
 The client defaults to ``anthropic.AnthropicGoogleCloud()`` (Claude Models on Google
 Cloud, Anthropic managed), configured by ``ANTHROPIC_GOOGLE_CLOUD_PROJECT`` and

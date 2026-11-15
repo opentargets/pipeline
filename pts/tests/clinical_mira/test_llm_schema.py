@@ -20,12 +20,9 @@ def test_patch_schema_closes_every_object() -> None:
             assert node['required'] == list(node['properties'])
 
 
-def test_old_names_still_importable() -> None:
-    from pts.transformers.clinical_mira.llm_workflow import _patch_schema
+def test_moa_llm_reexports_result_key() -> None:
     from pts.transformers.clinical_mira.moa.llm import result_key as old_result_key
 
-    schema = TrialExtractionV2.model_json_schema(by_alias=True)
-    assert _patch_schema(schema) == patch_schema(schema)
     assert old_result_key is result_key
 
 

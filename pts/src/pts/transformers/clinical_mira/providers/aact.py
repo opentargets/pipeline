@@ -85,24 +85,6 @@ def process_conditions(conditions: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _investigated_drug_names() -> pl.Expr:
-    """Drug names of an extraction, one list per row."""
-    return pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug'))
-
-
-def llm_drug_labels(extractions: pl.DataFrame) -> pl.Series:
-    """Distinct non-null drug names of v1 extractions (``ClinicalReportExtractionSchema``), sorted."""
-    return (
-        extractions
-        .select(drugFromSource=_investigated_drug_names())
-        .explode('drugFromSource')
-        .get_column('drugFromSource')
-        .drop_nulls()
-        .unique()
-        .sort()
-    )
-
-
 def replace_with_llm_indications(studies: pl.DataFrame, entities: pl.DataFrame) -> pl.DataFrame:
     """Replace the registry drugs and diseases with those of the trial extraction.
 

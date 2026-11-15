@@ -362,14 +362,14 @@ def test_read_extraction_reads_the_release_tag(tmp_path: Path) -> None:
     _publish_extraction(tmp_path / 'extraction_v2' / V2_TAG, _extractions([['a']]))
     _publish_extraction(tmp_path / 'extraction_v2' / 'other-tag', _extractions([['b'], ['c']]))
 
-    assert read_extraction(str(tmp_path / 'extraction_v2'), None).height == 1
+    assert read_extraction(str(tmp_path / 'extraction_v2')).height == 1
 
 
 def test_read_extraction_names_the_path_it_expected(tmp_path: Path) -> None:
     _publish_extraction(tmp_path / 'extraction_v2' / 'other-tag', _extractions([['b']]))
 
     with pytest.raises(FileNotFoundError, match=re.escape(f'extraction_v2/{V2_TAG}')):
-        read_extraction(str(tmp_path / 'extraction_v2'), None)
+        read_extraction(str(tmp_path / 'extraction_v2'))
 
 
 def test_aact_trial_models_refuses_a_v1_extraction(tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ def test_aact_trial_models_refuses_a_v1_extraction(tmp_path: Path) -> None:
     _publish_extraction(tmp_path / 'extraction_v2' / V2_TAG, _extractions([['a']]), v1)
 
     with pytest.raises(ValueError, match=r"kind 'extraction', not 'extraction_v2'"):
-        read_extraction(str(tmp_path / 'extraction_v2'), None)
+        read_extraction(str(tmp_path / 'extraction_v2'))
 
 
 def test_the_transformer_stages_both_snapshots_from_its_settings(
@@ -391,7 +391,7 @@ def test_the_transformer_stages_both_snapshots_from_its_settings(
         return {}
 
     monkeypatch.setattr(trial_models, 'read_aact_tables', lambda *args: {'studies': pl.DataFrame({'nct_id': ['n']})})
-    monkeypatch.setattr(trial_models, 'read_extraction', lambda uri, config: extractions)
+    monkeypatch.setattr(trial_models, 'read_extraction', lambda uri: extractions)
     monkeypatch.setattr(trial_models, 'stage_trial_models', fake_stage)
 
     aact_trial_models(
