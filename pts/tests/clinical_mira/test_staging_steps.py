@@ -10,6 +10,10 @@ from pydantic import BaseModel, ValidationError
 
 from pts.tasks.transform import Transform
 from pts.transformers.clinical_mira.aact_trial_extraction import AactTrialExtractionSettings, aact_trial_extraction
+from pts.transformers.clinical_mira.aact_trial_extraction_v2 import (
+    AactTrialExtractionV2Settings,
+    aact_trial_extraction_v2,
+)
 from pts.transformers.clinical_mira.aact_trial_models import AactTrialModelsSettings, aact_trial_models
 from pts.transformers.clinical_mira.clinical_mining_models import (
     ClinicalMiningModelsSettings,
@@ -21,6 +25,7 @@ CONFIG_PATH = Path(__file__).parents[2] / 'config.yaml'
 
 STEPS: dict[str, tuple[Callable[..., None], type[BaseModel]]] = {
     'aact_trial_extraction': (aact_trial_extraction, AactTrialExtractionSettings),
+    'aact_trial_extraction_v2': (aact_trial_extraction_v2, AactTrialExtractionV2Settings),
     'aact_trial_models': (aact_trial_models, AactTrialModelsSettings),
     'clinical_mining_models': (clinical_mining_models, ClinicalMiningModelsSettings),
 }

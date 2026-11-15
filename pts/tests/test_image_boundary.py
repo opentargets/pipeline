@@ -13,6 +13,7 @@ STAGING_STEPS = frozenset({
     'aact_moa',
     'moa_literature',
     'aact_trial_extraction',
+    'aact_trial_extraction_v2',
     'aact_trial_models',
     'clinical_mining_models',
 })

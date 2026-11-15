@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib import import_module, resources
 from pathlib import Path
-from types import NoneType, UnionType
-from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from loguru import logger
@@ -39,6 +38,7 @@ from pts.transformers.clinical_mira.llm_workflow import (
     client_timeout,
     extract_prompts,
 )
+from pts.transformers.clinical_mira.model_frames import models_to_frame, polars_schema
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.providers.aact_llm import TRIAL_FIELDS
 from pts.transformers.clinical_mira.record_store import (
@@ -65,8 +65,6 @@ IMPORT_COMPUTED_AT = datetime(1970, 1, 1, tzinfo=UTC)
 of those cached without one."""
 SYSTEMIC_FAILURE_MIN_PROMPTS = 10
 """Trials in an extraction call at or above which getting none back, for systemic reasons only, aborts the run."""
-POLARS_SCALARS: dict[Any, type[pl.DataType]] = {str: pl.String, int: pl.Int64, float: pl.Float64, bool: pl.Boolean}
-"""Polars dtype of each scalar type a response model field can hold."""
 
 
 class AactTrialExtractionSettings(BaseModel):
@@ -114,33 +112,6 @@ def import_class(dotted_path: str) -> type[BaseModel]:
     """Import a pydantic model class from a dotted module path."""
     module_path, class_name = dotted_path.rsplit('.', 1)
     return getattr(import_module(module_path), class_name)
-
-
-def polars_schema(model_class: type[BaseModel]) -> pl.Schema:
-    """The polars schema of ``model_class``'s ``model_dump``: one column per field, in declared order.
-
-    Strings, numbers, booleans, string ``Literal``s, nested models, lists and optionals are supported. Enums,
-    ``Annotated`` types inside a container, and fields excluded from ``model_dump`` are not.
-
-    Raises:
-        TypeError: If a field is excluded from ``model_dump`` or its type has no polars dtype here, naming the field.
-    """
-    schema = {}
-    for name, field in model_class.model_fields.items():
-        if field.exclude:
-            msg = f'{model_class.__name__}.{name} is excluded from model_dump'
-            raise TypeError(msg)
-        try:
-            schema[name] = _polars_dtype(field.annotation)
-        except TypeError as exc:
-            msg = f'{model_class.__name__}.{name}: {exc}'
-            raise TypeError(msg) from exc
-    return pl.Schema(schema)
-
-
-def models_to_frame(models: Sequence[BaseModel], model_class: type[BaseModel]) -> pl.DataFrame:
-    """One row per model, with the schema :py:func:`polars_schema` derives from ``model_class``."""
-    return pl.DataFrame([model.model_dump() for model in models], schema=polars_schema(model_class))
 
 
 def trial_report(archive: str, scratch_root: str | Path, sample_size: int | None) -> pl.DataFrame:
@@ -371,26 +342,6 @@ def _open_client(settings: AactTrialExtractionSettings, openai_key: str) -> Asyn
     return AsyncOpenAI(
         api_key=openai_key, timeout=client_timeout(settings.service_tier), max_retries=settings.max_retries
     )
-
-
-def _polars_dtype(annotation: Any) -> pl.DataType:
-    """The polars dtype of a response model field's type."""
-    origin = get_origin(annotation)
-    args = get_args(annotation)
-    if origin in (Union, UnionType):
-        present = [arg for arg in args if arg is not NoneType]
-        if len(present) == 1:
-            return _polars_dtype(present[0])
-    elif origin is Literal and all(isinstance(arg, str) for arg in args):
-        return pl.String()
-    elif origin is list:
-        return pl.List(_polars_dtype(args[0]))
-    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return pl.Struct(polars_schema(annotation))
-    elif annotation in POLARS_SCALARS:
-        return POLARS_SCALARS[annotation]()
-    msg = f'no polars dtype for {annotation!r}'
-    raise TypeError(msg)
 
 
 def _system_prompt(settings: AactTrialExtractionSettings, config: Config) -> str:
