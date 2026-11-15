@@ -21,11 +21,12 @@ from pts.transformers.clinical_mira.aact_trial_models import (
 )
 from pts.transformers.clinical_mira.hf_models import staged_model_revisions
 from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical_mira.providers.aact import llm_drug_labels
 from pts.transformers.clinical_mira.record_store import map_texts, read_records, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
+from pts.transformers.clinical_mira.trial_links import link_drug_labels, report_entities_frame
 from pts.transformers.clinical_report import attach_stop_reasons
+from tests.clinical_mira.test_trial_links import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 STOP_TAG = STOP_REASONS.tag(REVISIONS)
@@ -147,12 +148,16 @@ def test_release_drug_labels_are_staged() -> None:
     interventions = pl.DataFrame({'nct_id': ['NCT0'], 'intervention_type': ['DRUG'], 'name': ['Aspirin']})
     conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
     raw = ['Aspirin', ' Ibuprofen ', r'drug \[X\]', 'a\x0041b', 'nul\x00x']
-    extractions = _extractions([[*raw, None], [''], []])
+    extractions = v2_frame({
+        'NCT0': {'links': [v2_link(drug, 'pain') for drug in raw]},
+        'NCT1': {'links': [v2_link('', 'pain')]},
+    })
+    entities = report_entities_frame(extractions, 0.8)
 
-    report = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
+    report = extract_aact_clinical_report(studies, interventions, conditions, trial_entities=entities).df
 
     released = report['drugs'].explode().struct.field('drugFromSource').drop_nulls().unique().sort()
-    assert released.to_list() == llm_drug_labels(extractions).to_list() == sorted(['', *raw])
+    assert released.to_list() == link_drug_labels(extractions)['label'].unique().sort().to_list() == sorted(['', *raw])
 
 
 def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -314,8 +319,9 @@ def test_staged_stop_reasons_join_the_release_report(tmp_path: Path, models_uri:
     conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
     extractions = _extractions([['Aspirin']])
     _stage(tmp_path, models_uri, studies.select('nct_id', 'why_stopped'), extractions, 'r1')
+    entities = report_entities_frame(v2_frame({'NCT0': {'links': [v2_link('Aspirin', 'pain')]}}), 0.8)
 
-    aact = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
+    aact = extract_aact_clinical_report(studies, interventions, conditions, trial_entities=entities).df
     staged = pl.read_parquet(tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet')
     attached = attach_stop_reasons(aact, staged)
 

@@ -1162,7 +1162,7 @@ steps:
         chembl: input/chembl/chembl.tar.gz
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
-        trial_extraction: input/clinical_report/aact_trial_extraction
+        trial_extraction: input/clinical_report/aact_trial_extraction_v2
         aact_stop_reasons: input/clinical_report/aact_stop_reasons
         aact_drug_entities: input/clinical_report/aact_drug_entities
         mining_drug_entities: input/clinical_report/mining_drug_entities
@@ -1174,6 +1174,8 @@ steps:
         drugs_at_fda: input/clinical_report/drugs_at_fda.json.zip
       destination:
         output: output/clinical_report
+      settings:
+        min_link_confidence: 0.8
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################
