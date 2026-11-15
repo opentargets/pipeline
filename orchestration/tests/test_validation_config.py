@@ -8,11 +8,14 @@ from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 PPP_ONLY = [
     'gwas/finngen_meta',
+    'gwas/pgc',
     'molqtl/sle_map',
     'molqtl/otar2077/microglia',
     'molqtl/eQTLGen/single_cell_eqtl',
     'molqtl/eQTLGen/coeqtl',
     'molqtl/deCODE_proteomics',
+    'molqtl/bigbrain/eqtl',
+    'molqtl/bigbrain/sqtl',
 ]
 BOTH = ['molqtl/eqtl_catalogue', 'molqtl/ukb_ppp_eur', 'molqtl/finngen_multiome']
 
