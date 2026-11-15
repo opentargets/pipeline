@@ -26,6 +26,7 @@ EXPECTED_RUNS = {
     },
     'gwas_ppp': {
         'gwas/finngen_meta/{dataset}': 'gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output',
+        'gwas/pgc/{dataset}': 'gs://pgc_data/prod/${staging_pgc_ts}/output',
     },
     'molqtl': {
         'molqtl/eqtl_catalogue/{dataset}': 'gs://eqtl_catalogue_data/r8/prod/${staging_eqtl_catalogue_ts}/output',
@@ -38,6 +39,8 @@ EXPECTED_RUNS = {
         'molqtl/eQTLGen/coeqtl/{dataset}': 'gs://eqtlgen_data/prod/${staging_eqtlgen_ts}/output/coeqtl',
         'molqtl/deCODE_proteomics/{dataset}': 'gs://decode_data/prod/${staging_decode_ts}/output',
         'molqtl/sle_map/{dataset}': 'gs://sle_map_data/prod/${staging_sle_map_ts}/output',
+        'molqtl/bigbrain/eqtl/{dataset}': 'gs://bigbrain_data/prod/${staging_bigbrain_ts}/output/eqtl',
+        'molqtl/bigbrain/sqtl/{dataset}': 'gs://bigbrain_data/prod/${staging_bigbrain_ts}/output/sqtl',
     },
 }
 
