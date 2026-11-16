@@ -1211,8 +1211,8 @@ steps:
 
   #: ASSOCIATION STEP :#############################################################################
   association:
-    - name: pyspark association
-      pyspark: association
+    - name: transform association
+      transformer: association
       source:
         evidence: output/evidence_*
         disease: output/disease
@@ -1223,17 +1223,9 @@ steps:
         by_datasource_indirect: output/association_by_datasource_indirect
         by_datatype_direct: output/association_by_datatype_direct
         by_datatype_indirect: output/association_by_datatype_indirect
-        temporary: intermediate/indirect_association_intermediate
-      properties:
-        spark.driver.memory: '12g'
       settings:
-        partition_count:
-          overall_direct: 14
-          overall_indirect: 39
-          by_datasource_direct: 14
-          by_datasource_indirect: 43
-          by_datatype_direct: 15
-          by_datatype_indirect: 41
+        bucket_count: 64
+        concurrency: 8
         novelty_scale: 2 # 2 for long tailed slow decays
         novelty_shift: 3 # 3 for long tailed slow decays
         novelty_window: 10
@@ -1454,15 +1446,12 @@ steps:
 
   #: ASSOCIATION_OTF STEP :#########################################################################
   association_otf:
-    - name: pyspark association_otf
-      pyspark: association_otf
-      properties:
-        spark.driver.memory: '20g'
+    - name: transform association_otf
+      transformer: association_otf
       source:
         disease: output/disease
         evidence: output/evidence_*
         target: output/target
-        tractability: output/target_tractability
         association_direct: output/association_overall_direct
         association_indirect: output/association_overall_indirect
       destination: view/association_otf
@@ -1613,16 +1602,17 @@ steps:
 
   #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
   association_timeseries_view:
-    - name: pyspark timeseries view
-      pyspark: association_timeseries_view
+    - name: transform association_timeseries_view
+      transformer: association_timeseries_view
       source:
         association_overall_direct: output/association_overall_direct
         association_overall_indirect: output/association_overall_indirect
         association_by_datasource_direct: output/association_by_datasource_direct
         association_by_datasource_indirect: output/association_by_datasource_indirect
       destination: view/association_timeseries
-      properties:
-        spark.driver.memory: 12g
+      settings:
+        file_count: 300
+        concurrency: 8
   ##################################################################################################
 
   #: GENE_SETS STEP :###############################################################################
