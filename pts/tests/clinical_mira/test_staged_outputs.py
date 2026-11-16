@@ -17,7 +17,6 @@ from loguru import logger
 from pts.transformers.clinical_mira import staged_outputs
 from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings
 from pts.transformers.clinical_mira.moa import literature, schemas
-from pts.transformers.clinical_mira.moa.claude import MAX_TOKENS
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -39,6 +38,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DRUG_ENTITIES,
     EXTRACTION,
     EXTRACTION_V2,
+    EXTRACTION_V2_MAX_TOKENS,
     EXTRACTION_V2_PROMPT,
     MOA,
     MOA_LITERATURE,
@@ -496,9 +496,14 @@ def test_extraction_v2_release_tag_is_the_default_step_extraction() -> None:
     package, filename = EXTRACTION_V2_PROMPT
     prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
     settings = AactTrialExtractionV2Settings(store_uri='gs://b/store', snapshot='v1')
-    revision = extraction_v2_revision(settings.model, prompt, RENDER_VERSION, settings.effort, MAX_TOKENS)
+    revision = extraction_v2_revision(settings.model, prompt, RENDER_VERSION, settings.effort, EXTRACTION_V2_MAX_TOKENS)
 
     assert EXTRACTION_V2.release_tag() == EXTRACTION_V2.tag(revision, None)
+
+
+def test_extraction_v2_release_tag_is_the_staged_snapshot() -> None:
+    """The release copies this snapshot; a change that moves the tag re-extracts every trial."""
+    assert EXTRACTION_V2.release_tag() == '6e643deca5bd-p3b89ab7e'
 
 
 def test_extraction_v2_tag_and_metadata() -> None:

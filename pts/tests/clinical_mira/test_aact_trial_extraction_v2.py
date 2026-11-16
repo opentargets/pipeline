@@ -12,13 +12,14 @@ from otter.util.errors import TaskRunError
 from pts.transformers.clinical_mira import aact_trial_extraction as extraction
 from pts.transformers.clinical_mira import aact_trial_extraction_v2 as v2
 from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings, stage_extraction_v2
-from pts.transformers.clinical_mira.moa.claude import MAX_TOKENS, custom_id
+from pts.transformers.clinical_mira.moa.claude import custom_id
 from pts.transformers.clinical_mira.model_frames import polars_schema
 from pts.transformers.clinical_mira.providers.aact_context import RENDER_VERSION, render_trial, trial_context
 from pts.transformers.clinical_mira.record_store import ComputeAborted, read_records, text_sha256
 from pts.transformers.clinical_mira.schemas import TrialExtractionV2
 from pts.transformers.clinical_mira.staged_outputs import (
     EXTRACTION_V2,
+    EXTRACTION_V2_MAX_TOKENS,
     EXTRACTION_V2_MODEL,
     EXTRACTION_V2_PROMPT,
     extraction_v2_revision,
@@ -193,7 +194,7 @@ def _stage(
 def _revision() -> str:
     package, filename = EXTRACTION_V2_PROMPT
     prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
-    return extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'medium', MAX_TOKENS)
+    return extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'medium', EXTRACTION_V2_MAX_TOKENS)
 
 
 def _snapshot(tmp_path: Path) -> Path:
@@ -225,7 +226,8 @@ def test_extracts_and_publishes_a_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_
     records = read_records(str(tmp_path / 'store' / 'extraction_v2'), _config(tmp_path), pl.String())
     assert set(records['model']) == {EXTRACTION_V2_MODEL}
     assert set(records['model_revision']) == {_revision()}
-    assert (tmp_path / 'work' / 'extraction_v2_cache.jsonl').exists()
+    assert params['max_tokens'] == EXTRACTION_V2_MAX_TOKENS
+    assert (tmp_path / 'work' / f'extraction_v2_cache-{EXTRACTION_V2.release_tag()}.jsonl').exists()
     assert json.loads(_state(tmp_path).read_text()) == {'pending': []}
 
 
@@ -316,7 +318,7 @@ def test_a_system_prompt_override_is_sent_and_tags_the_snapshot(
 
     assert batches.created[0][0]['params']['system'][0]['text'] == 'a different system prompt'
     revision = extraction_v2_revision(
-        'claude-haiku-5-5', 'a different system prompt', RENDER_VERSION, 'medium', MAX_TOKENS
+        'claude-haiku-5-5', 'a different system prompt', RENDER_VERSION, 'medium', EXTRACTION_V2_MAX_TOKENS
     )
     tag = EXTRACTION_V2.tag(revision, 2)
     metadata = json.loads((tmp_path / 'extraction_v2' / tag / 'metadata.json').read_text())
@@ -381,7 +383,7 @@ def test_effort_is_sent_and_tags_the_snapshot(monkeypatch: pytest.MonkeyPatch, t
     assert batches.created[0][0]['params']['output_config']['effort'] == 'high'
     package, filename = EXTRACTION_V2_PROMPT
     prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
-    revision = extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'high', MAX_TOKENS)
+    revision = extraction_v2_revision('claude-haiku-5-5', prompt, RENDER_VERSION, 'high', EXTRACTION_V2_MAX_TOKENS)
     tag = EXTRACTION_V2.tag(revision, None)
     assert tag != EXTRACTION_V2.release_tag()
     metadata = json.loads((tmp_path / 'extraction_v2' / tag / 'metadata.json').read_text())

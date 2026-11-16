@@ -26,7 +26,6 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel
 
 from pts.transformers.clinical_mira.moa import literature, pooling, schemas
-from pts.transformers.clinical_mira.moa.claude import MAX_TOKENS
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
     CHEMICAL_MODEL,
@@ -308,6 +307,8 @@ EXTRACTION_V2_DEFAULT_MODEL = 'claude-haiku-5-5'
 """Claude model of a release extraction."""
 EXTRACTION_V2_DEFAULT_EFFORT = 'medium'
 """Claude effort of a release extraction."""
+EXTRACTION_V2_MAX_TOKENS = 16000
+"""Output budget per extraction request, thinking included; part of the extraction revision."""
 EXTRACTION_V2_PROMPT = ('pts.transformers.clinical_mira.prompts', 'aact_trial_v2.txt')
 """Packaged system prompt of the v2 extraction."""
 
@@ -380,7 +381,7 @@ class ExtractionV2Output:
         package, filename = EXTRACTION_V2_PROMPT
         prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
         revision = extraction_v2_revision(
-            EXTRACTION_V2_DEFAULT_MODEL, prompt, RENDER_VERSION, EXTRACTION_V2_DEFAULT_EFFORT, MAX_TOKENS
+            EXTRACTION_V2_DEFAULT_MODEL, prompt, RENDER_VERSION, EXTRACTION_V2_DEFAULT_EFFORT, EXTRACTION_V2_MAX_TOKENS
         )
         return self.tag(revision, None)
 

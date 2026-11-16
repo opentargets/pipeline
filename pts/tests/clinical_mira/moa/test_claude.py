@@ -297,6 +297,46 @@ def test_an_errored_result_reports_the_api_error_type(tmp_path):
     assert errors == {'a': 'overloaded_error'}
 
 
+def _rejecting(batches: FakeBatches, rejected: set[str]) -> FakeBatches:
+    """Make the results of ``rejected`` request ids errored as ``invalid_request_error``."""
+    error = SimpleNamespace(type='error', error=SimpleNamespace(type='invalid_request_error'))
+    original = batches.results
+    ids = {custom_id(request_id) for request_id in rejected}
+
+    def results(batch_id):
+        for item in original(batch_id):
+            if item.custom_id in ids:
+                item = SimpleNamespace(custom_id=item.custom_id, result=SimpleNamespace(type='errored', error=error))
+            yield item
+
+    batches.results = results  # ty: ignore[invalid-assignment]
+    return batches
+
+
+def test_every_request_rejected_as_invalid_raises(tmp_path):
+    batches = _rejecting(FakeBatches(), {'a', 'b:1'})
+
+    with pytest.raises(RuntimeError, match='invalid_request_error'):
+        _run(batches, tmp_path)
+
+
+def test_one_request_rejected_as_invalid_is_reported(tmp_path):
+    batches = _rejecting(FakeBatches(), {'a'})
+
+    results, errors = _run(batches, tmp_path)
+
+    assert errors == {'a': 'invalid_request_error'}
+    assert set(results) == {'b:1'}
+
+
+def test_batch_request_carries_max_tokens(tmp_path):
+    batches = FakeBatches()
+
+    _run(batches, tmp_path, max_tokens=1234)
+
+    assert batches.created[0][0]['params']['max_tokens'] == 1234
+
+
 def test_claude_batches_import_no_openai() -> None:
     code = "import sys; import pts.transformers.clinical_mira.moa.claude; print('openai' in sys.modules)"
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)

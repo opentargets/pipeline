@@ -142,10 +142,10 @@ def custom_id(request_id: str) -> str:
     return f'{re.sub(r"[^A-Za-z0-9_-]", "_", request_id)[:47]}-{digest}'
 
 
-def _params(text: str, system_prompt: str, schema: dict, model: str, effort: str) -> dict[str, Any]:
+def _params(text: str, system_prompt: str, schema: dict, model: str, effort: str, max_tokens: int) -> dict[str, Any]:
     return {
         'model': model,
-        'max_tokens': MAX_TOKENS,
+        'max_tokens': max_tokens,
         'system': [{'type': 'text', 'text': system_prompt, 'cache_control': {'type': 'ephemeral'}}],
         'messages': [{'role': 'user', 'content': text}],
         'output_config': {'format': {'type': 'json_schema', 'schema': schema}, 'effort': effort},
@@ -208,6 +208,7 @@ def run_batch_cached(
     cache_path: Path,
     state_uri: str,
     effort: str = 'medium',
+    max_tokens: int = MAX_TOKENS,
     client: Any = None,
     max_batch_requests: int = MAX_BATCH_REQUESTS,
     max_batch_bytes: int = MAX_BATCH_BYTES,
@@ -222,6 +223,10 @@ def run_batch_cached(
         result type ``expired`` or ``canceled``, ``refusal``, ``max_tokens`` or
         ``invalid_json``). Failures are not written to the result cache; whether a
         caller retries them is up to the caller.
+
+    Raises:
+        RuntimeError: If more than one request was submitted and every one was rejected as
+            ``invalid_request_error``: the settings, not the requests, are at fault.
     """
     if client is None:
         from anthropic import AnthropicGoogleCloud
@@ -289,7 +294,10 @@ def run_batch_cached(
 
     schema = patch_schema(response_model.model_json_schema(by_alias=True))
     batch_requests = [
-        {'custom_id': custom_id(request_id), 'params': _params(text, system_prompt, schema, model, effort)}
+        {
+            'custom_id': custom_id(request_id),
+            'params': _params(text, system_prompt, schema, model, effort, max_tokens),
+        }
         for request_id, text in pending
     ]
     for chunk in _chunks(batch_requests, max_batch_requests, max_batch_bytes):
@@ -301,5 +309,11 @@ def run_batch_cached(
         collect(batch_id)
         state['pending'].remove(batch_id)
         _write_state(state_uri, state)
+    rejected = [request_id for request_id, _ in pending if errors.get(request_id) == 'invalid_request_error']
+    if len(pending) > 1 and len(rejected) == len(pending):
+        msg = (
+            f'all {len(pending)} requests to {model} failed with invalid_request_error; check model, effort, max_tokens'
+        )
+        raise RuntimeError(msg)
     logger.info(f'{len(results)} of {len(requests)} done, {len(errors)} failed')
     return results, errors

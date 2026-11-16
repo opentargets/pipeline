@@ -22,7 +22,7 @@ from otter.util.errors import TaskRunError
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from pts.transformers.clinical_mira import aact_trial_extraction
-from pts.transformers.clinical_mira.moa.claude import CONTENT_ERRORS, MAX_BATCH_REQUESTS, MAX_TOKENS, run_batch_cached
+from pts.transformers.clinical_mira.moa.claude import CONTENT_ERRORS, MAX_BATCH_REQUESTS, run_batch_cached
 from pts.transformers.clinical_mira.model_frames import models_to_frame
 from pts.transformers.clinical_mira.providers.aact_context import (
     RENDER_VERSION,
@@ -42,6 +42,7 @@ from pts.transformers.clinical_mira.staged_outputs import (
     EXTRACTION_V2,
     EXTRACTION_V2_DEFAULT_EFFORT,
     EXTRACTION_V2_DEFAULT_MODEL,
+    EXTRACTION_V2_MAX_TOKENS,
     EXTRACTION_V2_MODEL,
     EXTRACTION_V2_PROMPT,
     extraction_v2_revision,
@@ -135,6 +136,7 @@ def extraction_v2_compute(
     settings: AactTrialExtractionV2Settings,
     state_uri: str,
     scratch: Path,
+    tag: str,
     client: Any = None,
     systemic: dict[str, str] | None = None,
 ) -> Compute:
@@ -148,7 +150,8 @@ def extraction_v2_compute(
         system_prompt: The extraction prompt.
         settings: The validated settings.
         state_uri: Where the submitted batch ids are recorded, a path or URI.
-        scratch: Local directory for the result cache.
+        scratch: Local directory for the result cache, one file per extraction tag.
+        tag: The extraction tag, which names the cache file so that a cached answer serves only its revision.
         client: The Anthropic client, ``AnthropicGoogleCloud()`` when ``None``.
         systemic: Filled with the error of each trial left out, by trial id.
 
@@ -157,7 +160,7 @@ def extraction_v2_compute(
         of the trials.
     """
     ids = dict(zip(prompts['prompt'].to_list(), prompts['id'].to_list(), strict=True))
-    cache_path = scratch / 'extraction_v2_cache.jsonl'
+    cache_path = scratch / f'extraction_v2_cache-{tag}.jsonl'
 
     def outcome(trial_id: str, results: dict, errors: dict[str, str]) -> tuple[str | None, str | None] | None:
         if trial_id in results:
@@ -176,6 +179,7 @@ def extraction_v2_compute(
             response_model=TrialExtractionV2,
             model=settings.model,
             effort=settings.effort,
+            max_tokens=EXTRACTION_V2_MAX_TOKENS,
             cache_path=cache_path,
             state_uri=state_uri,
             client=client,
@@ -240,7 +244,9 @@ def stage_extraction_v2(
             trial of a non-empty set was extracted.
     """
     system_prompt = _system_prompt(settings, config)
-    revision = extraction_v2_revision(settings.model, system_prompt, RENDER_VERSION, settings.effort, MAX_TOKENS)
+    revision = extraction_v2_revision(
+        settings.model, system_prompt, RENDER_VERSION, settings.effort, EXTRACTION_V2_MAX_TOKENS
+    )
     tag = EXTRACTION_V2.tag(revision, settings.sample_size)
     store_root = settings.store_uri.rstrip('/')
     systemic: dict[str, str] = {}
@@ -256,6 +262,7 @@ def stage_extraction_v2(
         settings,
         f'{store_root}/batches/{EXTRACTION_V2.name}-{settings.snapshot}-{tag}.json',
         config.work_path,
+        tag,
         client=client,
         systemic=systemic,
     )
