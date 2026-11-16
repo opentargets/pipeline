@@ -1,3 +1,4 @@
+# ruff: noqa: T201
 """Generate a strict-from-data DatasetModel module per profiled dataset.
 
 Usage: python generate.py <output_dir> <profiles_dir> <croissant_assets_dir> <target_package_dir> [dataset ...]

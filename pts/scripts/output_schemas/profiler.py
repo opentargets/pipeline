@@ -1,6 +1,7 @@
+# ruff: noqa: T201
 """Profile parquet datasets at every depth: dtype, nulls, NaN, empty lists, min/max, low-cardinality values, ID shapes.
 
-Usage: python profile.py <output_dir> <profiles_dir> [dataset ...]
+Usage: python profiler.py <output_dir> <profiles_dir> [dataset ...]
 Writes one <dataset>.json per dataset; skips datasets already profiled.
 """
 
