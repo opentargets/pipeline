@@ -6,16 +6,18 @@ the error messages a failing write produces.
 """
 
 import math
+from pathlib import Path
 from typing import Annotated, ClassVar
 
 import pandera.errors as pe
 import polars as pl
 import pytest
 from pandera.polars import PolarsData
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from pts.schemas.dataset import (
     DatasetModel,
+    PolarsDtype,
     PrimaryKey,
     SchemaDefinitionError,
     StructModel,
@@ -169,3 +171,51 @@ def test_nan_counts_as_null() -> None:
     )
 
     assert _failed_checks(Floats, frame) == {'not_nullable', 'elements[]: not null'}
+
+
+class _Single(DatasetModel):
+    dataset_name: ClassVar[str] = '_single'
+    dataset_title: ClassVar[str] = 'single precision'
+    dataset_description: ClassVar[str] = 'single precision'
+    example: ClassVar[dict] = {'x': 0.0}
+
+    x: Annotated[float, PolarsDtype(pl.Float32)] = Field(le=0.1)
+
+
+def test_float32_bounds_compare_the_stored_value_at_full_precision() -> None:
+    """A Float32 `0.1` is stored as 0.10000000149..., which is above 0.1 -- as Pydantic sees it too."""
+    frame = pl.DataFrame({'x': [0.1]}, schema={'x': pl.Float32})
+
+    with pytest.raises(ValidationError):
+        _Single.model_validate({'x': frame['x'].item()})
+    with pytest.raises(pe.SchemaErrors, match=r'x: <= 0.1'):
+        to_pandera(_Single).validate(frame, lazy=True)
+
+
+class _Entry(StructModel):
+    label: str
+
+
+class _Holder(StructModel):
+    entries: list[_Entry]
+
+
+class _Nested(DatasetModel):
+    dataset_name: ClassVar[str] = '_nested'
+    dataset_title: ClassVar[str] = 'nested'
+    dataset_description: ClassVar[str] = 'nested'
+    example: ClassVar[dict] = {'holder': {'entries': [{'label': 'a'}]}}
+
+    holder: _Holder | None
+
+
+def test_validates_a_list_inside_a_struct_read_from_several_row_groups(tmp_path: Path) -> None:
+    """A `when/then` over a struct field's `list.eval` panics in polars on such a frame."""
+    rows = [{'entries': [{'label': 'a'}]}, None, {'entries': [{'label': 'b'}, {'label': 'c'}]}] * 20
+    pl.DataFrame({'holder': rows}, schema=to_polars_schema(_Nested)).write_parquet(
+        tmp_path / 'part.parquet', row_group_size=7
+    )
+    frame = pl.read_parquet(tmp_path / 'part.parquet')
+
+    assert frame.n_chunks() > 1
+    to_pandera(_Nested).validate(frame, lazy=True)

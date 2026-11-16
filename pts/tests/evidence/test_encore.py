@@ -6,8 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.schemas.dataset.validate import validate_dataset
-from pts.schemas.outputs.encore_evidence import EncoreEvidence
+from pts.schemas.dataset.validate import format_report, validate_dataset
+from pts.schemas.outputs.evidence_encore import EvidenceEncore
 from pts.transformers.evidence.encore import ENCORE, encore
 from tests.evidence.fixtures import write_disease, write_target
 
@@ -23,8 +23,8 @@ def test_score_is_the_absolute_interaction_score_over_16() -> None:
 def test_cell_lines_tell_evidence_apart(tmp_path: Path) -> None:
     src = tmp_path / 'src'
     (src / 'encore').mkdir(parents=True)
-    # complete rows, so the written evidence passes `EncoreEvidence`
-    raw = {k: v for k, v in EncoreEvidence.example.items() if k not in _DERIVED}
+    # complete rows, so the written evidence passes `EvidenceEncore`
+    raw = {k: v for k, v in EvidenceEncore.example.items() if k not in _DERIVED}
     cell_line = raw['diseaseCellLines'][0]
     pl.DataFrame([
         raw
@@ -55,13 +55,14 @@ def test_cell_lines_tell_evidence_apart(tmp_path: Path) -> None:
     assert sorted(valid['score'].to_list()) == [0.25, 0.5]
     assert valid['targetId'].to_list() == ['ENSG00000000001', 'ENSG00000000001']
     assert failed.height == 1
-    assert validate_dataset(str(dst / 'valid'), EncoreEvidence).is_empty()
+    report = validate_dataset(str(dst / 'valid'), EvidenceEncore)
+    assert report.is_empty(), format_report(report)
 
 
 def test_validation_readouts_are_harmonised_before_validation(tmp_path: Path) -> None:
     src = tmp_path / 'src'
     (src / 'encore').mkdir(parents=True)
-    raw = {k: v for k, v in EncoreEvidence.example.items() if k not in _DERIVED}
+    raw = {k: v for k, v in EvidenceEncore.example.items() if k not in _DERIVED}
     # fields reversed and `hsaValue` an integer, as a producer might export them
     readout = {'screen': 'combinatorial', 'readoutMethodName': 'CellTiter-Glo', 'isValidated': True, 'hsaValue': 1}
     pl.DataFrame([raw | {'targetFromSourceId': 'A1', 'validationReadouts': [readout]}]).write_parquet(

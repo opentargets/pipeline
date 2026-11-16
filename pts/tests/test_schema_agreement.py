@@ -15,6 +15,7 @@ using every supported construct, so a construct no real dataset uses yet is cove
 """
 
 import copy
+import datetime
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ from pydantic import Field, ValidationError
 from pts.schemas.dataset import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
 from pts.schemas.dataset.converter import to_base_pandera
 from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.spec import Node, dataset_spec, walk
+from pts.schemas.dataset.spec import Constraints, Node, dataset_spec, walk
 
 
 class _Leaf(StructModel):
@@ -58,6 +59,7 @@ class _KitchenSink(DatasetModel):
         'branches': [{'name': 'c', 'rank': 2, 'leaves': [{'code': 'B2', 'weight': None, 'tags': ['zz']}]}],
         'maybe_numbers': [1.5],
         'optional_note': 'note',
+        'released': datetime.date(2020, 6, 1),
     }
 
     key: Annotated[str, PrimaryKey()] = Field(min_length=3, max_length=5)
@@ -70,6 +72,7 @@ class _KitchenSink(DatasetModel):
     branches: list[_Branch] = Field(min_length=1)
     maybe_numbers: list[float | None] | None
     optional_note: str | None = None
+    released: datetime.date = Field(ge=datetime.date(2020, 1, 1), le=datetime.date(2020, 12, 31))
 
 
 _MODELS = [_KitchenSink, *sorted(discover_datasets().values(), key=lambda m: m.dataset_name)]
@@ -123,7 +126,7 @@ def candidates(node: Node, value: Any) -> Iterator[tuple[str, Any]]:
     c = node.constraints
     for bound in (c.ge, c.gt, c.le, c.lt):
         if bound is not None:
-            for near in _around(bound, integer=node.dtype.is_integer()):
+            for near in _around(bound, integer=node.dtype.is_integer(), date=node.dtype == pl.Date()):
                 yield repr(near), near
     if c.allowed is not None:
         yield 'not allowed', max(int(v) for v in c.allowed) + 1 if node.dtype.is_integer() else '__not_allowed__'
@@ -138,7 +141,9 @@ def candidates(node: Node, value: Any) -> Iterator[tuple[str, Any]]:
                     yield f'{length} characters', 'a' * length
 
 
-def _around(bound: float, *, integer: bool) -> list[float]:
+def _around(bound: Any, *, integer: bool, date: bool) -> list[Any]:
+    if date:
+        return [bound - datetime.timedelta(days=1), bound, bound + datetime.timedelta(days=1)]
     if integer:
         return sorted({math.floor(bound) - 1, math.floor(bound), math.ceil(bound), math.ceil(bound) + 1})
     return [math.nextafter(bound, -math.inf), bound, math.nextafter(bound, math.inf)]
@@ -171,14 +176,33 @@ def pydantic_accepts(model: type[DatasetModel], row: dict[str, Any]) -> bool:
     return True
 
 
-def pandera_accepts(model: type[DatasetModel], mutation: Mutation) -> bool:
+def as_frame(model: type[DatasetModel], mutation: Mutation) -> pl.DataFrame:
     schema = to_polars_schema(model)
-    frame = pl.DataFrame([
-        pl.Series(name, [value], dtype=schema[name], strict=True)
+    return pl.DataFrame([
+        _series(name, value, schema[name])
         if name in schema and name not in mutation.inferred
         else pl.Series(name, [value])
         for name, value in mutation.row.items()
     ])
+
+
+def _series(name: str, value: Any, dtype: pl.DataType) -> pl.Series:
+    """`value` in the column's dtype -- or, for a value no Enum category holds, as the string column it would
+    arrive in (an Enum cannot store it)."""
+    if isinstance(dtype, pl.Enum) and value is not None and value not in dtype.categories:
+        return pl.Series(name, [value])
+    return pl.Series(name, [value], dtype=dtype, strict=True)
+
+
+def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:
+    """The row as the frame stores it: a narrower dtype (e.g. Float32) may round a value, and both sides
+    must judge the same value."""
+    frame = as_frame(model, mutation)
+    return frame.row(0, named=True) if frame.width else {}
+
+
+def pandera_accepts(model: type[DatasetModel], mutation: Mutation) -> bool:
+    frame = as_frame(model, mutation)
     try:
         to_base_pandera(model).validate(frame, lazy=True)
     except pe.SchemaErrors:
@@ -192,7 +216,7 @@ def test_pandera_agrees_with_pydantic_on_every_mutation(model: type[DatasetModel
     disagreements = [
         f'{m.label}: pydantic {"accepts" if p else "rejects"}, pandera {"accepts" if q else "rejects"}'
         for m in checked
-        if (p := pydantic_accepts(model, m.row)) != (q := pandera_accepts(model, m))
+        if (p := pydantic_accepts(model, stored_row(model, m))) != (q := pandera_accepts(model, m))
     ]
 
     assert pydantic_accepts(model, model.example)
@@ -203,8 +227,20 @@ def test_pandera_agrees_with_pydantic_on_every_mutation(model: type[DatasetModel
 
 @pytest.mark.parametrize('model', _MODELS, ids=lambda m: m.dataset_name)
 def test_example_reaches_every_value(model: type[DatasetModel]) -> None:
-    """Without this, an empty list in an example would silently skip every rule inside it."""
+    """Without this, an empty list in an example would silently skip every rule inside it.
+
+    Exempt: the element of a list that must be empty (`max_length=0`), which can never be reached, and a
+    primitive element with no constraint -- a list the release never fills (e.g. `qualityControls` of a dataset
+    with no flag raised) has no real element to show, and leaves no rule but the element's not-null unexercised.
+    """
     spec = dataset_spec(model)
     reached = {path for f in spec.fields for _, path, _, _ in locations(f.node, model.example[f.name], (), f.name)}
+    always_empty = [
+        f'{path}[]' for path, node in walk(spec) if node.kind == 'list' and node.constraints.max_length == 0
+    ]
+    unconstrained = {
+        path for path, node in walk(spec) if node.kind == 'primitive' and node.constraints == Constraints()
+    }
 
-    assert [path for path, _ in walk(spec) if path not in reached] == []
+    unreached = [path for path, _ in walk(spec) if path not in reached and path not in unconstrained]
+    assert [path for path in unreached if not any(path.startswith(prefix) for prefix in always_empty)] == []

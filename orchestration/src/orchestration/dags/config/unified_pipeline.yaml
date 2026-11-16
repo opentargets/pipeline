@@ -527,9 +527,14 @@ steps:
     num_partitions: 200
     depends_on:
       - pts_credible_set_annotation
-  gentropy_l2g_feature_matrix:
+  # validates gentropy's colocalisation against its pts model; L2G reads colocalisation only once it passes
+  pts_colocalisation_validation:
+    machine_type: n2d-standard-16
     depends_on:
       - gentropy_colocalisation
+  gentropy_l2g_feature_matrix:
+    depends_on:
+      - pts_colocalisation_validation
       - pts_enhancer_to_gene
       - pts_interaction
   gentropy_l2g_effector_gene_list:

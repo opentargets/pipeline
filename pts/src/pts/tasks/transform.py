@@ -10,10 +10,10 @@ from otter.manifest.model import Artifact
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import TaskValidationError
 from otter.util.fs import check_destination
 
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
+from pts.task_validation import validate_task
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
@@ -42,10 +42,12 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
 
-        The module may also hold a check of the written result, named after the
+        In the validation phase of the task, every destination a dataset model is
+        written at is validated against it (see `pts.task_validation`). The module
+        may also hold a check of what a model cannot state, named after the
         transformer with a `_check` suffix (`validation_check` for `validation`).
-        It takes the same four arguments, runs in the validation phase of the task,
-        and raises `ValueError` when the result is wrong.
+        It takes the same four arguments, runs after the model validation, and
+        raises `ValueError` when the result is wrong.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -121,11 +123,6 @@ class Transform(Task):
 
     @report
     def validate(self) -> Self:
-        """Run the transformer's check on the paths of the run; a task without one is valid."""
-        if self.check is None:
-            return self
-        try:
-            self.check(self.srcs, self.dsts, self.spec.settings or {}, self.context.config)
-        except ValueError as error:
-            raise TaskValidationError(str(error)) from error
+        """Validate the outputs against their dataset models, then run the transformer's check (`validate_task`)."""
+        validate_task(self.srcs, self.dsts, self.spec.settings or {}, self.context.config, self.check)
         return self

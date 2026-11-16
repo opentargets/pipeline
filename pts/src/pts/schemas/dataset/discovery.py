@@ -37,6 +37,22 @@ def discover_datasets(package: str = OUTPUTS_PACKAGE) -> dict[str, type[DatasetM
     return datasets
 
 
+def datasets_by_location(package: str = OUTPUTS_PACKAGE) -> dict[str, type[DatasetModel]]:
+    """Every concrete dataset model defined under `package`, by where it is written (`DatasetModel.location`).
+
+    Raises:
+        ValueError: if two models declare the same location.
+    """
+    by_location: dict[str, type[DatasetModel]] = {}
+    for model in discover_datasets(package).values():
+        location = model.location()
+        if location in by_location:
+            other = by_location[location]
+            raise ValueError(f'{location!r} is the location of two models: {_qualname(other)} and {_qualname(model)}')
+        by_location[location] = model
+    return by_location
+
+
 def _subclasses(cls: type[DatasetModel]) -> list[type[DatasetModel]]:
     """Every subclass of `cls`, however indirect, each once (a class may inherit from two of them)."""
     found: list[type[DatasetModel]] = []

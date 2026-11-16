@@ -66,7 +66,8 @@ def write_docs(directory: Path) -> list[Path]:
 
 def render(doc: dict[str, Any]) -> str:
     """Serialize a document the way it is stored on disk."""
-    return json.dumps(doc, indent=2, ensure_ascii=False) + '\n'
+    # `default=str` writes a date (an example value or a bound) in ISO format
+    return json.dumps(doc, indent=2, ensure_ascii=False, default=str) + '\n'
 
 
 def _field_doc(f: FieldSpec, *, top_level: bool) -> dict[str, Any]:

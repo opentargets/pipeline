@@ -11,6 +11,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
+from pts.task_validation import Check, validate_task
 
 PYSPARK_PACKAGE = 'pts.pyspark'
 
@@ -32,6 +33,12 @@ class PysparkSpec(Spec):
 
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
+
+        In the validation phase of the task, every destination a dataset model is
+        written at is validated against it (see `pts.task_validation`). The module
+        may also hold a `<pyspark>_check` of what a model cannot state, taking the
+        source and destination paths, the settings and the otter config, and
+        raising `ValueError` when the result is wrong.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -54,6 +61,7 @@ class Pyspark(Task):
         super().__init__(spec, context)
         self.spec: PysparkSpec
         self.pyspark = self.load_pyspark(spec.pyspark)
+        self.check = self.load_check(spec.pyspark)
 
     @staticmethod
     def load_pyspark(pyspark_name: str) -> pyspark_entrypoint:
@@ -65,6 +73,12 @@ class Pyspark(Task):
             return pyspark
         except ImportError:
             raise ModuleNotFoundError(f'{pyspark_name} not found in {PYSPARK_PACKAGE}')
+
+    @staticmethod
+    def load_check(pyspark_name: str) -> Check | None:
+        """The `<pyspark>_check` function of the entry point's module, if it has one."""
+        module = import_module(f'{PYSPARK_PACKAGE}.{pyspark_name}')
+        return getattr(module, f'{pyspark_name}_check', None)
 
     @report
     def run(self) -> Self:
@@ -89,4 +103,10 @@ class Pyspark(Task):
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
 
+        return self
+
+    @report
+    def validate(self) -> Self:
+        """Validate the outputs against their dataset models, then run the entry point's check (`validate_task`)."""
+        validate_task(self.srcs, self.dsts, self.spec.settings or {}, self.context.config, self.check)
         return self

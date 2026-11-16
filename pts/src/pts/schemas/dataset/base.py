@@ -43,12 +43,14 @@ class DatasetModel(SchemaModel):
 
     A concrete dataset sets `dataset_name`, `dataset_title`, `dataset_description` and `example`
     in its own class body, and `dataset_tags` where it has any. A subclass that does not set
-    `dataset_name` is an abstract base sharing fields between datasets (e.g.
-    `pts.schemas.outputs.evidence_base.EvidenceBase`) -- never discovered, converted or documented
-    on its own.
+    `dataset_name` is an abstract base sharing fields between datasets -- never discovered,
+    converted or documented on its own.
 
     Attributes:
         dataset_name: name of the dataset, matching the output name its step writes.
+        dataset_path: where the dataset is written, relative to the release root. Defaults to
+            `output/<dataset_name>`; a dataset written elsewhere (an intermediate one, say) sets it.
+            A pts task validates every destination it writes that a model has this path for.
         dataset_title: human-readable name of the dataset, e.g. `Biosample core annotation`.
         dataset_description: description of the dataset.
         dataset_tags: categories the dataset belongs to, e.g. `Target-Disease`.
@@ -60,12 +62,18 @@ class DatasetModel(SchemaModel):
     dataset_title: ClassVar[str]
     dataset_description: ClassVar[str]
     dataset_tags: ClassVar[tuple[str, ...]] = ()
+    dataset_path: ClassVar[str | None] = None
     example: ClassVar[dict[str, Any]]
 
     @classmethod
     def is_concrete(cls) -> bool:
         """Whether this class is a dataset in its own right, rather than a shared base."""
         return 'dataset_name' in cls.__dict__
+
+    @classmethod
+    def location(cls) -> str:
+        """Where the dataset is written, relative to the release root: `dataset_path`, or `output/<dataset_name>`."""
+        return cls.dataset_path or f'output/{cls.dataset_name}'
 
 
 @dataclass(frozen=True)

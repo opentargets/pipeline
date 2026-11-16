@@ -88,6 +88,14 @@ def test_maps_annotations_to_dtype_nullability_and_constraints(
     assert node.constraints == constraints
 
 
+def test_a_str_literal_is_stored_as_an_enum_of_its_values_in_order() -> None:
+    node = _node(Annotated[Literal['b', 'a'], PolarsDtype(pl.Enum)])
+
+    assert node.dtype == pl.Enum(['b', 'a'])
+    assert node.constraints == Constraints(allowed=('b', 'a'))
+    assert _node(Annotated[Literal['b', 'a'], PolarsDtype(pl.Enum(['b', 'a']))]).dtype == pl.Enum(['b', 'a'])
+
+
 def test_list_element_carries_its_own_nullability_constraints_and_markers() -> None:
     node = _node(list[Annotated[str, Field(pattern=r'^\d+$'), Reference('target', 'id')] | None] | None)
 
@@ -168,7 +176,7 @@ _Recursive.model_rebuild()
     [
         ({'x': int | str}, 'only `T | None`'),
         ({'x': dict[str, str]}, 'unsupported type'),
-        ({'x': datetime.date}, 'unsupported type'),
+        ({'x': datetime.datetime}, 'unsupported type'),
         ({'x': list}, 'needs its element type'),
         ({'x': Literal['a', 1]}, 'all str or all int'),
         ({'x': (int, Field(multiple_of=2))}, 'unsupported annotation'),
@@ -177,6 +185,8 @@ _Recursive.model_rebuild()
         ({'x': Annotated[list[str], Reference('a', 'b')]}, 'on the list element type'),
         ({'x': Annotated[int, PolarsDtype(pl.Float32)]}, 'does not fit int'),
         ({'x': Annotated[str, PolarsDtype(pl.Categorical)]}, 'does not fit str'),
+        ({'x': Annotated[Literal['a', 'b'], PolarsDtype(pl.Categorical)]}, 'only takes PolarsDtype\\(pl.Enum\\)'),
+        ({'x': Annotated[Literal['c', 'd'], PolarsDtype(pl.Enum(['d', 'c']))]}, 'Literal values, in the same order'),
         ({'x': list[Annotated[str, Note('n')]]}, 'must annotate the field itself'),
         ({'x': list[Annotated[str, Field(description='d')]]}, 'may only carry constraints'),
         ({'x': Annotated[str, Reference('a', 'b'), Reference('c', 'd')]}, 'more than once'),

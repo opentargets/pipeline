@@ -4,7 +4,7 @@ Anything a single row cannot decide (a rule across rows, or across columns in wa
 expresses) is written as a plain function over pandera's `PolarsData` and registered against its
 model, in the same module as the model::
 
-    @column_check(EncoreEvidence, 'score')
+    @column_check(EvidenceEncore, 'score')
     def score_matches_interaction_strength(data: PolarsData) -> pl.LazyFrame:
         \"\"\"`score` must be `abs(geneticInteractionScore) / 16`.\"\"\"
         ...

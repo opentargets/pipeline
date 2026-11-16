@@ -9,7 +9,7 @@ from pydantic import Field
 
 from pts.schemas.dataset import DatasetModel, PrimaryKey, to_polars_schema, validate
 from pts.schemas.dataset.validate import DUPLICATE_KEY, main, validate_dataset
-from pts.schemas.outputs.biosample import BiosampleIndex
+from pts.schemas.outputs.biosample import Biosample
 from pts.transformers.schema_validation import schema_validation, schema_validation_check
 
 
@@ -121,34 +121,34 @@ def test_a_single_parquet_file_is_validated(tmp_path: Path) -> None:
 
 
 def _biosample(tmp_path: Path, rows: int) -> str:
-    frame = pl.DataFrame([BiosampleIndex.example] * rows, schema=to_polars_schema(BiosampleIndex))
+    frame = pl.DataFrame([Biosample.example] * rows, schema=to_polars_schema(Biosample))
     return _write_parts(tmp_path / 'biosample', frame)
 
 
-def test_the_task_writes_an_empty_report_and_passes_its_check(tmp_path: Path) -> None:
+def test_the_standalone_task_writes_nothing_and_its_check_passes_a_valid_source(tmp_path: Path) -> None:
     source = {'biosample': _biosample(tmp_path, 1)}
-    destination = str(tmp_path / 'report')
 
-    schema_validation(source, destination, {}, None)
+    schema_validation(source, {}, {}, None)
+    schema_validation_check(source, {}, {}, None)
 
-    assert pl.read_parquet(destination).is_empty()
-    schema_validation_check(source, destination, {}, None)
+    assert sorted(path.name for path in tmp_path.iterdir()) == ['biosample']
 
 
-def test_the_task_writes_the_violations_and_fails_its_check(tmp_path: Path) -> None:
+def test_the_standalone_check_fails_a_source_breaking_its_model(tmp_path: Path) -> None:
     source = {'biosample': _biosample(tmp_path, 2)}
-    destination = str(tmp_path / 'report')
 
-    schema_validation(source, destination, {}, None)
-
-    assert pl.read_parquet(destination).select('dataset', 'check').rows() == [('biosample', DUPLICATE_KEY)]
-    with pytest.raises(ValueError, match='1 dataset\\(s\\) break their models'):
-        schema_validation_check(source, destination, {}, None)
+    with pytest.raises(ValueError, match=f'breaks its model Biosample:\n.*{DUPLICATE_KEY}'):
+        schema_validation_check(source, {}, {}, None)
 
 
-def test_the_task_refuses_a_dataset_without_a_model(tmp_path: Path) -> None:
+def test_the_standalone_task_refuses_a_dataset_without_a_model(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no dataset model named \\['nonexistent'\\]"):
-        schema_validation({'nonexistent': str(tmp_path)}, str(tmp_path / 'report'), {}, None)
+        schema_validation({'nonexistent': str(tmp_path)}, {}, {}, None)
+
+
+def test_the_standalone_task_refuses_a_destination(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match='destination must be empty'):
+        schema_validation({'biosample': _biosample(tmp_path, 1)}, {'report': str(tmp_path / 'r')}, {}, None)
 
 
 def test_the_command_line_validates_an_output_directory(tmp_path: Path) -> None:
