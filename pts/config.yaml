@@ -1083,7 +1083,7 @@ steps:
       settings:
         store_uri: gs://clinical_staging/store
         snapshot: '{{snapshot}}'
-        max_compute: 0
+        max_compute: 17000
   ##################################################################################################
 
   #: MOA_LITERATURE STEP :#########################################################################
