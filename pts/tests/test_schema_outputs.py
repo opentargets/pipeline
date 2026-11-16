@@ -19,6 +19,7 @@ from pts.schemas.dataset import DatasetModel, Reference, to_pandera, to_polars_s
 from pts.schemas.dataset.discovery import discover_datasets
 from pts.schemas.dataset.docs import write_docs
 from pts.schemas.dataset.spec import Node, dataset_spec, walk
+from pts.schemas.dataset.validate import format_report, validate_dataset
 from pts.schemas.outputs.evidence_base import QualityFlag
 from pts.transformers.evidence.utils.evidence import EvidenceFlags
 
@@ -85,7 +86,8 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
     if not location.exists():
         pytest.skip(f'no {location}')
 
-    to_pandera(model).validate(pl.read_parquet(location), lazy=True)
+    report = validate_dataset(str(location), model)
+    assert report.is_empty(), f'{model.dataset_name} breaks its model:\n{format_report(report)}'
 
 
 def test_every_dataset_has_a_title_and_tags() -> None:

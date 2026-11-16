@@ -1,4 +1,4 @@
-"""Derive the pandera schema `write_dataset` validates against from a dataset model.
+"""Derive the pandera schema a dataset is validated against from its model.
 
 Pandera validates a column's dtype, nullability, presence and uniqueness natively. Everything else
 -- ranges, patterns, allowed values, lengths, and the nullability of list elements and struct
@@ -33,17 +33,23 @@ from pts.schemas.dataset.spec import Node, SchemaDefinitionError, dataset_spec
 
 
 @functools.cache
-def to_pandera(model: type[DatasetModel]) -> pa.DataFrameSchema:
+def to_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFrameSchema:
     """The pandera schema of a dataset: derived checks plus its registered procedural checks.
 
     Cached per model, so checks must be registered (at import of the model's module) before the
     first conversion.
 
+    Args:
+        model: the dataset model.
+        unique: whether the schema checks that the primary key is unique. Without it, every check
+            is decided within the rows it is given, so a dataset can be validated one part at a
+            time and its key checked separately (`pts.schemas.dataset.validate`).
+
     Raises:
         SchemaDefinitionError: if the model is not convertible, or a check is registered on a
             column the model does not declare.
     """
-    return _build(model, registered_checks(model))
+    return _build(model, registered_checks(model), unique=unique)
 
 
 @functools.cache
@@ -90,14 +96,14 @@ def node_conditions(node: Node, value: pl.Expr, path: str) -> list[tuple[str, pl
     return conditions
 
 
-def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...]) -> pa.DataFrameSchema:
+def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...], *, unique: bool = True) -> pa.DataFrameSchema:
     spec = dataset_spec(model)
     columns = {f.name for f in spec.fields}
     unknown = sorted({check.column for check in extra if check.column is not None} - columns)
     if unknown:
         raise SchemaDefinitionError(f'{model.__name__}: checks registered on undeclared column(s) {unknown}')
 
-    single_key = spec.primary_key[0] if len(spec.primary_key) == 1 else None
+    single_key = spec.primary_key[0] if unique and len(spec.primary_key) == 1 else None
     schema_columns = {
         f.name: pa.Column(
             f.node.dtype,
@@ -114,7 +120,7 @@ def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...]) -> pa.
         schema_columns,
         checks=[_registered(check) for check in extra if check.column is None],
         strict=True,
-        unique=list(spec.primary_key) if len(spec.primary_key) > 1 else None,
+        unique=list(spec.primary_key) if unique and len(spec.primary_key) > 1 else None,
         name=spec.name,
         description=spec.description,
     )

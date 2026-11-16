@@ -1,7 +1,7 @@
 r"""Base classes and annotation markers for declaring PTS datasets as Pydantic models.
 
 A dataset is declared once, as a `DatasetModel` subclass, and everything else is derived from it:
-the pandera schema `write_dataset` validates against (`pts.schemas.dataset.to_pandera`) and the
+the pandera schema written datasets are validated against (`pts.schemas.dataset.to_pandera`) and the
 documentation JSON (`pts.schemas.dataset.docs`). The models are a specification only -- they are
 never used to validate data row by row at runtime.
 

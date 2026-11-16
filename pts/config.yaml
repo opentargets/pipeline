@@ -275,6 +275,14 @@ steps:
         uberon: input/biosample/uberon.json
         efo: input/biosample/efo.json
       destination: output/biosample
+
+    - name: transform schema_validation biosample
+      requires:
+        - transform biosample
+      transformer: schema_validation
+      source:
+        biosample: output/biosample
+      destination: intermediate/schema_validation/biosample
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
@@ -1440,6 +1448,14 @@ steps:
         failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
 
+    - name: transform schema_validation evidence_encore
+      requires:
+        - transform evidence.encore
+      transformer: schema_validation
+      source:
+        evidence_encore: output/evidence_encore
+      destination: intermediate/schema_validation/evidence_encore
+
   evidence_validation_lab:
     - name: transform evidence.validation_lab
       transformer: evidence.validation_lab
@@ -1570,6 +1586,14 @@ steps:
         evidence: output/evidence_gwas_credible_sets
       settings:
         locus_to_gene_threshold: *l2g_threshold
+
+    - name: transform schema_validation evidence_gwas_credible_sets
+      requires:
+        - transform evidence.gwas_credible_sets
+      transformer: schema_validation
+      source:
+        evidence_gwas_credible_sets: output/evidence_gwas_credible_sets
+      destination: intermediate/schema_validation/evidence_gwas_credible_sets
 
   #: BIOSAMPLE_ENRICHMENT STEP :####################################################################
   biosample_enrichment:
