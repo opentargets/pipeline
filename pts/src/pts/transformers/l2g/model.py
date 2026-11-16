@@ -1,7 +1,9 @@
 """Fit, evaluate and persist the L2G classifier.
 
-`DEFAULT_HYPERPARAMETERS` are the values gentropy was pinned to in #123, in full, so a change
-of gentropy or XGBoost defaults cannot change the model.
+`DEFAULT_HYPERPARAMETERS` are pinned in full, so a change of gentropy or XGBoost defaults cannot
+change the model. `n_estimators`, `max_depth` and `eta` are the 26.09 values (300/5/0.05); #123 had
+pinned 200/4/0.025, which removed most scores >= 0.8 with no gain on the held-out test. The rest
+are as pinned in #123.
 """
 
 from collections.abc import Sequence
@@ -28,10 +30,10 @@ DEFAULT_HYPERPARAMETERS: dict[str, Any] = {
     'objective': 'binary:logistic',
     'eval_metric': 'aucpr',
     'random_state': 777,
-    'n_estimators': 200,
-    'max_depth': 4,
+    'n_estimators': 300,
+    'max_depth': 5,
     'min_child_weight': 10,
-    'eta': 0.025,
+    'eta': 0.05,
     'subsample': 0.8,
     'colsample_bytree': 0.8,
     'reg_alpha': 1,
@@ -40,7 +42,7 @@ DEFAULT_HYPERPARAMETERS: dict[str, Any] = {
     'gamma': 0,
     'max_delta_step': 1,
 }
-"""Pinned in #123; see the module docstring."""
+"""See the module docstring."""
 
 
 def to_matrix(frame: pl.DataFrame, features: Sequence[str]) -> np.ndarray:

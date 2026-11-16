@@ -1515,15 +1515,16 @@ steps:
           - credibleSetConfidence
           - transPQtlColocH4Maximum
           - transPQtlColocH4MaximumNeighbourhood
-        # Pinned in #123.
+        # 26.09 values (gentropy 300/5/0.05), restored from the #123 pin (200/4/0.025). Must match
+        # DEFAULT_HYPERPARAMETERS.
         hyperparameters:
           objective: binary:logistic
           eval_metric: aucpr
           random_state: 777
-          n_estimators: 200
-          max_depth: 4
+          n_estimators: 300
+          max_depth: 5
           min_child_weight: 10
-          eta: 0.025
+          eta: 0.05
           subsample: 0.8
           colsample_bytree: 0.8
           reg_alpha: 1
