@@ -1,7 +1,7 @@
 [
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "Confidence of the UniProt curated gene-disease association ('high', 'medium')"
   },
   {
     "id": "datasourceId",
@@ -13,11 +13,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Disease name as curated by UniProt"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "OMIM identifier of the disease as curated by UniProt"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -39,7 +39,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers cited by UniProt for the disease-causing variant"
   },
   {
     "id": "publicationDate",
@@ -51,11 +51,11 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the UniProt confidence"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "UniProt accession of the target"
   },
   {
     "id": "targetId",
@@ -64,15 +64,15 @@
   },
   {
     "id": "targetModulation",
-    "description": "Description of target modulation event"
+    "description": "Effect of the disease on the target; 'up_or_down' as UniProt does not specify it"
   },
   {
     "id": "variantId",
-    "description": "Identifier in CHROM_POS_REF_ALT notation of the disease-causing variant",
+    "description": "Identifier in CHROM_POS_REF_ALT notation of the disease-causing variant curated by UniProt",
     "foreign_key": "variant/variantId"
   },
   {
     "id": "variantRsId",
-    "description": "Variant reference SNP cluster ID (Rsid)"
+    "description": "Reference SNP cluster ID (rsID) of the disease-causing variant curated by UniProt"
   }
 ]

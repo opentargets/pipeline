@@ -1,0 +1,74 @@
+[
+  {
+    "id": "conditionalBeta",
+    "description": "Effect size of the variant conditional on the other signals of the locus"
+  },
+  {
+    "id": "conditionalStandardError",
+    "description": "Standard error of the conditional effect size"
+  },
+  {
+    "id": "credibleSetId",
+    "description": "Identifier of the credible set of the variant",
+    "foreign_key": "credible_set/id",
+    "isPrimaryKey": true
+  },
+  {
+    "id": "effectAlleleFrequency",
+    "description": "Frequency of the effect allele, from the study or otherwise from gnomAD for the study populations"
+  },
+  {
+    "id": "logBayesFactor",
+    "description": "Log Bayes factor of the variant"
+  },
+  {
+    "id": "posteriorProbability",
+    "description": "Posterior inclusion probability of the variant in the credible set"
+  },
+  {
+    "id": "pValueExponent",
+    "description": "Exponent of the p-value of the variant"
+  },
+  {
+    "id": "pValueMantissa",
+    "description": "Mantissa of the p-value of the variant"
+  },
+  {
+    "id": "qualityControls",
+    "description": "Quality control flags of the variant, including the origin of its allele frequency and of its rescaled direction"
+  },
+  {
+    "id": "r2Overall",
+    "description": "LD r2 between the variant and the lead variant"
+  },
+  {
+    "id": "reportedBeta",
+    "description": "Effect size of the variant as reported by the study"
+  },
+  {
+    "id": "reportedStandardError",
+    "description": "Standard error of the reported effect size"
+  },
+  {
+    "id": "rescaledAbsBeta",
+    "description": "Absolute effect size rescaled to the standard deviation of a quantitative trait or the log odds of a binary trait"
+  },
+  {
+    "id": "rescaledDirection",
+    "description": "Direction of the rescaled effect relative to the effect allele: 1 or -1"
+  },
+  {
+    "id": "rescaledStandardError",
+    "description": "Standard error of the rescaled effect size"
+  },
+  {
+    "id": "sampleSize",
+    "description": "Sample size of the association of the variant"
+  },
+  {
+    "id": "variantId",
+    "description": "Identifier of the variant",
+    "foreign_key": "variant/variantId",
+    "isPrimaryKey": true
+  }
+]

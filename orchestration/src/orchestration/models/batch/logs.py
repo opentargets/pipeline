@@ -1,9 +1,11 @@
 from google.cloud import batch_v1
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LogsSpec(BaseModel):
     """Cloud logging specification."""
+
+    model_config = ConfigDict(extra='forbid')
 
     def build(self) -> batch_v1.LogsPolicy:
         """Build a `google.cloud.batch_v1.LogsPolicy` object from the logs specification.

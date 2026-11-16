@@ -55,9 +55,9 @@ def base_df() -> pl.DataFrame:
 
     Collision groups
     ----------------
-    - "acidosis"  : http://.../EFO_001 (efo, rank 1) vs http://.../HP_001
+    - "acidosis"  : http://.../EFO_001 (efo, rank 2) vs http://.../HP_001
                     (hp, rank 100) → EFO_001 canonical, HP_001 superseded
-    - "fever"     : http://.../MONDO_001 (mondo, rank 2) vs http://.../HP_002
+    - "fever"     : http://.../MONDO_001 (mondo, rank 1) vs http://.../HP_002
                     (hp, rank 100) → MONDO_001 canonical, HP_002 superseded
     - "unique"    : http://.../EFO_002  — no collision, must be unchanged
 
@@ -217,7 +217,7 @@ class TestAnnotateNameDuplicatesEdgeCases:
         )['deprecated'][0]
         assert hp_deprecated is not True
 
-    def test_priority_efo_over_mondo(self) -> None:
+    def test_priority_mondo_over_efo(self) -> None:
         df = _make_df(
             _make_node('http://www.ebi.ac.uk/efo/EFO_X', 'shared name'),
             _make_node('http://purl.obolibrary.org/obo/MONDO_X', 'Shared Name'),
@@ -229,8 +229,8 @@ class TestAnnotateNameDuplicatesEdgeCases:
         mondo_dep = result.filter(pl.col('id') == 'http://purl.obolibrary.org/obo/MONDO_X').select(
             pl.col('meta').struct['deprecated']
         )['deprecated'][0]
-        assert efo_dep is not True  # EFO wins
-        assert mondo_dep is True  # MONDO is superseded
+        assert mondo_dep is not True  # MONDO wins
+        assert efo_dep is True  # EFO is superseded
 
     def test_priority_mondo_over_hp(self) -> None:
         df = _make_df(

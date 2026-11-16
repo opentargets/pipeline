@@ -1,7 +1,8 @@
 """Mechanism of Action processing for drugs.
 
 Prepares the mechanism of action section of the drug object by joining raw
-ChEMBL mechanism, target, and reference tables with target/gene information.
+ChEMBL mechanism, target, and reference tables with target/gene information,
+and appends the mechanisms inferred from trial texts and the literature.
 """
 
 from pathlib import Path
@@ -12,8 +13,18 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
+from pts.transformers.drug_mechanism_of_action_candidates import (
+    LABEL_COLUMNS,
+    SOURCE_AACT,
+    SOURCE_LITERATURE,
+    build_literature_candidates,
+    build_trial_candidates,
+    stage_excluded,
+)
 from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.target import chembl_accession_lookup
 
 SCHEMA_NAME = 'public'
 
@@ -37,14 +48,28 @@ ORDER_BY = {
 }
 """Reads collected into published arrays, which must not come back in plan order."""
 
-#: The `proteinIds` sources ChEMBL accessions are resolved through.
-UNIPROT_SOURCES = ['uniprot_swissprot', 'uniprot_trembl']
-
+CURATION_MANUAL = 'manual'
+CURATION_ELECTRONIC = 'electronic'
+CLINICAL_TRIALS_SOURCE = 'ClinicalTrials'
+CLINICAL_TRIALS_URL = 'https://clinicaltrials.gov/study/'
+PUBMED_SOURCE = 'PubMed'
+PUBMED_URL = 'http://europepmc.org/abstract/MED/'
+PMC_SOURCE = 'PMC'
+PMC_URL = 'http://europepmc.org/article/PMC/'
+PREPRINT_SOURCE = 'EuropePMC'
+PREPRINT_URL = 'https://europepmc.org/article/PPR/'
+DOC_KINDS = [
+    (CLINICAL_TRIALS_SOURCE, CLINICAL_TRIALS_URL, r'^(NCT.*)$', ''),
+    (PUBMED_SOURCE, PUBMED_URL, r'(?i)^pmid(\d+)$', ''),
+    (PMC_SOURCE, PMC_URL, r'(?i)^(?:pmid)?pmc(\d+)$', 'PMC'),
+    (PREPRINT_SOURCE, PREPRINT_URL, r'(?i)^pmidppr(\d+)$', 'PPR'),
+]
+"""Each kind of doc id: its reference source and url, the pattern whose group is its id, and the id's prefix."""
 
 def drug_mechanism_of_action(
     source: dict[str, Path],
-    destination: Path,
-    _settings: dict[str, Any],
+    destination: Path | dict[str, Path],
+    settings: dict[str, Any],
     config: Config,
 ) -> None:
     """Transform ChEMBL mechanism of action data into the Open Targets format.
@@ -53,8 +78,20 @@ def drug_mechanism_of_action(
         source: Dictionary with paths to:
             - chembl: Path to the ChEMBL ``pg_dump`` archive.
             - target: Path to the target dataset.
-        destination: Path to write the output parquet file.
-        _settings: Custom settings (not used).
+            - aact: Optional path to the staged trial-text mechanism snapshot.
+            - literature: Optional path to the staged literature mechanism snapshot.
+            - clinical_report, chembl_molecule: Paths to the clinical report and the ChEMBL
+              molecule intermediate, read when either snapshot is given.
+        destination: Path to write the output parquet file, or a dictionary with:
+            - output: Path to write the output parquet file.
+            - candidates: Optional path to write the candidates of every source.
+            - chembl_report: Optional path to the side file of candidates for ChEMBL.
+        settings: Custom settings, read when either snapshot is given:
+            - release_min_confidence: Minimum confidence of an inferred mechanism to publish.
+            - exclude_stages: For each source, the maximum clinical stages whose inferred
+              mechanisms are not published.
+            - report_min_confidence, link_share, class_level_genes, suggestion_min_confidence:
+              The candidate filters of ``drug_mechanism_of_action_candidates``.
         config: Config object, for ``work_path``.
     """
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
@@ -79,8 +116,26 @@ def drug_mechanism_of_action(
         gene_df,
     )
 
-    logger.info(f'Writing mechanism of action to {destination}')
-    write_dataset(output_df, str(destination))
+    destinations = destination if isinstance(destination, dict) else {'output': destination}
+    candidates = build_inferred_candidates(source, settings)
+    if candidates is not None:
+        if destinations.get('candidates') is not None:
+            logger.info(f'Writing {candidates.height} candidates to {destinations["candidates"]}')
+            write_dataset(candidates, str(destinations['candidates']))
+        output_df, report = merge_inferred(
+            output_df,
+            candidates,
+            settings['release_min_confidence'],
+            settings['exclude_stages'],
+        )
+        if destinations.get('chembl_report') is not None:
+            logger.info(f'Writing the candidate report for ChEMBL to {destinations["chembl_report"]}')
+            write_dataset(report, str(destinations['chembl_report']))
+
+    output_path = destinations['output']
+
+    logger.info(f'Writing mechanism of action to {output_path}')
+    write_dataset(output_df, str(output_path))
 
 
 def process_mechanism_of_action(
@@ -149,7 +204,239 @@ def process_mechanism_of_action(
         )
     )
 
-    return _consolidate_duplicate_references(result)
+    return _consolidate_duplicate_references(result).with_columns(curation=pl.lit(CURATION_MANUAL))
+
+
+def build_inferred_candidates(source: dict[str, Path], settings: dict[str, Any]) -> pl.DataFrame | None:
+    """Build the candidates of the staged snapshots ``source`` names.
+
+    Args:
+        source: The step's sources; ``aact`` and ``literature`` are the optional snapshots.
+        settings: The step's settings, with the candidate filters.
+
+    Returns:
+        The trial candidates followed by the literature ones, or None if neither snapshot is given.
+    """
+    present = [name for name in (SOURCE_AACT, SOURCE_LITERATURE) if source.get(name) is not None]
+    if not present:
+        return None
+    clinical_report = (
+        scan_dataset(str(source['clinical_report'])).select('id', 'source', 'drugs', 'clinicalStage').collect()
+    )
+    chembl_molecule = (
+        scan_dataset(str(source['chembl_molecule'])).select('id', 'parentId', 'childChemblIds', 'drugType').collect()
+    )
+    target = scan_dataset(str(source['target'])).select(LABEL_COLUMNS).collect()
+    filters = {
+        'class_level_genes': settings['class_level_genes'],
+        'report_min_confidence': settings['report_min_confidence'],
+        'suggestion_min_confidence': settings['suggestion_min_confidence'],
+    }
+    parts = []
+    if SOURCE_AACT in present:
+        logger.info(f'Reading the staged trial mechanisms from {source[SOURCE_AACT]}')
+        moa = MOA.read(str(source[SOURCE_AACT]))
+        parts.append(
+            build_trial_candidates(
+                moa, clinical_report, chembl_molecule, target, link_share=settings['link_share'], **filters
+            )
+        )
+        logger.info(f'{parts[-1].height} trial candidates of {moa.height} mechanisms')
+    if SOURCE_LITERATURE in present:
+        logger.info(f'Reading the staged literature mechanisms from {source[SOURCE_LITERATURE]}')
+        moa = MOA_LITERATURE.read(str(source[SOURCE_LITERATURE]))
+        parts.append(build_literature_candidates(moa, clinical_report, chembl_molecule, target, **filters))
+        logger.info(f'{parts[-1].height} literature candidates of {moa.height} mechanisms')
+    return pl.concat(parts)
+
+
+def merge_inferred(
+    chembl_rows: pl.DataFrame,
+    candidates: pl.DataFrame,
+    release_min_confidence: float,
+    exclude_stages: dict[str, list[str]],
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Append the inferred mechanisms to the ChEMBL ones and build the side file for ChEMBL.
+
+    A candidate is published when its drug has no ChEMBL mechanism (``new_moa``), its confidence
+    is at least ``release_min_confidence`` and its stage is not excluded for its source. Of the
+    published candidates of one drug and gene set, the most confident gives the row, and the
+    doc ids of all of them give its references, classified by ``DOC_KINDS``: NCT ids as
+    ``ClinicalTrials``, ``pmid<digits>`` as ``PubMed``, ``pmc<digits>`` and ``pmidPMC<digits>`` as
+    ``PMC`` and ``pmidPPR<digits>`` as ``EuropePMC``, the prefixes in any case. Other doc ids are
+    counted in a warning and not referenced. A row left with no reference is not published. A
+    referenced row whose genes are all among those of a higher-ranked referenced row of the same
+    drug is not published, see :py:func:`_drop_contained`.
+
+    Args:
+        chembl_rows: Output of ``process_mechanism_of_action``.
+        candidates: Candidates of every source, with ``CANDIDATE_COLUMNS``.
+        release_min_confidence: Minimum confidence of a ``new_moa`` candidate to publish.
+        exclude_stages: For each candidate source, the maximum clinical stages whose
+            ``new_moa`` candidates are not published.
+
+    Returns:
+        The mechanism table with the published candidates appended, and the side file: the most
+        confident ``new_moa`` and non-overlapping ``extra_target`` candidate of each source,
+        drug and gene set, with ``category`` and ``chemblCurrentTargets``.
+
+    Raises:
+        ValueError: If a candidate source has no ``exclude_stages`` entry.
+    """
+    excluded = stage_excluded(candidates, exclude_stages)
+    classified = _classify(chembl_rows, candidates)
+    report = _most_confident(classified.filter(pl.col('category').is_not_null()), by_source=True)
+    eligible = classified.filter(
+        (pl.col('category') == 'new_moa') & (pl.col('confidence') >= release_min_confidence) & ~excluded
+    )
+    published = (
+        _most_confident(eligible, by_source=False).rechunk().with_columns(_references=_references(pl.col('docIds')))
+    )
+    unknown = published.select(pl.col('docIds').list.eval(~_is_known_doc(pl.element())).list.sum().sum()).item()
+    if unknown:
+        logger.warning(f'{unknown} doc ids of published candidates are of no known kind and are not referenced')
+    unreferenced = published.filter(pl.col('_references').list.len() == 0).height
+    if unreferenced:
+        logger.warning(f'{unreferenced} candidates not published: they have no reference')
+    referenced = published.filter(pl.col('_references').list.len() > 0)
+    kept = _drop_contained(referenced)
+    if kept.height < referenced.height:
+        logger.info(
+            f'{referenced.height - kept.height} inferred rows not published: '
+            'their genes are a subset of a higher-ranked row of the same drug'
+        )
+    appended = kept.select(
+        'chemblIds',
+        'mechanismOfAction',
+        'actionType',
+        pl.col('targetFromSource').alias('targetName'),
+        'targetType',
+        'targets',
+        pl.col('_references').alias('references'),
+        pl.lit(CURATION_ELECTRONIC).alias('curation'),
+    ).select([pl.col(name).cast(dtype) for name, dtype in chembl_rows.schema.items()])
+    return pl.concat([chembl_rows, appended]), report
+
+
+def _drop_contained(published: pl.DataFrame) -> pl.DataFrame:
+    """Keep, of each drug's rows, those whose genes are not a subset of a row ranked above them.
+
+    A drug's rows are ranked by confidence, then by number of doc ids, both descending, then by
+    their sorted genes joined as a string. A row is dropped when its genes are a subset of those
+    of any row ranked before it; rows that only partly overlap are kept. The kept rows stay in
+    their input order.
+    """
+    ranked = (
+        published
+        .with_row_index('_row')
+        .with_columns(
+            _n_docs=pl.col('docIds').list.len(),
+            _targets_key=pl.col('targets').fill_null([]).list.sort().list.join(','),
+        )
+        .sort('parentChemblId', 'confidence', '_n_docs', '_targets_key', descending=[False, True, True, False])
+    )
+    above: dict[str, list[set[str]]] = {}
+    kept = []
+    for row, parent, targets in ranked.select('_row', 'parentChemblId', 'targets').iter_rows():
+        genes = set(targets or [])
+        ranked_above = above.setdefault(parent, [])
+        if not any(genes <= other for other in ranked_above):
+            kept.append(row)
+        ranked_above.append(genes)
+    return published.with_row_index('_row').filter(pl.col('_row').is_in(kept)).drop('_row')
+
+
+def _classify(chembl_rows: pl.DataFrame, candidates: pl.DataFrame) -> pl.DataFrame:
+    """Add ``chemblCurrentTargets`` and ``category`` to each candidate.
+
+    ``category`` is ``new_moa`` when no molecule of the candidate's drug has a ChEMBL mechanism,
+    ``extra_target`` when they have one but no gene of the candidate is among their targets, and
+    null otherwise.
+    """
+    indexed = candidates.with_row_index('_row')
+    chembl_targets = (
+        chembl_rows
+        .select('chemblIds', 'targets')
+        .explode('chemblIds')
+        .group_by('chemblIds')
+        .agg(pl.col('targets').explode().drop_nulls().unique().alias('chemblTargets'))
+        .rename({'chemblIds': '_drug_id'})
+    )
+    current = (
+        indexed
+        .select(
+            '_row',
+            _drug_id=pl.concat_list(pl.col('parentChemblId').cast(pl.String), pl.col('chemblIds').fill_null([])),
+        )
+        .explode('_drug_id')
+        .unique()
+        .join(chembl_targets, on='_drug_id', how='inner')
+        .group_by('_row')
+        .agg(pl.col('chemblTargets').explode().drop_nulls().unique().sort().alias('chemblCurrentTargets'))
+    )
+    return (
+        indexed
+        .join(current, on='_row', how='left', maintain_order='left')
+        .with_columns(_has_mechanism=pl.col('chemblCurrentTargets').is_not_null())
+        .with_columns(chemblCurrentTargets=pl.col('chemblCurrentTargets').fill_null([]))
+        .with_columns(
+            category=pl
+            .when(~pl.col('_has_mechanism'))
+            .then(pl.lit('new_moa'))
+            .when(pl.col('targets').list.set_intersection(pl.col('chemblCurrentTargets')).list.len() == 0)
+            .then(pl.lit('extra_target'))
+        )
+        .drop('_has_mechanism', '_row')
+    )
+
+
+def _most_confident(candidates: pl.DataFrame, *, by_source: bool) -> pl.DataFrame:
+    """Keep the most confident candidate of each drug and gene set, and of each source if ``by_source``.
+
+    Across sources, ``docIds`` becomes the sorted union of the group's doc ids.
+    """
+    keys = ['source', 'parentChemblId', '_targets_key'] if by_source else ['parentChemblId', '_targets_key']
+    doc_ids = pl.col('docIds').first() if by_source else pl.col('docIds').list.explode().unique().sort()
+    return (
+        candidates
+        .with_columns(_targets_key=pl.col('targets').list.sort())
+        .sort('confidence', descending=True, maintain_order=True)
+        .group_by(keys, maintain_order=True)
+        .agg(pl.exclude('docIds').first(), doc_ids.alias('docIds'))
+        .select(candidates.columns)
+    )
+
+
+def _is_known_doc(doc_id: pl.Expr) -> pl.Expr:
+    """Whether a doc id is of one of the ``DOC_KINDS``."""
+    return pl.any_horizontal(doc_id.str.contains(pattern) for _, _, pattern, _ in DOC_KINDS)
+
+
+def _references(doc_ids: pl.Expr) -> pl.Expr:
+    """One reference per kind of doc id present, in ``DOC_KINDS`` order.
+
+    PubMed ids sort by length, then as strings, which orders them as numbers; the others sort as strings.
+    """
+
+    def reference(source: str, url: str, pattern: str, prefix: str) -> pl.Expr:
+        ids = (
+            doc_ids.list
+            .eval(pl.element().str.extract(pattern, 1).drop_nulls())
+            .list.eval(pl.lit(prefix) + pl.element())
+            .list.unique()
+            .list.sort()
+        )
+        if source == PUBMED_SOURCE:
+            ids = ids.list.eval(pl.element().sort_by(pl.element().str.len_chars(), maintain_order=True))
+        return pl.struct(
+            pl.lit(source).alias('source'),
+            ids.alias('ids'),
+            ids.list.eval(pl.lit(url) + pl.element()).alias('urls'),
+        )
+
+    return pl.concat_list(reference(*kind) for kind in DOC_KINDS).list.eval(
+        pl.element().filter(pl.element().struct.field('ids').list.len() > 0)
+    )
 
 
 def _with_target_chembl_id(mechanism: pl.DataFrame, target_dictionary: pl.DataFrame) -> pl.DataFrame:
@@ -242,18 +529,7 @@ def _chembl_target(
         .with_row_index('component_order')
     )
 
-    # ChEMBL spells a target as a uniprot accession or an Ensembl gene id, so resolution
-    # needs both lookups. `genes_by_id` covers the whole of `gene_df`, not just the rows
-    # surviving the explode, which drops genes with no accession.
-    genes_by_uniprot = (
-        gene_df
-        .select(pl.col('id').alias('geneId'), pl.col('proteinIds').alias('protein'))
-        .explode('protein', empty_as_null=False, keep_nulls=False)
-        .filter(pl.col('protein').struct.field('source').is_in(UNIPROT_SOURCES))
-        .select('geneId', pl.col('protein').struct.field('id').alias('uniprot_id'))
-    )
-    genes_by_id = gene_df.select(pl.col('id').alias('geneId'), pl.col('id').alias('uniprot_id'))
-    gene_lookup = pl.concat([genes_by_uniprot, genes_by_id]).unique()
+    gene_lookup = chembl_accession_lookup(gene_df)
 
     # genes sharing an accession come in id order
     joined = target_components_flat.join(gene_lookup, on='uniprot_id', how='left').sort('component_order', 'geneId')

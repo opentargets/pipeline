@@ -209,6 +209,9 @@ def impc(
         parse_impc(source, float(settings.get('score_cutoff', 0))),
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
+        # off: IMPC disease names carry a numbered subtype and its acronym, "Split hand/foot malformation 1
+        # (SHFM1)", and without the acronym the only match is the unnumbered parent disease
+        spelling_variants=False,
     ).collect()
     raw = deduplicate(mapped)
     luts = build_luts(raw.lazy(), disease=source['disease'], target=source['target'], literature=source['literature'])

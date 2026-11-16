@@ -11,15 +11,16 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from mira.dataset.clinical_indication import (
+from otter.config.model import Config
+
+from pts.schemas.drug_molecule import drug_molecule_schema
+from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
     ClinicalStageCategory,
 )
-from otter.config.model import Config
-
-from pts.schemas.drug_molecule import drug_molecule_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.quality_flags import valid_rows
 
 APPROVED_STAGE_CODE = ClinicalStageCategory.APPROVAL.value
 
@@ -87,16 +88,7 @@ def drug_molecule(
     logger.info(f'Loading data from {source}')
     clinical_report = scan_dataset(source['clinical_report']).collect()
 
-    invalid_qc_reasons = settings.get('invalid_clinical_report_qc', [])
-    if invalid_qc_reasons and 'qualityControls' in clinical_report.columns:
-        has_invalid_qc = (
-            pl.col('qualityControls').fill_null([]).list.set_intersection(invalid_qc_reasons).list.len() > 0
-        )
-        excluded = clinical_report.filter(has_invalid_qc)
-        clinical_report = clinical_report.filter(~has_invalid_qc)
-    else:
-        excluded = clinical_report.clear()
-
+    clinical_report, excluded = valid_rows(clinical_report, settings.get('invalid_clinical_report_qc', []))
     logger.info(f'Writing {excluded.height} excluded clinical reports to {destination["excluded"]}')
     write_dataset(excluded, str(destination['excluded']))
 
@@ -132,7 +124,9 @@ def process_drug_index(
     Returns:
         Final drug index DataFrame.
     """
-    max_phase = _compute_max_phase_per_drug(clinical_report)
+    max_phase = roll_up_to_parents(
+        compute_max_phase_per_drug(clinical_report), molecule.select('id', 'parentId').collect()
+    )
     indications = _process_clinical_report_indications(clinical_report, disease)
 
     # Every chemical probe drug id, for the is_drug filter.
@@ -241,7 +235,7 @@ def _describe() -> pl.Expr:
     )
 
 
-def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
+def compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
     """Compute the overall maximum clinical stage for each drug across all clinical reports.
 
     Explodes the drugs array, maps WITHDRAWAL/PHASE_4 to APPROVAL, ranks stages,
@@ -264,6 +258,33 @@ def _compute_max_phase_per_drug(clinical_report: pl.DataFrame) -> pl.DataFrame:
         .filter(pl.col('id').is_not_null())
         .group_by('id')
         .agg(_stage_rank(pl.col('clinicalStage')).min().alias('bestRank'))
+        .select('id', maximumClinicalStage=_stage_name_from_rank(pl.col('bestRank')))
+    )
+
+
+def roll_up_to_parents(stages: pl.DataFrame, molecules: pl.DataFrame) -> pl.DataFrame:
+    """Give each parent molecule the most advanced stage among itself and its children.
+
+    Children keep their own stage, as in ChEMBL's `max_phase`.
+
+    Args:
+        stages: ``id`` and ``maximumClinicalStage``, as :func:`compute_max_phase_per_drug` returns them.
+        molecules: ``id`` and ``parentId``; a parent's ``parentId`` is null or its own id.
+
+    Returns:
+        ``id`` and ``maximumClinicalStage``, one row per id.
+    """
+    to_parent = (
+        stages
+        .join(molecules.select('id', 'parentId'), on='id', how='inner')
+        .filter(pl.col('parentId').is_not_null() & (pl.col('parentId') != pl.col('id')))
+        .select(id='parentId', maximumClinicalStage='maximumClinicalStage')
+    )
+    return (
+        pl
+        .concat([stages, to_parent])
+        .group_by('id')
+        .agg(_stage_rank(pl.col('maximumClinicalStage')).min().alias('bestRank'))
         .select('id', maximumClinicalStage=_stage_name_from_rank(pl.col('bestRank')))
     )
 

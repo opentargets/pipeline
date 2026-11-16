@@ -10,6 +10,7 @@ from pts.transformers.interaction import (
     INTACT_SCHEMA,
     aggregate,
     check_interactions,
+    compose_string,
     divide,
     explode,
     generate_interactions,
@@ -44,6 +45,37 @@ STRING_COLUMNS = [
     'textmining',
     'combined_score',
     'homology',
+]
+# The headers of STRING's 9606.protein.links.detailed and 9606.protein.links.full files (v12.0, v12.5).
+STRING_DETAILED_COLUMNS = [
+    'protein1',
+    'protein2',
+    'neighborhood',
+    'fusion',
+    'cooccurence',
+    'coexpression',
+    'experimental',
+    'database',
+    'textmining',
+    'combined_score',
+]
+STRING_FULL_COLUMNS = [
+    'protein1',
+    'protein2',
+    'neighborhood',
+    'neighborhood_transferred',
+    'fusion',
+    'cooccurence',
+    'homology',
+    'coexpression',
+    'coexpression_transferred',
+    'experiments',
+    'experiments_transferred',
+    'database',
+    'database_transferred',
+    'textmining',
+    'textmining_transferred',
+    'combined_score',
 ]
 
 
@@ -285,6 +317,46 @@ def test_rnacentral_maps_columns() -> None:
     assert transform_rnacentral(df).row(0, named=True) == {'gene_id': 'ENSG1', 'mapped_id': 'URS1'}
 
 
+def _string_file(columns: list[str], rows: list[dict]) -> pl.LazyFrame:
+    return pl.LazyFrame([{c: r.get(c, '0') for c in columns} for r in rows], schema=dict.fromkeys(columns, pl.String))
+
+
+def test_compose_string_adds_homology_from_the_full_file() -> None:
+    detailed = _string_file(
+        STRING_DETAILED_COLUMNS,
+        [
+            {'protein1': '9606.ENSP1', 'protein2': '9606.ENSP2', 'experimental': '288', 'combined_score': '500'},
+            {'protein1': '9606.ENSP2', 'protein2': '9606.ENSP1', 'experimental': '288', 'combined_score': '500'},
+            {'protein1': '9606.ENSP3', 'protein2': '9606.ENSP4', 'combined_score': '200'},
+        ],
+    )
+    full = _string_file(
+        STRING_FULL_COLUMNS,
+        [
+            {'protein1': '9606.ENSP1', 'protein2': '9606.ENSP2', 'homology': '120', 'experiments': '999'},
+            {'protein1': '9606.ENSP2', 'protein2': '9606.ENSP1', 'homology': '130'},
+        ],
+    )
+    out = compose_string(detailed, full).collect()
+    assert out.columns == [*STRING_DETAILED_COLUMNS, 'homology']
+    assert sorted(out.columns) == sorted(STRING_COLUMNS)
+    by_pair = {(r['protein1'], r['protein2']): r for r in out.to_dicts()}
+    assert by_pair['9606.ENSP1', '9606.ENSP2']['homology'] == '120'
+    assert by_pair['9606.ENSP2', '9606.ENSP1']['homology'] == '130'
+    # Channel scores come from the detailed file, not the full file's direct-only columns.
+    assert by_pair['9606.ENSP1', '9606.ENSP2']['experimental'] == '288'
+    # A pair missing from the full file has no homology evidence.
+    assert by_pair['9606.ENSP3', '9606.ENSP4']['homology'] == '0'
+
+
+def test_compose_string_rejects_duplicate_pairs() -> None:
+    pair = {'protein1': '9606.ENSP1', 'protein2': '9606.ENSP2'}
+    detailed = _string_file(STRING_DETAILED_COLUMNS, [pair])
+    full = _string_file(STRING_FULL_COLUMNS, [pair, pair])
+    with pytest.raises(pl.exceptions.ComputeError):
+        compose_string(detailed, full).collect()
+
+
 def test_string_filters_scores_and_keeps_positive_channels() -> None:
     raw = string_frame([
         {
@@ -421,8 +493,12 @@ def test_interaction_end_to_end(tmp_path: Path) -> None:
         intact_record(interactor('P1'), interactor('Q9', organism()), 0.4, [intact_evidence('e3')]),
     ]
     (src / 'intact.json').write_text('\n'.join(json.dumps(r) for r in records) + '\n')
-    (src / 'string.txt').write_text(
-        ' '.join(STRING_COLUMNS) + '\n9606.ENSP00000000001 9606.ENSP00000000002 0 0 0 0 288 0 100 500 0\n'
+    (src / 'string_detailed.txt').write_text(
+        ' '.join(STRING_DETAILED_COLUMNS) + '\n9606.ENSP00000000001 9606.ENSP00000000002 0 0 0 0 288 0 100 500\n'
+    )
+    (src / 'string_full.txt').write_text(
+        ' '.join(STRING_FULL_COLUMNS)
+        + '\n9606.ENSP00000000001 9606.ENSP00000000002 0 0 0 0 50 0 0 288 0 0 0 100 0 500\n'
     )
     dst = tmp_path / 'dst'
     interaction(
@@ -432,7 +508,8 @@ def test_interaction_end_to_end(tmp_path: Path) -> None:
             'humanmapping': str(src / 'hm.dat'),
             'ensproteins': str(src / 'gtf'),
             'intact': str(src / 'intact.json'),
-            'strings': str(src / 'string.txt'),
+            'string_detailed': str(src / 'string_detailed.txt'),
+            'string_full': str(src / 'string_full.txt'),
         },
         {
             'interactions': str(dst / 'interaction'),
@@ -454,14 +531,14 @@ def test_interaction_end_to_end(tmp_path: Path) -> None:
         ('string', 'ENSP00000000001', 'ENSP00000000002'),
     }
     assert by_pair['intact', 'P1', 'P2']['count'] == 2
-    assert by_pair['string', 'ENSP00000000001', 'ENSP00000000002']['count'] == 2
+    assert by_pair['string', 'ENSP00000000001', 'ENSP00000000002']['count'] == 3
     assert by_pair['string', 'ENSP00000000001', 'ENSP00000000002']['scoring'] == 0.5
     assert unmatched['intB'].to_list() == ['Q9']
 
     assert evidences.height == interactions['count'].sum()
     assert evidences.join(interactions, on='interactionId', how='anti').height == 0
     string_scores = evidences.filter(pl.col('interactionResources').struct.field('sourceDatabase') == 'string')
-    assert sorted(string_scores['evidenceScore'].to_list()) == [0.1, 0.288]
+    assert sorted(string_scores['evidenceScore'].to_list()) == [0.05, 0.1, 0.288]
 
     assert evidences.columns[:7] == [
         'interactionResources',

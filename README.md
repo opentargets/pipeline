@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Open Targets Data Pipeline logo" width="480">
+</p>
+
 # Open Targets Data Pipeline
 
 Generates an Open Targets Data Release.
@@ -71,18 +75,6 @@ and publish the image.
 > fails otherwise — bump to a `dev` version on feature branches with
 > `uv --directory <package> version <next-dev-version>`.
 
-
-#### Open a PR
-
-To prepare a branch for a PR, run:
-
-```sh
-make pr
-```
-
-on your feature branch (pushed, with a clean tree). This will compute the next sequential
-release-candidate version for the package; bump `pyproject.toml`, update the lockfile,
-commit, and push. Then you can open a PR against `main`.
 
 
 ## Additional information

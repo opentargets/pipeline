@@ -3,8 +3,8 @@
 The `pyspark` task can be used to launch pyspark jobs. They are local jobs for now, but we'll add
 dataproc cluster support.
 
-The file [openfda.py](../pyspark/openfda.py) is an example of a pyspark job port of
-the scala ETL's OpenFDA step.
+The file [literature_entity_lut.py](../pyspark/literature_entity_lut.py) is an example of a
+pyspark job port of the scala ETL's literature entity lookup table step.
 
 
 ## Launching
@@ -12,7 +12,7 @@ the scala ETL's OpenFDA step.
 Just like any other Otter app:
 
 ```sh
-$ uv run pts -s openfda
+$ uv run pts -s literature_entity_lut
 ```
 
 
@@ -28,19 +28,17 @@ release_uri: gs://open-targets-pre-data-releases/jferrer/test-pts-pyspark
 pool: 8
 
 steps:
-  openfda:
-    - name: pyspark openfda
-      pyspark: openfda
+  literature_entity_lut:
+    - name: pyspark literature entity lut
+      pyspark: literature_entity_lut
       source:
-        drug_molecule: output/drug_molecule
-        fda_data: intermediate/openfda/*.parquet
-        blacklisted_events: input/openfda/blacklisted_events.txt
+        matches: intermediate/literature/match
       destination:
-        fda_unfiltered: intermediate/openfda_adverse_drug_reactions
-        fda_results: output/openfda_significant_adverse_drug_reactions
+        literature_entity_lut: output/literature_entity_lut
       settings:
-        montecarlo_permutations: 500
-        montecarlo_percentile: 0.95
+        partition_count: 35
+      properties:
+        'spark.sql.shuffle.partitions': '10000'
 ```
 
 You pass either a `str` or a `dict[str, str]` to both `source` and `destination`, and a `pyspark`
@@ -61,5 +59,5 @@ This can be used to develop and test locally with data in the host.
 > [!NOTE]
 >
 > GCS Support is still a bit flimsy, and the application must be launched with:
-> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s openfda`
+> `$ GCLOUD_PROJECT=open-targets-prod GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json uv run pts -s literature_entity_lut`
 > to specify a credentials file and project. We'll fix that in the future.

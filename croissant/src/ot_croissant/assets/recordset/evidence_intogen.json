@@ -1,15 +1,15 @@
 [
   {
     "id": "cohortDescription",
-    "description": "Description of the studied cohort"
+    "description": "Description of the IntOGen cohort (tumour type and data source)"
   },
   {
     "id": "cohortId",
-    "description": "Identifier of the studied cohort"
+    "description": "IntOGen identifier of the studied cohort"
   },
   {
     "id": "cohortShortName",
-    "description": "Short name of the studied cohort"
+    "description": "IntOGen short name of the studied cohort"
   },
   {
     "id": "datasourceId",
@@ -29,7 +29,7 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Cancer type of the IntOGen cohort"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -51,28 +51,28 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers of the publications describing the cohort"
   },
   {
     "id": "mutatedSamples",
-    "description": "Samples with a given mutation tested"
+    "description": "Counts of samples of the IntOGen cohort with mutations in the target"
   },
   {
     "id": "mutatedSamples/functionalConsequenceId",
-    "description": "Functional consequene identifier of the pooled mutations [bioregistry:so]",
+    "description": "Sequence ontology (SO) identifier of the mutation type the counts refer to",
     "foreign_key": "so/id"
   },
   {
     "id": "mutatedSamples/numberMutatedSamples",
-    "description": "Number of cohort samples in which target is mutated with a mutation of any type"
+    "description": "Number of samples of the IntOGen cohort in which the target is mutated"
   },
   {
     "id": "mutatedSamples/numberSamplesTested",
-    "description": "Number of cohort samples tested"
+    "description": "Number of samples of the IntOGen cohort tested"
   },
   {
     "id": "mutatedSamples/numberSamplesWithMutationType",
-    "description": "Number of cohort samples in which target is mutated with a specific mutation type"
+    "description": "Number of samples of the IntOGen cohort with a mutation of the given type in the target"
   },
   {
     "id": "publicationDate",
@@ -84,19 +84,19 @@
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "Combined q-value of the IntOGen cancer driver detection methods"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the log10 of the IntOGen combined q-value"
   },
   {
     "id": "significantDriverMethods",
-    "description": "Methods to detect cancer driver genes producing significant results"
+    "description": "IntOGen driver detection methods reporting the target as a significant cancer driver (e.g. 'dndscv', 'mutpanning')"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as reported by IntOGen"
   },
   {
     "id": "targetId",

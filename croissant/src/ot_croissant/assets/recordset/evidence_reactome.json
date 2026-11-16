@@ -9,11 +9,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Disease label as annotated in Reactome"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "Disease Ontology (DOID) identifier as annotated in Reactome"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -35,11 +35,11 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers supporting the Reactome reaction"
   },
   {
     "id": "pathways",
-    "description": "List of pooled pathways"
+    "description": "Reactome pathways associated with the reaction"
   },
   {
     "id": "pathways/id",
@@ -47,7 +47,7 @@
   },
   {
     "id": "pathways/name",
-    "description": "Pathway or gene set/pathway name"
+    "description": "Name of the Reactome pathway"
   },
   {
     "id": "publicationDate",
@@ -59,19 +59,19 @@
   },
   {
     "id": "reactionId",
-    "description": "Pathway, gene set or reaction identifier in Reactome"
+    "description": "Reactome identifier of the disease reaction"
   },
   {
     "id": "reactionName",
-    "description": "Name of the reaction, patway or gene set in Reactome"
+    "description": "Name of the Reactome disease reaction"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; 1.0 for all Reactome evidence"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "UniProt accession of the target as annotated in Reactome"
   },
   {
     "id": "targetId",
@@ -80,10 +80,10 @@
   },
   {
     "id": "targetModulation",
-    "description": "Description of target modulation event"
+    "description": "Effect of the disease variant on the target as annotated in Reactome (e.g. 'loss_of_function', 'gain_of_function')"
   },
   {
     "id": "variantAminoacidDescriptions",
-    "description": "Descriptions of variant consequences at protein level"
+    "description": "Protein-level descriptions of the disease variants annotated in Reactome"
   }
 ]

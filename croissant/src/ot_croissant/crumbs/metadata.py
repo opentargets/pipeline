@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from loguru import logger
-from mlcroissant import Metadata
+from mlcroissant import Context, Metadata
 
 from ot_croissant.crumbs.distribution import PlatformOutputDistribution
 from ot_croissant.crumbs.record_sets import PlatformOutputRecordSets
@@ -23,10 +23,14 @@ class PlatformOutputMetadata(Metadata):
         aws_location: str | None,
         version: str,
         date_published: datetime,
-        data_integrity_hash: str,
+        data_integrity_hash: str | None = None,
         instance: str | None = None,
     ) -> None:
-        """Initialize the metadata."""
+        """Initialize the metadata.
+
+        Without a `data_integrity_hash`, the dataset is declared live and the
+        location `FileObject`s carry no `sha256`.
+        """
         # Managing instance:
         if instance != 'ppp':
             instance = 'public'
@@ -34,7 +38,10 @@ class PlatformOutputMetadata(Metadata):
         logger.info(f'Generating metadata for the {instance} Platform instance.')
         ann = InstanceCuration().get(instance)
 
+        ctx = Context(is_live_dataset=True) if data_integrity_hash is None else Context()
+
         super().__init__(
+            ctx=ctx,
             name=ann.name if ann else '',
             description=ann.description if ann else '',
             cite_as=self.CITE_AS,
@@ -43,7 +50,7 @@ class PlatformOutputMetadata(Metadata):
             version=version,
             date_published=date_published,
             distribution=(
-                PlatformOutputDistribution()
+                PlatformOutputDistribution(ctx)
                 .add_ftp_location(ftp_location, data_integrity_hash)
                 .add_gcp_location(gcp_location, data_integrity_hash)
                 .add_aws_location(aws_location, data_integrity_hash)

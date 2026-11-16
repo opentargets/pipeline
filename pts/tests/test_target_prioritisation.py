@@ -836,3 +836,23 @@ def test_target_prioritisation_end_to_end(tmp_path):
     assert got.schema == OUTPUT_SCHEMA
     assert got.equals(compute_target_prioritisation(**inputs()))
     assert parquet_bytes(tmp_path / 'out1') == parquet_bytes(tmp_path / 'out2')
+
+
+def test_target_prioritisation_counts_an_electronic_mechanism(tmp_path):
+    """T2 has no ChEMBL mechanism; its electronic mechanism for D3 counts toward maxClinicalStage."""
+    source = write_inputs(tmp_path)
+    mechanisms = frame(
+        [(['T1', 'G2'], ['D1', 'D2'], 'manual'), (['T2'], ['D3'], 'electronic')],
+        MOA_SCHEMA | {'curation': pl.String},
+    )
+    molecules = frame([('D1', 'PHASE_2'), ('D2', 'APPROVAL'), ('D3', 'APPROVAL')], MOLECULE_SCHEMA)
+    for name, df in (('mechanism_of_action', mechanisms), ('molecule', molecules)):
+        (Path(source[name]) / 'part-1.parquet').unlink()
+        df.write_parquet(Path(source[name]) / 'part-0.parquet')
+
+    target_prioritisation(source, str(tmp_path / 'out'), None, None)
+
+    got = pl.read_parquet(tmp_path / 'out')
+    stages = dict(got.select('targetId', 'maxClinicalStage').rows())
+    assert stages['T2'] == 1.0
+    assert stages['T1'] == 1.0

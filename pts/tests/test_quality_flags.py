@@ -6,7 +6,13 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.utils.quality_flags import flag_rows, has_excluded_flag, resolve_flag_names, valid_rows
+from pts.transformers.utils.quality_flags import (
+    flag_matching_ids,
+    flag_rows,
+    has_excluded_flag,
+    resolve_flag_names,
+    valid_rows,
+)
 
 
 class Flag(StrEnum):
@@ -52,6 +58,7 @@ def test_valid_rows_with_no_invalid_flags_accepts_every_row():
     """An empty reason list accepts all rows, including rows carrying QC flags."""
     frame = flagged_frame()
     result = valid_rows(frame, [])
+    assert result.valid is frame
     assert_frame_equal(result.valid.collect(), frame.collect())
     assert_frame_equal(result.invalid.collect(), frame.collect().head(0))
 
@@ -76,6 +83,31 @@ def test_valid_rows_accepts_untyped_all_empty_quality_controls(flags):
     assert result.invalid.collect().is_empty()
 
 
+def test_valid_rows_accepts_flag_values_as_plain_strings():
+    """Settings list flags as strings; they exclude the same rows as the enum members."""
+    by_member = valid_rows(flagged_frame(), [Flag.INVALID])
+    by_value = valid_rows(flagged_frame(), ['invalid study'])
+    assert_frame_equal(by_value.valid.collect(), by_member.valid.collect())
+    assert_frame_equal(by_value.invalid.collect(), by_member.invalid.collect())
+
+
+def test_valid_rows_splits_an_eager_frame_into_eager_frames():
+    frame = flagged_frame().collect()
+    result = valid_rows(frame, [Flag.INVALID])
+    assert isinstance(result.valid, pl.DataFrame)
+    assert isinstance(result.invalid, pl.DataFrame)
+    assert result.invalid['id'].to_list() == ['invalid']
+
+
+@pytest.mark.parametrize('lazy', [True, False], ids=['lazy', 'eager'])
+def test_valid_rows_accepts_every_row_without_a_quality_controls_column(lazy):
+    frame = pl.DataFrame({'id': ['a', 'b']})
+    result = valid_rows(frame.lazy() if lazy else frame, [Flag.INVALID])
+    valid, invalid = (part.collect() if isinstance(part, pl.LazyFrame) else part for part in result)
+    assert_frame_equal(valid, frame)
+    assert_frame_equal(invalid, frame.clear())
+
+
 def test_flag_rows_appends_unique_sorted_flags_and_initialises_lists():
     frame = pl.LazyFrame({'id': ['a', 'b', 'c', 'd'], 'x': [1, 2, None, 1]})
 
@@ -97,6 +129,29 @@ def test_flag_rows_accepts_untyped_all_empty_quality_controls():
     result = flag_rows(frame, pl.col('x') == 1, Flag.INVALID).collect()
 
     assert result['qualityControls'].to_list() == [['invalid study'], []]
+
+
+def test_flag_rows_sorts_null_elements_last_as_spark():
+    frame = pl.LazyFrame({'qualityControls': [['z', None]]})
+
+    result = flag_rows(frame, pl.lit(True), Flag.INVALID).collect()
+
+    assert result['qualityControls'].to_list() == [['invalid study', 'z', None]]
+
+
+@pytest.mark.parametrize('lazy', [True, False], ids=['lazy', 'eager'])
+def test_flag_rows_keeps_the_frame_kind_and_empties_null_lists(lazy):
+    """A missing column is added, and a null list stays countable when the condition is false."""
+    missing = pl.DataFrame({'x': [1, 0]})
+    null_lists = pl.DataFrame(
+        {'qualityControls': [None, None], 'x': [1, 0]}, schema_overrides={'qualityControls': pl.List(pl.String)}
+    )
+
+    for frame in (missing, null_lists):
+        result = flag_rows(frame.lazy() if lazy else frame, pl.col('x') == 1, Flag.INVALID)
+        assert isinstance(result, pl.LazyFrame if lazy else pl.DataFrame)
+        rows = result.collect() if isinstance(result, pl.LazyFrame) else result
+        assert rows['qualityControls'].to_list() == [['invalid study'], []]
 
 
 def test_has_excluded_flag_matches_valid_rows():
@@ -129,3 +184,11 @@ def test_resolve_flag_names_keeps_members_whose_value_names_another_member():
         Clash.FIRST,
         'second reason',
     ]
+
+
+def test_flag_matching_ids_flags_the_listed_ids_and_keeps_rows_order_and_columns():
+    frame = pl.LazyFrame({'id': ['c', 'a', 'b', 'a'], 'qualityControls': [[], [], [], []]})
+    ids = pl.LazyFrame({'id': ['a', 'a', 'z']})
+    flagged = flag_matching_ids(frame, 'id', ids, Flag.INVALID).collect()
+    assert flagged.columns == ['id', 'qualityControls']
+    assert flagged.rows() == [('c', []), ('a', [Flag.INVALID.value]), ('b', []), ('a', [Flag.INVALID.value])]

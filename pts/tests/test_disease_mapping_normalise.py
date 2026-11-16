@@ -16,6 +16,8 @@ import pytest
 from pts.transformers.utils.disease_mapping.normalise import (
     GOOGLE_STOP_WORDS,
     STOP_WORDS,
+    _clean_token,
+    _term_tokens,
     normalise,
     normalise_symbol,
     normalise_term,
@@ -37,12 +39,19 @@ def reference() -> pl.DataFrame:
     return pl.read_parquet(FIXTURE)
 
 
+def _negates_a_word(label: str | None) -> bool:
+    return label is not None and 'non' in [_clean_token(t) for t in _term_tokens(label)]
+
+
 def _mismatches(df: pl.DataFrame, expected: str, got: str) -> list[tuple]:
     return df.filter(pl.col(expected).ne_missing(pl.col(got))).select('label', expected, got).rows()
 
 
 @pytest.mark.parametrize(('track', 'function'), [('term', normalise_term), ('symbol', normalise_symbol)])
 def test_normalisation_matches_spark_nlp(reference: pl.DataFrame, track: str, function) -> None:
+    if track == 'term':
+        # the term track joins `non` to the next word, where spark-nlp keeps it a token of its own
+        reference = reference.filter(~pl.col('label').map_elements(_negates_a_word, return_dtype=pl.Boolean))
     got = reference.with_columns(pl.Series('got', [function(label) for label in reference['label']]))
     assert _mismatches(got, track, 'got') == []
 
@@ -84,6 +93,27 @@ def test_term_track_peels_context_characters_before_splitting() -> None:
     # peeled off a whole candidate, `(of)` leaves the stop word; inside `(of)-x` it leaves `of)`
     assert normalise_term('(of) x') == 'x'
     assert normalise_term('(of)-x') == 'ofx'
+
+
+@pytest.mark.parametrize(
+    ('label', 'other'),
+    [
+        ('non-squamous non-small cell lung cancer', 'non-small cell squamous lung cancer'),
+        ('non-infectious non-anterior uveitis', 'non-infectious anterior uveitis'),
+        ('Hodgkin and non-Hodgkin lymphoma', 'non-Hodgkin lymphoma'),
+    ],
+)
+def test_term_track_keeps_each_negation(label: str, other: str) -> None:
+    assert normalise_term(label) != normalise_term(other)
+
+
+def test_term_track_negation_spellings_match() -> None:
+    keys = {normalise_term(s) for s in ('non-squamous', 'non squamous', 'nonsquamous', 'Non-Squamous', 'NON SQUAMOUS')}
+    assert len(keys) == 1
+
+
+def test_term_track_keeps_a_trailing_non() -> None:
+    assert normalise_term('Hodgkin and non') == 'hodgkinnon'
 
 
 def test_stop_words_are_case_sensitive() -> None:

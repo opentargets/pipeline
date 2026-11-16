@@ -93,7 +93,7 @@ def _read_publications(
     fulltexts = _read_kind('fulltext')
     processed_fulltexts = EPMCPublication._annotate_fulltexts_with_pmid(fulltexts, pub_id_lut)
 
-    abstracts = _read_kind('abstract')
+    abstracts = EPMCPublication._identify_abstracts_by_pprid(_read_kind('abstract'))
     all_publications = EPMCPublication._merge_abstracts_with_fulltexts(abstracts, processed_fulltexts)
 
     most_recent = EPMCPublication._get_most_recent_publications(all_publications)

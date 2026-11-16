@@ -42,7 +42,7 @@ RAW_SCHEMA = {
     'targetFromSourceId': pl.String,
     'resourceScore': pl.Float32,
     'statisticalTestTail': pl.String,
-    'log2FoldChangeValue': pl.Float64,
+    'phenotypicConsequenceScore': pl.Float64,
 }
 
 
@@ -151,16 +151,16 @@ def test_generate_joins_screens_to_hits_and_explodes_mapped_diseases(tmp_path: P
     upper = {'statisticalTestTail': 'upper tail'}
     expected = [
         {**b, 'diseaseFromSourceMappedId': 'MONDO_3', 'targetFromSourceId': 'GENE4', 'resourceScore': 0.001, **upper}
-        | {'log2FoldChangeValue': 3.0}
+        | {'phenotypicConsequenceScore': 3.0}
     ]
     expected += [
         {**a, 'diseaseFromSourceMappedId': d, 'targetFromSourceId': 'GENE1', 'resourceScore': 0.01, **lower}
-        | {'log2FoldChangeValue': -2.5}
+        | {'phenotypicConsequenceScore': -2.5}
         for d in ['MONDO_1', 'MONDO_2']
     ]
     expected += [
         {**a, 'diseaseFromSourceMappedId': d, 'targetFromSourceId': 'GENE2', 'resourceScore': 0.2, **upper}
-        | {'log2FoldChangeValue': 1.5}
+        | {'phenotypicConsequenceScore': 1.5}
         for d in ['MONDO_1', 'MONDO_2']
     ]
     got = raw.sort('studyId', 'targetFromSourceId', 'diseaseFromSourceMappedId').to_dicts()
@@ -234,7 +234,7 @@ def test_generate_reads_study_columns_by_name(tmp_path: Path) -> None:
 
     raw = generate(**sources).collect()
 
-    assert raw.select('targetFromSourceId', 'log2FoldChangeValue', 'statisticalTestTail').rows() == [
+    assert raw.select('targetFromSourceId', 'phenotypicConsequenceScore', 'statisticalTestTail').rows() == [
         ('GENE1', -0.5, 'lower tail'),
     ]
     assert raw['resourceScore'].to_list() == [float(np.float32(0.03))]
@@ -282,7 +282,7 @@ def test_generate_casts_unparseable_numbers_to_null(tmp_path: Path) -> None:
 
     raw = generate(**sources).collect().sort('targetFromSourceId')
 
-    assert raw.select('targetFromSourceId', 'resourceScore', 'log2FoldChangeValue').rows() == [
+    assert raw.select('targetFromSourceId', 'resourceScore', 'phenotypicConsequenceScore').rows() == [
         ('GENE1', 0.5, None),
         ('GENE2', None, 1.0),
     ]

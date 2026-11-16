@@ -9,7 +9,7 @@
   },
   {
     "id": "directionOnTarget",
-    "description": "Gain or loss of function effect of the evidence on the target resulting from genetic variants, pharmacological modulation, or other perturbations"
+    "description": "Gain of function for oncogenes and loss of function for tumour suppressor genes, as classified in the Cancer Gene Census"
   },
   {
     "id": "directionOnTrait",
@@ -17,7 +17,7 @@
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "Disease identifier as reported by COSMIC"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -39,28 +39,28 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers of the publications reporting the mutations in COSMIC"
   },
   {
     "id": "mutatedSamples",
-    "description": "Samples with a given mutation tested"
+    "description": "Counts of COSMIC samples with mutations in the target, by mutation type"
   },
   {
     "id": "mutatedSamples/functionalConsequenceId",
-    "description": "Functional consequene identifier of the pooled mutations [bioregistry:so]",
+    "description": "Sequence ontology (SO) identifier of the mutation type the counts refer to",
     "foreign_key": "so/id"
   },
   {
     "id": "mutatedSamples/numberMutatedSamples",
-    "description": "Number of cohort samples in which target is mutated with a mutation of any type"
+    "description": "Number of COSMIC samples of the disease with a mutation of any type in the target"
   },
   {
     "id": "mutatedSamples/numberSamplesTested",
-    "description": "Number of cohort samples tested"
+    "description": "Number of COSMIC samples of the disease screened for mutations in the target"
   },
   {
     "id": "mutatedSamples/numberSamplesWithMutationType",
-    "description": "Number of cohort samples in which target is mutated with a specific mutation type"
+    "description": "Number of COSMIC samples of the disease with a mutation of the given type in the target"
   },
   {
     "id": "publicationDate",
@@ -72,19 +72,19 @@
   },
   {
     "id": "resourceScore",
-    "description": "Score provided by datasource indicating strength of target-disease association"
+    "description": "Score of the target-disease association provided by the COSMIC Cancer Gene Census"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship; equal to the COSMIC resource score"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "COSMIC identifier of the study reporting the mutations"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier of the target as reported by COSMIC"
   },
   {
     "id": "targetId",

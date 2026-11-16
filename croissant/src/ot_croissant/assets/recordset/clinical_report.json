@@ -48,7 +48,7 @@
   },
   {
     "id": "provider",
-    "description": "Resource or organisation that distributes the data fetched from the primary source (e.g. AACT, ChEMBL, EMA, PMDA, TTD)"
+    "description": "Resource or organisation that distributes the data fetched from the primary source (e.g. AACT, ChEMBL, EMA, FDA, PMDA, TTD)"
   },
   {
     "id": "qualityControls",

@@ -17,6 +17,7 @@ from pts.transformers.coding_variant import (
     process_target_index,
     process_variants,
 )
+from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
 VE = pl.Struct({'method': pl.String, 'score': pl.Float32})
 TC = pl.Struct({
@@ -26,7 +27,6 @@ TC = pl.Struct({
     'variantFunctionalConsequenceIds': pl.List(pl.String),
 })
 PROT = pl.Struct({'id': pl.String, 'source': pl.String})
-LOCUS = pl.Struct({'variantId': pl.String, 'posteriorProbability': pl.Float64})
 EV = {'datasourceId': pl.String, 'variantId': pl.String, 'score': pl.Float64, 'id': pl.String, 'diseaseId': pl.String}
 GWAS = {
     'datasourceId': pl.String,
@@ -133,24 +133,33 @@ def world() -> dict[str, pl.DataFrame]:
         schema=GWAS,
         orient='row',
     )
-    credible_set = pl.DataFrame(
-        {
-            'studyLocusId': ['SL1', 'SL2', 'SL3', 'SL4', 'SL5', 'SL6'],
-            'studyType': ['gwas', 'gwas', 'eqtl', 'pqtl', 'sqtl', None],
-            'locus': [
-                [{'variantId': 'V1', 'posteriorProbability': 0.5}, {'variantId': 'V9', 'posteriorProbability': 0.5}],
-                [{'variantId': 'V1', 'posteriorProbability': 1.0}],
-                [
-                    {'variantId': 'V7', 'posteriorProbability': 0.5},
-                    {'variantId': 'V7', 'posteriorProbability': 0.1},
-                    {'variantId': 'V1', 'posteriorProbability': 0.4},
-                ],
-                [],
-                None,
-                [{'variantId': 'V3', 'posteriorProbability': 1.0}],
-            ],
-        },
-        schema={'studyLocusId': pl.String, 'studyType': pl.String, 'locus': pl.List(LOCUS)},
+    credible_set = published_credible_set(
+        *(
+            {'id': set_id, 'studyType': study_type}
+            for set_id, study_type in [
+                ('SL1', 'gwas'),
+                ('SL2', 'gwas'),
+                ('SL3', 'eqtl'),
+                ('SL4', 'pqtl'),
+                ('SL5', 'sqtl'),
+                ('SL6', None),
+            ]
+        )
+    )
+    # SL4 and SL5 have no variants
+    credible_set_variant = published_credible_set_variant(
+        *(
+            {'credibleSetId': set_id, 'variantId': variant_id}
+            for set_id, variant_id in [
+                ('SL1', 'V1'),
+                ('SL1', 'V9'),
+                ('SL2', 'V1'),
+                ('SL3', 'V7'),
+                ('SL3', 'V7'),
+                ('SL3', 'V1'),
+                ('SL6', 'V3'),
+            ]
+        )
     )
     return {
         'variant': variant,
@@ -172,6 +181,7 @@ def world() -> dict[str, pl.DataFrame]:
         ]),
         'evidence_gwas_credible_set': gwas,
         'credible_set': credible_set,
+        'credible_set_variant': credible_set_variant,
         'pharmacogenetics': pl.DataFrame({'variantId': ['V2', 'V2', None], 'datasourceId': ['clinpgx'] * 3}),
     }
 
@@ -354,7 +364,7 @@ def test_process_target_index_keeps_swissprot_only() -> None:
 def test_qtl_variant_ids_survive_case() -> None:
     frames = world()
     variant_ids = process_variants(frames['variant'].lazy()).select('variantId')
-    qtls = process_qtls(frames['credible_set'].lazy(), variant_ids).collect()
+    qtls = process_qtls(frames['credible_set'].lazy(), frames['credible_set_variant'].lazy(), variant_ids).collect()
     assert 'variantId' in qtls.columns
     assert sorted(qtls['variantId'].to_list()) == ['V1', 'V7', 'V7']
     out = by_variant(view(frames))
@@ -413,6 +423,7 @@ def test_gwas_keeps_tied_maxima_and_coding_fan_out() -> None:
         frames['disease'].lazy().select(pl.col('id').alias('diseaseId'), 'therapeuticAreas'),
         frames['evidence_gwas_credible_set'].lazy(),
         frames['credible_set'].lazy(),
+        frames['credible_set_variant'].lazy(),
     ).collect()
     got = sorted(gwas.select('variantId', 'diseaseId', 'score', 'evidenceId').rows())
     # V1 has two coding rows, so every row is doubled; SL1/D1 keeps only its max, SL2/D4 keeps both tied rows
@@ -421,18 +432,12 @@ def test_gwas_keeps_tied_maxima_and_coding_fan_out() -> None:
     )
 
 
-def test_empty_locus_dropped() -> None:
+def test_a_credible_set_without_variants_adds_no_qtl_evidence() -> None:
     frames = world()
-    frames['credible_set'] = pl.DataFrame(
-        {
-            'studyLocusId': ['SL3', 'SL4', 'SL5'],
-            'studyType': ['eqtl', 'pqtl', 'sqtl'],
-            'locus': [[{'variantId': 'V7', 'posteriorProbability': 0.5}], [], None],
-        },
-        schema={'studyLocusId': pl.String, 'studyType': pl.String, 'locus': pl.List(LOCUS)},
-    )
+    credible_set_variant = frames['credible_set_variant'].filter(pl.col('credibleSetId').is_in(['SL3', 'SL4', 'SL5']))
     variant_ids = process_variants(frames['variant'].lazy()).select('variantId')
-    assert process_qtls(frames['credible_set'].lazy(), variant_ids).collect()['variantId'].to_list() == ['V7']
+    qtls = process_qtls(frames['credible_set'].lazy(), credible_set_variant.lazy(), variant_ids).collect()
+    assert sorted(qtls['variantId'].to_list()) == ['V1', 'V7', 'V7']
 
 
 def test_coding_variant_null_and_empty_lists() -> None:

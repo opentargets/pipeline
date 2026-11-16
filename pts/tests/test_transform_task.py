@@ -6,9 +6,11 @@ from unittest.mock import Mock
 
 import pytest
 from otter.config.model import Config
+from otter.util.errors import TaskValidationError
 from pydantic import ValidationError
 
 from pts.tasks.transform import Transform, TransformSpec
+from pts.transformers.credible_set.validation import validation_check
 from pts.transformers.evidence.encore import encore
 from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
@@ -77,3 +79,39 @@ def test_a_plain_name_is_not_shadowed_by_an_evidence_module_of_the_same_name() -
 def test_raises_for_an_unknown_transformer() -> None:
     with pytest.raises(ModuleNotFoundError):
         Transform.load_transformer('does_not_exist')
+
+
+def _validating_task(monkeypatch, check) -> Transform:
+    """A task whose run resolved its paths, with `check` next to its transformer."""
+    monkeypatch.setattr(Transform, 'load_transformer', staticmethod(lambda _: Mock()))
+    monkeypatch.setattr(Transform, 'load_check', staticmethod(lambda _: check))
+    spec = TransformSpec(name='transform test', transformer='study', source='input/study', destination='output/study')
+    task = Transform(spec, SimpleNamespace(config=Config.model_construct(step='study', work_path='/work')))
+    task.srcs, task.dsts = '/work/input/study', '/work/output/study'
+    return task
+
+
+def test_loads_the_check_next_to_the_transformer() -> None:
+    assert Transform.load_check('credible_set.validation') is validation_check
+
+
+def test_a_transformer_without_a_check_has_none() -> None:
+    assert Transform.load_check('reactome') is None
+
+
+def test_validate_runs_the_check_with_the_paths_of_the_run(monkeypatch) -> None:
+    check = Mock()
+    task = _validating_task(monkeypatch, check)
+    unwrap(Transform.validate)(task)
+    check.assert_called_once_with('/work/input/study', '/work/output/study', {}, task.context.config)
+
+
+def test_a_failed_check_is_a_task_validation_error(monkeypatch) -> None:
+    task = _validating_task(monkeypatch, Mock(side_effect=ValueError('3 input rows != 2 written rows')))
+    with pytest.raises(TaskValidationError, match='3 input rows'):
+        unwrap(Transform.validate)(task)
+
+
+def test_a_transformer_without_a_check_is_valid(monkeypatch) -> None:
+    task = _validating_task(monkeypatch, None)
+    assert unwrap(Transform.validate)(task) is task

@@ -13,6 +13,7 @@ from pts.transformers.evidence.utils.expressions import direction_when_disease_p
 from pts.transformers.evidence.utils.luts import build_luts
 from pts.transformers.evidence.utils.run import write_evidence
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
+from pts.transformers.utils.quality_flags import valid_rows
 
 TRIAL_OUTCOME_REFERENCE_TYPES = ['result', 'derived']
 
@@ -159,15 +160,10 @@ def generate(
         Raw clinical precedence evidence, one row per report, disease, drug and target; and the
         clinical reports excluded by quality control.
     """
-    reports = scan_dataset(clinical_report)
-    has_invalid_qc = (
-        pl.col('qualityControls').list.eval(pl.element().is_in(invalid_clinical_report_qc)).list.any().fill_null(False)
-    )
-    excluded = reports.filter(has_invalid_qc)
+    reports, excluded = valid_rows(scan_dataset(clinical_report), invalid_clinical_report_qc)
 
     report_evidence = (
         reports
-        .filter(~has_invalid_qc)
         .select(
             pl.col('id').alias('clinicalReportId'),
             'clinicalStage',

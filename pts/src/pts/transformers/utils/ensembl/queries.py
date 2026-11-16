@@ -22,13 +22,25 @@ _UNIPROT_DBS = {
     'Uniprot_isoform': 'uniprot_isoform',
 }
 
+_RNACENTRAL_DB = 'RNAcentral'
+#: Appended to RNAcentral accessions, as a human sequence is identified in interaction data.
+_RNACENTRAL_HUMAN_SUFFIX = '_9606'
+
 #: `analysis.logic_name` of the protein features whose `hit_name` is reported.
 _FEATURE_ANALYSES = ['alphafold', 'signalp']
 
 _XREF_FIELDS = [*_UNIPROT_DBS.values(), *_FEATURE_ANALYSES]
 
 #: `attrib_type.code` values kept on a transcript.
-TRANSCRIPT_ATTRIBUTES = ['is_canonical', 'MANE_Select', 'MANE_Plus_Clinical', 'gencode_primary', 'appris']
+TRANSCRIPT_ATTRIBUTES = [
+    'is_canonical',
+    'MANE_Select',
+    'MANE_Plus_Clinical',
+    'gencode_primary',
+    'appris',
+    'miRNA',
+    'readthrough_tra',
+]
 
 
 def _seq_region_names(dump: CoreDump) -> pl.LazyFrame:
@@ -237,3 +249,62 @@ def translation_xrefs(dump: CoreDump) -> pl.DataFrame:
         .sort('translationId')
         .collect()
     )
+
+
+def transcript_rnacentral(dump: CoreDump) -> pl.DataFrame:
+    """RNAcentral accessions of the transcripts of `transcripts`, suffixed with the human taxon (`URS…_9606`).
+
+    Returns:
+        One row per transcript with any accession, sorted by `transcriptId`, with the columns of
+        `schemas.ensembl_core.transcript_rnacentral`. The list is unique and sorted.
+    """
+    external_db = dump.scan('external_db', schema.EXTERNAL_DB).filter(pl.col('db_name') == _RNACENTRAL_DB)
+    transcript = _canonical_transcripts(dump).select('transcript_id', pl.col('stable_id').alias('transcriptId'))
+    return (
+        dump
+        .scan('object_xref', schema.OBJECT_XREF)
+        .filter(pl.col('ensembl_object_type') == 'Transcript')
+        .join(dump.scan('xref', schema.XREF), on='xref_id', how='inner')
+        .join(external_db, on='external_db_id', how='inner')
+        .join(transcript, left_on='ensembl_id', right_on='transcript_id', how='inner')
+        .select('transcriptId', (pl.col('dbprimary_acc') + _RNACENTRAL_HUMAN_SUFFIX).alias('rnacentral'))
+        .unique()
+        .sort('transcriptId', 'rnacentral')
+        .group_by('transcriptId', maintain_order=True)
+        .agg('rnacentral')
+        .collect()
+    )
+
+
+def translation_uniprot(dump: CoreDump) -> pl.DataFrame:
+    """Swiss-Prot and TrEMBL accessions of the translations of `transcripts`, in the dump's `object_xref` line order.
+
+    Returns:
+        One row per translation with any accession, sorted by `transcriptId`: `transcriptId`,
+        `uniprot_swissprot` and `uniprot_trembl`, each list unique in first-line order and `[]` when empty.
+    """
+    databases = {name: field for name, field in _UNIPROT_DBS.items() if field != 'uniprot_isoform'}
+    external_db = dump.scan('external_db', schema.EXTERNAL_DB).filter(pl.col('db_name').is_in(list(databases)))
+    transcript = _canonical_transcripts(dump).select('transcript_id', pl.col('stable_id').alias('transcriptId'))
+    translation = (
+        dump
+        .scan('translation', schema.TRANSLATION)
+        .join(transcript, on='transcript_id', how='inner')
+        .select('translation_id', 'transcriptId')
+    )
+    accessions = (
+        dump
+        .scan('object_xref', schema.OBJECT_XREF)
+        .with_row_index('line')
+        .filter(pl.col('ensembl_object_type') == 'Translation')
+        .join(dump.scan('xref', schema.XREF), on='xref_id', how='inner')
+        .join(external_db, on='external_db_id', how='inner')
+        .join(translation, left_on='ensembl_id', right_on='translation_id', how='inner')
+        .sort('line')
+        .group_by('transcriptId', maintain_order=True)
+        .agg([
+            pl.col('dbprimary_acc').filter(pl.col('db_name') == name).unique(maintain_order=True).alias(field)
+            for name, field in databases.items()
+        ])
+    )
+    return accessions.sort('transcriptId').collect()

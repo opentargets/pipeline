@@ -110,7 +110,7 @@ class TestDirectXrefArm:
             _make_node('MONDO_001', 'a disease by another name'),
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
-        assert _merged(result, 'MONDO_001', 'EFO_001')
+        assert _merged(result, 'EFO_001', 'MONDO_001')
 
     def test_mondo_wins_over_hp(self) -> None:
         df = _make_df(
@@ -290,8 +290,8 @@ class TestGroupGating:
             _make_node('HP_400', 'A disease', xrefs=['MONDO:400']),
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
-        assert _merged(result, 'MONDO_400', 'EFO_400')
-        assert _merged(result, 'HP_400', 'EFO_400')
+        assert _merged(result, 'EFO_400', 'MONDO_400')
+        assert _merged(result, 'HP_400', 'MONDO_400')
 
     def test_transitive_group_points_every_member_at_one_canonical(self) -> None:
         """Every superseded member must name the surviving term, not its neighbour."""
@@ -301,7 +301,82 @@ class TestGroupGating:
             _make_node('HP_400', 'A disease', xrefs=['MONDO:400']),
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
-        assert _replacement(result, 'HP_400') == _url('EFO_400')
+        assert _replacement(result, 'EFO_400') == _url('MONDO_400')
+        assert _replacement(result, 'HP_400') == _url('MONDO_400')
+
+
+# ---------------------------------------------------------------------------
+# Measurement guard
+# ---------------------------------------------------------------------------
+
+MEASUREMENT = 'EFO_0001444'
+
+
+class TestMeasurementGuard:
+    """A measurement and a disease are never the same entity (opentargets/issues#4573)."""
+
+    def test_no_merge_of_a_measurement_into_a_disease(self) -> None:
+        """The multiple sclerosis case: a measurement term cross-references the disease."""
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement'),
+            _make_node('EFO_0803536', 'multiple sclerosis symptom measurement', xrefs=['MONDO:0005301']),
+            _make_node('MONDO_0005301', 'multiple sclerosis'),
+        )
+        edges = _make_edges(('EFO_0803536', MEASUREMENT))
+        result = annotate_xref_duplicates(df, edges)
+        assert not _any_deprecated(result, 'EFO_0803536', 'MONDO_0005301')
+
+    def test_no_merge_through_an_indirect_measurement_ancestor(self) -> None:
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement'),
+            _make_node('EFO_900', 'neurological measurement'),
+            _make_node('EFO_901', 'a symptom measurement', xrefs=['MONDO:901']),
+            _make_node('MONDO_901', 'a disease'),
+        )
+        edges = _make_edges(('EFO_901', 'EFO_900'), ('EFO_900', MEASUREMENT))
+        result = annotate_xref_duplicates(df, edges)
+        assert not _any_deprecated(result, 'EFO_901', 'MONDO_901')
+
+    def test_no_merge_on_shared_xref_across_measurement_and_disease(self) -> None:
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement'),
+            _make_node('EFO_902', 'body mass index', xrefs=['UMLS:C0005893'], synonyms=['bmi']),
+            _make_node('HP_902', 'Abnormal body mass index', xrefs=['UMLS:C0005893'], synonyms=['bmi']),
+        )
+        edges = _make_edges(('EFO_902', MEASUREMENT))
+        result = annotate_xref_duplicates(df, edges)
+        assert not _any_deprecated(result, 'EFO_902', 'HP_902')
+
+    def test_measurement_root_counts_as_a_measurement(self) -> None:
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement', xrefs=['MONDO:903']),
+            _make_node('MONDO_903', 'a disease'),
+        )
+        result = annotate_xref_duplicates(df, NO_EDGES)
+        assert not _any_deprecated(result, MEASUREMENT, 'MONDO_903')
+
+    def test_two_measurements_still_merge(self) -> None:
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement'),
+            _make_node('EFO_904', 'serum urate measurement', xrefs=['OBA:904']),
+            _make_node('OBA_904', 'urate amount in blood serum'),
+        )
+        edges = _make_edges(('EFO_904', MEASUREMENT), ('OBA_904', MEASUREMENT))
+        result = annotate_xref_duplicates(df, edges)
+        assert _merged(result, 'OBA_904', 'EFO_904')
+
+    def test_only_the_mixed_pair_is_withdrawn_from_a_group(self) -> None:
+        """The disease still absorbs its phenotype duplicate; only the measurement stays out."""
+        df = _make_df(
+            _make_node(MEASUREMENT, 'measurement'),
+            _make_node('EFO_905', 'a symptom measurement', xrefs=['MONDO:905']),
+            _make_node('MONDO_905', 'a disease', xrefs=['HP:905']),
+            _make_node('HP_905', 'A disease'),
+        )
+        edges = _make_edges(('EFO_905', MEASUREMENT))
+        result = annotate_xref_duplicates(df, edges)
+        assert _merged(result, 'HP_905', 'MONDO_905')
+        assert not _any_deprecated(result, 'EFO_905', 'MONDO_905')
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +436,7 @@ class TestStructure:
         assert annotate_xref_duplicates(df, NO_EDGES).schema == df.schema
 
     def test_canonical_node_not_deprecated(self, df: pl.DataFrame) -> None:
-        assert not _is_deprecated(annotate_xref_duplicates(df, NO_EDGES), 'EFO_001')
+        assert not _is_deprecated(annotate_xref_duplicates(df, NO_EDGES), 'MONDO_001')
 
     def test_untouched_node_keeps_its_metadata(self, df: pl.DataFrame) -> None:
         result = annotate_xref_duplicates(df, NO_EDGES)
@@ -383,13 +458,13 @@ class TestStructure:
         )
         df = df.with_columns(
             meta=pl.col('meta').struct.with_fields(
-                basicPropertyValues=pl.when(pl.col('id') == _url('MONDO_001'))
+                basicPropertyValues=pl.when(pl.col('id') == _url('EFO_001'))
                 .then(pl.lit([{'pred': 'http://example.org/other', 'val': 'kept'}]))
                 .otherwise(pl.col('meta').struct['basicPropertyValues'])
             )
         )
         result = annotate_xref_duplicates(df, NO_EDGES)
-        preds = [entry['pred'] for entry in result.filter(pl.col('id') == _url('MONDO_001'))['meta'].struct[
+        preds = [entry['pred'] for entry in result.filter(pl.col('id') == _url('EFO_001'))['meta'].struct[
             'basicPropertyValues'
         ][0].to_list()]
         assert 'http://example.org/other' in preds

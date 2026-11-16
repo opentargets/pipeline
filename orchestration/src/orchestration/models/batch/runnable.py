@@ -8,11 +8,13 @@ from importlib.resources import files
 from typing import Annotated
 
 from google.cloud import batch_v1
-from pydantic import BaseModel, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
 
 class RunnableSpec(BaseModel):
     """Runnable specification."""
+
+    model_config = ConfigDict(extra='forbid')
 
     image_uri: Annotated[str, StringConstraints(min_length=1)]
     """Container image to be used for the batch task."""

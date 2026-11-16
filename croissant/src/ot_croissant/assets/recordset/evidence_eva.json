@@ -1,23 +1,23 @@
 [
   {
     "id": "alleleOrigins",
-    "description": "Origin of the variant allele"
+    "description": "Origin(s) of the variant allele as reported in ClinVar (e.g. 'germline')"
   },
   {
     "id": "allelicRequirements",
-    "description": "Inheritance patterns"
+    "description": "Mode(s) of inheritance reported in the ClinVar submissions"
   },
   {
     "id": "clinicalSignificances",
-    "description": "Standard terms to define clinical significance"
+    "description": "ClinVar clinical significance(s) of the variant for the condition (e.g. 'pathogenic', 'uncertain significance')"
   },
   {
     "id": "cohortPhenotypes",
-    "description": "Clinical features/phenotypes observed in studied individuals"
+    "description": "Condition names submitted to ClinVar for the record"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "ClinVar review status of the record (e.g. 'criteria provided, single submitter', 'reviewed by expert panel')"
   },
   {
     "id": "datasourceId",
@@ -37,11 +37,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Condition name as reported in ClinVar"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "MedGen identifier of the condition as reported in ClinVar"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -63,7 +63,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers cited in the ClinVar submissions"
   },
   {
     "id": "publicationDate",
@@ -79,15 +79,15 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the ClinVar clinical significance and review status"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "ClinVar reference (RCV) accession of the variant-condition record"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier of the gene the variant was assigned to by EVA"
   },
   {
     "id": "targetId",
@@ -96,7 +96,7 @@
   },
   {
     "id": "variantFromSourceId",
-    "description": "Identifier of the disease-causing variant at source"
+    "description": "ClinVar variation (VCV) accession of the variant"
   },
   {
     "id": "variantFunctionalConsequenceId",
@@ -105,7 +105,7 @@
   },
   {
     "id": "variantHgvsId",
-    "description": "Identifier in HGVS notation of the disease-causing variant"
+    "description": "Genomic HGVS notation of the variant as reported in ClinVar"
   },
   {
     "id": "variantId",

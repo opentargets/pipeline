@@ -65,8 +65,8 @@ def coding_variant(
 
     Args:
         source: paths keyed `variant`, `target`, `disease`, `evidence_eva`, `evidence_eva_somatic`,
-            `evidence_uniprot_variant`, `evidence_gwas_credible_set`, `credible_set` and
-            `pharmacogenetics`.
+            `evidence_uniprot_variant`, `evidence_gwas_credible_set`, `credible_set`,
+            `credible_set_variant` and `pharmacogenetics`.
         destination: output directory.
         settings: unused.
         config: unused.
@@ -107,10 +107,14 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         [
             process_evidence(diseases, [frames[name] for name in EVIDENCE_SOURCES]),
             process_gwas_associations(
-                variant_ids, diseases, frames['evidence_gwas_credible_set'], frames['credible_set']
+                variant_ids,
+                diseases,
+                frames['evidence_gwas_credible_set'],
+                frames['credible_set'],
+                frames['credible_set_variant'],
             ),
             process_pharmacogenetics(frames['pharmacogenetics']),
-            process_qtls(frames['credible_set'], variant_ids),
+            process_qtls(frames['credible_set'], frames['credible_set_variant'], variant_ids),
         ],
         how='diagonal_relaxed',
     )
@@ -369,41 +373,44 @@ def process_pharmacogenetics(pharmacogenetics: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def explode_loci(credible_set: pl.LazyFrame, variant_ids: pl.LazyFrame) -> pl.LazyFrame:
-    """One row per credible set locus entry whose variant is in `variant_ids`.
+def credible_set_members(
+    credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFrame, variant_ids: pl.LazyFrame
+) -> pl.LazyFrame:
+    """One row per credible set variant whose variant is in `variant_ids`, with its set's study type.
 
     Args:
-        credible_set: the credible set dataset.
+        credible_set: the credible set dataset, for `id` and `studyType`.
+        credible_set_variant: the credible set variant dataset, for `credibleSetId` and `variantId`.
         variant_ids: `variantId` of the coding variants.
 
     Returns:
-        `studyLocusId`, `studyType` and `variantId`.
+        `credibleSetId`, `studyType` and `variantId`.
     """
+    study_type = credible_set.select(pl.col('id').alias('credibleSetId'), pl.col('studyType').cast(pl.String))
     return (
-        credible_set
-        .select(
-            'studyLocusId',
-            'studyType',
-            pl.col('locus').list.eval(pl.element().struct.field('variantId')).alias('variantId'),
-        )
-        .filter(pl.col('variantId').list.len() > 0)
-        .explode('variantId')
+        credible_set_variant
+        .select('credibleSetId', 'variantId')
         .join(variant_ids.unique(), on='variantId', how='semi')
+        .join(study_type, on='credibleSetId')
+        .select('credibleSetId', 'studyType', 'variantId')
     )
 
 
-def process_qtls(credible_set: pl.LazyFrame, variant_ids: pl.LazyFrame) -> pl.LazyFrame:
+def process_qtls(
+    credible_set: pl.LazyFrame, credible_set_variant: pl.LazyFrame, variant_ids: pl.LazyFrame
+) -> pl.LazyFrame:
     """Get all molecular QTL evidence on the coding variants.
 
     Args:
         credible_set: the credible set dataset.
+        credible_set_variant: the credible set variant dataset.
         variant_ids: `variantId` of the coding variants.
 
     Returns:
-        One row per QTL locus entry, each with its own `evidenceId`.
+        One row per QTL credible set variant, each with its own `evidenceId`.
     """
     return (
-        explode_loci(credible_set, variant_ids)
+        credible_set_members(credible_set, credible_set_variant, variant_ids)
         .filter(pl.col('studyType') != 'gwas')
         .with_row_index('evidenceId')
         .select(
@@ -420,30 +427,35 @@ def process_gwas_associations(
     diseases: pl.LazyFrame,
     gwas_evidence: pl.LazyFrame,
     credible_set: pl.LazyFrame,
+    credible_set_variant: pl.LazyFrame,
 ) -> pl.LazyFrame:
     """Get the strongest GWAS evidence of each credible set on its coding variants.
+
+    The evidence names its credible set `studyLocusId`, the published evidence field.
 
     Args:
         variant_ids: `variantId` of the coding variants, one row per consequence.
         diseases: `diseaseId` and `therapeuticAreas`.
         gwas_evidence: the GWAS credible set evidence dataset.
         credible_set: the credible set dataset.
+        credible_set_variant: the credible set variant dataset.
 
     Returns:
-        One row per top evidence, locus variant and coding consequence of that variant.
+        One row per top evidence, credible set variant and coding consequence of that variant.
     """
     score = pl.col('score')
+    member = credible_set_members(credible_set, credible_set_variant, variant_ids).select('credibleSetId', 'variantId')
     return (
         gwas_evidence
-        .select('studyLocusId', 'diseaseId', 'score', 'datasourceId')
-        .filter(score == score.max().over('studyLocusId', 'diseaseId'))
-        .join(explode_loci(credible_set, variant_ids).select('studyLocusId', 'variantId'), on='studyLocusId')
+        .select(pl.col('studyLocusId').alias('credibleSetId'), 'diseaseId', 'score', 'datasourceId')
+        .filter(score == score.max().over('credibleSetId', 'diseaseId'))
+        .join(member, on='credibleSetId')
         .select(
             'variantId',
             'diseaseId',
             'score',
             'datasourceId',
-            pl.col('studyLocusId').alias('evidenceId'),
+            pl.col('credibleSetId').alias('evidenceId'),
             zero_evidence(),
         )
         .join(variant_ids, on='variantId')

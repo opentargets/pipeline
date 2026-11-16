@@ -241,6 +241,33 @@ def test_generate_excludes_nothing_without_invalid_quality_controls(tmp_path: Pa
     assert raw.height == 12
 
 
+def test_generate_reaches_a_drug_whose_only_mechanism_is_electronic(tmp_path: Path) -> None:
+    """CHEMBL9 has no ChEMBL mechanism; its electronic row reaches the evidence like a manual one."""
+    sources = _sources(tmp_path)
+    schema = {**MOA_SCHEMA, 'curation': pl.String}
+    rows = [
+        {'actionType': 'INHIBITOR', 'chemblIds': ['CHEMBL1'], 'targets': ['ENSG1'], 'curation': 'manual'},
+        {'actionType': 'ANTAGONIST', 'chemblIds': ['CHEMBL9'], 'targets': ['ENSG9'], 'curation': 'electronic'},
+    ]
+    pl.DataFrame(rows, schema=schema).write_parquet(tmp_path / 'moa' / 'part.parquet')
+
+    raw, _ = generate(**sources, invalid_clinical_report_qc=INVALID_QC)
+    got = [r for r in raw.collect().to_dicts() if r['drugId'] == 'CHEMBL9']
+
+    assert got == [
+        _row(
+            'R8',
+            'APPROVAL',
+            ASTHMA,
+            _drug('drugD', 'CHEMBL9'),
+            'ENSG9',
+            'ANTAGONIST',
+            studyStartDate='2009-12-31',
+            evidenceDate='2010',
+        ),
+    ]
+
+
 def test_generate_is_independent_of_input_row_order(tmp_path: Path) -> None:
     raw, _ = generate(**_sources(tmp_path, REPORTS[::-1]), invalid_clinical_report_qc=INVALID_QC)
 

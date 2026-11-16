@@ -181,7 +181,7 @@ def generate(screens: str, studies_dir: str, disease_mapping: str) -> pl.LazyFra
             .when(hit_class == 'Negative Hit')
             .then(pl.lit('lower tail'))
             .alias('statisticalTestTail'),
-            pl.col('Phenotype').alias('log2FoldChangeValue'),
+            pl.col('Phenotype').alias('phenotypicConsequenceScore'),
             'studyId',
         )
         .unique(maintain_order=True)

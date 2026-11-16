@@ -27,18 +27,24 @@ from pts.transformers.evidence.gene_burden.common import to_parsed
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
 from tests.evidence.fixtures import write_disease, write_literature, write_ontoma_lut, write_target
 from tests.evidence.gene_burden.fixtures import (
+    bipex_row,
     curated_line,
     cvdi_row,
     genebass_row,
+    schema_row,
     write_az,
+    write_bipex,
     write_brava,
     write_curated,
     write_cvdi,
     write_finngen,
     write_genebass,
     write_genes_and_health,
+    write_schema,
 )
 from tests.evidence.gene_burden.logs import logged
+
+SETTINGS = {'finngen_release': 'R12', 'schema_release': '2026-07-15', 'bipex_release': '2026-08-07'}
 
 # the removed evidence_postprocess_gene_burden settings
 SPARK_SCORE = """
@@ -284,6 +290,8 @@ def _sources(
     curated: list[str],
     genebass: list[dict[str, Any]] | None = None,
     cvdi: list[dict[Any, Any]] | None = None,
+    schema: list[dict[str, str]] | None = None,
+    bipex: list[dict[str, str]] | None = None,
 ) -> dict[str, str]:
     root.mkdir(parents=True)
     az_binary, az_quantitative, az_genes, az_phenotypes = write_az(root, [], [])
@@ -299,10 +307,14 @@ def _sources(
         'cvdi': write_cvdi(root, cvdi or []),
         'genes_and_health': write_genes_and_health(root, [], [], []),
         'brava': write_brava(root),
+        'schema': write_schema(root, schema or []),
+        'bipex': write_bipex(root, bipex or []),
         'curated_studies': write_curated(root / 'curated_evidence.tsv', *curated),
         'ontoma_disease_label_lut': _label_lut(root),
         'ontoma_disease_id_lut': _id_lut(root),
-        'disease': write_disease(root / 'disease', ['EFO_0000001', 'EFO_0000002', 'EFO_0000003']),
+        'disease': write_disease(
+            root / 'disease', ['EFO_0000001', 'EFO_0000002', 'EFO_0000003', 'MONDO_0005090', 'MONDO_0004985']
+        ),
         'target': write_target(root / 'target', ['ENSG1', 'ENSG2'], {'ENSG1': 'G1', 'ENSG2': 'G2'}),
         'literature': write_literature(root / 'literature', {'12345': '2020-05-01'}),
     }
@@ -311,7 +323,7 @@ def _sources(
 def test_sub_sources_in_the_old_union_order(tmp_path: Path) -> None:
     cvdi = [cvdi_row() | {('LOF (MAF<0.1%)', 'Meta P-value'): 1e-9}]
     sources = _sources(tmp_path / 'src', [curated_line()], [genebass_row()], cvdi)
-    frames = parse_sub_sources(sources, {'finngen_release': 'R12'})
+    frames = parse_sub_sources(sources, SETTINGS)
     assert [frame.collect()['projectId'].unique().to_list() for frame in frames] == [
         [],
         ['REGENERON'],
@@ -320,12 +332,14 @@ def test_sub_sources_in_the_old_union_order(tmp_path: Path) -> None:
         ['CVDI Human Disease Portal'],
         [],
         [],
+        [],
+        [],
     ]
 
 
 def _run(tmp: Path, curated: list[str], genebass: list[dict[str, Any]] | None = None) -> tuple[pl.DataFrame, ...]:
     destination = {'evidence': str(tmp / 'out' / 'valid'), 'failed_evidence': str(tmp / 'out' / 'failed')}
-    gene_burden(_sources(tmp / 'src', curated, genebass), destination, {'finngen_release': 'R12'}, None)
+    gene_burden(_sources(tmp / 'src', curated, genebass), destination, SETTINGS, None)
     return pl.read_parquet(destination['evidence']), pl.read_parquet(destination['failed_evidence'])
 
 
@@ -381,3 +395,14 @@ def test_empty_sub_source_writes_outputs(tmp_path: Path) -> None:
     for column in ('pValueExponent', 'studySampleSize', 'urls', 'directionOnTrait', 'directionOnTarget', 'score'):
         assert empty_valid.schema[column] == evidence_schema[column]
     assert 'curatedDiseaseFromSourceMappedId' not in empty_valid.columns
+
+
+def test_schema_and_bipex_map_to_their_curated_diseases(tmp_path: Path) -> None:
+    destination = {'evidence': str(tmp_path / 'out' / 'valid'), 'failed_evidence': str(tmp_path / 'out' / 'failed')}
+    sources = _sources(tmp_path / 'src', [], schema=[schema_row()], bipex=[bipex_row(gene_id='ENSG2')])
+    gene_burden(sources, destination, SETTINGS, None)
+    valid = pl.read_parquet(destination['evidence']).sort('projectId')
+    assert valid.select('projectId', 'targetId', 'diseaseId', 'directionOnTrait', 'releaseVersion').rows() == [
+        ('BipEx', 'ENSG2', 'MONDO_0004985', 'risk', '2026-08-07'),
+        ('SCHEMA', 'ENSG1', 'MONDO_0005090', 'risk', '2026-07-15'),
+    ]

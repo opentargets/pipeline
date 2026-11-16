@@ -6,15 +6,13 @@ import pytest
 
 from orchestration.models.batch.runnable import RunnableSpec
 
-ANNOTATE_TRANSCRIPTS = files('orchestration.assets').joinpath('annotate_transcripts.sh').read_text()
-ANNOTATE_VARIANTS = files('orchestration.assets').joinpath('annotate_variants.sh').read_text()
+SUSIE_FINEMAP = files('orchestration.assets').joinpath('susie_finemap.sh').read_text()
 
 
 @pytest.mark.parametrize(
     ('script', 'expected_line_count'),
     [
-        pytest.param(ANNOTATE_TRANSCRIPTS, 23, id='annotate_transcripts'),
-        pytest.param(ANNOTATE_VARIANTS, 34, id='annotate_variants'),
+        pytest.param(SUSIE_FINEMAP, 31, id='susie_finemap'),
     ],
 )
 def test_remove_comments_line_count(script: str, expected_line_count: int) -> None:
@@ -24,8 +22,7 @@ def test_remove_comments_line_count(script: str, expected_line_count: int) -> No
 @pytest.mark.parametrize(
     ('script', 'expected_count'),
     [
-        pytest.param(ANNOTATE_TRANSCRIPTS, 5, id='annotate_transcripts'),
-        pytest.param(ANNOTATE_VARIANTS, 5, id='annotate_variants'),
+        pytest.param(SUSIE_FINEMAP, 4, id='susie_finemap'),
     ],
 )
 def test_join_continuation_lines_count(script: str, expected_count: int) -> None:
@@ -36,8 +33,7 @@ def test_join_continuation_lines_count(script: str, expected_count: int) -> None
 @pytest.mark.parametrize(
     ('script', 'expected_count'),
     [
-        pytest.param(ANNOTATE_TRANSCRIPTS, 5, id='annotate_transcripts'),
-        pytest.param(ANNOTATE_VARIANTS, 5, id='annotate_variants'),
+        pytest.param(SUSIE_FINEMAP, 4, id='susie_finemap'),
     ],
 )
 def test_split_commands_count(script: str, expected_count: int) -> None:
@@ -49,8 +45,7 @@ def test_split_commands_count(script: str, expected_count: int) -> None:
 @pytest.mark.parametrize(
     ('script', 'expected_count'),
     [
-        pytest.param(ANNOTATE_TRANSCRIPTS, 5, id='annotate_transcripts'),
-        pytest.param(ANNOTATE_VARIANTS, 5, id='annotate_variants'),
+        pytest.param(SUSIE_FINEMAP, 4, id='susie_finemap'),
     ],
 )
 def test_parse_script_file_command_count(script: str, expected_count: int) -> None:

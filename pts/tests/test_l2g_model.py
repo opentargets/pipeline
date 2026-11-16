@@ -45,7 +45,7 @@ def test_default_hyperparameters_match_the_pinned_model() -> None:
 
 
 def test_to_matrix_uses_the_requested_feature_order() -> None:
-    frame = pl.DataFrame({'a': [1.0], 'b': [2.0], 'studyLocusId': ['sl1']})
+    frame = pl.DataFrame({'a': [1.0], 'b': [2.0], 'credibleSetId': ['sl1']})
     assert to_matrix(frame, ['b', 'a']).tolist() == [[2.0, 1.0]]
 
 

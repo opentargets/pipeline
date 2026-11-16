@@ -50,4 +50,6 @@ nodes:
           instance:
             machine_type: n1-standard-4
             provisioning_model: SPOT
+          # gentropy 3.4.0-rc.3 fetches the gcs connector jar from github.com when spark starts
+          external_ip_address: true
         logs: {}

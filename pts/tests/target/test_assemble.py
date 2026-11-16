@@ -30,7 +30,7 @@ from pts.transformers.target.assemble import (
     uniprot_by_gene,
 )
 from pts.transformers.target.ensembl import ensembl_genes
-from tests.target.fixtures import GENES, TRANSCRIPTS, XREFS
+from tests.target.fixtures import GENES, RNACENTRAL, TRANSCRIPTS, XREFS
 from tests.target.rows import rows
 
 
@@ -100,7 +100,7 @@ ENSEMBL = pl.DataFrame(
         'canonicalTranscript': CANONICAL_TRANSCRIPT,
     },
     orient='row',
-)
+).with_columns(pl.lit(None, dtype=pl.List(ID_SOURCE)).alias('rnacentral'))
 HGNC = pl.DataFrame(
     [
         (
@@ -380,7 +380,7 @@ def test_tss_follows_the_strand(strand: int | None, expected: int | None) -> Non
 
 
 def test_tss_from_the_ensembl_canonical_transcript() -> None:
-    tss = {r['id']: r['tss'] for r in add_tss(ensembl_genes(GENES, TRANSCRIPTS, XREFS)).to_dicts()}
+    tss = {r['id']: r['tss'] for r in add_tss(ensembl_genes(GENES, TRANSCRIPTS, XREFS, RNACENTRAL)).to_dicts()}
     assert tss == {'ENSG00000141510': 7687538, 'ENSG00000000002': 1000, 'ENSG00000000003': 577}
 
 
@@ -404,6 +404,18 @@ def test_uniprot_only_reaches_genes_through_hgnc() -> None:
     assert gene['subcellularLocations'] is None
     assert gene['proteinIds'] is None
     assert gene['dbXrefs'] == []
+
+
+def test_rnacentral_ids_join_the_xrefs() -> None:
+    xref = _ids(('URS0000000010_9606', 'RNAcentral'))
+    rna_schema = {'id': pl.String, 'rnacentral': pl.List(ID_SOURCE)}
+    rna = pl.DataFrame({'id': [NOHGNC], 'rnacentral': [xref]}, schema=rna_schema)
+    ensembl = ENSEMBL.drop('rnacentral').join(rna, on='id', how='left', maintain_order='left')
+    result = assemble(
+        ensembl, HGNC, GO_FRAME, HALLMARKS_FRAME, UNIPROT, PROTEIN_CLASS, HPA, CONSTRAINT_FRAME, NCBI, REACTOME
+    )
+    assert {r['id']: r for r in result.to_dicts()}[NOHGNC]['dbXrefs'] == xref
+    assert result.schema == TARGET
 
 
 def test_tp53_end_to_end() -> None:

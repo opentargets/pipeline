@@ -1,0 +1,7 @@
+
+SENTENCES FROM PUBLICATIONS — this input is not trial text:
+- Each entry is one publication that mentions the drug. Its "Trial ID" is "pmid" followed by the PubMed id (e.g. "pmid39167366"), or a PMC id. Under "Sentences:" are single sentences from that publication, one per line, chosen automatically because a text-mining tool recognised the drug's name in them. They are out of context and not in their original order.
+- Treat the entries exactly like trials: the TEXT ONLY rule and every quote rule apply. Cite the entry's id, as written after "Trial ID:", as the nctId of its quotes, and copy each quote verbatim from ONE sentence.
+- The line "Names of the drug in these sentences" lists the names the tool matched. The tool can be wrong: an abbreviation or code can belong to another substance, a gene or an unrelated concept. Ignore any sentence that is not about this drug.
+- Sentences often list several drugs. A target counts only when the sentence attributes it to THIS drug ("oleclumab, an anti-CD73 antibody"), not to another drug in the same sentence, a comparator or a drug class.
+- One clear sentence is enough. When the sentences disagree, prefer what several publications state, and lower your confidence.

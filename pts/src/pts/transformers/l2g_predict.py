@@ -25,7 +25,8 @@ from pts.transformers.l2g import model as l2g_model
 from pts.transformers.l2g.features import FEATURES, impute_and_cast
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
-OUTPUT_COLUMNS = ('studyLocusId', 'geneId', 'score', 'features', 'shapBaseValue')
+OUTPUT_COLUMNS = ('credibleSetId', 'geneId', 'score', 'features', 'shapBaseValue')
+"""gentropy v4 `L2GPrediction` schema."""
 
 
 def build_output(
@@ -41,7 +42,7 @@ def build_output(
     rather than left to inference.
 
     Args:
-        keys: `studyLocusId`, `geneId` and `score`, one row per prediction.
+        keys: `credibleSetId`, `geneId` and `score`, one row per prediction.
         matrix: the feature values behind those rows, in fitted order.
         shap_values: SHAP values with the shape of `matrix`, or None when explanations are off,
             in which case every `shapValue` is null.
@@ -64,7 +65,7 @@ def build_output(
     wide = pl.concat([keys, values, shaps], how='horizontal')
 
     return wide.select(
-        pl.col('studyLocusId').cast(pl.String),
+        pl.col('credibleSetId').cast(pl.String),
         pl.col('geneId').cast(pl.String),
         pl.col('score').cast(pl.Float64),
         pl.concat_list(
@@ -102,7 +103,7 @@ def l2g_predict(
     gwas_loci = (
         scan_dataset(source['credible_set'])
         .filter(pl.col('studyType') == 'gwas')
-        .select('studyLocusId')
+        .select(pl.col('id').alias('credibleSetId'))
         .unique()
     )
 
@@ -110,7 +111,7 @@ def l2g_predict(
     prepared = impute_and_cast(
         scan_dataset(source['feature_matrix'])
         .filter(pl.col('isProteinCoding') == 1)
-        .join(gwas_loci, on='studyLocusId', how='semi'),
+        .join(gwas_loci, on='credibleSetId', how='semi'),
         features,
     ).collect()
 
@@ -120,7 +121,7 @@ def l2g_predict(
     scores = model.predict_proba(matrix)[:, 1] if matrix.shape[0] else np.empty(0, dtype=np.float32)
 
     keep = scores >= threshold
-    keys = prepared.select('studyLocusId', 'geneId').filter(pl.Series(keep)).with_columns(
+    keys = prepared.select('credibleSetId', 'geneId').filter(pl.Series(keep)).with_columns(
         pl.Series('score', scores[keep])
     )
     matrix = matrix[keep]
@@ -143,7 +144,7 @@ def l2g_predict(
         base_value, shap_values = None, None
 
     output = build_output(keys, matrix, shap_values, base_value, features).sort(
-        'studyLocusId', 'geneId'
+        'credibleSetId', 'geneId'
     )
     write_dataset(output, destination)
     logger.info('prediction complete')

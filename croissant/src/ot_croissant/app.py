@@ -98,8 +98,8 @@ parser.add_argument(
 parser.add_argument(
     '--data_integrity_hash',
     type=str,
-    help='Data integrity hash using sha256',
-    required=True,
+    help='Data integrity hash using sha256; omit to publish the dataset as live',
+    required=False,
 )
 
 parser.add_argument(

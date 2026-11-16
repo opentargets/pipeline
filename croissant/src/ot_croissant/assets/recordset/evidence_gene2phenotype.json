@@ -1,11 +1,11 @@
 [
   {
     "id": "allelicRequirements",
-    "description": "Inheritance patterns"
+    "description": "Allelic requirement as curated by Gene2Phenotype (e.g. 'biallelic_autosomal')"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "Gene2Phenotype confidence category of the gene-disease pair ('definitive', 'strong', 'moderate', 'limited')"
   },
   {
     "id": "datasourceId",
@@ -17,7 +17,7 @@
   },
   {
     "id": "directionOnTarget",
-    "description": "Effect of direction on target"
+    "description": "Gain or loss of function effect of the evidence on the target resulting from genetic variants, pharmacological modulation, or other perturbations"
   },
   {
     "id": "directionOnTrait",
@@ -25,11 +25,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Disease name as curated by Gene2Phenotype"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "Disease identifier (e.g. MONDO) as curated by Gene2Phenotype"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -51,7 +51,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers cited by Gene2Phenotype for the gene-disease pair"
   },
   {
     "id": "publicationDate",
@@ -63,15 +63,15 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the Gene2Phenotype confidence category"
   },
   {
     "id": "studyId",
-    "description": "Identifier of the study generating the data"
+    "description": "Gene2Phenotype panel(s) the gene-disease pair belongs to (e.g. 'DD; Eye')"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as curated by Gene2Phenotype"
   },
   {
     "id": "targetId",
@@ -80,7 +80,7 @@
   },
   {
     "id": "variantFunctionalConsequenceId",
-    "description": "Sequence ontology (SO) identifier of the functional consequence of the variant [bioregistry:so]",
+    "description": "Sequence ontology (SO) identifier of the molecular mechanism curated by Gene2Phenotype (e.g. 'absent gene product')",
     "foreign_key": "so/id"
   }
 ]

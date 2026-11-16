@@ -4,7 +4,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from pts.transformers.utils.target import tss_lut
+from pts.transformers.utils.target import chembl_accession_lookup, tss_lut
 
 
 def target_frame(rows):
@@ -55,3 +55,28 @@ def test_tss_preserves_duplicate_targets_and_null_structs():
 def test_empty_tss_lookup_schema():
     """Empty input still yields the lookup contract."""
     assert tss_lut(target_frame([])).collect_schema() == pl.Schema({'geneId': pl.String, 'tss': pl.Int64})
+
+
+def test_chembl_accession_lookup():
+    """UniProt accessions, including those labelled obsolete, and the gene id itself resolve; others do not."""
+    protein = pl.Struct({'id': pl.String, 'source': pl.String})
+    genes = pl.DataFrame(
+        {
+            'id': ['ENSG1', 'ENSG2', 'ENSG3'],
+            'proteinIds': [
+                [{'id': 'P1', 'source': 'uniprot_swissprot'}, {'id': 'Q1', 'source': 'uniprot_trembl'}],
+                [{'id': 'P2', 'source': 'uniprot_obsolete'}],
+                [{'id': 'X3', 'source': 'ensembl_PRO'}],
+            ],
+        },
+        schema={'id': pl.String, 'proteinIds': pl.List(protein)},
+    )
+    result = chembl_accession_lookup(genes).sort('uniprot_id')
+    assert result.rows() == [
+        ('ENSG1', 'ENSG1'),
+        ('ENSG2', 'ENSG2'),
+        ('ENSG3', 'ENSG3'),
+        ('ENSG1', 'P1'),
+        ('ENSG2', 'P2'),
+        ('ENSG1', 'Q1'),
+    ]

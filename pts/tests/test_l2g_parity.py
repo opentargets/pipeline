@@ -18,15 +18,19 @@ could tell them apart. That mutation is covered instead by
 `test_l2g_predict.py::test_l2g_predict_keeps_a_row_scoring_exactly_at_the_threshold`, which derives
 its threshold from a score the model actually produced.
 
-Row-level SHAP parity is deliberately NOT asserted. Each of gentropy's 1000 Batch tasks drew its
-own unseeded background, so `shapBaseValue` varies across the baseline's own partitions: across
-all 200 partitions of `do/platform-2609-1`, 200 distinct base values from 0.028042 to 0.137713, a
-4.91x spread. Re-running gentropy would not reproduce it either. `explain_predictions` is
-therefore off, which is also what keeps this affordable.
+Row-level SHAP parity is deliberately NOT asserted, and `explain_predictions` is off, which is
+also what keeps this affordable. Releases made by gentropy Batch cannot serve as a SHAP reference:
+each of its 1000 tasks drew its own unseeded background, so `shapBaseValue` varied across the
+release's own partitions (200 distinct values on `do/platform-2609-1`, a 4.91x spread).
+`l2g_predict` writes one base value for the whole run, so a v4 release has a constant
+`shapBaseValue` and nothing about it is asserted here.
+
+The run must be a gentropy v4 release: its feature matrix, credible set and predictions keyed by
+`credibleSetId`, so pre-v4 runs such as `do/platform-2609-1` no longer qualify.
 
 Gated on an environment variable because it reads a multi-gigabyte GCS dataset:
 
-    L2G_PARITY_RUN=do/platform-2609-1 uv run --frozen pytest tests/test_l2g_parity.py -rxs
+    L2G_PARITY_RUN=<v4 run prefix> uv run --frozen pytest tests/test_l2g_parity.py -rxs
 """
 
 import os
@@ -73,38 +77,27 @@ def scored(tmp_path_factory) -> pl.DataFrame:
         None,
     )
     return pl.read_parquet(
-        f'{destination}/*.parquet', columns=['studyLocusId', 'geneId', 'score']
+        f'{destination}/*.parquet', columns=['credibleSetId', 'geneId', 'score']
     )
 
 
 @pytest.fixture(scope='module')
 def baseline() -> pl.DataFrame:
     return pl.read_parquet(
-        f'{BUCKET}/{RUN}/output/l2g_prediction/*.parquet', columns=['studyLocusId', 'geneId', 'score']
+        f'{BUCKET}/{RUN}/output/l2g_prediction/*.parquet', columns=['credibleSetId', 'geneId', 'score']
     )
 
 
 def test_scores_match_the_published_column(scored: pl.DataFrame, baseline: pl.DataFrame) -> None:
-    joined = baseline.join(scored, on=['studyLocusId', 'geneId'], how='inner', suffix='_new')
+    joined = baseline.join(scored, on=['credibleSetId', 'geneId'], how='inner', suffix='_new')
     assert joined.height == baseline.height, 'a published prediction has no row in the new path'
     delta = (joined['score'] - joined['score_new']).abs()
     assert float(delta.max()) < 1e-6, f'max |delta| = {delta.max()}'
 
 
 def test_the_row_set_at_threshold_matches(scored: pl.DataFrame, baseline: pl.DataFrame) -> None:
-    mine = scored.filter(pl.col('score') >= 0.05).select('studyLocusId', 'geneId')
-    theirs = baseline.select('studyLocusId', 'geneId')
+    mine = scored.filter(pl.col('score') >= 0.05).select('credibleSetId', 'geneId')
+    theirs = baseline.select('credibleSetId', 'geneId')
     assert mine.height == theirs.height
-    assert mine.join(theirs, on=['studyLocusId', 'geneId'], how='anti').height == 0
+    assert mine.join(theirs, on=['credibleSetId', 'geneId'], how='anti').height == 0
 
-
-def test_the_baselines_own_base_value_is_not_constant() -> None:
-    """Documents why row-level SHAP parity is not asserted anywhere in this file."""
-    values = pl.read_parquet(
-        f'{BUCKET}/{RUN}/output/l2g_prediction/*.parquet', columns=['shapBaseValue']
-    )['shapBaseValue'].unique()
-    assert values.len() > 1, 'baseline base value is constant; revisit the SHAP parity decision'
-    # Loose on purpose. The measured spread on `do/platform-2609-1` is 4.91x, but that number is
-    # one release's; the proposition under test is only that the baseline's base value is not
-    # usable as a reference, and 1.5x already establishes that on any release.
-    assert float(values.max()) / float(values.min()) > 1.5

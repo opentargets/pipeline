@@ -13,11 +13,18 @@ RAW_ENTITY_LUT = pl.Schema({
     'entityKind': pl.String,
 })
 
-#: OnToma's `EntityLUT`: the ids a normalised label or id maps to.
+#: OnToma's `EntityLUT`: the ids a normalised label or id maps to, with whether only an acronym synonym maps there.
 ENTITY_LUT = pl.Schema({
     'entityKind': pl.String,
     'entityType': pl.String,
     'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+    'entityIds': pl.List(
+        pl.Struct({
+            'entityId': pl.String,
+            'entitySource': pl.String,
+            'isAcronym': pl.Boolean,
+            'isAllowlistedAcronym': pl.Boolean,
+        })
+    ),
 })
 ENTITY_LUT_KEY = ('entityKind', 'entityType', 'entityLabelNormalised')

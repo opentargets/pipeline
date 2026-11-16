@@ -2,7 +2,9 @@
 environment_specs:
   - name: Prod
     vars:
-      data_bucket: gs://decode_data
+      # the release of 2026-09-16, copied into a dated run folder (see the README).
+      # Running the DAG again overwrites it.
+      data_bucket: gs://decode_data/prod/20260916T175627/output
       input_bucket: gs://decode_inputs
       gnomad_bucket: gs://gnomad_data_2
       gentropy_ref: '3.4.0-dev.15'

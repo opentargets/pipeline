@@ -307,7 +307,7 @@ def test_probes_data_collects_every_set_and_origin(tmp_path, flag):
     """Every PROBES_SETS column is read from the sheet, whatever type its flags have."""
     xlsx = _probes_xlsx(tmp_path / 'probes.xlsx', flag)
     if flag is True:
-        sheet = pl.read_excel(xlsx, sheet_name='PROBES', infer_schema_length=None)
+        sheet = pl.read_excel(xlsx, sheet_name='PROBES', engine='openpyxl', infer_schema_length=None)
         assert sheet.schema['experimental probe'] == pl.Boolean, 'the fixture must hold real booleans'
 
     rows = process_probes_data(xlsx)

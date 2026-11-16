@@ -16,11 +16,6 @@ def union(*exprs: pl.Expr) -> pl.Expr:
     return pl.concat_list(filled).list.unique(maintain_order=True)
 
 
-def tag(expr: pl.Expr, field: str, source: str) -> pl.Expr:
-    """Wrap each element of a string list as a `{field, source}` struct; null stays null."""
-    return expr.list.eval(pl.struct(pl.element().alias(field), pl.lit(source).alias('source')))
-
-
 def flatten_distinct(frame: pl.DataFrame, key: str, column: str) -> pl.DataFrame:
     """Per key, concatenate the distinct non-null lists of `column`, first occurrence first.
 

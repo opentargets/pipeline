@@ -1,15 +1,15 @@
 [
   {
     "id": "biomarkerList",
-    "description": "List of biomarkers associated with the biological model"
+    "description": "Biomarkers characterising the screened cell line (e.g. microsatellite instability status)"
   },
   {
     "id": "biomarkerList/description",
-    "description": "One biomarker for the model"
+    "description": "Value of the biomarker in the cell line"
   },
   {
     "id": "biomarkerList/name",
-    "description": "Short name of the biomarker"
+    "description": "Name of the biomarker"
   },
   {
     "id": "datasourceId",
@@ -21,11 +21,11 @@
   },
   {
     "id": "diseaseCellLines",
-    "description": "Cancer cell lines used to generate evidence"
+    "description": "Cancer cell lines in which the combinatorial CRISPR screen was performed"
   },
   {
     "id": "diseaseCellLines/id",
-    "description": "Cell type identifier in cell ontology or in cell model database"
+    "description": "Cell Model Passports identifier of the cell line (e.g. SIDM00616)"
   },
   {
     "id": "diseaseCellLines/name",
@@ -42,7 +42,7 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Cancer type of the screened cell lines"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -58,16 +58,12 @@
     "description": "Earliest data for the evidence"
   },
   {
-    "id": "geneInteractionType",
-    "description": "Description of the interaction between the two genes"
-  },
-  {
-    "id": "geneticInteractionPValue",
-    "description": "p-value of the genetic interaction test"
-  },
-  {
     "id": "geneticInteractionScore",
-    "description": "The strength of the genetic interaction. Directionality is captured as well: antagonistics < 0 < cooperative"
+    "description": "Strength of the genetic interaction between the target and the interacting target. Directionality is captured as well: antagonistic < 0 < cooperative"
+  },
+  {
+    "id": "geneticInteractionType",
+    "description": "Type of genetic interaction between the target and the interacting target (antagonistic or cooperative)"
   },
   {
     "id": "id",
@@ -76,31 +72,23 @@
   },
   {
     "id": "interactingTargetFromSourceId",
-    "description": "Identifer of the interacting target"
+    "description": "Gene symbol of the target knocked out together with the target in the combinatorial screen"
   },
   {
     "id": "interactingTargetRole",
-    "description": "Role of a target in the genetic interaction test"
-  },
-  {
-    "id": "phenotypicConsequenceFDR",
-    "description": "False discovery rate of the genetic test"
+    "description": "Role of the interacting target in the ENCORE screen design (e.g. 'Anchor', 'Library', 'Paralog', 'GIControl')"
   },
   {
     "id": "phenotypicConsequenceLogFoldChange",
-    "description": "Log 2 fold change of the cell survival"
+    "description": "Log 2 fold change of cell survival upon the combinatorial knockout"
   },
   {
     "id": "phenotypicConsequencePValue",
-    "description": "P-value of the the cell survival test"
-  },
-  {
-    "id": "projectDescription",
-    "description": "Description of the project that generated the data"
+    "description": "P-value of the cell survival change upon the combinatorial knockout"
   },
   {
     "id": "projectId",
-    "description": "The identifer of the project that generated the data"
+    "description": "Open Targets (OTAR) project code of the ENCORE project"
   },
   {
     "id": "qualityControls",
@@ -108,23 +96,23 @@
   },
   {
     "id": "releaseDate",
-    "description": "Date of the release of the data in a 'YYYY-MM-DD' format"
+    "description": "Date of the ENCORE data release in a 'YYYY-MM-DD' format"
   },
   {
     "id": "releaseVersion",
-    "description": "Open Targets data release version"
+    "description": "Version of the ENCORE data release"
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the absolute genetic interaction score"
   },
   {
     "id": "statisticalMethod",
-    "description": "Statistical method used to calculate the association"
+    "description": "Statistical method used to calculate the genetic interaction score (e.g. 'HSA_Z')"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Gene symbol of the target as reported by ENCORE"
   },
   {
     "id": "targetId",
@@ -133,6 +121,26 @@
   },
   {
     "id": "targetRole",
-    "description": "Role of a target in the genetic interaction test"
+    "description": "Role of the target in the ENCORE screen design (e.g. 'Anchor', 'Library', 'Paralog', 'GIControl')"
+  },
+  {
+    "id": "validationReadouts",
+    "description": "Readouts of the validation screens of the genetic interaction"
+  },
+  {
+    "id": "validationReadouts/hsaValue",
+    "description": "Highest single agent (HSA) value of the genetic interaction in the validation readout"
+  },
+  {
+    "id": "validationReadouts/isValidated",
+    "description": "Whether the genetic interaction was validated by the readout"
+  },
+  {
+    "id": "validationReadouts/readoutMethodName",
+    "description": "Method of the validation readout (e.g. 'CTG', 'CellTox', 'Confluence')"
+  },
+  {
+    "id": "validationReadouts/screen",
+    "description": "Validation screen the readout comes from (e.g. 'V2')"
   }
 ]

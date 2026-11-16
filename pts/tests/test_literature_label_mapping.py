@@ -1,4 +1,4 @@
-"""Tests for literature label mapping with the polars disease mapping, checked against OnToma's output."""
+"""Tests for literature label mapping with the polars disease mapping, checked against golden outputs."""
 
 import shutil
 from pathlib import Path
@@ -59,7 +59,9 @@ def _map_labels(spark, rows: list[dict], lut_path: str, **kwargs) -> MatchMapped
 def _mapped_rows(mapped: MatchMapped) -> list[tuple]:
     rows = []
     for row in mapped.df.collect():
-        ids = None if row.entityIds is None else sorted((i.entityId, i.entitySource) for i in row.entityIds)
+        ids = (
+            None if row.entityIds is None else sorted((i.entityId, i.entitySource, i.isAcronym) for i in row.entityIds)
+        )
         rows.append((*(row[c] for c in KEY), row.entityLabelNormalised, ids, row.mappedId, row.isMapped))
     return rows
 
@@ -74,7 +76,7 @@ def _distinct_rows(mapped: pl.DataFrame) -> list[tuple]:
             label,
             entity_type,
             normalised,
-            None if ids is None else tuple((i['entityId'], i['entitySource']) for i in ids),
+            None if ids is None else tuple((i['entityId'], i['entitySource'], i['isAcronym']) for i in ids),
         )
         for label, entity_type, normalised, ids in mapped.rows()
     ])
@@ -84,7 +86,7 @@ def _expected_distinct(*pairs: tuple[str | None, str | None]) -> list[tuple]:
     return _sorted(list({(r[2], r[3], r[5], None if r[6] is None else tuple(r[6])) for r in MAPPED if r[2:4] in pairs}))
 
 
-def test_map_labels_matches_ontoma(spark, lut_path: str) -> None:
+def test_map_labels_matches_goldens(spark, lut_path: str) -> None:
     mapped = _map_labels(spark, match_rows(), lut_path)
     assert mapped.df.columns == [
         *Match.get_schema().fieldNames(),
@@ -117,7 +119,14 @@ def test_map_distinct_labels_one_row_per_spelling(lut: pl.DataFrame) -> None:
     pairs = (('Gaucher-Lefèvre disease', 'DS'), ('Ñandú kinase', 'GP'), ('Cystic fibrosis', 'DS'))
     mapped = map_distinct_labels(_labels(*pairs), lut)
     assert mapped.columns == ['label', 'type', 'entityLabelNormalised', 'entityIds']
-    assert mapped.schema['entityIds'] == pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String}))
+    assert mapped.schema['entityIds'] == pl.List(
+        pl.Struct({
+            'entityId': pl.String,
+            'entitySource': pl.String,
+            'isAcronym': pl.Boolean,
+            'isAllowlistedAcronym': pl.Boolean,
+        })
+    )
     rows = _distinct_rows(mapped)
     assert rows == _expected_distinct(*pairs)
     assert [(n, ids is None) for label, _, n, ids in rows if label == 'Gaucher-Lefèvre disease'] == [
@@ -177,7 +186,7 @@ def test_empty_normalised_label_unmapped(spark, lut: pl.DataFrame, lut_path: str
 def test_null_entity_id_is_unmapped(spark, lut_path: str) -> None:
     rows = [r for r in match_rows() if r['label'] == 'NOID']
     assert _mapped_rows(_map_labels(spark, rows, lut_path)) == [
-        ('1', 's2', 'NOID', 'GP', 9, 'noid', [(None, 'approved_symbol')], None, False)
+        ('1', 's2', 'NOID', 'GP', 9, 'noid', [(None, 'approved_symbol', False)], None, False)
     ]
 
 

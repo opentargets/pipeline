@@ -192,7 +192,13 @@ def _enrich(
         .with_columns(alteration=pl.coalesce('IndividualMutation', 'alteration'))
         .with_columns(alteration=_clean_alteration())
         .explode('source', keep_nulls=False)
-        .with_columns(source=regexp_extract(source, r'(PMID:[0-9]+)|([A-Za-z0-9_ ]+)', 0).str.strip_chars(' '))
+        # a citation with its own source entry (e.g. one abstract) keeps it, others fall back to the meeting
+        .with_columns(
+            source=pl
+            .when(source.is_in(sources['source'].implode()))
+            .then(source)
+            .otherwise(regexp_extract(source, r'(PMID:[0-9]+)|([A-Za-z0-9_ ]+)', 0).str.strip_chars(' '))
+        )
         .join(sources, on='source', how='left', maintain_order='left')
         .with_columns(
             literature=pl.when(source.str.starts_with('PMID')).then(regexp_extract(source, '(PMID:)([0-9]+)', 2)),

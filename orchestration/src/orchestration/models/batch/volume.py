@@ -5,7 +5,7 @@ from functools import cached_property
 from typing import Annotated
 
 from google.cloud import batch_v1
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from orchestration.utils.path import GCSPath
 
@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 class VolumeSpec(BaseModel):
     """Volume specification for Google Batch tasks."""
+
+    model_config = ConfigDict(extra='forbid')
 
     remote_uri: Annotated[str, Field(pattern=r'^gs://[a-zA-Z0-9_-]+(/[a-zA-Z0-9_.-]+)*/?$')]
     """GCS path to be mounted."""
@@ -56,6 +58,8 @@ class VolumeSpec(BaseModel):
 
 class VolumeRegistrySpec(BaseModel):
     """Volume registry for Google Batch tasks."""
+
+    model_config = ConfigDict(extra='forbid')
 
     mounting_points: list[VolumeSpec]
     """List of volume specifications for Google Batch tasks."""

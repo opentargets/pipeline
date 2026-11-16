@@ -8,7 +8,7 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pts.schemas.study import study_schema
+from pts.schemas.study import StudyType, study_schema
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -161,9 +161,9 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag study types other than GWAS or types ending in qtl."""
+    """Flag study types that are not one of `StudyType`, the gentropy study types."""
     logger.info('Validating study types')
-    supported = (pl.col('studyType') == 'gwas') | pl.col('studyType').str.ends_with('qtl')
+    supported = pl.col('studyType').is_in([study_type.value for study_type in StudyType])
     return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 
@@ -189,7 +189,10 @@ def validate_target(studies: pl.LazyFrame, target: pl.LazyFrame) -> pl.LazyFrame
 def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve foreground and background diseases and flag unresolved GWAS studies."""
     logger.info('Normalizing and validating study diseases')
-    result = studies.drop('diseaseIds', 'backgroundDiseaseIds')
+    # Some sources (gentropy v4 study index) already carry these columns; replace them, or the
+    # joins below would add `*_right` columns and leave the source values in place.
+    studies = studies.drop('diseaseIds', 'backgroundDiseaseIds', strict=False)
+    result = studies
     for source, destination in [
         ('traitFromSourceMappedIds', 'diseaseIds'),
         ('backgroundTraitFromSourceMappedIds', 'backgroundDiseaseIds'),
@@ -214,13 +217,15 @@ def validate_disease(studies: pl.LazyFrame, disease_map: pl.LazyFrame) -> pl.Laz
 def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.LazyFrame:
     """Resolve source biosample IDs and flag unmatched non-GWAS studies."""
     logger.info('Validating study biosamples')
+    # Replace a source `biosampleId` (gentropy v4 study index) with the resolved one.
+    studies = studies.drop('biosampleId', strict=False)
     lookup = biosample.select(
         pl.col('biosampleId').alias('biosampleFromSourceId'),
         'biosampleId',
         pl.lit(True).alias('_biosample_found'),
     )
     return flag_rows(
-        studies.drop('biosampleId').join(lookup, on='biosampleFromSourceId', how='left'),
+        studies.join(lookup, on='biosampleFromSourceId', how='left'),
         (pl.col('studyType') != 'gwas') & pl.col('_biosample_found').is_null(),
         QualityFlag.UNKNOWN_BIOSAMPLE,
     ).drop('_biosample_found')

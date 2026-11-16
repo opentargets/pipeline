@@ -69,6 +69,19 @@ class DiffOperator(BaseBranchOperator):
         self.impersonation_chain = impersonation_chain
         self.client: Client
 
+    @staticmethod
+    def upstream_steps_that_ran(task_instance: RuntimeTaskInstanceProtocol, steps_upstream: list[str]) -> list[str]:
+        """Return the steps recorded as run by the diff tasks of `steps_upstream`.
+
+        `xcom_pull` without `task_ids` reads only the calling task's own XComs, so the
+        upstream diff tasks must be named.
+        """
+        if not steps_upstream:
+            return []
+        task_ids = [f'{step}.diff_{step}' for step in steps_upstream]
+        pulled = task_instance.xcom_pull(key='steps_that_ran', task_ids=task_ids) or []
+        return [step for value in pulled if value for step in value]
+
     def choose_branch(self, context: Context) -> str | Iterable[str]:
         """Decide whether to run a step or not."""
         task_instance: RuntimeTaskInstanceProtocol | None = context.get('task_instance')
@@ -76,8 +89,8 @@ class DiffOperator(BaseBranchOperator):
             raise ValueError('task_instance not found in context')
 
         # check if any upstream step has run, if so, we must run this step
-        steps_that_ran = task_instance.xcom_pull(key='steps_that_ran') or []
         steps_upstream = self.config.step_definition(self.step_name).get('depends_on', [])
+        steps_that_ran = self.upstream_steps_that_ran(task_instance, steps_upstream)
         self.logger().info(f'checking if any of the upstream steps ({steps_upstream}) have run: {steps_that_ran}')
         if any(step in steps_that_ran for step in steps_upstream):
             self.logger().info(f'upstream step {steps_upstream} has run, forcing run of {self.step_name}')

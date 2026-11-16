@@ -1,6 +1,7 @@
 """Tests for the per-dataset recordset curation files and Pydantic models."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,15 @@ def test_distribution_ids_are_unique():
     ids = [e['id'] for e in entries]
     duplicates = [id_ for id_ in set(ids) if ids.count(id_) > 1]
     assert not duplicates, f'Duplicate distribution ids: {duplicates}'
+
+
+def test_chembl_bioactivity_names_the_chembl_release_the_pipeline_downloads():
+    """The release is in the description rather than in every row, so a ChEMBL bump must update it."""
+    pis_config = (Path(__file__).parents[2] / 'pis/config.yaml').read_text()
+    match = re.search(r"^\s*chembl_version:\s*'?(\d+)'?\s*$", pis_config, re.MULTILINE)
+    assert match, 'chembl_version not found in pis/config.yaml'
+    entries = {e['id']: e for e in json.loads((ASSETS_DIR / 'distribution.json').read_text())}
+    assert f'ChEMBL {match.group(1)} ' in entries['chembl_bioactivity']['description']
 
 
 # ---------------------------------------------------------------------------

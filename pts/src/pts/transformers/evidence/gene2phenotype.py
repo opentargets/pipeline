@@ -2,7 +2,7 @@
 
 Parses the Gene2Phenotype panels into evidence and post-processes it.
 Diseases are mapped with the OnToma lookup tables through `add_efo_mapping`, by label and by
-MONDO or OMIM id.
+MONDO or OMIM id, retrying the label of a disease neither maps in American spelling.
 """
 
 from __future__ import annotations

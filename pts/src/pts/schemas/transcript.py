@@ -3,6 +3,7 @@
 import polars as pl
 
 from pts.schemas.ensembl_core import exon
+from pts.schemas.target import ID_SOURCE
 
 __all__ = ['exon', 'flag', 'transcript']
 
@@ -18,6 +19,7 @@ transcript = pl.Schema({
     'uniprotTremblIds': pl.List(pl.String()),
     'uniprotIsoformIds': pl.List(pl.String()),
     'alphafoldIds': pl.List(pl.String()),
+    'dbXrefs': pl.List(ID_SOURCE),
     'isEnsemblCanonical': pl.Boolean(),
     'chromosome': pl.String(),
     'start': pl.Int64(),

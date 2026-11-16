@@ -1,11 +1,11 @@
 [
   {
     "id": "alleleOrigins",
-    "description": "Origin of the variant allele"
+    "description": "Origin of the variant allele; germline and somatic for all Orphanet associations"
   },
   {
     "id": "confidence",
-    "description": "Confidence qualifier on the reported evidence"
+    "description": "Orphanet assessment status of the gene-disease association ('Assessed', 'Not yet assessed')"
   },
   {
     "id": "datasourceId",
@@ -25,11 +25,11 @@
   },
   {
     "id": "diseaseFromSource",
-    "description": "Disease label from the original source"
+    "description": "Name of the Orphanet disorder"
   },
   {
     "id": "diseaseFromSourceId",
-    "description": "Disease identifier from the original source"
+    "description": "Orphanet identifier of the disorder"
   },
   {
     "id": "diseaseFromSourceMappedId",
@@ -51,7 +51,7 @@
   },
   {
     "id": "literature",
-    "description": "List of PubMed or preprint reference identifiers"
+    "description": "PubMed identifiers supporting the Orphanet gene-disease association"
   },
   {
     "id": "publicationDate",
@@ -63,15 +63,15 @@
   },
   {
     "id": "score",
-    "description": "Score of the evidence reflecting the strength of the disease/target relationship"
+    "description": "Score of the evidence reflecting the strength of the disease/target relationship, derived from the Orphanet assessment status"
   },
   {
     "id": "targetFromSource",
-    "description": "Target name/synonym or non HGNC symbol in resource of origin"
+    "description": "Gene name as reported by Orphanet"
   },
   {
     "id": "targetFromSourceId",
-    "description": "Target ID in resource of origin (accepted sources include Ensembl gene ID, Uniprot ID, gene symbol), only capital letters are accepted"
+    "description": "Ensembl gene identifier of the target as reported by Orphanet"
   },
   {
     "id": "targetId",
@@ -80,7 +80,7 @@
   },
   {
     "id": "variantFunctionalConsequenceId",
-    "description": "Sequence ontology (SO) identifier of the functional consequence of the variant [bioregistry:so]",
+    "description": "Sequence ontology (SO) identifier of the variant effect (loss or gain of function) derived from the Orphanet association type",
     "foreign_key": "so/id"
   }
 ]

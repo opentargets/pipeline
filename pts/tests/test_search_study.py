@@ -4,6 +4,7 @@ import polars as pl
 
 from pts.transformers.search.helpers import LIST_STR
 from pts.transformers.search.study import build_study_index, credible_set_counts
+from tests.credible_set_fixtures import published_credible_set
 
 STUDY_SCHEMA = {
     'studyId': pl.String,
@@ -35,7 +36,7 @@ def _targets():
 
 
 def _credible(rows):
-    return pl.LazyFrame(rows, schema={'studyId': pl.String})
+    return published_credible_set(*({'studyId': study_id} for study_id in rows['studyId'])).lazy()
 
 
 def test_study_index_carries_the_release_identity_columns() -> None:

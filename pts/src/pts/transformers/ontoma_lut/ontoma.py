@@ -5,7 +5,13 @@ from typing import Any
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, build_lut, disease_id_lut, disease_label_lut
+from pts.transformers.ontoma_lut.build import (
+    DISEASE_COLUMNS,
+    build_lut,
+    disease_id_lut,
+    disease_label_lut,
+    packaged_acronym_allowlist,
+)
 from pts.transformers.ontoma_lut.inputs import curation_label_luts, load_dataset
 from pts.transformers.utils.dataset import check_destinations_absent, write_dataset
 
@@ -30,7 +36,10 @@ def ontoma(
 
     logger.info(f'save disease label lookup table to {destination["disease_label_lut"]}')
     write_dataset(
-        build_lut([disease_label_lut(disease), *curation_label_luts(source, disease)]),
+        build_lut(
+            [disease_label_lut(disease), *curation_label_luts(source, disease)],
+            acronym_allowlist=packaged_acronym_allowlist(disease),
+        ),
         destination['disease_label_lut'],
     )
     logger.info(f'save disease id lookup table to {destination["disease_id_lut"]}')

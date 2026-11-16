@@ -1,26 +1,42 @@
-"""Tests for the polars port of `OnToma.map_entities` and of `add_efo_mapping`."""
+"""Tests for `map_entities` and `add_efo_mapping`."""
 
 from pathlib import Path
 
 import polars as pl
 import pytest
 
+from pts.schemas.ontoma_lut import ENTITY_LUT, RAW_ENTITY_LUT
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
+from pts.transformers.ontoma_lut.build import build_lut
 from pts.transformers.utils.disease_mapping import map_entities
+from pts.transformers.utils.disease_mapping.mapping import non_acronym_ids, read_entity_lut
 from pts.transformers.utils.disease_mapping.normalise import normalise_symbol, normalise_term
+from pts.transformers.utils.disease_mapping.query import spelling_variant
 
 LUT_SCHEMA = {
     'entityKind': pl.String,
     'entityType': pl.String,
     'entityLabelNormalised': pl.String,
-    'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+    'entityIds': pl.List(
+        pl.Struct({
+            'entityId': pl.String,
+            'entitySource': pl.String,
+            'isAcronym': pl.Boolean,
+            'isAllowlistedAcronym': pl.Boolean,
+        })
+    ),
 }
 
 
 def _lut(rows: list[tuple[str, str, str, list[tuple[str, str]]]]) -> pl.DataFrame:
     return pl.DataFrame(
         [
-            (kind, type_, label, [{'entityId': i, 'entitySource': s} for i, s in ids])
+            (
+                kind,
+                type_,
+                label,
+                [{'entityId': i, 'entitySource': s, 'isAcronym': False, 'isAllowlistedAcronym': False} for i, s in ids],
+            )
             for kind, type_, label, ids in rows
         ],
         schema=LUT_SCHEMA,
@@ -99,8 +115,21 @@ def test_include_flags() -> None:
     out = _map(df, include_normalised_entities=True, include_entity_source=True)
     assert out.columns == ['label', 'entityLabelNormalised', 'ids']
     assert sorted(out.select('entityLabelNormalised', 'ids').rows()) == sorted([
-        (normalise_term('Papillon-Lefevre syndrome'), [{'entityId': 'MONDO_0009859', 'entitySource': 'name'}]),
-        (normalise_term('Papillon-Lefèvre syndrome'), [{'entityId': 'EFO_0000001', 'entitySource': 'exact_synonym'}]),
+        (
+            normalise_term('Papillon-Lefevre syndrome'),
+            [{'entityId': 'MONDO_0009859', 'entitySource': 'name', 'isAcronym': False, 'isAllowlistedAcronym': False}],
+        ),
+        (
+            normalise_term('Papillon-Lefèvre syndrome'),
+            [
+                {
+                    'entityId': 'EFO_0000001',
+                    'entitySource': 'exact_synonym',
+                    'isAcronym': False,
+                    'isAllowlistedAcronym': False,
+                }
+            ],
+        ),
     ])
 
 
@@ -172,6 +201,22 @@ def lut_paths(tmp_path: Path) -> tuple[str, str]:
     return str(label), str(ids)
 
 
+def test_read_entity_lut_rejects_lut_without_is_acronym(tmp_path: Path) -> None:
+    old = pl.DataFrame(
+        [('label', 'DS', 'cf', [{'entityId': 'MONDO_1', 'entitySource': 'name'}])],
+        schema={
+            'entityKind': pl.String,
+            'entityType': pl.String,
+            'entityLabelNormalised': pl.String,
+            'entityIds': pl.List(pl.Struct({'entityId': pl.String, 'entitySource': pl.String})),
+        },
+        orient='row',
+    )
+    old.write_parquet(tmp_path / 'part-0.parquet')
+    with pytest.raises(ValueError, match=str(tmp_path)):
+        read_entity_lut(str(tmp_path))
+
+
 def test_add_efo_mapping_merges_label_and_id_mappings(lut_paths: tuple[str, str]) -> None:
     label_lut, id_lut = lut_paths
     evidence = pl.LazyFrame({
@@ -210,3 +255,138 @@ def test_add_efo_mapping_keeps_evidence_columns(lut_paths: tuple[str, str], with
     assert out.columns == [*evidence.collect_schema().names(), 'diseaseFromSourceMappedId']
     assert out['labelMappedResult'].to_list() == [['kept'], ['kept']]
     assert out['idMappedResult'].to_list() == [['kept too'], ['kept too']]
+
+
+def _acronym_lut() -> pl.LazyFrame:
+    raw = pl.DataFrame(
+        [
+            ('MONDO_1', 'CF', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+            ('MONDO_1', 'Cystic fibrosis', 1.0, 'term', 'name', 'DS', 'label'),
+            ('MONDO_1', 'MONDO:1', 1.0, 'symbol', 'id', 'DS', 'id'),
+        ],
+        schema=RAW_ENTITY_LUT,
+        orient='row',
+    )
+    return build_lut(
+        [raw], acronym_allowlist=pl.DataFrame(schema={'acronym': pl.String, 'diseaseId': pl.String})
+    ).lazy()
+
+
+def _structs(label: str, kind: str = 'label') -> list[dict] | None:
+    lf = pl.LazyFrame({'x': [label]})
+    out = map_entities(
+        lf, _acronym_lut(), 'ids', 'x', kind, type_col=pl.lit('DS'), include_entity_source=True
+    ).collect()
+    return out['ids'].to_list()[0]
+
+
+@pytest.mark.parametrize('label', ['CF', 'C.F.', '(CF)', '#CF', ' cf '])
+def test_spellings_of_an_acronym_hit_the_flagged_entry(label: str) -> None:
+    assert _structs(label) == [
+        {'entityId': 'MONDO_1', 'entitySource': 'exact_synonym', 'isAcronym': True, 'isAllowlistedAcronym': False}
+    ]
+
+
+def test_full_name_is_not_flagged() -> None:
+    assert _structs('cystic fibrosis') == [
+        {'entityId': 'MONDO_1', 'entitySource': 'name', 'isAcronym': False, 'isAllowlistedAcronym': False}
+    ]
+
+
+def test_id_queries_never_flagged() -> None:
+    found = _structs('MONDO:1', kind='id')
+    assert found
+    assert all(not entry['isAcronym'] for entry in found)
+
+
+def test_without_entity_source_ids_are_bare() -> None:
+    lf = pl.LazyFrame({'x': ['CF']})
+    out = map_entities(lf, _acronym_lut(), 'ids', 'x', 'label', type_col=pl.lit('DS')).collect()
+    assert out['ids'].to_list() == [['MONDO_1']]
+
+
+def test_non_acronym_ids() -> None:
+    def entry(i: str, source: str, flag: bool | None) -> dict:
+        return {'entityId': i, 'entitySource': source, 'isAcronym': flag, 'isAllowlistedAcronym': False}
+
+    structs = pl.Series(
+        [
+            [entry('A', 's', True), entry('B', 's', False), entry('B', 't', False)],
+            [entry('A', 's', True)],
+            [entry('C', 's', None), entry('A', 's', True)],
+            None,
+            [],
+        ],
+        dtype=ENTITY_LUT['entityIds'],
+    )
+    out = pl.DataFrame({'s': structs}).select(non_acronym_ids(pl.col('s')))['s'].to_list()
+    assert out == [['B'], None, ['C'], None, None]
+
+
+SPELLING_LUT = _lut([
+    ('label', 'DS', normalise_term('chronic myeloid leukemia'), [('MONDO_0011996', 'name')]),
+    ('label', 'DS', normalise_term('coronavirus disease 2019'), [('MONDO_0100096', 'name')]),
+    ('label', 'DS', normalise_term('diabetes'), [('EFO_0000400', 'name')]),
+    ('label', 'DS', normalise_term('anaemia'), [('EFO_BRITISH', 'exact_synonym')]),
+    ('label', 'DS', normalise_term('anemia'), [('EFO_AMERICAN', 'name')]),
+])
+
+
+def _map_variants(labels: list[str | None], **kwargs) -> list[list[str] | None]:
+    df = pl.DataFrame({'label': labels}, schema={'label': pl.String})
+    out = map_entities(df.lazy(), SPELLING_LUT.lazy(), 'ids', 'label', 'label', type_col=pl.lit('DS'), **kwargs)
+    return out.collect()['ids'].to_list()
+
+
+def test_spelling_variants_can_be_turned_off() -> None:
+    labels = ['Chronic Myeloid Leukaemia', 'coronavirus disease 2019 (COVID-19)']
+    assert _map_variants(labels, spelling_variants=False) == [None, None]
+
+
+def test_spelling_variants_are_on_by_default() -> None:
+    assert _map_variants(['Chronic Myeloid Leukaemia']) == [['MONDO_0011996']]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('Chronic Myeloid Leukaemia', ['MONDO_0011996']),
+        ('coronavirus disease 2019 (COVID-19)', ['MONDO_0100096']),
+        ('chronic myeloid leukaemia (CML)', ['MONDO_0011996']),
+    ],
+)
+def test_spelling_variants_map_british_spellings_and_bracketed_acronyms(label: str, expected: list[str]) -> None:
+    assert _map_variants([label], spelling_variants=True) == [expected]
+
+
+def test_spelling_variants_keep_brackets_of_several_words() -> None:
+    assert _map_variants(['diabetes (type 2)'], spelling_variants=True) == [None]
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('(T2D) diabetes', '(T2D) diabetes'),
+        (' (CML) leukaemia', '(CML) leukemia'),
+        (') (COVID-19) infection', ') (COVID-19) infection'),
+        ('-insulin-dependent (type-2) diabetes', '-insulin-dependent (type-2) diabetes'),
+    ],
+)
+def test_spelling_variant_keeps_brackets_of_a_label_not_opening_with_a_word(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('peroxisome biogenesis disorder 13A (Zellweger) (biallelic)', 'peroxisome biogenesis disorder 13A'),
+        ('Chronic Otitis Media(COM) media', 'Chronic Otitis Media media'),
+        ('coronavirus disease 2019 (COVID-19)', 'coronavirus disease 2019'),
+    ],
+)
+def test_spelling_variant_removes_brackets_after_text(label: str, expected: str) -> None:
+    assert pl.select(spelling_variant(pl.lit(label))).item() == expected
+
+
+def test_spelling_variants_are_only_tried_when_the_label_finds_nothing() -> None:
+    assert _map_variants(['anaemia', None, 'unknown disease'], spelling_variants=True) == [['EFO_BRITISH'], None, None]

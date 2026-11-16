@@ -415,6 +415,26 @@ def test_output_schema_is_published(tmp_path: Path) -> None:
     assert out['variantAnnotation'].to_list()[0][0]['baseAlleleOrGenotype'] == 'C'
 
 
+def test_electronic_mechanism_makes_the_gene_a_direct_target(tmp_path: Path) -> None:
+    """CHEMBL85 has only an electronic mechanism; its target is still a direct target."""
+    source = _write_inputs(
+        tmp_path / 'in',
+        [CLINPGX_RECORD],
+        [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}],
+    )
+    electronic = pl.DataFrame(
+        [(['CHEMBL85'], ['ENSG00000117152'], 'electronic')],
+        schema=MOA_SCHEMA | {'curation': pl.String},
+        orient='row',
+    )
+    electronic.write_parquet(tmp_path / 'in' / 'moa' / 'part-0.parquet')
+    destination = _destination(tmp_path)
+    pharmacogenetics(source, destination, {}, None)
+    out = _read_output(destination['associations'])
+    assert out['isDirectTarget'].to_list() == [True]
+    assert out['drugs'].to_list() == [[{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}]]
+
+
 def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
     source = _write_inputs(tmp_path / 'in', [], [])
     destination = _destination(tmp_path)

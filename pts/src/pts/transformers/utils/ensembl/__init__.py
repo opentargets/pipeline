@@ -5,7 +5,9 @@ from pts.transformers.utils.ensembl.queries import (
     CANONICAL_CHROMOSOMES,
     gene_names,
     genes,
+    transcript_rnacentral,
     transcripts,
+    translation_uniprot,
     translation_xrefs,
 )
 
@@ -15,6 +17,8 @@ __all__ = [
     'CoreDumpError',
     'gene_names',
     'genes',
+    'transcript_rnacentral',
     'transcripts',
+    'translation_uniprot',
     'translation_xrefs',
 ]

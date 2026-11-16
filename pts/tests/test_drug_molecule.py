@@ -1,16 +1,21 @@
 """Tests for the drug_molecule transformer."""
 
+from unittest.mock import Mock
+
 import polars as pl
 import pytest
+from otter.config.model import Config
 
 from pts.schemas.disease import schema as disease_index_schema
 from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
 from pts.transformers.drug_molecule import (
-    _compute_max_phase_per_drug,
     _generate_description,
     _join_semantic,
     _process_clinical_report_indications,
+    compute_max_phase_per_drug,
+    drug_molecule,
     process_drug_index,
+    roll_up_to_parents,
 )
 
 # --- Schemas used to build test DataFrames ---
@@ -170,20 +175,20 @@ def _by_id(frame: pl.DataFrame, column: str) -> dict:
     return dict(zip(frame['id'].to_list(), frame[column].to_list(), strict=True))
 
 
-# --- Tests for _compute_max_phase_per_drug ---
+# --- Tests for compute_max_phase_per_drug ---
 
 
 class TestComputeMaxPhasePerDrug:
     def test_basic_max_phase(self, clinical_report_df):
         """CHEMBL1 has APPROVAL and PHASE_3, so the max is APPROVAL."""
-        stages = _by_id(_compute_max_phase_per_drug(clinical_report_df), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(clinical_report_df), 'maximumClinicalStage')
         assert stages['CHEMBL1'] == 'APPROVAL'
         assert stages['CHEMBL2'] == 'PHASE_3'
         assert stages['CHEMBL3'] == 'PHASE_1'
 
     def test_null_drug_ids_are_excluded(self, clinical_report_df):
         """Drugs with a null drugId should not appear in the results."""
-        result = _compute_max_phase_per_drug(clinical_report_df)
+        result = compute_max_phase_per_drug(clinical_report_df)
         assert result['id'].null_count() == 0
         assert 'CHEMBL_MISSING' not in result['id'].to_list()
 
@@ -195,7 +200,7 @@ class TestComputeMaxPhasePerDrug:
             schema=CLINICAL_REPORT_SCHEMA,
             orient='row',
         )
-        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(report), 'maximumClinicalStage')
         assert stages['CHEMBL_W'] == 'APPROVAL'
 
     def test_unrecognised_stage_falls_back_to_unknown(self):
@@ -205,8 +210,53 @@ class TestComputeMaxPhasePerDrug:
             schema=CLINICAL_REPORT_SCHEMA,
             orient='row',
         )
-        stages = _by_id(_compute_max_phase_per_drug(report), 'maximumClinicalStage')
+        stages = _by_id(compute_max_phase_per_drug(report), 'maximumClinicalStage')
         assert stages['CHEMBL_U'] == 'UNKNOWN'
+
+
+# --- Tests for roll_up_to_parents ---
+
+
+def _stages(rows):
+    return pl.DataFrame(rows, schema={'id': pl.String, 'maximumClinicalStage': pl.String}, orient='row')
+
+
+def _family(rows):
+    return pl.DataFrame(rows, schema={'id': pl.String, 'parentId': pl.String}, orient='row')
+
+
+class TestRollUpToParents:
+    def test_parent_takes_the_best_stage_of_its_family(self):
+        stages = _stages([('P', 'UNKNOWN'), ('SALT', 'APPROVAL'), ('HYDRATE', 'PHASE_3')])
+        family = _family([('P', None), ('SALT', 'P'), ('HYDRATE', 'P')])
+        assert _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')['P'] == 'APPROVAL'
+
+    def test_children_keep_their_own_stage(self):
+        stages = _stages([('P', 'APPROVAL'), ('SALT', 'PHASE_3')])
+        family = _family([('P', None), ('SALT', 'P')])
+        rolled = _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')
+        assert rolled == {'P': 'APPROVAL', 'SALT': 'PHASE_3'}
+
+    def test_parent_without_reports_gets_its_childs_stage(self):
+        stages = _stages([('SALT', 'PHASE_2')])
+        family = _family([('P', None), ('SALT', 'P')])
+        rolled = _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')
+        assert rolled == {'P': 'PHASE_2', 'SALT': 'PHASE_2'}
+
+    def test_parent_better_than_its_children_keeps_its_stage(self):
+        stages = _stages([('P', 'APPROVAL'), ('SALT', 'PHASE_1')])
+        family = _family([('P', 'P'), ('SALT', 'P')])
+        assert _by_id(roll_up_to_parents(stages, family), 'maximumClinicalStage')['P'] == 'APPROVAL'
+
+    def test_ids_outside_the_molecules_keep_their_stage(self):
+        stages = _stages([('ORPHAN', 'PHASE_1')])
+        rolled = _by_id(roll_up_to_parents(stages, _family([('P', None)])), 'maximumClinicalStage')
+        assert rolled == {'ORPHAN': 'PHASE_1'}
+
+    def test_one_row_per_id(self):
+        stages = _stages([('P', 'PHASE_1'), ('A', 'APPROVAL'), ('B', 'PHASE_2')])
+        family = _family([('P', None), ('A', 'P'), ('B', 'P')])
+        assert roll_up_to_parents(stages, family)['id'].sort().to_list() == ['A', 'B', 'P']
 
 
 # --- Tests for _process_clinical_report_indications ---
@@ -414,6 +464,44 @@ class TestProcessDrugIndex:
         assert stages['CHEMBL888'] == 'UNKNOWN'
         assert drug_index_result['maximumClinicalStage'].null_count() == 0
 
+    def test_drug_with_only_an_electronic_mechanism_qualifies(
+        self, molecule_df, chemical_probes_df, clinical_report_df, disease_df
+    ):
+        """CHEMBL999 has no drugbank xref, report or probe; an electronic mechanism makes it a drug."""
+        mechanisms = pl.DataFrame(
+            [
+                {'chemblIds': ['CHEMBL1'], 'actionType': 'INHIBITOR', 'curation': 'manual'},
+                {'chemblIds': ['CHEMBL999'], 'actionType': 'INHIBITOR', 'curation': 'electronic'},
+            ],
+            schema={**MECHANISM_SCHEMA, 'curation': pl.String},
+            orient='row',
+        )
+        result = process_drug_index(molecule_df.lazy(), chemical_probes_df, mechanisms, clinical_report_df, disease_df)
+        assert 'CHEMBL999' in result['id'].to_list()
+        assert _by_id(result, 'maximumClinicalStage')['CHEMBL999'] == 'UNKNOWN'
+        assert dict(result.schema) == drug_molecule_schema
+
+    def test_parent_stage_is_rolled_up_from_its_salt(self, chemical_probes_df, mechanism_df, disease_df):
+        drugbank = [{'source': 'drugbank', 'ids': ['DB1']}]
+        molecules = pl.DataFrame(
+            [
+                _molecule('CHEMBL_P', parentId=None, childChemblIds=['CHEMBL_S'], crossReferences=drugbank),
+                _molecule('CHEMBL_S', parentId='CHEMBL_P'),
+            ],
+            schema=MOLECULE_SCHEMA,
+            orient='row',
+        )
+        reports = pl.DataFrame(
+            [
+                _report('r1', 'APPROVAL', [('Salt', 'CHEMBL_S')], [('Disease X', 'EFO_0001')]),
+                _report('r2', 'PHASE_2', [('Parent', 'CHEMBL_P')], [('Disease Y', 'EFO_0002')]),
+            ],
+            schema=CLINICAL_REPORT_SCHEMA,
+            orient='row',
+        )
+        result = process_drug_index(molecules.lazy(), chemical_probes_df, mechanism_df, reports, disease_df)
+        assert _by_id(result, 'maximumClinicalStage') == {'CHEMBL_P': 'APPROVAL', 'CHEMBL_S': 'APPROVAL'}
+
     def test_output_matches_the_declared_schema(self, drug_index_result):
         assert dict(drug_index_result.schema) == drug_molecule_schema
 
@@ -438,3 +526,47 @@ class TestProcessDrugIndex:
         molblocks = _by_id(drug_index_result, 'molblock')
         assert molblocks['CHEMBL1'] == 'MOLBLOCK_CHEMBL1'
         assert molblocks['CHEMBL2'] is None
+
+
+# --- Tests for the drug_molecule step ---
+
+
+def test_step_excludes_reports_with_an_invalid_qc_flag(
+    tmp_path, molecule_df, chemical_probes_df, mechanism_df, clinical_report_df, disease_df
+):
+    """A report with a listed flag goes to `excluded` and sets no stage; an unlisted flag keeps the report."""
+    flagged = _report(
+        'flagged', 'PHASE_4', [('Drug C', 'CHEMBL3')], [('Disease X', 'EFO_0001')], ['PHASE_IV_NOT_APPROVED']
+    )
+    unlisted = _report('unlisted', 'PHASE_4', [('Drug B', 'CHEMBL2')], [('Disease Y', 'EFO_0002')], ['NO_DISEASE'])
+    reports = pl.concat([
+        clinical_report_df,
+        pl.DataFrame([flagged, unlisted], schema=CLINICAL_REPORT_SCHEMA, orient='row'),
+    ])
+    frames = {
+        'molecule': molecule_df,
+        'chemical_probes': chemical_probes_df,
+        'mechanism_of_action': mechanism_df,
+        'clinical_report': reports,
+        'disease': disease_df,
+    }
+    source = {}
+    for name, frame in frames.items():
+        path = tmp_path / f'{name}.parquet'
+        frame.write_parquet(path)
+        source[name] = str(path)
+    destination = {'output': str(tmp_path / 'output'), 'excluded': str(tmp_path / 'excluded')}
+
+    drug_molecule(
+        source=source,
+        destination=destination,
+        settings={'invalid_clinical_report_qc': ['PHASE_IV_NOT_APPROVED']},
+        config=Mock(spec=Config),
+    )
+
+    output = pl.read_parquet(list((tmp_path / 'output').glob('*.parquet')))
+    excluded = pl.read_parquet(list((tmp_path / 'excluded').glob('*.parquet')))
+    assert excluded['id'].to_list() == ['flagged']
+    stages = _by_id(output, 'maximumClinicalStage')
+    assert stages['CHEMBL3'] == 'PHASE_1'
+    assert stages['CHEMBL2'] == 'APPROVAL'
