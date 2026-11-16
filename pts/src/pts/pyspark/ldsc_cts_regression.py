@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -60,6 +62,41 @@ _REQUIRED_SUMSTATS_COLUMNS = {
     'standardError',
     'sampleSize',
 }
+_REGRESSION_DEFAULT_PROPERTIES = {
+    'spark.driver.userClassPathFirst': 'true',
+    'spark.executor.userClassPathFirst': 'true',
+}
+
+
+def _configure_local_driver_memory(properties: dict[str, str]) -> None:
+    driver_memory = properties.get('spark.driver.memory')
+    if not driver_memory:
+        return
+
+    submit_args = shlex.split(os.environ.get('PYSPARK_SUBMIT_ARGS', ''))
+    filtered_args: list[str] = []
+    index = 0
+    while index < len(submit_args):
+        argument = submit_args[index]
+        if argument == '--driver-memory':
+            index += 2
+            continue
+        if argument.startswith('--driver-memory=') or argument == 'pyspark-shell':
+            index += 1
+            continue
+        filtered_args.append(argument)
+        index += 1
+    filtered_args.extend(['--driver-memory', str(driver_memory), 'pyspark-shell'])
+    os.environ['PYSPARK_SUBMIT_ARGS'] = shlex.join(filtered_args)
+
+
+def _effective_regression_properties(
+    properties: dict[str, str], spark_uri: str
+) -> dict[str, str]:
+    effective = {**_REGRESSION_DEFAULT_PROPERTIES, **properties}
+    if spark_uri.startswith('local'):
+        effective['spark.hadoop.fs.gs.requester.pays.mode'] = 'AUTO'
+    return effective
 
 
 @dataclass(frozen=True)
@@ -100,10 +137,13 @@ def ldsc_cts_regression(
     runs one grouped Pandas regression per study on Spark workers.
     """
     spark_uri = str(settings.get('spark_uri', 'local[*]'))
+    effective_properties = _effective_regression_properties(properties, spark_uri)
+    if spark_uri.startswith('local'):
+        _configure_local_driver_memory(effective_properties)
     session = Session(
         app_name='ldsc_cts_regression',
         spark_uri=spark_uri,
-        properties=properties,
+        properties=effective_properties,
     )
     spark = session.spark
 
@@ -175,8 +215,10 @@ def ldsc_cts_regression(
                         study,
                         specificity_id,
                         [
-                            f'No complete annotation reference for inferred ancestry '
-                            f'{study.ancestry}'
+                            (
+                                f'No complete annotation reference for inferred ancestry '
+                                f'{study.ancestry}'
+                            )
                         ],
                     )
                 )
@@ -317,6 +359,28 @@ def _resolve_root_dataset_ids(
 ) -> list[tuple[str, str]]:
     resolved: list[tuple[str, str]] = []
     for candidate, path in entries:
+        partition_name = path.rstrip('/').rsplit('/', 1)[-1]
+        partition_id = (
+            partition_name.removeprefix('studyId=')
+            if partition_name.startswith('studyId=')
+            else None
+        )
+        if partition_id is not None:
+            if candidate is not None and str(candidate) != partition_id:
+                if discovery_issues is not None:
+                    candidate_id = str(candidate)
+                    resolved.append((candidate_id, path))
+                    discovery_issues[candidate_id] = (
+                        f'Summary-statistics directory ID {candidate_id} does not match '
+                        f'partition studyId {partition_id}'
+                    )
+                    continue
+                raise ValueError(
+                    f'Summary-statistics directory ID {candidate} does not match '
+                    f'partition studyId {partition_id} in {path}'
+                )
+            resolved.append((partition_id, path))
+            continue
         try:
             raw_ids = [
                 row['studyId']
@@ -523,17 +587,19 @@ def _read_sumstats_batch(
     root: str,
 ) -> tuple[DataFrame | None, list[tuple[str, str]]]:
     paths = [path for _, path in entries]
-    raw = spark.read.parquet(*paths)
-    missing = _REQUIRED_SUMSTATS_COLUMNS - set(raw.columns)
-    if missing:
-        reason = f'Summary statistics are missing required columns: {sorted(missing)}'
-        return None, [(study_id, reason) for study_id, _ in entries]
+    raw = _normalise_munged_sumstats_columns(spark.read.parquet(*paths))
 
-    pattern = re.escape(root.rstrip('/')) + r'/([^/]+)/'
+    pattern = re.escape(root.rstrip('/')) + r'/(?:studyId=)?([^/]+)/'
     source_id = f.regexp_extract(f.input_file_name(), pattern, 1)
     if len(entries) == 1:
         source_id = f.when(source_id == '', f.lit(entries[0][0])).otherwise(source_id)
     raw = raw.withColumn('_sourceStudyId', source_id)
+    if 'studyId' not in raw.columns:
+        raw = raw.withColumn('studyId', f.col('_sourceStudyId'))
+    missing = _REQUIRED_SUMSTATS_COLUMNS - set(raw.columns)
+    if missing:
+        reason = f'Summary statistics are missing required columns: {sorted(missing)}'
+        return None, [(study_id, reason) for study_id, _ in entries]
     pairs = raw.select('_sourceStudyId', 'studyId').distinct().collect()
     by_source: dict[str, set[str]] = defaultdict(set)
     for row in pairs:
@@ -551,8 +617,10 @@ def _read_sumstats_batch(
             issues.append(
                 (
                     source_value,
-                    f'Summary-statistics dataset contains study IDs {sorted(actual)}; '
-                    f'expected exactly {source_value}',
+                    (
+                        f'Summary-statistics dataset contains study IDs {sorted(actual)}; '
+                        f'expected exactly {source_value}'
+                    ),
                 )
             )
     valid = raw.filter(~f.col('_sourceStudyId').isin(sorted(invalid_sources)))
@@ -561,10 +629,31 @@ def _read_sumstats_batch(
 
 def _read_sumstats(spark: SparkSession, path: str) -> DataFrame:
     """Read one completed summary-statistics dataset (compatibility helper)."""
-    return _normalise_sumstats_frame(spark.read.parquet(path))
+    return _normalise_sumstats_frame(_normalise_munged_sumstats_columns(spark.read.parquet(path)))
+
+
+def _normalise_munged_sumstats_columns(raw: DataFrame) -> DataFrame:
+    aliases = {
+        'variantId': ('variantKey',),
+        'standardError': ('se',),
+        'sampleSize': ('n', 'N'),
+    }
+    for target, sources in aliases.items():
+        if target not in raw.columns:
+            source = next((column for column in sources if column in raw.columns), None)
+            if source is not None:
+                raw = raw.withColumn(target, f.col(source))
+    if 'variantId' in raw.columns:
+        parts = f.split(f.col('variantId').cast('string'), '_')
+        if 'chromosome' not in raw.columns:
+            raw = raw.withColumn('chromosome', parts.getItem(0))
+        if 'position' not in raw.columns:
+            raw = raw.withColumn('position', parts.getItem(1).cast('long'))
+    return raw
 
 
 def _normalise_sumstats_frame(raw: DataFrame) -> DataFrame:
+    raw = _normalise_munged_sumstats_columns(raw)
     missing = _REQUIRED_SUMSTATS_COLUMNS - set(raw.columns)
     if missing:
         raise ValueError(f'Summary statistics are missing required columns: {sorted(missing)}')
@@ -725,9 +814,17 @@ def _join_and_regress_batch(
         CONTROL_ANNOTATION,
         *cell_types,
     ]
-    selected = joined.select(*[quoted_col(column).alias(column) for column in select_columns])
+    internal_columns = {
+        column: f'_ldsc_input_{index}' for index, column in enumerate(select_columns)
+    }
+    selected = joined.select(
+        *[quoted_col(column).alias(internal_columns[column]) for column in select_columns]
+    )
 
     def regress_group(pdf: pd.DataFrame) -> pd.DataFrame:
+        pdf = pdf.rename(
+            columns={internal: original for original, internal in internal_columns.items()}
+        )
         study_id = str(pdf['studyId'].iloc[0])
         if len(pdf) > max_rows:
             return pd.DataFrame([_group_skip_row(study_id, 'Too many joined SNPs for collection')])
@@ -768,7 +865,7 @@ def _join_and_regress_batch(
             ]
         )
 
-    metrics = selected.groupBy('studyId').applyInPandas(
+    metrics = selected.groupBy(internal_columns['studyId']).applyInPandas(
         regress_group,
         schema=_GROUP_RESULT_SCHEMA,
     )

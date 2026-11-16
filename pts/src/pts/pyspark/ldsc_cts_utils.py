@@ -14,6 +14,7 @@ import pyspark.sql.functions as f
 from pyspark.sql import DataFrame, SparkSession
 
 _ANCESTRY_RE = re.compile(r'\.([a-z0-9]+)\.common\.adj\.ld\.bm$')
+_STUDY_PARTITION_RE = re.compile(r'^studyId=(.+)$')
 _REQUIRED_EDGE_OPTIONS = (
     '--ld-bm-path',
     '--chromosome',
@@ -245,6 +246,18 @@ def success_exists(spark: SparkSession, path: str) -> bool:
     return bool(fs.exists(hadoop_path))
 
 
+def _is_directory(spark: SparkSession, path: str) -> bool:
+    if '://' not in path:
+        return Path(path).is_dir()
+    hadoop_path, fs = _hadoop_filesystem(spark, path)
+    return bool(fs.exists(hadoop_path) and fs.getFileStatus(hadoop_path).isDirectory())
+
+
+def _partitioned_study_id(name: str) -> str | None:
+    match = _STUDY_PARTITION_RE.fullmatch(name)
+    return match.group(1) if match else None
+
+
 def discover_completed_study_paths(
     spark: SparkSession,
     root: str,
@@ -252,10 +265,10 @@ def discover_completed_study_paths(
 ) -> list[tuple[str | None, str]]:
     """Discover completed one-study datasets beneath a local or GCS root.
 
-    The normal layout is ``root/<studyId>/_SUCCESS``. A root which is itself a
-    completed dataset is also accepted when exactly one ``study_ids`` filter is
-    supplied; this keeps small local fixtures convenient without weakening the
-    production one-study-per-child invariant.
+    The normal layout is ``root/<studyId>/_SUCCESS``. Published munged LDSC
+    data can instead use ``root/studyId=<studyId>/`` without child success
+    markers. A root which is itself a completed dataset is also accepted when
+    exactly one ``study_ids`` filter is supplied.
     """
     root = root.rstrip('/')
     requested = [str(value).strip() for value in study_ids or [] if str(value).strip()]
@@ -269,6 +282,8 @@ def discover_completed_study_paths(
             path = f'{root}/{study_id}'
             if success_exists(spark, path):
                 entries.append((study_id, path))
+            elif _is_directory(spark, f'{root}/studyId={study_id}'):
+                entries.append((study_id, f'{root}/studyId={study_id}'))
             elif len(requested) == 1 and success_exists(spark, root):
                 entries.append((study_id, root))
             else:
@@ -283,9 +298,10 @@ def discover_completed_study_paths(
             raise FileNotFoundError(f'Summary-statistics root does not exist: {root}')
         children = [(child.name, str(child)) for child in sorted(root_path.iterdir()) if child.is_dir()]
         entries = [
-            (name, path)
+            (_partitioned_study_id(name) or name, path)
             for name, path in children
-            if not name.startswith('_') and success_exists(spark, path)
+            if not name.startswith('_')
+            and (success_exists(spark, path) or _partitioned_study_id(name) is not None)
         ]
     else:
         hadoop_root, fs = _hadoop_filesystem(spark, root)
@@ -298,8 +314,11 @@ def discover_completed_study_paths(
             child = status.getPath()
             name = str(child.getName())
             path = str(child)
-            if not name.startswith('_') and success_exists(spark, path):
-                entries.append((name, path))
+            partitioned_id = _partitioned_study_id(name)
+            if not name.startswith('_') and (
+                partitioned_id is not None or success_exists(spark, path)
+            ):
+                entries.append((partitioned_id or name, path))
         entries.sort(key=lambda item: item[0])
 
     if not entries and success_exists(spark, root):

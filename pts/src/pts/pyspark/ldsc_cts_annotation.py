@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 from dataclasses import dataclass
 from typing import Any
 
 import pyspark.sql.functions as f
 from gentropy.method.ldsc import (
+    CONTROL_ANNOTATION,
     build_snp_annotations,
-    compute_annotation_ld_scores,
     map_genes_to_variants,
     melt_specificity_matrix,
 )
@@ -40,6 +42,38 @@ class _SpecificityContext:
     dataset_id: str
     specificity_long: DataFrame
     gene_locations: DataFrame
+    annotation_names: list[str]
+
+
+def _annotation_batches(annotation_names: list[str], batch_size: int) -> list[list[str]]:
+    if batch_size < 1:
+        raise ValueError('annotation_batch_size must be at least 1')
+    return [
+        annotation_names[index : index + batch_size]
+        for index in range(0, len(annotation_names), batch_size)
+    ]
+
+
+def _configure_local_driver_memory(properties: dict[str, str]) -> None:
+    driver_memory = properties.get('spark.driver.memory')
+    if not driver_memory:
+        return
+
+    submit_args = shlex.split(os.environ.get('PYSPARK_SUBMIT_ARGS', ''))
+    filtered_args: list[str] = []
+    index = 0
+    while index < len(submit_args):
+        argument = submit_args[index]
+        if argument == '--driver-memory':
+            index += 2
+            continue
+        if argument.startswith('--driver-memory=') or argument == 'pyspark-shell':
+            index += 1
+            continue
+        filtered_args.append(argument)
+        index += 1
+    filtered_args.extend(['--driver-memory', str(driver_memory), 'pyspark-shell'])
+    os.environ['PYSPARK_SUBMIT_ARGS'] = shlex.join(filtered_args)
 
 
 def ldsc_cts_annotation(
@@ -56,6 +90,8 @@ def ldsc_cts_annotation(
     specificity dataset is scored against that edge set before it is released.
     """
     spark_uri = str(settings.get('spark_uri', 'local[*]'))
+    if spark_uri.startswith('local'):
+        _configure_local_driver_memory(properties)
     session = Session(
         app_name='ldsc_cts_annotations',
         spark_uri=spark_uri,
@@ -110,7 +146,14 @@ def ldsc_cts_annotation(
                     pending = [
                         context
                         for context in contexts
-                        if not _annotation_complete(output_root, context.dataset_id, population, chromosome, spark)
+                        if not _annotation_complete(
+                            output_root,
+                            context.dataset_id,
+                            population,
+                            chromosome,
+                            spark,
+                            expected_annotation_count=len(context.annotation_names),
+                        )
                     ]
                     if not pending:
                         catalog_records.extend(
@@ -146,18 +189,21 @@ def ldsc_cts_annotation(
                                 population=population,
                                 settings=settings,
                             )
-                            catalog_records.append(
-                                _catalog_record(
-                                    output_root,
-                                    context.dataset_id,
-                                    population,
-                                    chromosome,
-                                    spark,
-                                )
-                            )
                     finally:
                         variant_positions.unpersist()
                         edges.unpersist()
+                    catalog_records.extend(
+                        [
+                            _catalog_record(
+                                output_root,
+                                context.dataset_id,
+                                population,
+                                chromosome,
+                                spark,
+                            )
+                            for context in contexts
+                        ]
+                    )
             finally:
                 score_variants_all.unpersist()
     finally:
@@ -186,11 +232,26 @@ def _prepare_specificity_contexts(
         )
         gene_id_column = str(dataset_settings.get('gene_id_column', 'gene'))
         strip_gene_version = bool(dataset_settings.get('strip_gene_version', True))
+        input_annotation_names = [
+            column for column in specificity.columns if column != gene_id_column
+        ]
+        if CONTROL_ANNOTATION in input_annotation_names:
+            raise ValueError(
+                f"Specificity input uses reserved annotation name '{CONTROL_ANNOTATION}'"
+            )
         specificity_long = melt_specificity_matrix(
             specificity,
             gene_id_column=gene_id_column,
             strip_gene_version=strip_gene_version,
         ).persist(StorageLevel.DISK_ONLY)
+        observed_annotations = {
+            row['annotation']
+            for row in specificity_long.select('annotation').distinct().collect()
+        }
+        annotation_names = [
+            column for column in input_annotation_names if column in observed_annotations
+        ]
+        annotation_names.append(CONTROL_ANNOTATION)
         gene_locations = _read_gene_locations(
             spark=spark,
             target=target,
@@ -204,6 +265,7 @@ def _prepare_specificity_contexts(
                 dataset_id=dataset['id'],
                 specificity_long=specificity_long,
                 gene_locations=gene_locations,
+                annotation_names=annotation_names,
             )
         )
     return contexts
@@ -236,21 +298,34 @@ def _score_specificity_chromosome(
         window_kb=int(settings.get('window_kb', 100)),
     )
     annotations = build_snp_annotations(gene_variant_map, context.specificity_long)
-    ld_scores, m_annot = compute_annotation_ld_scores(
-        annotations_long=annotations,
-        ld_edges=edges,
-        score_variants=score_variants,
-    )
-    (
-        ld_scores.withColumn('specificityId', f.lit(context.dataset_id))
-        .write.mode('overwrite')
-        .parquet(f'{output}/ld_scores')
-    )
-    (
-        m_annot.withColumn('specificityId', f.lit(context.dataset_id))
-        .write.mode('overwrite')
-        .parquet(f'{output}/m_annot')
-    )
+    batch_size = int(settings.get('annotation_batch_size', 16))
+    annotation_batches = _annotation_batches(context.annotation_names, batch_size)
+    for batch_index, annotation_batch in enumerate(annotation_batches):
+        logger.info(
+            'Computing LDSC annotation batch {}/{} for {} / {} / chromosome {}',
+            batch_index + 1,
+            len(annotation_batches),
+            context.dataset_id,
+            population,
+            chromosome,
+        )
+        batch_annotations = annotations.filter(f.col('annotation').isin(annotation_batch))
+        ld_scores, m_annot = _compute_annotation_ld_scores_wide(
+            annotations_long=batch_annotations,
+            ld_edges=edges,
+            score_variants=score_variants,
+            annotation_names=annotation_batch,
+        )
+        (
+            ld_scores.withColumn('specificityId', f.lit(context.dataset_id))
+            .write.mode('overwrite' if batch_index == 0 else 'append')
+            .parquet(f'{output}/ld_scores')
+        )
+        (
+            m_annot.withColumn('specificityId', f.lit(context.dataset_id))
+            .write.mode('overwrite' if batch_index == 0 else 'append')
+            .parquet(f'{output}/m_annot')
+        )
     logger.info(
         'Completed LDSC-CTS annotation {} / {} / chromosome {}',
         context.dataset_id,
@@ -259,17 +334,120 @@ def _score_specificity_chromosome(
     )
 
 
+def _compute_annotation_ld_scores_wide(
+    annotations_long: DataFrame,
+    ld_edges: DataFrame,
+    score_variants: DataFrame | None,
+    annotation_names: list[str],
+) -> tuple[DataFrame, DataFrame]:
+    if not annotation_names:
+        raise ValueError('At least one annotation name is required')
+
+    annotation_rows = annotations_long.groupBy('variantId', 'annotation').agg(
+        f.max('annotationValue').alias('annotationValue')
+    )
+    annotations_map = annotation_rows.groupBy('variantId').agg(
+        f.map_from_entries(
+            f.collect_list(f.struct('annotation', 'annotationValue'))
+        ).alias('annotationValues')
+    )
+
+    directed = ld_edges.filter(
+        (f.col('variantId') != f.col('tagVariantId')) & (f.col('r') != 0.0)
+    )
+    if score_variants is not None:
+        score_ids = score_variants.select('variantId').distinct()
+        forward = directed.join(score_ids, on='variantId', how='inner')
+        reverse = (
+            directed.join(
+                score_ids.withColumnRenamed('variantId', 'tagVariantId'),
+                on='tagVariantId',
+                how='inner',
+            )
+            .select(
+                f.col('tagVariantId').alias('variantId'),
+                f.col('variantId').alias('tagVariantId'),
+                f.col('r'),
+            )
+        )
+        candidate_edges = forward.unionByName(reverse)
+        self_universe = score_ids.join(
+            annotations_map.select('variantId'), on='variantId', how='inner'
+        )
+    else:
+        candidate_edges = directed.unionByName(
+            directed.select(
+                f.col('tagVariantId').alias('variantId'),
+                f.col('variantId').alias('tagVariantId'),
+                f.col('r'),
+            )
+        )
+        self_universe = (
+            candidate_edges.select('variantId')
+            .unionByName(annotations_map.select('variantId'))
+            .distinct()
+        )
+
+    self_edges = (
+        self_universe.withColumn('tagVariantId', f.col('variantId'))
+        .withColumn('r', f.lit(1.0))
+        .select('variantId', 'tagVariantId', 'r')
+    )
+    all_edges = candidate_edges.unionByName(self_edges)
+    annotated_edges = all_edges.withColumn('r2', f.col('r') * f.col('r')).join(
+        annotations_map.withColumnRenamed('variantId', 'tagVariantId'),
+        on='tagVariantId',
+        how='inner',
+    )
+    ld_scores_wide = annotated_edges.groupBy('variantId').agg(
+        *[
+            f.sum(
+                f.col('r2')
+                * f.coalesce(
+                    f.element_at(f.col('annotationValues'), f.lit(annotation)),
+                    f.lit(0.0),
+                )
+            ).alias(annotation)
+            for annotation in annotation_names
+        ]
+    )
+    ld_scores_long = ld_scores_wide.unpivot(
+        ids=['variantId'],
+        values=annotation_names,
+        variableColumnName='annotation',
+        valueColumnName='ldScore',
+    ).filter(f.col('ldScore') > 0.0)
+    m_values = annotation_rows.groupBy('annotation').agg(
+        f.sum('annotationValue').alias('M')
+    )
+    all_annotations = annotations_long.sparkSession.createDataFrame(
+        [(annotation,) for annotation in annotation_names],
+        schema=StructType([StructField('annotation', StringType(), False)]),
+    )
+    m_annot = all_annotations.join(m_values, on='annotation', how='left').select(
+        'annotation',
+        f.coalesce(f.col('M'), f.lit(0.0)).alias('M'),
+    )
+    return ld_scores_long, m_annot
+
+
 def _annotation_complete(
     output_root: str,
     dataset_id: str,
     population: str,
     chromosome: str,
     spark: SparkSession,
+    expected_annotation_count: int | None = None,
 ) -> bool:
     output = f'{output_root}/{dataset_id}/{population}/chr{chromosome}'
-    return success_exists(spark, f'{output}/ld_scores') and success_exists(
+    if not success_exists(spark, f'{output}/ld_scores') or not success_exists(
         spark, f'{output}/m_annot'
-    )
+    ):
+        return False
+    if expected_annotation_count is None:
+        return True
+    annotation_count = spark.read.parquet(f'{output}/m_annot').select('annotation').distinct().count()
+    return annotation_count == expected_annotation_count
 
 
 def _catalog_record(

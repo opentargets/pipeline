@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from pathlib import Path
 
 import pyspark.sql.functions as f
 import pytest
-from gentropy.method.ldsc import infer_ld_ancestry
+from gentropy.method.ldsc import compute_annotation_ld_scores, infer_ld_ancestry
 from pyspark.sql import Row
 
-from pts.pyspark.ldsc_cts_annotation import _read_edges, _read_specificity
+from pts.pyspark.ldsc_cts_annotation import (
+    _configure_local_driver_memory,
+    _read_edges,
+    _read_specificity,
+)
 from pts.pyspark.ldsc_cts_regression import (
     _chunks,
     _prepare_sumstats,
     _read_annotation_catalog,
+    _read_sumstats_batch,
     _resolve_root_dataset_ids,
 )
 from pts.pyspark.ldsc_cts_utils import (
@@ -38,6 +45,114 @@ def _write_edge_task(root: Path, name: str, ancestry: str, chromosome: int) -> P
         '--output-path edges.parquet'
     )
     return edge_output
+
+
+def test_ldsc_driver_memory_is_added_to_submit_args(monkeypatch) -> None:
+    monkeypatch.setenv(
+        'PYSPARK_SUBMIT_ARGS',
+        '--conf spark.sql.shuffle.partitions=1024 --driver-memory=1g pyspark-shell',
+    )
+
+    _configure_local_driver_memory({'spark.driver.memory': '88g'})
+
+    submit_args = shlex.split(os.environ['PYSPARK_SUBMIT_ARGS'])
+    assert submit_args[-3:] == ['--driver-memory', '88g', 'pyspark-shell']
+    assert submit_args.count('--driver-memory') == 1
+
+
+def test_local_regression_uses_automatic_requester_pays_mode() -> None:
+    from pts.pyspark.ldsc_cts_regression import _effective_regression_properties
+
+    properties = _effective_regression_properties(
+        {'spark.hadoop.fs.gs.requester.pays.mode': 'CUSTOM'}, 'local[12]'
+    )
+
+    assert properties['spark.hadoop.fs.gs.requester.pays.mode'] == 'AUTO'
+
+
+def test_ldsc_regression_prefers_user_classpath() -> None:
+    from pts.pyspark.ldsc_cts_regression import _REGRESSION_DEFAULT_PROPERTIES
+
+    assert _REGRESSION_DEFAULT_PROPERTIES == {
+        'spark.driver.userClassPathFirst': 'true',
+        'spark.executor.userClassPathFirst': 'true',
+    }
+
+
+def test_wide_annotation_scoring_matches_long_reference(spark) -> None:
+    from pts.pyspark.ldsc_cts_annotation import _compute_annotation_ld_scores_wide
+
+    annotations = spark.createDataFrame([
+        Row(variantId='1_100_A_G', annotation='cell_a', annotationValue=0.5),
+        Row(variantId='1_100_A_G', annotation='cell_b', annotationValue=1.0),
+        Row(variantId='1_120_C_T', annotation='cell_a', annotationValue=0.25),
+        Row(variantId='1_120_C_T', annotation='cell_b', annotationValue=0.75),
+        Row(variantId='1_140_G_A', annotation='cell_b', annotationValue=0.5),
+        Row(variantId='1_100_A_G', annotation='all_genes_control', annotationValue=1.0),
+        Row(variantId='1_120_C_T', annotation='all_genes_control', annotationValue=1.0),
+        Row(variantId='1_140_G_A', annotation='all_genes_control', annotationValue=1.0),
+    ])
+    edges = spark.createDataFrame([
+        Row(variantId='1_100_A_G', tagVariantId='1_120_C_T', r=0.5),
+        Row(variantId='1_100_A_G', tagVariantId='1_140_G_A', r=0.0),
+        Row(variantId='1_120_C_T', tagVariantId='1_140_G_A', r=0.25),
+    ])
+    score_variants = spark.createDataFrame([
+        Row(variantId='1_100_A_G'),
+        Row(variantId='1_120_C_T'),
+        Row(variantId='1_140_G_A'),
+    ])
+    annotation_names = ['cell_a', 'cell_b', 'all_genes_control', 'empty_annotation']
+
+    expected_ld, expected_m = compute_annotation_ld_scores(
+        annotations, edges, score_variants
+    )
+    actual_ld, actual_m = _compute_annotation_ld_scores_wide(
+        annotations, edges, score_variants, annotation_names
+    )
+
+    expected_ld_values = {
+        (row['variantId'], row['annotation']): row['ldScore']
+        for row in expected_ld.collect()
+    }
+    actual_ld_values = {
+        (row['variantId'], row['annotation']): row['ldScore']
+        for row in actual_ld.collect()
+    }
+    assert actual_ld_values.keys() == expected_ld_values.keys()
+    for key, value in expected_ld_values.items():
+        assert actual_ld_values[key] == pytest.approx(value)
+
+    expected_m_values = {row['annotation']: row['M'] for row in expected_m.collect()}
+    actual_m_values = {row['annotation']: row['M'] for row in actual_m.collect()}
+    assert actual_m_values == pytest.approx({**expected_m_values, 'empty_annotation': 0.0})
+
+
+def test_annotation_batches_cover_all_names() -> None:
+    from pts.pyspark.ldsc_cts_annotation import _annotation_batches
+
+    names = ['a', 'b', 'c', 'd', 'e']
+
+    assert _annotation_batches(names, 2) == [['a', 'b'], ['c', 'd'], ['e']]
+    with pytest.raises(ValueError, match='at least 1'):
+        _annotation_batches(names, 0)
+
+
+def test_partial_annotation_output_is_not_complete(spark, tmp_path: Path) -> None:
+    from pts.pyspark.ldsc_cts_annotation import _annotation_complete
+
+    output = tmp_path / 'annotations' / 'one' / 'nfe' / 'chr1'
+    (output / 'ld_scores').mkdir(parents=True)
+    (output / 'm_annot').mkdir()
+    (output / 'ld_scores' / '_SUCCESS').write_text('')
+    (output / 'm_annot' / '_SUCCESS').write_text('')
+    spark.createDataFrame([Row(annotation='cell_a', M=1.0)]).write.mode('overwrite').parquet(
+        str(output / 'm_annot')
+    )
+
+    assert not _annotation_complete(
+        str(tmp_path / 'annotations'), 'one', 'nfe', '1', spark, expected_annotation_count=2
+    )
 
 
 def test_edge_manifest_requires_complete_unique_exports(tmp_path: Path) -> None:
@@ -66,6 +181,34 @@ def test_dataset_registry_and_population_validation() -> None:
     assert normalise_populations('nfe,eas') == ['nfe', 'eas']
     with pytest.raises(ValueError, match='duplicate population'):
         normalise_populations(['nfe', 'NFE'])
+
+
+def test_munged_study_partitions_are_discovered_and_normalised(spark, tmp_path: Path) -> None:
+    from pts.pyspark.ldsc_cts_regression import _resolve_root_dataset_ids
+
+    root = tmp_path / 'munged'
+    path = root / 'studyId=GCST1'
+    spark.createDataFrame([
+        Row(variantKey='1_100_A_G', beta=0.1, se=0.2, n=20_000.0, L2=1.0),
+    ]).write.mode('overwrite').parquet(str(path))
+    (path / '_SUCCESS').unlink()
+
+    entries = discover_completed_study_paths(spark, str(root))
+    assert entries == [('GCST1', str(path))]
+    resolved = _resolve_root_dataset_ids(spark, entries)
+    frame, issues = _read_sumstats_batch(spark, resolved, str(root))
+
+    assert issues == []
+    assert frame is not None
+    row = frame.select('studyId', 'variantId', 'chromosome', 'position', 'standardError', 'sampleSize').first()
+    assert row.asDict() == {
+        'studyId': 'GCST1',
+        'variantId': '1_100_A_G',
+        'chromosome': '1',
+        'position': 100,
+        'standardError': 0.2,
+        'sampleSize': 20_000.0,
+    }
 
 
 def test_study_index_plurality_is_independent_of_analysis_id() -> None:
@@ -269,6 +412,7 @@ def test_two_chromosome_two_dataset_annotation_and_batched_regression(
             ref=ref,
             alt=alt,
             base=1.0 + index * 0.1,
+            **{'CTCF_Hoffman.extend.500': 1.5 + index * 0.1},
         )
         for index, (variant_id, chromosome, position, ref, alt) in enumerate(variants)
     ]).write.mode('overwrite').option('header', 'true').option('sep', '\t').csv(

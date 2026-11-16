@@ -2159,18 +2159,23 @@ steps:
             path: tabula_sapiens-tissue_ontology_term_id__sum/esmu.csv.gz
           - id: gtex-tissue
             path: gtex/esmu.csv.gz
-        populations: [nfe, eas]
+        populations: [nfe]
         spark_uri: local[12]
+        annotation_batch_size: 256
       properties:
-        'spark.driver.memory': '33g'
+        'spark.driver.memory': '88g'
         'spark.executor.memory': '33g'
         'spark.driver.memoryOverhead': '8g'
         'spark.executor.memoryOverhead': '8g'
-        'spark.sql.shuffle.partitions': '1024'
+        'spark.sql.shuffle.partitions': '2048'
         'spark.default.parallelism': '24'
         'spark.dynamicAllocation.enabled': 'false'
         'spark.sql.adaptive.enabled': 'true'
-        'spark.sql.adaptive.coalescePartitions.enabled': 'false'
+        'spark.sql.adaptive.coalescePartitions.enabled': 'true'
+        'spark.sql.adaptive.advisoryPartitionSizeInBytes': '256MB'
+        'spark.sql.adaptive.coalescePartitions.parallelismFirst': 'false'
+        'spark.network.timeout': '120s'
+        'spark.executor.heartbeatInterval': '10s'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
 
   #: LDSC CTS REGRESSION STEPS :####################################################################
@@ -2180,8 +2185,8 @@ steps:
     - name: pyspark ldsc cts regression
       pyspark: ldsc_cts_regression
       source:
-        summary_statistics_root: gs://gwas_catalog_inputs/harmonised_summary_statistics
-        study_index: gs://open-targets-pre-data-releases/26.03/output/study
+        summary_statistics_root: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/outputs/release_25_06/munged/ancestry=nfe
+        study_index: gs://open-targets-data-releases/25.06/output/study
         annotations: intermediate/ldsc_cts/annotations
         reference_root: /home/alegbe/repos/ldsc-baseline-generate-nf/results
       destination:
@@ -2191,6 +2196,119 @@ steps:
         min_samples: 10000
         n_blocks: 200
         spark_uri: local[12]
+        study_ids:
+          - GCST000569
+          - GCST000612
+          - GCST000922
+          - GCST001198
+          - GCST001212
+          - GCST002318
+          - GCST003367
+          - GCST003368
+          - GCST003658
+          - GCST003740
+          - GCST003837
+          - GCST003839
+          - GCST004075
+          - GCST004076
+          - GCST004137
+          - GCST004608
+          - GCST004613
+          - GCST004614
+          - GCST004617
+          - GCST004620
+          - GCST004623
+          - GCST004624
+          - GCST004626
+          - GCST004634
+          - GCST004744
+          - GCST004748
+          - GCST004750
+          - GCST004901
+          - GCST005179
+          - GCST005180
+          - GCST005314
+          - GCST005850
+          - GCST006250
+          - GCST006326
+          - GCST006464
+          - GCST006475
+          - GCST006586
+          - GCST006810
+          - GCST007406
+          - GCST007431
+          - GCST007435
+          - GCST007799
+          - GCST007800
+          - GCST008403
+          - GCST009325
+          - GCST009984
+          - GCST010100
+          - GCST011365
+          - GCST011494
+          - GCST012227
+          - GCST90000045
+          - GCST90000050
+          - GCST90000513
+          - GCST90000514
+          - GCST90000515
+          - GCST90000618
+          - GCST90000654
+          - GCST90001389
+          - GCST90002912
+          - GCST90003099
+          - GCST90003710
+          - GCST90003862
+          - GCST90003889
+          - GCST90004135
+          - GCST90004431
+          - GCST90012105
+          - GCST90012612
+          - GCST90012754
+          - GCST90012794
+          - GCST90012857
+          - GCST90012877
+          - GCST90013423
+          - GCST90013429
+          - GCST90013866
+          - GCST90013882
+          - GCST90013886
+          - GCST90013916
+          - GCST90013919
+          - GCST90013925
+          - GCST90013928
+          - GCST90013937
+          - GCST90013939
+          - GCST90013940
+          - GCST90013943
+          - GCST90013945
+          - GCST90013946
+          - GCST90013947
+          - GCST90013951
+          - GCST90013958
+          - GCST90013963
+          - GCST90013964
+          - GCST90013967
+          - GCST90013968
+          - GCST90013970
+          - GCST90013972
+          - GCST90013980
+          - GCST90013987
+          - GCST90013988
+          - GCST90013989
+          - GCST90013991
+          - GCST90013993
+          - GCST90013994
+          - GCST90013995
+          - GCST90013996
+          - GCST90014000
+          - GCST90014004
+          - GCST90014010
+          - GCST90014014
+          - GCST90014019
+          - GCST90014020
+          - GCST90014022
+          - GCST90014033
       properties:
         'spark.driver.memory': '33g'
         'spark.executor.memory': '33g'
@@ -2201,7 +2319,9 @@ steps:
         'spark.dynamicAllocation.enabled': 'false'
         'spark.sql.adaptive.enabled': 'true'
         'spark.sql.adaptive.coalescePartitions.enabled': 'false'
+        'spark.driver.userClassPathFirst': 'true'
+        'spark.executor.userClassPathFirst': 'true'
         'spark.local.dir': /mnt/disks/ldsc-scratch/gentropy-ldsc-cts/spark
         'spark.hadoop.fs.gs.requester.pays.mode': CUSTOM
-        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-pre-data-releases
+        'spark.hadoop.fs.gs.requester.pays.buckets': gwas_catalog_inputs,open-targets-data-releases
         'spark.hadoop.fs.gs.requester.pays.project.id': open-targets-genetics-dev
