@@ -107,7 +107,7 @@ def test_l2g_train_writes_a_loadable_model(workspace) -> None:
     assert model.get_booster().num_boosted_rounds() == 5
 
 
-def test_l2g_train_metrics_carry_the_seven_scores_and_the_run_settings(workspace) -> None:
+def test_l2g_train_metrics_carry_the_eight_scores_and_the_run_settings(workspace) -> None:
     destination = _destination(workspace)
     l2g_train(_source(workspace), destination, dict(SETTINGS), None)
     metrics = json.loads(Path(destination['metrics']).read_text())
@@ -116,9 +116,10 @@ def test_l2g_train_metrics_carry_the_seven_scores_and_the_run_settings(workspace
         'accuracy',
         'weightedPrecision',
         'averagePrecision',
-        'averagePrecisionFromScores',
+        'averagePrecisionFromLabels',
         'weightedRecall',
         'f1',
+        'topOneAccuracy',
     }
     assert metrics['shapBackgroundSeed'] == 42
     assert metrics['shapBackgroundSize'] == 10
@@ -379,3 +380,41 @@ def test_l2g_train_leaves_no_local_gs_tree_for_a_cloud_destination(workspace, tm
     assert set(written) == {destination['split_stats'], destination['model'], destination['metrics']}
     assert parquet_calls == [(destination['background'], {'mkdir': True})]
     assert not (tmp_path / 'gs:').exists(), 'an artifact was written to a local gs:/ tree'
+
+
+def _share_leads_by_gene(workspace) -> None:
+    """Give credible sets of the same gene one lead variant, so repeats form association units."""
+    for name, column in (('cs', 'leadVariantId'), ('gs', 'variantId')):
+        path = workspace / name / 'part-0.parquet'
+        frame = pl.read_parquet(path)
+        index = pl.col('id' if name == 'cs' else 'credibleSetId').str.slice(2).cast(pl.Int32)
+        frame.with_columns(pl.format('1_{}_A_G', index % 8).alias(column)).write_parquet(path)
+
+
+def test_l2g_train_tags_association_units_and_reports_three_held_out_weightings(workspace) -> None:
+    _share_leads_by_gene(workspace)
+    destination = _destination(workspace)
+    l2g_train(_source(workspace), destination, dict(SETTINGS), None)
+
+    test = scan_dataset(destination['test_split']).collect()
+    assert 'associationUnitId' in test.columns
+    assert test['associationUnitId'].n_unique() < test['credibleSetId'].n_unique()
+
+    stats = json.loads(Path(destination['split_stats']).read_text())
+    assert stats['test']['n_association_units'] == test['associationUnitId'].n_unique()
+
+    metrics = json.loads(Path(destination['metrics']).read_text())
+    assert metrics['weightByAssociationUnit'] is True
+    assert metrics['associationUnitWeightK'] == 5.0
+    assert set(metrics['heldOutUnitWeighted']) == set(metrics['heldOut']) == set(metrics['heldOutPerAssociation'])
+    assert 'topOneAccuracy' in metrics['heldOut']
+
+
+def test_l2g_train_without_unit_weights_fits_unweighted(workspace) -> None:
+    _share_leads_by_gene(workspace)
+    destination = _destination(workspace)
+    settings = dict(SETTINGS) | {'weight_by_association_unit': False}
+    l2g_train(_source(workspace), destination, settings, None)
+    metrics = json.loads(Path(destination['metrics']).read_text())
+    assert metrics['weightByAssociationUnit'] is False
+    assert set(metrics['heldOut']) == set(metrics['heldOutPerAssociation'])
