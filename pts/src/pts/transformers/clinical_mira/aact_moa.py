@@ -28,7 +28,7 @@ from pts.transformers.clinical_mira.record_store import (
     read_records,
     write_run,
 )
-from pts.transformers.clinical_mira.staged_outputs import EXTRACTION, MOA
+from pts.transformers.clinical_mira.staged_outputs import EXTRACTION_V2, MOA
 from pts.transformers.clinical_mira.staging_errors import ComputeTooLarge, SeedTooSmall
 
 if TYPE_CHECKING:
@@ -161,7 +161,7 @@ def stage_moa(
 
     Args:
         archive: The AACT dump archive. The tables required are restored inline.
-        extraction_dir: The directory holding the extraction snapshot of the current tag.
+        extraction_dir: The directory holding the v2 extraction snapshot of the release tag.
         destination: The directory holding one directory per extraction tag, which receives the snapshot.
         settings: The validated settings.
         config: The otter config.
@@ -184,11 +184,11 @@ def stage_moa(
         msg = f'import_for_tag {settings.import_for_tag} is not the current tag {tag}; update or unset it'
         raise ValueError(msg)
     system_prompt = schemas.load_prompt('extract')
-    extraction_tag = EXTRACTION.release_tag()
-    extracted = EXTRACTION.read(f'{extraction_dir.rstrip("/")}/{extraction_tag}')
+    extraction_tag = EXTRACTION_V2.release_tag()
+    extracted = EXTRACTION_V2.read(f'{extraction_dir.rstrip("/")}/{extraction_tag}')
 
-    texts, counts = pooling.match_texts(pooling.trial_texts(archive, str(config.work_path)), extracted)
-    trials = pooling.single_drug_trials(extracted)
+    texts, counts = pooling.texts_by_id(pooling.trial_texts(archive, str(config.work_path)), extracted)
+    trials = pooling.link_single_drug_trials(extracted, texts)
     pools = pooling.build_pools(trials, texts, char_budget=MOA.params['char_budget'])
     listed = staging.pool_trials(pools, texts, trials)
     logger.info(f'texts {counts}, {trials.height} single-drug trials, {pools.height} pools')
@@ -305,7 +305,7 @@ def aact_moa(source: dict[str, str], destination: dict[str, str], settings: dict
     """Stage the mechanisms of action stated in AACT trial texts, reusing earlier outputs.
 
     Args:
-        source: Keys ``aact``, the AACT dump archive, and ``extraction``, the directory of tagged extractions.
+        source: Keys ``aact``, the AACT dump archive, and ``extraction``, the directory of tagged v2 extractions.
         destination: Key ``moa``, the directory of tagged extractions the snapshot is published beneath.
         settings: See :py:class:`AactMoaSettings`.
         config: The otter config.

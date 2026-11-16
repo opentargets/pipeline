@@ -21,58 +21,28 @@ from pts.transformers.clinical_mira.aact_trial_models import (
 )
 from pts.transformers.clinical_mira.hf_models import staged_model_revisions
 from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DRUG_NER_MODEL, DRUGTEMIST_MODEL
-from pts.transformers.clinical_mira.providers.aact import llm_drug_labels
-from pts.transformers.clinical_mira.record_store import map_texts, read_records, text_sha256
-from pts.transformers.clinical_mira.staged_outputs import DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.record_store import map_texts, publish_snapshot, read_records, text_sha256
+from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
+from pts.transformers.clinical_mira.staged_outputs import (
+    DRUG_ENTITIES,
+    EXTRACTION,
+    EXTRACTION_V2,
+    STOP_REASONS,
+    schema_digest,
+)
 from pts.transformers.clinical_mira.stop_reasons import STOP_REASONS_MODEL
+from pts.transformers.clinical_mira.trial_links import link_drug_labels, report_entities_frame
 from pts.transformers.clinical_report import attach_stop_reasons
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'rs', CHEMICAL_MODEL: 'rc', DRUGTEMIST_MODEL: 'rd'}
 STOP_TAG = STOP_REASONS.tag(REVISIONS)
 DRUG_TAG = DRUG_ENTITIES.tag(REVISIONS)
-DRUG_STRUCT = pl.Struct({
-    'drug': pl.String,
-    'route': pl.String,
-    'formulation': pl.String,
-    'synonyms': pl.List(pl.String),
-    'dosages': pl.List(pl.String),
-    'evidence_quote': pl.String,
-})
-DISEASE_STRUCT = pl.Struct({
-    'name': pl.String,
-    'severity': pl.String,
-    'stage': pl.String,
-    'onset': pl.String,
-    'etiology': pl.String,
-    'evidence_quote': pl.String,
-})
+V2_TAG = EXTRACTION_V2.release_tag()
 
 
-def _drug(name: str | None) -> dict[str, Any]:
-    return {
-        'drug': name,
-        'route': None,
-        'formulation': None,
-        'synonyms': None,
-        'dosages': None,
-        'evidence_quote': None,
-    }
-
-
-def _extractions(drugs: list[list[str | None]]) -> pl.DataFrame:
-    disease = {'name': 'pain', 'severity': None, 'stage': None, 'onset': None, 'etiology': None, 'evidence_quote': None}
-    return pl.DataFrame(
-        {
-            'id': [f'NCT{i}' for i in range(len(drugs))],
-            'primary_indications': [[disease] for _ in drugs],
-            'investigated_drugs': [[_drug(d) for d in row] for row in drugs],
-        },
-        schema={
-            'id': pl.String,
-            'primary_indications': pl.List(DISEASE_STRUCT),
-            'investigated_drugs': pl.List(DRUG_STRUCT),
-        },
-    )
+def _extractions(drugs: list[list[str]]) -> pl.DataFrame:
+    return v2_frame({f'NCT{i}': {'links': [v2_link(d, 'pain') for d in row]} for i, row in enumerate(drugs)})
 
 
 def _studies(why_stopped: list[str | None]) -> pl.DataFrame:
@@ -133,7 +103,7 @@ def _stage(
         ner_model_batch_size=3,
         stop_reasons_batch_size=2,
         max_attempts=3,
-        extraction_tag=EXTRACTION.release_tag(),
+        extraction_tag=V2_TAG,
     )
 
 
@@ -147,12 +117,16 @@ def test_release_drug_labels_are_staged() -> None:
     interventions = pl.DataFrame({'nct_id': ['NCT0'], 'intervention_type': ['DRUG'], 'name': ['Aspirin']})
     conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
     raw = ['Aspirin', ' Ibuprofen ', r'drug \[X\]', 'a\x0041b', 'nul\x00x']
-    extractions = _extractions([[*raw, None], [''], []])
+    extractions = v2_frame({
+        'NCT0': {'links': [v2_link(drug, 'pain') for drug in raw]},
+        'NCT1': {'links': [v2_link('', 'pain')]},
+    })
+    entities = report_entities_frame(extractions, 0.8)
 
-    report = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
+    report = extract_aact_clinical_report(studies, interventions, conditions, trial_entities=entities).df
 
     released = report['drugs'].explode().struct.field('drugFromSource').drop_nulls().unique().sort()
-    assert released.to_list() == llm_drug_labels(extractions).to_list() == sorted(['', *raw])
+    assert released.to_list() == link_drug_labels(extractions)['label'].unique().sort().to_list() == sorted(['', *raw])
 
 
 def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, models: Models) -> None:
@@ -178,7 +152,7 @@ def test_trial_models_publishes_both_snapshots(tmp_path: Path, models_uri: str, 
         metadata = json.loads((tmp_path / f'snap/{kind.name}/{tag}/metadata.json').read_text())
         expected = {'kind': kind.name, 'model': model, 'tag': tag, 'model_revisions': hub}
         if kind is DRUG_ENTITIES:
-            expected['extraction_tag'] = EXTRACTION.release_tag()
+            expected['extraction_tag'] = V2_TAG
         assert metadata == expected
     assert stats['stop_reasons'] == {
         'texts': 2,
@@ -314,8 +288,9 @@ def test_staged_stop_reasons_join_the_release_report(tmp_path: Path, models_uri:
     conditions = pl.DataFrame({'nct_id': ['NCT0'], 'downcase_name': ['pain']})
     extractions = _extractions([['Aspirin']])
     _stage(tmp_path, models_uri, studies.select('nct_id', 'why_stopped'), extractions, 'r1')
+    entities = report_entities_frame(v2_frame({'NCT0': {'links': [v2_link('Aspirin', 'pain')]}}), 0.8)
 
-    aact = extract_aact_clinical_report(studies, interventions, conditions, llm_extractions=extractions).df
+    aact = extract_aact_clinical_report(studies, interventions, conditions, trial_entities=entities).df
     staged = pl.read_parquet(tmp_path / f'snap/stop_reasons/{STOP_TAG}/data.parquet')
     attached = attach_stop_reasons(aact, staged)
 
@@ -374,28 +349,35 @@ def test_the_drug_snapshot_records_the_extraction_it_was_staged_from(
 
     metadata = json.loads((tmp_path / f'snap/drug_entities/{DRUG_TAG}/metadata.json').read_text())
     stop = json.loads((tmp_path / f'snap/stop_reasons/{STOP_TAG}/metadata.json').read_text())
-    assert metadata['extraction_tag'] == EXTRACTION.release_tag()
+    assert metadata['extraction_tag'] == V2_TAG
     assert 'extraction_tag' not in stop
 
 
-def test_read_extraction_reads_the_release_tag(tmp_path: Path) -> None:
-    directory = tmp_path / 'extraction' / EXTRACTION.release_tag()
-    directory.mkdir(parents=True)
-    _extractions([['a']]).write_parquet(directory / 'data.parquet')
-    other = tmp_path / 'extraction' / 'other-tag'
-    other.mkdir()
-    _extractions([['b'], ['c']]).write_parquet(other / 'data.parquet')
+def _publish_extraction(directory: Path, extractions: pl.DataFrame, metadata: dict[str, Any] | None = None) -> None:
+    metadata = metadata or {**EXTRACTION_V2.metadata('0' * 64, None), 'tag': V2_TAG}
+    publish_snapshot(extractions, str(directory), metadata, None)
 
-    assert read_extraction(str(tmp_path / 'extraction'), None).height == 1
+
+def test_read_extraction_reads_the_release_tag(tmp_path: Path) -> None:
+    _publish_extraction(tmp_path / 'extraction_v2' / V2_TAG, _extractions([['a']]))
+    _publish_extraction(tmp_path / 'extraction_v2' / 'other-tag', _extractions([['b'], ['c']]))
+
+    assert read_extraction(str(tmp_path / 'extraction_v2')).height == 1
 
 
 def test_read_extraction_names_the_path_it_expected(tmp_path: Path) -> None:
-    other = tmp_path / 'extraction' / 'other-tag'
-    other.mkdir(parents=True)
-    _extractions([['b']]).write_parquet(other / 'data.parquet')
+    _publish_extraction(tmp_path / 'extraction_v2' / 'other-tag', _extractions([['b']]))
 
-    with pytest.raises(FileNotFoundError, match=re.escape(f'extraction/{EXTRACTION.release_tag()}/data.parquet')):
-        read_extraction(str(tmp_path / 'extraction'), None)
+    with pytest.raises(FileNotFoundError, match=re.escape(f'extraction_v2/{V2_TAG}')):
+        read_extraction(str(tmp_path / 'extraction_v2'))
+
+
+def test_aact_trial_models_refuses_a_v1_extraction(tmp_path: Path) -> None:
+    v1 = EXTRACTION.metadata(schema_digest(ClinicalReportExtractionSchema), None)
+    _publish_extraction(tmp_path / 'extraction_v2' / V2_TAG, _extractions([['a']]), v1)
+
+    with pytest.raises(ValueError, match=r"kind 'extraction', not 'extraction_v2'"):
+        read_extraction(str(tmp_path / 'extraction_v2'))
 
 
 def test_the_transformer_stages_both_snapshots_from_its_settings(
@@ -409,11 +391,11 @@ def test_the_transformer_stages_both_snapshots_from_its_settings(
         return {}
 
     monkeypatch.setattr(trial_models, 'read_aact_tables', lambda *args: {'studies': pl.DataFrame({'nct_id': ['n']})})
-    monkeypatch.setattr(trial_models, 'read_extraction', lambda uri, config: extractions)
+    monkeypatch.setattr(trial_models, 'read_extraction', lambda uri: extractions)
     monkeypatch.setattr(trial_models, 'stage_trial_models', fake_stage)
 
     aact_trial_models(
-        {'aact': 'aact.zip', 'extraction': f'{tmp_path}/extraction/', 'models': 'models'},
+        {'aact': 'aact.zip', 'extraction': f'{tmp_path}/extraction_v2/', 'models': 'models'},
         {'stop_reasons': 'stop_reasons'},
         {'store_uri': 'store/', 'snapshot': '2026-10', 'ner_batch_size': 8, 'stop_reasons_batch_size': 4},
         Config(step='test', steps=['test'], work_path=tmp_path),
@@ -425,7 +407,7 @@ def test_the_transformer_stages_both_snapshots_from_its_settings(
     assert models_uri == 'models'
     assert destination == {
         'stop_reasons': 'stop_reasons',
-        'drug_entities': f'{tmp_path}/extraction/{EXTRACTION.release_tag()}/drug_entities',
+        'drug_entities': f'{tmp_path}/extraction_v2/{V2_TAG}/drug_entities',
     }
     assert store_uri == 'store'
     assert run_id.startswith('2026-10-')
@@ -433,4 +415,4 @@ def test_the_transformer_stages_both_snapshots_from_its_settings(
     assert call['ner_model_batch_size'] == 32
     assert call['stop_reasons_batch_size'] == 4
     assert call['max_attempts'] == 3
-    assert call['extraction_tag'] == EXTRACTION.release_tag()
+    assert call['extraction_tag'] == V2_TAG

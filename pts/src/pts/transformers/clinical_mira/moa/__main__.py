@@ -28,37 +28,15 @@ from pts.transformers.clinical_mira.moa import (
     quotes,
     report,
     staging,
-    vertex,
 )
-from pts.transformers.clinical_mira.moa.claude import run_batch_cached
-from pts.transformers.clinical_mira.moa.llm import run_cached
+from pts.transformers.clinical_mira.moa.claude import cached_results, run_batch_cached
 from pts.transformers.clinical_mira.moa.schemas import JudgeVerdict, MoaExtraction, load_prompt
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
 STRATA = ('phase_group', 'maximumClinicalStage', 'drugType')
-DEFAULT_MODELS = {
-    ('openai', 'extract'): 'gpt-5-mini',
-    ('openai', 'judge'): 'gpt-5',
-    ('vertex', 'extract'): vertex.GPT_OSS_120B,
-    ('vertex', 'judge'): vertex.GPT_OSS_120B,
-    ('anthropic', 'extract'): 'claude-opus-5-5',
-    ('anthropic', 'judge'): 'claude-opus-5-5',
-}
-
-
-def _provider_options(args: argparse.Namespace, stage: str) -> dict:
-    """The ``run_cached`` options for the chosen provider."""
-    model = args.model or DEFAULT_MODELS[(args.provider, stage)]
-    if args.provider == 'vertex':
-        project, location = args.vertex_project, args.vertex_location
-        return {
-            'model': model,
-            'api': 'chat',
-            'client_factory': lambda: vertex.vertex_client(project, location),
-        }
-    return {'model': model}
+DEFAULT_MODEL = 'claude-opus-5-5'
 
 
 def _run_llm(
@@ -69,34 +47,24 @@ def _run_llm(
     response_model: type[BaseModel],
     cached_only: bool = False,
 ) -> tuple[dict, dict[str, str]]:
-    """Run one stage's requests with the chosen provider, through the stage's cache."""
-    if args.provider == 'anthropic':
-        if cached_only:
-            return run_cached(
-                requests,
-                system_prompt=load_prompt(stage),
-                response_model=response_model,
-                model=args.model or DEFAULT_MODELS[('anthropic', stage)],
-                cache_path=run / f'{stage}_cache.jsonl',
-                cached_only=True,
-            )
-        return run_batch_cached(
+    """Run one stage's requests as Claude batches, through the stage's cache."""
+    system_prompt, cache_path = load_prompt(stage), run / f'{stage}_cache.jsonl'
+    if cached_only:
+        return cached_results(
             requests,
-            system_prompt=load_prompt(stage),
+            system_prompt=system_prompt,
             response_model=response_model,
-            model=args.model or DEFAULT_MODELS[('anthropic', stage)],
-            cache_path=run / f'{stage}_cache.jsonl',
-            state_uri=str(run / f'{stage}_batches.json'),
-            effort=args.effort,
+            model=args.model,
+            cache_path=cache_path,
         )
-    return run_cached(
+    return run_batch_cached(
         requests,
-        system_prompt=load_prompt(stage),
+        system_prompt=system_prompt,
         response_model=response_model,
-        cache_path=run / f'{stage}_cache.jsonl',
-        concurrency=args.concurrency,
-        cached_only=cached_only,
-        **_provider_options(args, stage),
+        model=args.model,
+        cache_path=cache_path,
+        state_uri=str(run / f'{stage}_batches.json'),
+        effort=args.effort,
     )
 
 
@@ -133,7 +101,7 @@ def cmd_texts(run: Path, args: argparse.Namespace) -> None:
 def cmd_pools(run: Path, args: argparse.Namespace) -> None:
     extraction = _read(args.extraction, ['id', 'investigated_drugs'])
     texts = pl.read_parquet(run / 'texts.parquet')
-    trials = pooling.single_drug_trials(extraction)
+    trials = pooling.single_drug_names(extraction)
     pools = pooling.build_pools(trials, texts, char_budget=args.char_budget)
     pools.write_parquet(run / 'pools.parquet')
     counts = {
@@ -342,7 +310,7 @@ def cmd_diff_snapshots(_run: Path, args: argparse.Namespace) -> None:
 
 
 def _usage(cache_path: Path) -> dict[str, int]:
-    """Sum the token counts recorded in a cache (Claude batches record them; other providers do not)."""
+    """Sum the token counts recorded in a cache."""
     totals = {'requests': 0, 'with_usage': 0}
     if not cache_path.exists():
         return totals
@@ -386,7 +354,6 @@ def build_parser() -> argparse.ArgumentParser:
     command('pilot', cmd_pilot).add_argument('--seed', type=int, default=0)
 
     extract = command('extract', cmd_extract)
-    extract.add_argument('--concurrency', type=int, default=20)
     extract.add_argument('--limit', type=int, default=None)
     extract.add_argument('--all', action='store_true', help='every pool, not only the pilot')
     extract.add_argument('--cached-only', action='store_true', help='use cached results only; call no model')
@@ -401,17 +368,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     judge_cmd = command('judge', cmd_judge)
-    judge_cmd.add_argument('--concurrency', type=int, default=20)
     judge_cmd.add_argument('--n-matches', type=int, default=300)
     judge_cmd.add_argument('--seed', type=int, default=0)
     judge_cmd.add_argument('--show-chembl', action='store_true', help='show the judge ChEMBL mechanisms')
 
     for sub_parser in (extract, judge_cmd):
-        sub_parser.add_argument('--provider', choices=['openai', 'vertex', 'anthropic'], default='openai')
-        sub_parser.add_argument('--effort', default='medium', help='Claude effort (anthropic provider only)')
-        sub_parser.add_argument('--model', default=None, help='default depends on the provider and the stage')
-        sub_parser.add_argument('--vertex-project', default=vertex.DEFAULT_PROJECT)
-        sub_parser.add_argument('--vertex-location', default=vertex.DEFAULT_LOCATION)
+        sub_parser.add_argument('--effort', default='medium', help='Claude effort')
+        sub_parser.add_argument('--model', default=DEFAULT_MODEL)
 
     qc_cmd = commands.add_parser('qc')
     qc_cmd.add_argument('--release', required=True, type=Path, help='release output root with the inferred sources')

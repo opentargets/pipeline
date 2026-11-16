@@ -17,6 +17,7 @@ from pts.transformers.clinical_mira import (
     ClinicalReport,
     ClinicalReportType,
     ClinicalSource,
+    extract_aact_clinical_report,
 )
 from pts.transformers.clinical_mira.mining import read_ema_sheet
 from pts.transformers.clinical_mira.providers import aact as aact_provider
@@ -29,21 +30,27 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
+    EXTRACTION_V2,
     STOP_REASONS,
     StagedOutput,
     schema_digest,
 )
+from pts.transformers.clinical_mira.trial_links import report_entities_frame
 from pts.transformers.clinical_report import (
     ClinicalReportFlags,
     attach_stop_reasons,
     flag_indirect_primary_purpose,
     flag_null_diseases,
     flag_observational_studies,
+    map_broader_diseases,
     map_report_entities,
     order_output_columns,
     require_staged,
+    trial_broader_terms,
+    trial_drug_intents,
     validate_disease,
 )
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 from tests.clinical_mira.mapping_fixtures import DISEASE, DRUG
 
 
@@ -212,6 +219,26 @@ def test_flag_indirect_primary_purpose_with_llm_non_therapeutic_flagged() -> Non
     assert _flagged(result, 'r2')
 
 
+def test_trial_drug_intents_match_reports_whose_ids_clinical_report_lowercased() -> None:
+    """A v2 extraction keyed by the AACT NCT id reaches the lowercased AACT reports: a therapeutic trial is kept."""
+    extractions = v2_frame({
+        'NCT0001': {'drug_intent': 'therapeutic'},
+        'NCT0002': {'drug_intent': 'supportive_care'},
+    })
+    reports = _build_reports([
+        _report('NCT0001', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+        _report('NCT0002', ClinicalSource.CLINICAL_TRIALS_GOV.value, primary_purpose='TREATMENT'),
+    ])
+
+    intents = trial_drug_intents(extractions)
+    result = flag_indirect_primary_purpose(reports, llm_drug_intent=intents)
+
+    assert intents.columns == ['id', 'drug_intent']
+    assert sorted(intents['id'].to_list()) == ['nct0001', 'nct0002']
+    assert not _flagged(result, 'nct0001')
+    assert _flagged(result, 'nct0002')
+
+
 BENAZEPRIL = {'drugFromSource': 'BENAZEPRIL', 'drugId': 'CHEMBL1694'}
 
 
@@ -282,33 +309,126 @@ def test_flag_indirect_primary_purpose_non_aact_not_flagged() -> None:
     assert not _flagged(result, 'r3')
 
 
-def _extraction(nct_id: str, disease: str, drug: str) -> pl.DataFrame:
-    """A minimal frame in `ClinicalReportExtractionSchema` shape, as the extraction snapshot holds it."""
-    return pl.DataFrame({
-        'id': [nct_id],
-        'drug_intent': ['therapeutic'],
-        'drug_intent_confidence': [0.99],
-        'primary_indications': [[{'name': disease, 'evidence_quote': 'q'}]],
-        'investigated_drugs': [[{'drug': drug, 'evidence_quote': 'q'}]],
-    })
+def _extraction(nct_id: str, disease: str, drug: str, confidence: float = 0.9) -> pl.DataFrame:
+    """A one-link frame in `TrialExtractionV2` shape, as the extraction snapshot holds it."""
+    return v2_frame({nct_id: {'links': [v2_link(drug, disease, confidence)]}})
 
 
-def test_llm_extractions_are_passed_in_their_raw_schema_shape() -> None:
-    """`clinical_report` must hand the extraction to the AACT provider unprojected."""
+def test_registry_entities_are_replaced_by_the_extraction() -> None:
     studies = pl.DataFrame({
-        'nct_id': ['NCT0001'],
-        'diseaseFromSource': ['from-aact'],
-        'drugFromSource': ['from-aact'],
+        'nct_id': ['NCT0001', 'NCT0001', 'NCT0002'],
+        'diseaseFromSource': ['from-aact', 'pain', 'from-aact'],
+        'drugFromSource': ['from-aact', 'from-aact', 'from-aact'],
+    })
+    entities = report_entities_frame(_extraction('nct0001', 'asthma', 'aspirin'), 0.8)
+
+    result = replace_with_llm_indications(studies, entities)
+
+    assert result.rows() == [('NCT0001', 'asthma', 'aspirin')]
+
+
+def _aact_tables(nct_id: str = 'NCT0001') -> dict[str, pl.DataFrame]:
+    """One interventional drug trial, as the AACT tables give it."""
+    return {
+        'studies': pl.DataFrame({
+            'nct_id': [nct_id],
+            'study_type': ['INTERVENTIONAL'],
+            'phase': ['PHASE2'],
+            'official_title': ['t'],
+        }),
+        'interventions': pl.DataFrame({'nct_id': [nct_id], 'intervention_type': ['DRUG'], 'name': ['Registry Drug']}),
+        'conditions': pl.DataFrame({'nct_id': [nct_id], 'downcase_name': ['registry condition']}),
+    }
+
+
+def _entities(row: dict) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """The extraction of NCT0001 with `row`, and its report entities at confidence 0.8."""
+    extraction = v2_frame({'NCT0001': row})
+    return extraction, report_entities_frame(extraction, 0.8)
+
+
+def test_trial_report_entities_come_from_v2_links_above_threshold() -> None:
+    _, entities = _entities({
+        'links': [v2_link('aspirin', 'asthma', 0.9), v2_link('ibuprofen', 'pain', 0.5)],
+        'background_drugs': [{'drug': 'cisplatin', 'synonyms': [], 'role': 'backbone', 'evidence_quote': 'q'}],
+        'population_conditions': ['hypertension'],
     })
 
-    result = replace_with_llm_indications(studies, _extraction('NCT0001', 'asthma', 'aspirin'))
+    (row,) = extract_aact_clinical_report(**_aact_tables(), trial_entities=entities).df.iter_rows(named=True)
 
-    assert result['diseaseFromSource'].to_list() == ['asthma']
-    assert result['drugFromSource'].to_list() == ['aspirin']
+    assert row['drugs'] == [{'drugFromSource': 'aspirin', 'drugId': None}]
+    assert row['diseases'] == [{'diseaseId': None, 'diseaseFromSource': 'asthma'}]
 
-    pre_projected = pl.DataFrame({'id': ['NCT0001'], 'drugs': [['aspirin']], 'diseases': [['asthma']]})
-    with pytest.raises(pl.exceptions.ColumnNotFoundError, match='primary_indications'):
-        replace_with_llm_indications(studies, pre_projected)
+
+def _mapped(entities: pl.DataFrame) -> ClinicalReport:
+    reports = extract_aact_clinical_report(**_aact_tables(), trial_entities=entities).df
+    return map_report_entities(reports, DISEASE, DRUG, chembl_curation=None, drug_entities=_staged_drug_entities())
+
+
+def test_unmapped_indication_falls_back_to_its_broader_term() -> None:
+    _, entities = _entities({
+        'links': [
+            v2_link('aspirin', 'cystic fibrosis in adults', broader='cystic fibrosis'),
+            v2_link('aspirin', 'made-up disease', broader='made-up family'),
+        ]
+    })
+    mapped = _mapped(entities)
+
+    result = map_broader_diseases(
+        mapped,
+        trial_broader_terms(entities),
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        drug_entities=_staged_drug_entities(),
+    )
+
+    (row,) = result.df.iter_rows(named=True)
+    assert sorted(row['diseases'], key=str) == sorted(
+        [
+            {'diseaseFromSource': 'cystic fibrosis in adults', 'diseaseId': 'MONDO_0009061'},
+            {'diseaseFromSource': 'made-up disease', 'diseaseId': None},
+        ],
+        key=str,
+    )
+    assert row['drugs'] == [{'drugFromSource': 'aspirin', 'drugId': 'CHEMBL25'}]
+    assert result.df.drop('diseases').equals(mapped.df.drop('diseases'))
+
+
+def test_broader_terms_map_only_trial_reports() -> None:
+    _, entities = _entities({'links': [v2_link('aspirin', 'cf in adults', broader='cystic fibrosis')]})
+    other = {
+        **_report('NCT0001', ClinicalSource.TTD.value),
+        'diseases': [{'diseaseFromSource': 'cf in adults', 'diseaseId': None}],
+    }
+    reports = ClinicalReport(df=pl.DataFrame([other]))
+
+    result = map_broader_diseases(
+        reports,
+        trial_broader_terms(entities),
+        DISEASE,
+        DRUG,
+        chembl_curation=None,
+        drug_entities=_staged_drug_entities(),
+    )
+
+    assert result.df['diseases'].to_list() == [[{'diseaseFromSource': 'cf in adults', 'diseaseId': None}]]
+
+
+def test_trial_without_confident_links_has_no_report() -> None:
+    _, entities = _entities({'links': [v2_link('aspirin', 'cystic fibrosis', 0.5)]})
+
+    reports = extract_aact_clinical_report(**_aact_tables('NCT0001'), trial_entities=entities).df
+
+    assert reports.is_empty()
+
+
+def test_trial_the_extraction_misses_has_no_report() -> None:
+    _, entities = _entities({'links': [v2_link('aspirin', 'asthma')]})
+
+    reports = extract_aact_clinical_report(**_aact_tables('NCT0002'), trial_entities=entities).df
+
+    assert reports.is_empty()
 
 
 EMA_BANNER = [
@@ -756,11 +876,10 @@ def _release_source(
     tmp_path: Path,
     disease_tag: str | None = None,
     drug_extraction_tag: str | None = None,
-    extraction_digest: str | None = None,
+    extraction_metadata: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """The sources of a release, staged under ``tmp_path``, each with the metadata given."""
-    digest = extraction_digest or schema_digest(ClinicalReportExtractionSchema)
-    extraction_tag = drug_extraction_tag or EXTRACTION.release_tag()
+    extraction_tag = drug_extraction_tag or EXTRACTION_V2.release_tag()
     metadatas = {
         'aact_stop_reasons': _snapshot_metadata(STOP_REASONS),
         'aact_drug_entities': _snapshot_metadata(DRUG_ENTITIES, extraction_tag=extraction_tag),
@@ -779,7 +898,8 @@ def _release_source(
         publish_snapshot(empty, str(tmp_path / name), metadata, None)
         source[name] = str(tmp_path / name)
     extraction = _extraction('NCT0001', 'asthma', 'aspirin')
-    publish_snapshot(extraction, str(tmp_path / 'extraction'), EXTRACTION.metadata(digest, None), None)
+    metadata = extraction_metadata or {**EXTRACTION_V2.metadata('0' * 64, None), 'tag': EXTRACTION_V2.release_tag()}
+    publish_snapshot(extraction, str(tmp_path / 'extraction'), metadata, None)
     source['trial_extraction'] = str(tmp_path / 'extraction')
     (tmp_path / 'stage_downgrades.tsv').write_text('ttdDrugId\tdrugFromSource\tdiseaseFromSource\treason\n')
     (tmp_path / 'link_corrections.tsv').write_text(
@@ -865,8 +985,16 @@ def test_release_fails_before_restoring_dumps_on_a_stale_snapshot(tmp_path: Path
 
 @pytest.mark.usefixtures('no_dump')
 def test_release_fails_before_restoring_dumps_on_an_extraction_of_another_tag(tmp_path: Path) -> None:
-    source = _release_source(tmp_path, extraction_digest='f' * 64)
+    source = _release_source(tmp_path, extraction_metadata=EXTRACTION_V2.metadata('f' * 64, None))
     with pytest.raises(ValueError, match=r'ffffffffffff.*this code expects'):
+        clinical_report_module.clinical_report(source, {}, {}, None)
+
+
+@pytest.mark.usefixtures('no_dump')
+def test_clinical_report_refuses_a_v1_extraction(tmp_path: Path) -> None:
+    v1 = EXTRACTION.metadata(schema_digest(ClinicalReportExtractionSchema), None)
+    source = _release_source(tmp_path, extraction_metadata=v1)
+    with pytest.raises(ValueError, match=r"kind 'extraction', not 'extraction_v2'"):
         clinical_report_module.clinical_report(source, {}, {}, None)
 
 

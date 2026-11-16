@@ -1,11 +1,11 @@
 """AACT clinical-trial synonym mining for ChEMBL molecules.
 
-Mines candidate drug synonyms from the OpenAI/AACT clinical-trial extraction and anchors
+Mines candidate drug synonyms from the v2 AACT clinical-trial extraction and anchors
 them to ChEMBL molecules. :mod:`pts.transformers.chembl_molecule` is the only consumer and
 reaches it through three functions: :func:`parse_aact_entries`,
 :func:`mine_aact_synonyms` and :func:`merge_aact_synonyms`.
 
-Pipeline: trial extractions (as published by ``pts.transformers.clinical_mira.aact_trial_extraction``) ->
+Pipeline: trial drug entries (``pts.transformers.clinical_mira.trial_links.drug_synonym_entries``) ->
 normalized drug member sets -> anchor against a ChEMBL name index (with an ambiguity cap)
 -> eleven cleanup rules -> keep candidates seen in ``MIN_TRIALS`` distinct trials -> merge
 into the molecule synonyms.
@@ -134,31 +134,23 @@ def _has_class_keyword(expr: pl.Expr) -> pl.Expr:
     return expr.str.contains(_CLASS_PATTERN)
 
 
-def parse_aact_entries(batch: pl.DataFrame) -> pl.DataFrame:
-    """Turn parsed AACT batch extractions into one row per drug entry with a normalized member set.
+def parse_aact_entries(entries: pl.DataFrame) -> pl.DataFrame:
+    """Turn trial drug entries into one row per entry with a normalized member set.
 
     Args:
-        batch: DataFrame as published by
-            :py:mod:`pts.transformers.clinical_mira.aact_trial_extraction`
-            (or, for tests, anything carrying the same ``id``,
-            ``investigated_drugs``/``comparator_drugs``/``supportive_drugs`` columns).
+        entries: DataFrame[id, drug, synonyms, ...] as returned by
+            :py:func:`pts.transformers.clinical_mira.trial_links.drug_synonym_entries`,
+            tested and role drugs alike.
 
     Returns:
         DataFrame[nct_id, members: list[str]] (normalized, deduped, non-empty).
     """
-    roles = pl.concat_list(
-        pl.col('investigated_drugs').fill_null([]),
-        pl.col('comparator_drugs').fill_null([]),
-        pl.col('supportive_drugs').fill_null([]),
-    )
     return (
-        batch
-        .select(pl.col('id').alias('nct_id'), roles.alias('entry'))
-        .explode('entry', empty_as_null=True)
-        # a trial with no extracted drugs explodes to a null row rather than to nothing
-        .drop_nulls('entry')
-        .unnest('entry')
-        .with_columns(members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([])))
+        entries
+        .select(
+            pl.col('id').alias('nct_id'),
+            members=pl.concat_list(pl.concat_list(pl.col('drug')), pl.col('synonyms').fill_null([])),
+        )
         .with_columns(
             members=pl
             .col('members')

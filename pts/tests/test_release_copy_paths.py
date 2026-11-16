@@ -8,7 +8,7 @@ from pts.transformers.clinical_mira.ner import CHEMICAL_MODEL, DISEASE_MODEL, DR
 from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
-    EXTRACTION,
+    EXTRACTION_V2,
     MOA,
     MOA_LITERATURE,
     STOP_REASONS,
@@ -54,7 +54,7 @@ def test_pinned_tags_equal_the_code() -> None:
         key = f'{kind.name}_tag'
         expected = kind.tag(revisions)
         assert scratchpad.get(key) == expected, f'set {key} in pis/config.yaml to {expected}'
-    expected = EXTRACTION.release_tag()
+    expected = EXTRACTION_V2.release_tag()
     assert scratchpad.get('extraction_tag') == expected, f'set extraction_tag in pis/config.yaml to {expected}'
     assert scratchpad.get('moa_tag') == MOA.tag(), f'set moa_tag in pis/config.yaml to {MOA.tag()}'
 
@@ -69,7 +69,7 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
             STOP_REASONS,
         ),
         'input/clinical_report/aact_drug_entities': (
-            'gs://clinical_staging/aact/{staging_version}/extraction/{extraction_tag}/drug_entities',
+            'gs://clinical_staging/aact/{staging_version}/extraction_v2/{extraction_tag}/drug_entities',
             DRUG_ENTITIES,
         ),
         'input/clinical_report/mining_drug_entities': (
@@ -89,8 +89,8 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
 def test_release_copies_the_extraction_of_the_pinned_tag() -> None:
     """The extraction the release copies is the one directory named by the pinned extraction tag."""
     scratchpad = _scratchpad()
-    directory = f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
-    sources = _copy_sources()['input/clinical_report/aact_trial_extraction']
+    directory = f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction_v2/{scratchpad["extraction_tag"]}'
+    sources = _copy_sources()['input/clinical_report/aact_trial_extraction_v2']
     assert sorted(sources) == [f'{directory}/data.parquet', f'{directory}/metadata.json']
 
 
@@ -98,7 +98,7 @@ def test_release_copies_the_moa_of_the_pinned_tag() -> None:
     """The MoA snapshot the release copies is the one directory named by the pinned moa tag."""
     scratchpad = _scratchpad()
     directory = (
-        f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction/{scratchpad["extraction_tag"]}'
+        f'gs://clinical_staging/aact/{scratchpad["staging_version"]}/extraction_v2/{scratchpad["extraction_tag"]}'
         f'/moa/{scratchpad["moa_tag"]}'
     )
     sources = _copy_sources()['input/drug_mechanism_of_action/aact_moa']

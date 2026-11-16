@@ -7,7 +7,7 @@ from typing import Any, cast
 import polars as pl
 import pytest
 
-from pts.transformers.clinical_mira.moa import llm, pooling, schemas, staging
+from pts.transformers.clinical_mira.moa import claude, pooling, schemas, staging
 from pts.transformers.clinical_mira.moa.staging import (
     carry_forward,
     import_experiment_cache,
@@ -51,7 +51,9 @@ def _inputs() -> tuple[pl.DataFrame, pl.DataFrame]:
 
 def _write_cache(path: Path, pools: pl.DataFrame, system_prompt: str, which: str) -> str:
     row = pools.filter(pl.col('drug_name') == which).row(0, named=True)
-    key = llm.result_key(request_text(row['drug_name'], row['text']), system_prompt, schemas.MoaExtraction, MOA.model)
+    key = claude.result_key(
+        request_text(row['drug_name'], row['text']), system_prompt, schemas.MoaExtraction, MOA.model
+    )
     path.write_text(json.dumps({'key': key, 'request_id': row['pool_id'], 'response': EXTRACTION}) + '\n')
     return str(path)
 

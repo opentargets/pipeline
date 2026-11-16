@@ -40,7 +40,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from otter.config.model import Config
 
@@ -224,13 +224,13 @@ def _current(records: pl.DataFrame) -> pl.DataFrame:
 
 def _compute_round(
     todo: pl.DataFrame,
-    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+    compute: Callable[[list[str]], Sequence[tuple[Any, str | None] | None]],
     model: str,
     model_revision: str,
     run_id: str,
     schema: pl.Schema,
 ) -> pl.DataFrame:
-    """Compute one round over ``todo`` and return its records."""
+    """Compute one round over ``todo`` and return its records, none for a text ``compute`` left out."""
     todo_texts = todo['text'].to_list()
     try:
         results = compute(todo_texts)
@@ -243,16 +243,22 @@ def _compute_round(
     if len(results) != len(todo_texts):
         msg = f'compute returned {len(results)} results for {len(todo_texts)} texts'
         raise RecordStoreError(msg)
+    kept = [i for i, r in enumerate(results) if r is not None]
+    if len(kept) < len(results):
+        logger.warning(
+            f'compute left out {len(results) - len(kept)} of {len(results)} texts, recording nothing for them'
+        )
+    answered = [r for r in results if r is not None]
 
     return pl.DataFrame(
         {
-            'text_sha256': todo['text_sha256'],
-            'text': todo['text'],
+            'text_sha256': todo['text_sha256'].gather(kept),
+            'text': todo['text'].gather(kept),
             'model': model,
             'model_revision': model_revision,
-            'output': [r[0] for r in results],
-            'status': ['failed' if r[0] is None else 'ok' for r in results],
-            'error': [r[1] for r in results],
+            'output': [r[0] for r in answered],
+            'status': ['failed' if r[0] is None else 'ok' for r in answered],
+            'error': [r[1] for r in answered],
             'computed_at': datetime.now(UTC),
             'run_id': run_id,
         },
@@ -262,7 +268,7 @@ def _compute_round(
 
 def _compute_with_retries(
     todo: pl.DataFrame,
-    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+    compute: Callable[[list[str]], Sequence[tuple[Any, str | None] | None]],
     model: str,
     model_revision: str,
     run_id: str,
@@ -296,7 +302,7 @@ def _compute_with_retries(
 
 def map_texts(
     texts: pl.Series,
-    compute: Callable[[list[str]], list[tuple[Any, str | None]]],
+    compute: Callable[[list[str]], Sequence[tuple[Any, str | None] | None]],
     store_uri: str,
     model: str,
     model_revision: str,
@@ -314,8 +320,9 @@ def map_texts(
     ``compute`` call, with the texts distinct and sorted. An exception from
     ``compute`` aborts the call, as :py:class:`ComputeAborted` chained to it: the
     call records nothing, so no text uses up an attempt. A text that fails alone
-    is returned as ``(None, error)``. An abort in a retry round still writes the
-    rounds before it.
+    is returned as ``(None, error)``. A text ``compute`` returns ``None`` for is left
+    out: nothing is recorded for it, so it uses up no attempt and is not retried in the
+    run. An abort in a retry round still writes the rounds before it.
 
     With ``allow_failures`` the texts that fail are recomputed in the same run,
     one ``compute`` call per round, until their failures, earlier runs' included,
@@ -328,8 +335,8 @@ def map_texts(
 
     Args:
         texts: The texts to map. Must not contain nulls.
-        compute: Maps a list of texts to one ``(output, None)`` or ``(None, error)``
-            per text, in the same order.
+        compute: Maps a list of texts to one ``(output, None)``, ``(None, error)`` or
+            ``None`` (left out) per text, in the same order.
         store_uri: Root of the store, an absolute URI.
         model: Name of the model.
         model_revision: Revision of the model.

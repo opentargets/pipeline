@@ -103,25 +103,10 @@ def test_detailed_description_value_preserved():
 
 
 def test_replace_with_llm_indications():
-    """Test that LLM indications replace source indications for LLM-covered trials."""
+    """Extracted trials take the drugs and diseases of their confident links; others are dropped."""
     from pts.transformers.clinical_mira.providers.aact import replace_with_llm_indications
-
-    _disease_struct = pl.Struct({
-        'name': pl.String,
-        'severity': pl.String,
-        'stage': pl.String,
-        'onset': pl.String,
-        'etiology': pl.String,
-        'evidence_quote': pl.String,
-    })
-    _drug_struct = pl.Struct({
-        'drug': pl.String,
-        'route': pl.String,
-        'formulation': pl.String,
-        'synonyms': pl.List(pl.String),
-        'dosages': pl.List(pl.String),
-        'evidence_quote': pl.String,
-    })
+    from pts.transformers.clinical_mira.trial_links import report_entities_frame
+    from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
     studies = pl.DataFrame({
         'nct_id': ['NCT1', 'NCT1', 'NCT2', 'NCT3', 'NCT4'],
@@ -141,75 +126,22 @@ def test_replace_with_llm_indications():
         ],
         'trial_phase': ['PHASE2', 'PHASE2', 'PHASE3', 'PHASE1', 'PHASE4'],
     })
+    extractions = v2_frame({
+        'NCT1': {'links': [v2_link('acetaminophen', 'metastatic colorectal cancer')]},
+        'NCT3': {'links': [v2_link('carbamazepine', 'dementia', 0.3)]},
+        'nct4': {'links': [v2_link('lisinopril', 'congestive heart failure')]},
+    })
 
-    def disease(name: str) -> dict:
-        return {
-            'name': name,
-            'severity': None,
-            'stage': None,
-            'onset': None,
-            'etiology': None,
-            'evidence_quote': name,
-        }
+    result = replace_with_llm_indications(studies, report_entities_frame(extractions, 0.8))
 
-    def drug(name: str) -> dict:
-        return {
-            'drug': name,
-            'route': None,
-            'formulation': None,
-            'synonyms': None,
-            'dosages': None,
-            'evidence_quote': name,
-        }
-
-    extractions = pl.DataFrame(
-        {
-            'id': ['NCT1', 'NCT3', 'nct4'],
-            'primary_indications': [
-                [disease('metastatic colorectal cancer')],
-                [],
-                [disease('congestive heart failure')],
-            ],
-            'investigated_drugs': [
-                [drug('acetaminophen')],
-                [drug('carbamazepine')],
-                [drug('lisinopril')],
-            ],
-        },
-        schema={
-            'id': pl.String,
-            'primary_indications': pl.List(_disease_struct),
-            'investigated_drugs': pl.List(_drug_struct),
-        },
+    assert result.columns == studies.columns
+    assert sorted(result.select('nct_id', 'diseaseFromSource', 'drugFromSource').rows(), key=str) == sorted(
+        [
+            ('NCT1', 'metastatic colorectal cancer', 'acetaminophen'),
+            ('NCT4', 'congestive heart failure', 'lisinopril'),
+        ],
+        key=str,
     )
-
-    result = replace_with_llm_indications(studies, extractions)
-
-    # LLM-covered trial uses LLM indications only — "pain" row is gone
-    nct1_diseases = result.filter(pl.col('nct_id') == 'NCT1')['diseaseFromSource'].to_list()
-    assert nct1_diseases == ['metastatic colorectal cancer'], (
-        'Expected LLM indication to replace original source indications entirely'
-    )
-
-    # LLM-covered trial does not bleed original disease/drug pairs
-    assert 'pain' not in result['diseaseFromSource'].to_list(), (
-        'Original indications for LLM-covered trials must be fully replaced'
-    )
-
-    # Uncovered trial gets null indications
-    nct2 = result.filter(pl.col('nct_id') == 'NCT2')
-    assert nct2['diseaseFromSource'].to_list() == [None]
-    assert nct2['drugFromSource'].to_list() == [None]
-
-    # LLM-covered trial NCT3 should not have disease information
-    # the result of the extraction was None
-    nct3 = result.filter(pl.col('nct_id') == 'NCT3')
-    assert nct3['drugFromSource'].to_list() == ['carbamazepine']
-    assert nct3['diseaseFromSource'][0] is None
-
-    # LLM integration is case insensitive
-    nct4 = result.filter(pl.col('nct_id') == 'NCT4')
-    assert nct4['diseaseFromSource'].to_list() == ['congestive heart failure']
 
 
 def test_extract_clinical_report_with_sponsors():

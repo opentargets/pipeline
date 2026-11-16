@@ -30,13 +30,17 @@ from pts.transformers.clinical_mira.mining import mining_reports, read_mining_in
 from pts.transformers.clinical_mira.providers.aact import read_aact_tables
 from pts.transformers.clinical_mira.providers.drugs_at_fda import extract_clinical_report as extract_fda_clinical_report
 from pts.transformers.clinical_mira.providers.drugs_at_fda import read_applications as read_fda_applications
-from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION, STOP_REASONS
+from pts.transformers.clinical_mira.staged_outputs import DISEASE_ENTITIES, DRUG_ENTITIES, EXTRACTION_V2, STOP_REASONS
+from pts.transformers.clinical_mira.trial_links import report_entities_frame
 from pts.transformers.clinical_mira.ttd_curation import apply_ttd_curation, known_disease_ids, read_ttd_curation
 from pts.transformers.ontoma_lut.build import DISEASE_COLUMNS, DRUG_COLUMNS
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import flag_rows
 
 CHEMBL_SCHEMA_NAME = 'public'
+
+MIN_LINK_CONFIDENCE = 0.8
+"""Default lowest confidence of an extracted drug-indication link a trial report takes."""
 
 CHEMBL_TABLES = {
     'drug_indication': ['drugind_id', 'molregno', 'max_phase_for_ind', 'efo_id', 'efo_term'],
@@ -116,18 +120,22 @@ def clinical_report(
         source: Dictionary containing paths to input data
         destination: Dictionary containing paths to output data:
             - output: Path to write clinical reports (output/clinical_report)
-        settings: Dictionary containing step variables, none used
+        settings: Dictionary containing step variables:
+            - min_link_confidence: lowest confidence of an extracted trial link taken (default 0.8)
         config: Config object, for the scratch space of the dump restores
     """
     logger.info(f'source paths: {source}')
-    llm_extractions = EXTRACTION.read(source['trial_extraction'])
+    llm_extractions = EXTRACTION_V2.read(source['trial_extraction'])
+    trial_entities = report_entities_frame(
+        llm_extractions, float(settings.get('min_link_confidence', MIN_LINK_CONFIDENCE))
+    )
     stop_reasons = STOP_REASONS.read({'aact_stop_reasons': source['aact_stop_reasons']})
     drug_entities = DRUG_ENTITIES.read(
         {
             'aact_drug_entities': source['aact_drug_entities'],
             'mining_drug_entities': source['mining_drug_entities'],
         },
-        expect={'aact_drug_entities': {'extraction_tag': EXTRACTION.release_tag()}},
+        expect={'aact_drug_entities': {'extraction_tag': EXTRACTION_V2.release_tag()}},
     )
     disease_entities = DISEASE_ENTITIES.read({'mining_disease_entities': source['mining_disease_entities']})
     chembl_curation = scan_dataset(source['chembl_curation']).collect() if 'chembl_curation' in source else None
@@ -196,7 +204,7 @@ def clinical_report(
                 'agg': 'first',
             },
         },
-        llm_extractions=llm_extractions,
+        trial_entities=trial_entities,
     )
     logger.info(f'attach stop reasons staged at {source["aact_stop_reasons"]}')
     aact = ClinicalReport(df=attach_stop_reasons(aact.df, stop_reasons))
@@ -228,14 +236,15 @@ def clinical_report(
         extract_fda_clinical_report(fda_applications, molecule_index).df,
     ])
     logger.info('reports generated. map entities...')
+    mapping = {
+        'disease_index': disease_index,
+        'drug_index': molecule_index,
+        'chembl_curation': chembl_curation,
+        'drug_entities': drug_entities,
+    }
     output = (
-        map_report_entities(
-            reports=reports,
-            disease_index=disease_index,
-            drug_index=molecule_index,
-            chembl_curation=chembl_curation,
-            drug_entities=drug_entities,
-        )
+        map_report_entities(reports=reports, **mapping)
+        .pipe(map_broader_diseases, trial_broader_terms(trial_entities), **mapping)
         .pipe(
             apply_ttd_curation,
             ttd_downgrades,
@@ -255,7 +264,10 @@ def clinical_report(
         .pipe(flag_null_drugs)
         .pipe(flag_safety_reports)
         .pipe(flag_phase_iv_not_approved)
-        .pipe(flag_indirect_primary_purpose, llm_drug_intent=llm_extractions.select('id', 'drug_intent'))
+        .pipe(
+            flag_indirect_primary_purpose,
+            llm_drug_intent=trial_drug_intents(llm_extractions),
+        )
         .pipe(flag_observational_studies)
         .pipe(flag_unvalidated_indication, chembl_indication_report=chembl_indication_report)
     )
@@ -355,6 +367,104 @@ def map_report_entities(
                 pl.col('drug').drop_nulls().unique().alias('drugs'),
             )
             .with_columns(pl.when(pl.col(c).list.len() > 0).then(pl.col(c)) for c in ['diseases', 'drugs'])
+        )
+    )
+
+
+def trial_drug_intents(extractions: pl.DataFrame) -> pl.DataFrame:
+    """The drug intent of each extracted trial, as `id` (lowercase, as the reports') and `drug_intent`."""
+    return extractions.select(pl.col('id').str.to_lowercase(), 'drug_intent')
+
+
+def trial_broader_terms(entities: pl.DataFrame) -> pl.DataFrame:
+    """The broader term of each extracted trial indication, as `id` (lowercase), `diseaseFromSource` and `broader`.
+
+    Indications without a broader term, or whose broader term is the indication itself, are left out.
+    """
+    return (
+        entities
+        .select(pl.col('nct_id').str.to_lowercase().alias('id'), 'diseaseBroader')
+        .explode('diseaseBroader', empty_as_null=True)
+        .drop_nulls('diseaseBroader')
+        .unnest('diseaseBroader')
+        .rename({'indication': 'diseaseFromSource'})
+        .filter(pl.col('broader').is_not_null() & (pl.col('broader') != pl.col('diseaseFromSource')))
+        .unique()
+    )
+
+
+def map_broader_diseases(
+    reports: ClinicalReport,
+    broader: pl.DataFrame,
+    disease_index: pl.DataFrame,
+    drug_index: pl.DataFrame,
+    chembl_curation: pl.DataFrame | None,
+    drug_entities: pl.DataFrame,
+) -> ClinicalReport:
+    """Map the unmapped diseases of ClinicalTrials.gov reports by their broader term.
+
+    A hit sets `diseaseId`; `diseaseFromSource` stays the extracted indication.
+
+    Args:
+        reports: the mapped reports.
+        broader: the broader term of each trial indication, as `trial_broader_terms` returns.
+        disease_index: disease index, with `DISEASE_COLUMNS`.
+        drug_index: drug molecules, with `DRUG_COLUMNS`.
+        chembl_curation: ChEMBL's clinical trial curation.
+        drug_entities: the staged drug NER.
+
+    Returns:
+        ClinicalReport with the ids found.
+    """
+    df = reports.df.with_row_index('__row')
+    entries = (
+        df
+        .filter(pl.col('source') == ClinicalSource.CLINICAL_TRIALS_GOV.value)
+        .select('__row', 'id', 'diseases')
+        .explode('diseases')
+        .drop_nulls('diseases')
+        .unnest('diseases')
+    )
+    queries = entries.filter(pl.col('diseaseId').is_null()).join(broader, on=['id', 'diseaseFromSource'])
+    if queries.is_empty():
+        return reports
+    hits = (
+        map_entities(
+            queries.select(
+                'id',
+                pl.col('diseaseFromSource').alias('indication'),
+                pl.col('broader').alias('diseaseFromSource'),
+                pl.lit(None, dtype=pl.String).alias('drugFromSource'),
+            ),
+            disease_index,
+            drug_index,
+            chembl_curation,
+            drug_entities,
+        )
+        .filter(pl.col('diseaseId').is_not_null())
+        .select('id', pl.col('indication').alias('diseaseFromSource'), pl.col('diseaseId').alias('__broaderId'))
+        .unique()
+    )
+    remapped = (
+        entries
+        .filter(pl.col('__row').is_in(entries.join(hits, on=['id', 'diseaseFromSource'])['__row'].implode()))
+        .join(hits, on=['id', 'diseaseFromSource'], how='left', maintain_order='left')
+        .select(
+            '__row',
+            pl.struct('diseaseFromSource', pl.coalesce('diseaseId', '__broaderId').alias('diseaseId')).alias(
+                '__disease'
+            ),
+        )
+        .group_by('__row', maintain_order=True)
+        .agg(pl.col('__disease').unique(maintain_order=True).alias('__diseases'))
+    )
+    logger.info(f'broader terms mapped diseases of {remapped.height} trial reports')
+    return ClinicalReport(
+        df=(
+            df
+            .join(remapped, on='__row', how='left', maintain_order='left')
+            .with_columns(pl.coalesce('__diseases', 'diseases').alias('diseases'))
+            .select(reports.df.columns)
         )
     )
 

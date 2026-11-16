@@ -12,7 +12,7 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
-from pts.transformers.clinical_mira.moa import llm, pooling, schemas
+from pts.transformers.clinical_mira.moa import claude, pooling, schemas
 from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
 from pts.transformers.clinical_mira.record_store import import_run, record_schema, text_sha256
 from pts.transformers.clinical_mira.staged_outputs import MOA
@@ -220,7 +220,7 @@ def import_experiment_cache(
         rows = []
         for pool in pools.to_dicts():
             request = request_text(pool['drug_name'], pool['text'])
-            row = cached.get(llm.result_key(request, system_prompt, schemas.MoaExtraction, MOA.model))
+            row = cached.get(claude.result_key(request, system_prompt, schemas.MoaExtraction, MOA.model))
             if row is None:
                 continue
             output = record_output(
@@ -303,7 +303,7 @@ def moa_compute(
             if key not in results:
                 out.append((None, errors.get(key, 'missing')))
                 continue
-            result_key = llm.result_key(texts[key], system_prompt, schemas.MoaExtraction, MOA.model)
+            result_key = claude.result_key(texts[key], system_prompt, schemas.MoaExtraction, MOA.model)
             output = record_output(
                 listed[key]['drug_name'],
                 listed[key]['trials'],

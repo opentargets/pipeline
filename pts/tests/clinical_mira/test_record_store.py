@@ -527,3 +527,24 @@ def test_import_run_writes_once(store_uri):
     assert import_run(lambda: records, store_uri, 'import', None) == 1
     assert import_run(refuse, store_uri, 'import', None) == 0
     assert read_records(store_uri, None)['run_id'].to_list() == ['import']
+
+
+def test_a_text_compute_leaves_out_records_nothing_and_is_not_retried_in_the_run(store_uri):
+    def compute(texts):
+        calls.append(list(texts))
+        return [None if t == 'skip' else (None, 'bad text') if t == 'bad' else ([t.upper()], None) for t in texts]
+
+    calls: list[list[str]] = []
+    mapped = run_mapped(['a', 'bad', 'skip'], compute, store_uri, 'r1', allow_failures=True, max_attempts=2)
+
+    assert calls == [['a', 'bad', 'skip'], ['bad']]
+    assert mapped.frame['text'].to_list() == ['a']
+    assert mapped.failed == 2
+    records = read_records(store_uri, None)
+    assert sorted(records['text'].to_list()) == ['a', 'bad', 'bad']
+    rerun = Recorder()
+    assert run(['a', 'bad', 'skip'], rerun, store_uri, 'r2', allow_failures=True, max_attempts=2)['text'].to_list() == [
+        'a',
+        'skip',
+    ]
+    assert rerun.calls == [['skip']]

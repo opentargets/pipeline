@@ -1,6 +1,6 @@
 # Clinical staging
 
-This document was updated on 2026-11-03.
+This document was updated on 2026-11-15.
 
 The `clinical_report` step needs data that comes from an LLM or from models:
 the trial extraction, the stop reasons, and the drug and disease entities in
@@ -22,16 +22,17 @@ file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 | `staging_version` in `pis/config.yaml` | the date the release copies, for every source |
 | `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
 | `*_tag` in `pis/config.yaml` | the snapshots the release copies |
-| `extraction_tag` in `pis/config.yaml` | the extraction the release copies, and the AACT drug snapshot under it |
+| `extraction_tag` in `pis/config.yaml` | the v2 extraction the release copies, and the AACT drug and MoA snapshots under it |
 
 ## Layout
 
 ```{bash}
-gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,moa,moa_literature}/  # record stores, shared across versions
+gs://clinical_staging/store/{stop_reasons,drug_entities,disease_entities,extraction,extraction_v2,moa,moa_literature}/  # record stores, shared across versions
+gs://clinical_staging/store/batches/                                  # Claude batch ids, so a rerun collects them instead of resubmitting
 gs://clinical_staging/frozen/2026-05-27/                             # chembl_mapping.parquet and ner_cache.parquet, never fetched
 gs://clinical_staging/aact/<staging_version>/input/                   # aact.zip and the models, <org>/<name>/<revision>/<file>
-gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/  # data.parquet + metadata.json
-gs://clinical_staging/aact/<staging_version>/extraction/<extraction_tag>/drug_entities/<tag>/
+gs://clinical_staging/aact/<staging_version>/extraction_v2/<extraction_v2_tag>/  # data.parquet + metadata.json
+gs://clinical_staging/aact/<staging_version>/extraction_v2/<extraction_v2_tag>/drug_entities/<tag>/
 gs://clinical_staging/aact/<staging_version>/stop_reasons/<tag>/      # data.parquet + metadata.json
 gs://clinical_staging/<source>/<version>/etc/config/               # the config each step ran with
 gs://clinical_staging/clinical_mining/<staging_version>/input/                # ttd, ema, pmda, chembl mapping, models
@@ -51,14 +52,23 @@ published release it reads instead,
 
 1. `pis_aact` — downloads the monthly archive to `input/aact.zip` and the
    stop-reasons, chemical and drugtemist models to `input/models/`.
-2. `pts_aact_trial_extraction` (n1-highmem-8) — asks the LLM to read every trial the record
-   store does not already hold, and publishes the extraction. A trial that
-   fails all 3 attempts is published without, with a warning giving the count;
-   a rerun of the version computes nothing.
+2. `pts_aact_trial_extraction_v2` (n1-highmem-8) — asks Claude, through Message Batches, to read every trial the record
+   store does not already hold, and publishes the extraction at
+   `extraction_v2/<extraction_v2_tag>`. A trial a batch leaves unanswered for a
+   systemic reason (`expired`, `canceled`, `overloaded_error` or `api_error`)
+   uses up no attempt, and the step refuses to publish while any such trial
+   remains; a rerun resubmits only those trials. A content failure
+   (`refusal`, `max_tokens`, `invalid_json` or `invalid_request_error`) uses up
+   an attempt. A trial that fails all 3 is left out of the snapshot for that
+   AACT version, with a warning giving the count, and a rerun does not retry it.
+   `<extraction_v2_tag>` is the tag the pts code computes
+   (`EXTRACTION_V2.release_tag()` in `staged_outputs.py`) from the Claude
+   model, the prompt, the schema, the renderer, the effort and the output-token
+   limit.
 3. `pts_aact_trial_models` (n2d-standard-16) — runs the stop-reasons model over
    the distinct `why_stopped` texts and the drug NER over the distinct drug
    labels, and publishes `stop_reasons/<tag>` and
-   `extraction/<extraction_tag>/drug_entities/<tag>`. The drug NER runs the
+   `extraction_v2/<extraction_v2_tag>/drug_entities/<tag>`. The drug NER runs the
    model on 32 labels per forward pass (`ner_model_batch_size`). It reads the
    extraction of the tag its own code computes, and fails naming the expected
    path if there is none.
@@ -121,8 +131,11 @@ snapshot covers, whatever its source.
 
 There is no Airflow dependency between this DAG and `unified_pipeline`. The
 release names the versions in `pis/config.yaml`; if it names one that was
-never staged, its copy fails on a missing path. The OpenAI key is fetched from
-Secret Manager onto the VM and mounted into the container.
+never staged, its copy fails on a missing path. The Claude steps (`pts_aact_trial_extraction_v2`,
+`pts_aact_moa`, `pts_moa_literature`) run as
+`clinical-staging-llm@open-targets-eu-dev.iam.gserviceaccount.com`, with
+`ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID` and `ANTHROPIC_GOOGLE_CLOUD_PROJECT` set
+in their `container_env`. No step mounts a secret.
 
 ## Record stores, snapshots and revision tags
 
@@ -152,23 +165,22 @@ computes each tag from the pinned hub revisions and fails, printing the new
 tag, when a pin is stale. Reading a snapshot staged by code with other
 parameters fails before any work, naming both digests.
 
-The extraction is tagged too:
+The v2 extraction is tagged too:
 
 ```
-<schema digest, 12 hex>-p<8 hex of sha256({logic_version, trial_fields, sample_size})>
+<revision, 12 hex>-p<8 hex of sha256({logic_version, params, sample_size})>
 ```
 
-The schema digest is that of `ClinicalReportExtractionSchema`. A schema change,
-a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or any
-`sample_size` gives a new tag. The OpenAI model and the
-system prompt are not in it, because they do not change what is published.
-The extraction store keeps the full schema digest as its revision. The AACT
-drug snapshot is published under the extraction it was computed from and
-records its `extraction_tag` in its metadata. `clinical_report` checks the
-extraction and the drug snapshot's `extraction_tag`, and `chembl_molecule` the
-extraction only, before any dump restore. Both check against the tag the code
-computes, not against the pin; the pin test ties the pin to that tag. A sampled
-extraction never passes.
+The revision is the sha256 of the `TrialExtractionV2` schema digest, the system
+prompt, the Claude model, the renderer's `RENDER_VERSION`, the effort and
+`max_tokens` (`extraction_v2_revision` in `staged_outputs.py`). A change to any of
+them, a `logic_version` bump of `EXTRACTION_V2`, or any `sample_size` gives a new
+tag. The extraction store keeps the full revision. The AACT drug and MoA
+snapshots are published under the extraction they were computed from.
+`clinical_report` and `chembl_molecule` check the extraction against the tag the
+code computes for the packaged prompt, default model and effort
+(`EXTRACTION_V2.release_tag()`), not against the pin; the pin test ties the pin
+to that tag. A sampled extraction never passes.
 
 Snapshots and extractions are write-once per (version, tag).
 
@@ -200,9 +212,10 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
 
 A change to the `params` of a kind, or a `logic_version` bump for any other
 change to the code that computes its output, also gives a new tag. The
-extraction follows the same rule with `EXTRACTION` in `staged_outputs.py`: its
-params are `TRIAL_FIELDS`, and a change to the code that builds the prompt or
-reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
+v2 extraction follows the same rule with `EXTRACTION_V2` in `staged_outputs.py`;
+a prompt, model, effort or schema change gives a new tag through its revision,
+and any other change to the code that renders the trial or reads the response
+needs a `logic_version` bump. Either needs a new `extraction_tag` pin.
 
 1. Change the constants that the kind's `params` reference: `STOP_REASONS_THRESHOLD`
    in `stop_reasons.py`, or `DRUG_NAME_PATTERNS`, `BIOBERT_LABELS`,
@@ -228,23 +241,11 @@ reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
 
 1. Release pts and pis, and bump `pts_version` and `pis_version` in
    `clinical_staging.yaml`, and the pins in `pis/config.yaml`.
-2. First run only, in `pts/config.yaml`: set `import_extraction_cache` under
-   the `settings` of the `aact_trial_extraction` step to
-   `gs://aact_data/cache/trial_extraction/<schema digest>`, and `seed_ner_cache`
-   under the `settings` of the `aact_trial_models` step to
-   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`.
-   The schema digest is the full 64 hex digest of the response schema, as the
-   step computes it; from `pts/`:
-
-   ```bash
-   uv run python -c "from pts.transformers.clinical_mira.staged_outputs import schema_digest; from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema as M; print(schema_digest(M))"
-   ```
-
-   Remove both afterwards: once the schema changes, an `import_extraction_cache`
-   left set names another schema's namespace, and the step fails. The mining
-   disease NER (about 3k texts) is computed in full on the first run. Without
-   the import and the seed the first run pays for every trial and every label
-   again.
+2. First run only, in `pts/config.yaml`: set `seed_ner_cache` under the
+   `settings` of the `aact_trial_models` step to
+   `gs://clinical_staging/frozen/2026-05-27/ner_cache.parquet`. Remove it
+   afterwards. The mining disease NER (about 3k texts) is computed in full on
+   the first run. Without the seed the first run pays for every label again.
 3. Trigger the DAG. It runs `clinical_mining_models` after `aact_trial_models`,
    so the seed covers the mining labels. Check that every snapshot of both
    sources exists.
@@ -268,6 +269,21 @@ and reads the copy the `clinical_report` step makes.
 Only AACT trials with an extraction row are included in the clinical report.
 
 ## Changelog
+
+### 2026-11-16
+
+- The release copies the v2 extraction `6e643deca5bd-p3b89ab7e` (239,208 trials)
+  into `input/clinical_report/aact_trial_extraction_v2`, and its drug entities
+  and MoA (`claude-opus-5-5-p4e6708cf`) from under it. `extraction_tag` in
+  `pis/config.yaml` now pins the v2 tag.
+
+### 2026-11-15
+
+- The trial extraction runs on Claude as `pts_aact_trial_extraction_v2`, with
+  its record store at `store/extraction_v2` and its snapshot at
+  `extraction_v2/<extraction_v2_tag>`, the AACT drug snapshot under it. A
+  systemic batch failure stops the snapshot from publishing until a rerun
+  answers the trial.
 
 ### 2026-11-03
 

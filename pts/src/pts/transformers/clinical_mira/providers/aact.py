@@ -85,81 +85,33 @@ def process_conditions(conditions: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _investigated_drug_names() -> pl.Expr:
-    """Drug names of an extraction, one list per row."""
-    return pl.col('investigated_drugs').list.eval(pl.element().struct.field('drug'))
+def replace_with_llm_indications(studies: pl.DataFrame, entities: pl.DataFrame) -> pl.DataFrame:
+    """Replace the registry drugs and diseases with those of the trial extraction.
 
-
-def llm_drug_labels(extractions: pl.DataFrame) -> pl.Series:
-    """Distinct non-null drug names of the extractions, sorted: the labels `replace_with_llm_indications` emits."""
-    return (
-        extractions
-        .select(drugFromSource=_investigated_drug_names())
-        .explode('drugFromSource')
-        .get_column('drugFromSource')
-        .drop_nulls()
-        .unique()
-        .sort()
-    )
-
-
-def replace_with_llm_indications(
-    studies: pl.DataFrame,
-    extractions: pl.DataFrame,
-) -> pl.DataFrame:
-    """Replace diseaseFromSource/drugFromSource with LLM-extracted indications.
-
-    The *extractions* DataFrame must conform to the
-    ``ClinicalReportExtractionSchema`` (``id``, ``primary_indications``,
-    ``investigated_drugs``, …). Disease and drug names are extracted from
-    the ``.name`` and ``.drug`` struct fields respectively.
-
-    Trials not present in *extractions* get null indications.
+    *entities* is the frame ``trial_links.report_entities_frame`` returns (``nct_id``, ``drugFromSource`` and
+    ``diseaseFromSource`` lists). A trial it covers gets one row per drug and disease, or a null disease where
+    its disease list is empty; a trial it does not cover, or covers with no drug, is dropped. Trial ids match
+    case-insensitively.
     """
-    llm_extracted = (
-        extractions
-        .select(
-            nct_id=pl.col('id'),
-            diseaseFromSource=pl.col('primary_indications').list.eval(pl.element().struct.field('name')),
-            drugFromSource=_investigated_drug_names(),
-        )
-        .with_columns(
-            diseaseFromSource=pl
-            .when(pl.col('diseaseFromSource').list.len() == 0)
-            .then(pl.lit(None, dtype=pl.List(pl.String)))
-            .otherwise(pl.col('diseaseFromSource')),
-            drugFromSource=pl
-            .when(pl.col('drugFromSource').list.len() == 0)
-            .then(pl.lit(None, dtype=pl.List(pl.String)))
-            .otherwise(pl.col('drugFromSource')),
-        )
+    extracted = (
+        entities
+        .select('nct_id', 'drugFromSource', 'diseaseFromSource')
         .explode('diseaseFromSource', empty_as_null=True)
         .explode('drugFromSource', empty_as_null=True)
     )
-
-    return pl.concat([
-        # Trials not covered by LLM extraction get null indications
-        studies.join(
-            llm_extracted.select('nct_id'),
-            left_on=pl.col('nct_id').str.to_uppercase(),
-            right_on=pl.col('nct_id').str.to_uppercase(),
-            how='anti',
-        ).with_columns(
-            pl.lit(None, dtype=pl.String).alias('drugFromSource'),
-            pl.lit(None, dtype=pl.String).alias('diseaseFromSource'),
-        ),
-        # Trials covered by LLM extraction get LLM annotations
+    return (
         studies
         .drop(['diseaseFromSource', 'drugFromSource'])
         .unique()  # to avoid ID duplication due to exploded diseases/drugs
         .join(
-            llm_extracted,
+            extracted,
             left_on=pl.col('nct_id').str.to_uppercase(),
             right_on=pl.col('nct_id').str.to_uppercase(),
             how='inner',
         )
-        .select(studies.columns),  # to keep the same column order
-    ])
+        .filter(pl.col('drugFromSource').is_not_null())
+        .select(studies.columns)  # to keep the same column order
+    )
 
 
 def extract_clinical_report(
@@ -168,7 +120,7 @@ def extract_clinical_report(
     conditions: pl.DataFrame,
     additional_metadata: list[pl.DataFrame] | None = None,
     aggregation_specs: dict[str, dict[str, Any]] | None = None,
-    llm_extractions: pl.DataFrame | None = None,
+    trial_entities: pl.DataFrame | None = None,
 ) -> ClinicalReport:
     """Return clinical trials with desired extra annotations from other tables.
 
@@ -178,7 +130,8 @@ def extract_clinical_report(
         conditions: DataFrame with condition information.
         additional_metadata: List of DataFrames with additional metadata.
         aggregation_specs: Dictionary with aggregation specifications.
-        llm_extractions: DataFrame with LLM extractions.
+        trial_entities: The drugs and diseases of each extracted trial, as ``report_entities_frame`` returns them.
+            When given, they replace the registry's, and an extracted trial without a drug is dropped.
 
     Returns:
         ClinicalReport with desired extra annotations from other tables.
@@ -186,8 +139,10 @@ def extract_clinical_report(
     interventions = process_interventions(interventions)
     conditions = process_conditions(conditions)
     studies = studies.join(interventions, on='nct_id', how='left').join(conditions, on='nct_id', how='left')
-    if llm_extractions is not None:
-        studies = replace_with_llm_indications(studies, llm_extractions)
+    if trial_entities is not None:
+        studies = replace_with_llm_indications(studies, trial_entities)
+    else:
+        studies = studies.filter(pl.col('drugFromSource').is_not_null())
     if additional_metadata is not None:
         for metadata_df in additional_metadata:
             if aggregation_specs:
@@ -219,7 +174,6 @@ def extract_clinical_report(
     reports = (
         studies
         .filter(pl.col('study_type').is_in(STUDY_TYPES))
-        .filter(pl.col('drugFromSource').is_not_null())
         .rename({col: f'trial_{col}' for col in trial_metadata_cols})
         .rename({'nct_id': 'id'})
         .with_columns(
