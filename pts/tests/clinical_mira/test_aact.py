@@ -103,7 +103,7 @@ def test_detailed_description_value_preserved():
 
 
 def test_replace_with_llm_indications():
-    """Extracted trials take the drugs and diseases of their confident links; trials not extracted are dropped."""
+    """Extracted trials take the drugs and diseases of their confident links; others are dropped."""
     from pts.transformers.clinical_mira.providers.aact import replace_with_llm_indications
     from pts.transformers.clinical_mira.trial_links import report_entities_frame
     from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
@@ -138,7 +138,6 @@ def test_replace_with_llm_indications():
     assert sorted(result.select('nct_id', 'diseaseFromSource', 'drugFromSource').rows(), key=str) == sorted(
         [
             ('NCT1', 'metastatic colorectal cancer', 'acetaminophen'),
-            ('NCT3', None, None),
             ('NCT4', 'congestive heart failure', 'lisinopril'),
         ],
         key=str,

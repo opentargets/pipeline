@@ -41,7 +41,6 @@ from pts.transformers.clinical_report import (
     attach_stop_reasons,
     flag_indirect_primary_purpose,
     flag_null_diseases,
-    flag_null_drugs,
     flag_observational_studies,
     map_broader_diseases,
     map_report_entities,
@@ -416,16 +415,12 @@ def test_broader_terms_map_only_trial_reports() -> None:
     assert result.df['diseases'].to_list() == [[{'diseaseFromSource': 'cf in adults', 'diseaseId': None}]]
 
 
-def test_trial_without_confident_links_is_flagged_no_disease() -> None:
+def test_trial_without_confident_links_has_no_report() -> None:
     _, entities = _entities({'links': [v2_link('aspirin', 'cystic fibrosis', 0.5)]})
 
-    flagged = validate_disease(_mapped(entities), DISEASE).pipe(flag_null_diseases).pipe(flag_null_drugs)
+    reports = extract_aact_clinical_report(**_aact_tables('NCT0001'), trial_entities=entities).df
 
-    (row,) = flagged.df.iter_rows(named=True)
-    assert row['id'] == 'nct0001'
-    assert row['drugs'] is None
-    assert row['diseases'] is None
-    assert {'NO_DISEASE', 'NO_DRUGS'} <= set(row['qualityControls'])
+    assert reports.is_empty()
 
 
 def test_trial_the_extraction_misses_has_no_report() -> None:

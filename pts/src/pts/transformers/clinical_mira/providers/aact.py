@@ -89,8 +89,9 @@ def replace_with_llm_indications(studies: pl.DataFrame, entities: pl.DataFrame) 
     """Replace the registry drugs and diseases with those of the trial extraction.
 
     *entities* is the frame ``trial_links.report_entities_frame`` returns (``nct_id``, ``drugFromSource`` and
-    ``diseaseFromSource`` lists). A trial it covers gets one row per drug and disease, or a null drug or disease
-    where its list is empty; a trial it does not cover is dropped. Trial ids match case-insensitively.
+    ``diseaseFromSource`` lists). A trial it covers gets one row per drug and disease, or a null disease where
+    its disease list is empty; a trial it does not cover, or covers with no drug, is dropped. Trial ids match
+    case-insensitively.
     """
     extracted = (
         entities
@@ -108,6 +109,7 @@ def replace_with_llm_indications(studies: pl.DataFrame, entities: pl.DataFrame) 
             right_on=pl.col('nct_id').str.to_uppercase(),
             how='inner',
         )
+        .filter(pl.col('drugFromSource').is_not_null())
         .select(studies.columns)  # to keep the same column order
     )
 
@@ -129,7 +131,7 @@ def extract_clinical_report(
         additional_metadata: List of DataFrames with additional metadata.
         aggregation_specs: Dictionary with aggregation specifications.
         trial_entities: The drugs and diseases of each extracted trial, as ``report_entities_frame`` returns them.
-            When given, they replace the registry's, and an extracted trial without any is kept.
+            When given, they replace the registry's, and an extracted trial without a drug is dropped.
 
     Returns:
         ClinicalReport with desired extra annotations from other tables.
