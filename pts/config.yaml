@@ -1009,6 +1009,13 @@ steps:
             - APPROVAL
           literature:
             - APPROVAL
+        stage_exempt_drug_types:
+          aact:
+            - Antibody
+            - Antibody drug conjugate
+            - Enzyme
+            - Oligonucleotide
+            - Protein
         report_min_confidence: 0.70
         link_share: 0.8
         class_level_genes: 20
