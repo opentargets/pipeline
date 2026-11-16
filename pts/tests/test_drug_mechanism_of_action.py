@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
+import yaml
 from loguru import logger
 
 from pts.transformers import drug_mechanism_of_action as module
@@ -21,6 +22,7 @@ from pts.transformers.drug_mechanism_of_action import (
     merge_inferred,
     process_mechanism_of_action,
 )
+from pts.transformers.drug_mechanism_of_action_candidates import DRUG_TYPES
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 PROTEIN_ID = pl.Struct({'id': pl.String, 'source': pl.String})
@@ -822,6 +824,14 @@ class TestMergeInferred:
         assert merged.height == chembl.height + 1
         assert merged.tail(1)['mechanismOfAction'].to_list() == ['antibody']
 
+    def test_an_exempt_source_without_exclude_stages_raises(self, chembl: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match='aactt'):
+            self.merge(chembl, candidate(), exempt_drug_types={'aactt': ['Antibody']})
+
+    def test_an_unknown_exempt_drug_type_raises(self, chembl: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match='Antibodies'):
+            self.merge(chembl, candidate(), exempt_drug_types={'aact': ['Antibodies']})
+
     def test_filtering_comes_before_deduplication(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
             chembl,
@@ -1171,3 +1181,12 @@ class TestEntryPoint:
                 self.settings(),
                 SimpleNamespace(work_path=root),
             )
+
+
+def test_the_configured_exemptions_name_known_sources_and_drug_types() -> None:
+    config = yaml.safe_load((Path(__file__).parents[1] / 'config.yaml').read_text())
+    (task,) = config['steps']['drug_mechanism_of_action']
+    settings = task['settings']
+    exempt = settings['stage_exempt_drug_types']
+    assert set(exempt) <= set(settings['exclude_stages'])
+    assert {drug_type for types in exempt.values() for drug_type in types} <= DRUG_TYPES
