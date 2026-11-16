@@ -123,9 +123,9 @@ def test_release_copy_paths_use_the_pinned_tags() -> None:
     extraction = FAKE_TAGS['extraction_tag']
     for base in (
         f'gs://clinical_staging/aact/S/stop_reasons/{stop}',
-        f'gs://clinical_staging/aact/S/extraction/{extraction}',
-        f'gs://clinical_staging/aact/S/extraction/{extraction}/moa/{FAKE_TAGS["moa_tag"]}',
-        f'gs://clinical_staging/aact/S/extraction/{extraction}/drug_entities/{drug}',
+        f'gs://clinical_staging/aact/S/extraction_v2/{extraction}',
+        f'gs://clinical_staging/aact/S/extraction_v2/{extraction}/moa/{FAKE_TAGS["moa_tag"]}',
+        f'gs://clinical_staging/aact/S/extraction_v2/{extraction}/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/drug_entities/{drug}',
         f'gs://clinical_staging/clinical_mining/S/disease_entities/{disease}',
         f'gs://clinical_staging/literature/R/moa_literature/{FAKE_TAGS["moa_literature_tag"]}',
