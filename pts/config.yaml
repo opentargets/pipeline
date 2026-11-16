@@ -245,6 +245,29 @@ steps:
         trans_qtl_threshold: 5000000
   ##################################################################################################
 
+  #: COLOCALISATION STEP :##########################################################################
+  # Runs on the published credible sets of the credible_set_annotation step.
+  colocalisation:
+    - name: pyspark colocalisation
+      pyspark: colocalisation
+      source:
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+      destination:
+        colocalisation: output/colocalisation
+      properties:
+        spark.executor.memory: 22g
+        spark.executor.memoryOverhead: 4g
+        spark.executor.cores: '4'
+        spark.memory.fraction: '0.8'
+        spark.memory.storageFraction: '0.2'
+      settings:
+        priorc1: 1.0e-4
+        priorc2: 1.0e-4
+        priorc12: 1.0e-5
+        output_partitions: 200
+  ##################################################################################################
+
   #: OTAR STEP :####################################################################################
   otar:
     - name: transform otar
