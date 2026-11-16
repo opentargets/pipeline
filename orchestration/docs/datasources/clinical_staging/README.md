@@ -22,7 +22,7 @@ file, copied from `gs://clinical_staging/frozen/2026-05-27/`.
 | `staging_version` in `pis/config.yaml` | the date the release copies, for every source |
 | `*_model_revision`, `*_ner_revision` in `pis/config.yaml` | the models |
 | `*_tag` in `pis/config.yaml` | the snapshots the release copies |
-| `extraction_tag` in `pis/config.yaml` | the extraction the release copies, and the AACT drug snapshot under it |
+| `extraction_tag` in `pis/config.yaml` | the v2 extraction the release copies, and the AACT drug and MoA snapshots under it |
 
 ## Layout
 
@@ -165,23 +165,22 @@ computes each tag from the pinned hub revisions and fails, printing the new
 tag, when a pin is stale. Reading a snapshot staged by code with other
 parameters fails before any work, naming both digests.
 
-The extraction is tagged too:
+The v2 extraction is tagged too:
 
 ```
-<schema digest, 12 hex>-p<8 hex of sha256({logic_version, trial_fields, sample_size})>
+<revision, 12 hex>-p<8 hex of sha256({logic_version, params, sample_size})>
 ```
 
-The schema digest is that of `ClinicalReportExtractionSchema`. A schema change,
-a change to `TRIAL_FIELDS`, a `logic_version` bump of `EXTRACTION`, or any
-`sample_size` gives a new tag. The Claude model and the
-system prompt are not in it, because they do not change what is published.
-The extraction store keeps the full schema digest as its revision. The AACT
-drug snapshot is published under the extraction it was computed from and
-records its `extraction_tag` in its metadata. `clinical_report` checks the
-extraction and the drug snapshot's `extraction_tag`, and `chembl_molecule` the
-extraction only, before any dump restore. Both check against the tag the code
-computes, not against the pin; the pin test ties the pin to that tag. A sampled
-extraction never passes.
+The revision is the sha256 of the `TrialExtractionV2` schema digest, the system
+prompt, the Claude model, the renderer's `RENDER_VERSION`, the effort and
+`max_tokens` (`extraction_v2_revision` in `staged_outputs.py`). A change to any of
+them, a `logic_version` bump of `EXTRACTION_V2`, or any `sample_size` gives a new
+tag. The extraction store keeps the full revision. The AACT drug and MoA
+snapshots are published under the extraction they were computed from.
+`clinical_report` and `chembl_molecule` check the extraction against the tag the
+code computes for the packaged prompt, default model and effort
+(`EXTRACTION_V2.release_tag()`), not against the pin; the pin test ties the pin
+to that tag. A sampled extraction never passes.
 
 Snapshots and extractions are write-once per (version, tag).
 
@@ -213,9 +212,10 @@ last. Until the new snapshot exists, the release copy fails on the missing tag.
 
 A change to the `params` of a kind, or a `logic_version` bump for any other
 change to the code that computes its output, also gives a new tag. The
-extraction follows the same rule with `EXTRACTION` in `staged_outputs.py`: its
-params are `TRIAL_FIELDS`, and a change to the code that builds the prompt or
-reads the response needs a `logic_version` bump and a new `extraction_tag` pin.
+v2 extraction follows the same rule with `EXTRACTION_V2` in `staged_outputs.py`;
+a prompt, model, effort or schema change gives a new tag through its revision,
+and any other change to the code that renders the trial or reads the response
+needs a `logic_version` bump. Either needs a new `extraction_tag` pin.
 
 1. Change the constants that the kind's `params` reference: `STOP_REASONS_THRESHOLD`
    in `stop_reasons.py`, or `DRUG_NAME_PATTERNS`, `BIOBERT_LABELS`,
@@ -269,6 +269,13 @@ and reads the copy the `clinical_report` step makes.
 Only AACT trials with an extraction row are included in the clinical report.
 
 ## Changelog
+
+### 2026-11-16
+
+- The release copies the v2 extraction `6e643deca5bd-p3b89ab7e` (239,208 trials)
+  into `input/clinical_report/aact_trial_extraction_v2`, and its drug entities
+  and MoA (`claude-opus-5-5-p4e6708cf`) from under it. `extraction_tag` in
+  `pis/config.yaml` now pins the v2 tag.
 
 ### 2026-11-15
 
