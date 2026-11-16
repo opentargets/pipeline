@@ -77,6 +77,8 @@ scratchpad:
   staging_eqtlgen_ts: '20261103T135048'
   staging_decode_ts: '20261103T122701'
   staging_sle_map_ts: '20261103T145657'
+  staging_pgc_ts: '20261113T192257'
+  staging_bigbrain_ts: '20261029T162943'
 
 steps:
   #: BASELINE_EXPRESSION_RAW STEP :#################################################################
@@ -1008,6 +1010,19 @@ steps:
     - name: copy_many finngen meta credible set variants
       sources: gs://finngen_data/meta/three-way/prod/${staging_finngen_meta_ts}/output/credible_set_variant/*.parquet
       destination: input/gwas/finngen_meta/credible_set_variant
+
+    - name: copy_many PGC study
+      sources: gs://pgc_data/prod/${staging_pgc_ts}/output/study/*.parquet
+      destination: input/gwas/pgc/study
+
+    # The joint sets: SuSiE plus the PICS sets SuSiE does not explain.
+    - name: copy_many PGC credible sets
+      sources: gs://pgc_data/prod/${staging_pgc_ts}/output/credible_set/*.parquet
+      destination: input/gwas/pgc/credible_set
+
+    - name: copy_many PGC credible set variants
+      sources: gs://pgc_data/prod/${staging_pgc_ts}/output/credible_set_variant/*.parquet
+      destination: input/gwas/pgc/credible_set_variant
   ##################################################################################################
 
   #: HERITABILITY STEP :############################################################################
@@ -1156,6 +1171,23 @@ steps:
     - name: copy_many sle_map credible set variants
       sources: gs://sle_map_data/prod/${staging_sle_map_ts}/output/credible_set_variant/*.parquet
       destination: input/molqtl/sle_map/credible_set_variant
+
+    - name: explode bigbrain molqtl
+      foreach:
+        - eqtl
+        - sqtl
+      do:
+        - name: copy_many bigbrain ${each} study
+          sources: gs://bigbrain_data/prod/${staging_bigbrain_ts}/output/${each}/study/*.parquet
+          destination: input/molqtl/bigbrain/${each}/study
+
+        - name: copy_many bigbrain ${each} credible sets
+          sources: gs://bigbrain_data/prod/${staging_bigbrain_ts}/output/${each}/credible_set/*.parquet
+          destination: input/molqtl/bigbrain/${each}/credible_set
+
+        - name: copy_many bigbrain ${each} credible set variants
+          sources: gs://bigbrain_data/prod/${staging_bigbrain_ts}/output/${each}/credible_set_variant/*.parquet
+          destination: input/molqtl/bigbrain/${each}/credible_set_variant
   ##################################################################################################
 
   #: ONTOMA STEP :##################################################################################
