@@ -64,32 +64,9 @@ class EvidenceGenomicsEngland(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description=('PubMed identifiers listed for the gene in the Genomics England PanelApp panel')
     )
-    allelicRequirements: (
-        list[
-            Literal[
-                'BIALLELIC, autosomal or pseudoautosomal',
-                (
-                    'BOTH monoallelic and biallelic (but BIALLELIC mutations cause a more '
-                    'SEVERE disease form), autosomal or pseudoautosomal'
-                ),
-                'BOTH monoallelic and biallelic, autosomal or pseudoautosomal',
-                'MITOCHONDRIAL',
-                'MONOALLELIC, autosomal or pseudoautosomal, NOT imprinted',
-                'MONOALLELIC, autosomal or pseudoautosomal, imprinted status unknown',
-                ('MONOALLELIC, autosomal or pseudoautosomal, maternally imprinted (paternal allele expressed)'),
-                ('MONOALLELIC, autosomal or pseudoautosomal, paternally imprinted (maternal allele expressed)'),
-                'Other',
-                'Other - please specifiy in evaluation comments',
-                'Unknown',
-                'X-LINKED: hemizygous mutation in males, biallelic mutations in females',
-                (
-                    'X-LINKED: hemizygous mutation in males, monoallelic mutations in '
-                    'females may cause disease (may be less severe, later onset than males)'
-                ),
-            ]
-        ]
-        | None
-    ) = Field(description=('Mode of inheritance of the gene as curated in the Genomics England PanelApp panel'))
+    allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        description=('Mode of inheritance of the gene as curated in the Genomics England PanelApp panel')
+    )
     datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
     datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')

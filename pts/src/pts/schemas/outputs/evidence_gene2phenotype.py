@@ -92,7 +92,7 @@ class EvidenceGene2phenotype(DatasetModel):
             'relationship, derived from the Gene2Phenotype confidence category'
         ),
     )
-    directionOnTrait: Literal['risk'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
     directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '

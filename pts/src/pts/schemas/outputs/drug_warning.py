@@ -4,7 +4,7 @@ Generated from the 26.12 release output (2,009 rows) and its croissant metadata 
 `scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
@@ -66,8 +66,8 @@ class DrugWarning(DatasetModel):
     description: str | None = Field(min_length=1, description='Description of the drug adverse effect')
     id: Annotated[int, PrimaryKey()] = Field(ge=0, description='Internal identifier for the drug warning record')
     references: list[References] = Field(description='List of sources supporting the warning information')
-    warningType: Literal['Black Box Warning', 'Withdrawn'] = Field(
-        description=('Classification of action taken (drug is withdrawn or has a black box warning)')
+    warningType: str = Field(
+        min_length=1, description=('Classification of action taken (drug is withdrawn or has a black box warning)')
     )
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, description='Year when the warning was issued')
     efoTerm: str | None = Field(min_length=1, description='List of disease labels')

@@ -4,7 +4,7 @@ Generated from the 26.12 release output (3,817,240 rows) and its croissant metad
 `scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
@@ -39,29 +39,8 @@ class Homology(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the query target'
     )
     speciesId: str = Field(pattern=DIGITS, description='Species ID for the homologue')
-    speciesName: Literal[
-        'Caenorhabditis elegans (Nematode, N2)',
-        'Chimpanzee',
-        'Dog',
-        'Drosophila melanogaster - (Fruit fly)',
-        'Guinea Pig',
-        'Human',
-        'Macaque',
-        'Mouse',
-        'Norway rat - BN/NHsdMcwi',
-        'Pig',
-        'Rabbit',
-        'Tropical clawed frog',
-        'Zebrafish',
-    ] = Field(description='Species name for the homologue')
-    homologyType: Literal[
-        'gene_split',
-        'ortholog_many2many',
-        'ortholog_one2many',
-        'ortholog_one2one',
-        'other_paralog',
-        'within_species_paralog',
-    ] = Field(description='Type of homology relationship')
+    speciesName: str = Field(min_length=1, description='Species name for the homologue')
+    homologyType: str = Field(min_length=1, description='Type of homology relationship')
     targetGeneId: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Target gene ID of the homologue')
     isHighConfidence: str | None = Field(pattern=DIGITS, description='Indicates if the homology is high confidence')
     targetGeneSymbol: str = Field(min_length=1, description='Gene symbol of the homologous target')

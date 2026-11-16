@@ -111,19 +111,10 @@ class DrugMolecule(DatasetModel):
             'bonds, and spatial coordinates'
         ),
     )
-    drugType: Literal[
-        'Antibody',
-        'Antibody drug conjugate',
-        'Cell',
-        'Enzyme',
-        'Gene',
-        'Oligonucleotide',
-        'Oligosaccharide',
-        'Protein',
-        'Small molecule',
-        'Unknown',
-        'Vaccine component',
-    ] = Field(description=("Classification of the molecule's therapeutic category or chemical class (e.g. Antibody)"))
+    drugType: str = Field(
+        min_length=1,
+        description=("Classification of the molecule's therapeutic category or chemical class (e.g. Antibody)"),
+    )
     name: str = Field(min_length=1, description='Generic name of the drug molecule')
     parentId: str | None = Field(
         pattern=CHEMBL_ID,
@@ -136,15 +127,17 @@ class DrugMolecule(DatasetModel):
         description='List of Open Targets molecule identifiers of derivative compounds'
     )
     maximumClinicalStage: Literal[
+        'WITHDRAWAL',
         'APPROVAL',
+        'PHASE_4',
+        'PREAPPROVAL',
+        'PHASE_3',
+        'PHASE_2_3',
+        'PHASE_2',
+        'PHASE_1_2',
+        'PHASE_1',
         'EARLY_PHASE_1',
         'IND',
-        'PHASE_1',
-        'PHASE_1_2',
-        'PHASE_2',
-        'PHASE_2_3',
-        'PHASE_3',
-        'PREAPPROVAL',
         'PRECLINICAL',
         'UNKNOWN',
     ] = Field(

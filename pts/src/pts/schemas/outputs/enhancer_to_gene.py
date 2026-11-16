@@ -47,7 +47,8 @@ class EnhancerToGene(DatasetModel):
         'biosampleId': 'UBERON_0002113',
         'studyId': 'ENCFF229GDZ',
         'intervalId': '349400b9fa555cb9c170e98971eb7173',
-        'qualityControls': [],
+        # a valid interval may carry a flag the step does not exclude by; one is here so the element rules run
+        'qualityControls': ['Interval has a duplicate with different score'],
     }
 
     chromosome: str = Field(min_length=1, description='Chromosome the interval is located on')
@@ -84,4 +85,16 @@ class EnhancerToGene(DatasetModel):
     )
     studyId: str = Field(min_length=1, description='Identifier of the interval study')
     intervalId: str = Field(pattern=MD5_HEX, description='Identifier of the interval')
-    qualityControls: list[str] = Field(description='Quality control flags for this interval')
+    qualityControls: list[
+        Literal[
+            'Target/gene identifier could not match to reference',
+            'Biosample identifier was not found in the reference',
+            'Score was above or below specified thresholds',
+            'Interval type is not supported',
+            'Interval has a duplicate with different score',
+            'Interval chromosome was not found in contig index',
+            'Interval range exceeded chromosome bounds',
+            'Multiple interval types for the same (region, geneId) pair',
+            'Interval chromosome does not match associated gene chromosome',
+        ]
+    ] = Field(description='Quality control flags for this interval')

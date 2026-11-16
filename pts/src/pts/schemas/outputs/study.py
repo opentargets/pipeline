@@ -16,7 +16,7 @@ from pts.schemas.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTO
 class LdPopulationStructure(StructModel):
     """`ldPopulationStructure[]`."""
 
-    ldPopulation: Literal['afr', 'amr', 'eas', 'fin', 'nfe'] = Field(description='Population identifier')
+    ldPopulation: str = Field(min_length=1, description='Population identifier')
     relativeSampleSize: float | None = Field(
         ge=0.0, le=1.0, description='Fraction of the total sample represented by the population'
     )
@@ -26,26 +26,7 @@ class DiscoverySamples(StructModel):
     """`discoverySamples[]`."""
 
     sampleSize: Annotated[int, PolarsDtype(pl.Int32)] = Field(ge=0, description='Discovery sample size')
-    ancestry: Literal[
-        'Aboriginal Australian',
-        'African American or Afro-Caribbean',
-        'African unspecified',
-        'Asian unspecified',
-        'Central Asian',
-        'East Asian',
-        'European',
-        'Finnish',
-        'Greater Middle Eastern (Middle Eastern, North African or Persian)',
-        'Hispanic or Latin American',
-        'NR',
-        'Native American',
-        'Oceanian',
-        'Other',
-        'Other admixed ancestry',
-        'South Asian',
-        'South East Asian',
-        'Sub-Saharan African',
-    ] = Field(description='Discovery sample ancestry name')
+    ancestry: str = Field(min_length=1, description='Discovery sample ancestry name')
 
 
 class ReplicationSamples(StructModel):
@@ -58,20 +39,7 @@ class ReplicationSamples(StructModel):
 class SumstatQCValues(StructModel):
     """`sumstatQCValues[]`."""
 
-    QCCheckName: Literal[
-        'LDSC_SNP-h2',
-        'LDSC_SNP-h2_se',
-        'LDSC_gc_lambda',
-        'LDSC_intercept',
-        'LDSC_intercept_se',
-        'LDSC_mean_chisq',
-        'gc_lambda',
-        'mean_beta',
-        'mean_diff_pz',
-        'n_variants',
-        'n_variants_sig',
-        'se_diff_pz',
-    ] = Field(description='Quality control metric identifier')
+    QCCheckName: str = Field(min_length=1, description='Quality control metric identifier')
     QCCheckValue: Annotated[float, PolarsDtype(pl.Float32)] = Field(description='Quality control metric value')
 
 
@@ -135,7 +103,7 @@ class Study(DatasetModel):
         min_length=1,
         description=('Identifier of the source project collection that the study information is derived from'),
     )
-    studyType: Literal['eqtl', 'gwas', 'pqtl', 'sceqtl', 'sqtl', 'tuqtl'] = Field(
+    studyType: Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'] = Field(
         description=('Field specifying if study contains phenotype/disease or molecular genetic associations')
     )
     traitFromSource: str = Field(
@@ -201,30 +169,27 @@ class Study(DatasetModel):
     )
     qualityControls: list[
         Literal[
+            'Target/gene identifier could not match to reference',
+            'No valid disease identifier found',
+            'This type of study is not supported',
+            'Biosample identifier was not found in the reference',
+            'The identifier of this study is not unique',
             'Harmonized summary statistics are not available or empty',
-            'Sample size is null or equal to zero',
-            ('Study has non empty or zero nCases, nControls & nSamples with matching sum'),
-            ('Study has non empty or zero nCases, nControls & nSamples with non matching sum'),
-            'Study has non empty or zero nSamples with empty nCases and nControls',
-            'Study has only cases or only controls',
+            'GWAS Catalog study has not been curated by Open Targets',
+            'The mean beta QC check value is not within the expected range',
+            'The PZ QC check values are not within the expected range',
+            'The GC lambda value is not within the expected range',
             'The number of SNPs in the study is below the expected threshold',
+            'Case-case study design',
+            'Deprecated project',
+            'Sample size is null or equal to zero',
+            'Study has non empty or zero nCases, nControls & nSamples with matching sum',
+            'Study has non empty or zero nCases, nControls & nSamples with non matching sum',
+            'Study has only cases or only controls',
+            'Study has non empty or zero nSamples with empty nCases and nControls',
         ]
     ] = Field(description='Control metrics refining study validation')
-    analysisFlags: list[
-        Literal[
-            'Case-case study, wgsGWAS',
-            'ExWAS',
-            'GxE',
-            'GxE, Case-case study',
-            'GxG',
-            'Metabolite',
-            'Multivariate analysis',
-            'Non-additive model',
-            'metabolite, wgsGWAS',
-            'multivariate',
-            'wgsGWAS',
-        ]
-    ] = Field(
+    analysisFlags: list[Annotated[str, Field(min_length=1)]] = Field(
         description=('Collection of flags indicating the type of the analysis conducted in the association study')
     )
     summarystatsLocation: str | None = Field(

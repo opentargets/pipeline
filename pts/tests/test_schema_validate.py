@@ -50,6 +50,26 @@ def test_a_valid_dataset_has_an_empty_report(tmp_path: Path) -> None:
     assert validate_dataset(path, _Scores).is_empty()
 
 
+def test_widespread_violations_keep_only_counts_and_a_few_examples(tmp_path: Path, monkeypatch) -> None:
+    """Every row of every part fails: each part is logged as it is validated, and the report sums the counts
+    while keeping at most EXAMPLES values, however many fail."""
+    rows = 1_000
+    parts = [
+        _scores([f'{part}-{i}' for i in range(rows)], [1.5 + part + i / rows for i in range(rows)]) for part in range(3)
+    ]
+    path = _write_parts(tmp_path / 'ds', *parts)
+    warnings: list[str] = []
+    monkeypatch.setattr(validate.logger, 'warning', lambda message, *args: warnings.append(message.format(*args)))
+
+    report = validate_dataset(path, _Scores)
+
+    assert report.select('column', 'check', 'failures', 'parts').rows() == [('score', 'score: <= 1.0', 3 * rows, 3)]
+    assert len(report['examples'].item()) == validate.EXAMPLES
+    part_warnings = [w for w in warnings if ' part ' in w]
+    assert len(part_warnings) == 3
+    assert all(f'{rows} failure(s) in 1 part(s)' in w for w in part_warnings)
+
+
 def test_violations_are_counted_across_parts(tmp_path: Path) -> None:
     path = _write_parts(
         tmp_path / 'ds',

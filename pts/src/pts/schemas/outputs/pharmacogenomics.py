@@ -19,14 +19,10 @@ class VariantAnnotation(StructModel):
     comparisonAlleleOrGenotype: str | None = Field(
         min_length=1, description='Allele or genotype the variant effect is interpreted on'
     )
-    directionality: Literal['decreased', 'increased'] | None = Field(
-        description='Direction of effect of the allele or genotype'
-    )
+    directionality: str | None = Field(min_length=1, description='Direction of effect of the allele or genotype')
     effect: str | None = Field(min_length=1, description='Pharmacogenomic effect of the variation')
     effectDescription: str = Field(min_length=1, description='Summary of the impact of the allele on the drug response')
-    effectType: Literal['drug', 'functional', 'phenotype'] = Field(
-        description='Type of effect (eg. functional, drug or phenotype)'
-    )
+    effectType: str = Field(min_length=1, description='Type of effect (eg. functional, drug or phenotype)')
     entity: str | None = Field(min_length=1, description='Entity affected by the effect')
     id: str = Field(pattern=DIGITS, description='Identifier of the variant annotation at source')
     literature: str = Field(
@@ -108,8 +104,8 @@ class Pharmacogenomics(DatasetModel):
     directionality: str | None = Field(
         min_length=1, description=('Indicates wether the genetic variant increases or decreases drug response')
     )
-    evidenceLevel: Literal['1A', '1B', '2A', '2B', '3', '4'] = Field(
-        description='Strength of the scientific support for the variant/drug response'
+    evidenceLevel: str = Field(
+        min_length=1, description='Strength of the scientific support for the variant/drug response'
     )
     genotype: str = Field(min_length=1, description='Genetic variant configuration')
     genotypeAnnotationText: str = Field(min_length=1, description="Explanation of the genotype's clinical significance")
@@ -124,9 +120,7 @@ class Pharmacogenomics(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] = Field(
         description='List of PubMed or preprint reference identifiers'
     )
-    pgxCategory: Literal['dosage', 'efficacy', 'metabolism/pk', 'other', 'pd', 'toxicity'] = Field(
-        description='Classification of the drug response type (e.g. Toxicity)'
-    )
+    pgxCategory: str = Field(min_length=1, description='Classification of the drug response type (e.g. Toxicity)')
     phenotypeFromSourceId: Annotated[str, Reference('disease', 'id')] | None = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier result of mapping phenotypeText'
     )

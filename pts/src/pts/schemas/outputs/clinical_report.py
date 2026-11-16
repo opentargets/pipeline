@@ -26,8 +26,8 @@ class Drugs(StructModel):
 class TrialSponsor(StructModel):
     """`trialSponsor`."""
 
-    agencyClass: Literal['FED', 'INDIV', 'INDUSTRY', 'NETWORK', 'NIH', 'OTHER', 'OTHER_GOV', 'UNKNOWN'] = Field(
-        description='Classification of the lead trial sponsor (e.g. INDUSTRY, NIH, OTHER)'
+    agencyClass: str = Field(
+        min_length=1, description='Classification of the lead trial sponsor (e.g. INDUSTRY, NIH, OTHER)'
     )
     name: str = Field(min_length=1, description='Name of the lead sponsor associated with the clinical trial')
 
@@ -115,19 +115,19 @@ class ClinicalReport(DatasetModel):
 
     id: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the clinical report')
     clinicalStage: Literal[
+        'WITHDRAWAL',
         'APPROVAL',
-        'EARLY_PHASE_1',
-        'IND',
-        'PHASE_1',
-        'PHASE_1_2',
-        'PHASE_2',
-        'PHASE_2_3',
-        'PHASE_3',
         'PHASE_4',
         'PREAPPROVAL',
+        'PHASE_3',
+        'PHASE_2_3',
+        'PHASE_2',
+        'PHASE_1_2',
+        'PHASE_1',
+        'EARLY_PHASE_1',
+        'IND',
         'PRECLINICAL',
         'UNKNOWN',
-        'WITHDRAWAL',
     ] = Field(description='Clinical stage of the report')
     origin: str = Field(
         pattern=ONTOLOGY_ID,
@@ -144,13 +144,15 @@ class ClinicalReport(DatasetModel):
     source: str = Field(
         min_length=1, description=('Source database or registry from which the clinical report was obtained')
     )
-    provider: Literal['AACT', 'ChEMBL', 'EMA', 'PMDA', 'TTD'] = Field(
+    provider: Literal['AACT', 'ChEMBL', 'EMA', 'FDA', 'PMDA', 'TTD'] = Field(
         description=(
             'Resource or organisation that distributes the data fetched from the '
             'primary source (e.g. AACT, ChEMBL, EMA, FDA, PMDA, TTD)'
         )
     )
-    drugs: list[Drugs] = Field(description='Drugs associated with the clinical report')
+    drugs: list[Drugs] | None = Field(
+        description='Drugs associated with the clinical report; null for a report flagged NO_DRUGS'
+    )
     countries: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description='Countries associated with the clinical report'
     )
@@ -167,9 +169,7 @@ class ClinicalReport(DatasetModel):
     sideEffects: list[SideEffects] | None = Field(
         description='Side effects or adverse events associated with the clinical report'
     )
-    trialPhase: (
-        Literal['EARLY_PHASE1', 'PHASE1', 'PHASE1/PHASE2', 'PHASE2', 'PHASE2/PHASE3', 'PHASE3', 'PHASE4'] | None
-    ) = Field(description='Phase of the clinical trial')
+    trialPhase: str | None = Field(min_length=1, description='Phase of the clinical trial')
     trialWhyStopped: str | None = Field(min_length=1, description='Reason provided for stopping the clinical trial')
     trialStudyType: Literal['EXPANDED_ACCESS', 'INTERVENTIONAL', 'OBSERVATIONAL'] | None = Field(
         description='Type of clinical study (e.g. Interventional, Observational)'
@@ -177,52 +177,27 @@ class ClinicalReport(DatasetModel):
     qualityControls: (
         list[
             Literal[
-                'INDIRECT_PRIMARY_PURPOSE',
-                'NO_DISEASE',
                 'PHASE_IV_NOT_APPROVED',
-                'SAFETY_REPORT',
                 'UNVALIDATED_INDICATION',
+                'INDIRECT_PRIMARY_PURPOSE',
+                'OBSERVATIONAL_STUDY',
+                'NO_DISEASE',
+                'NO_DRUGS',
+                'SAFETY_REPORT',
             ]
         ]
         | None
     ) = Field(description='Quality control flags or notes for the clinical report')
-    trialPrimaryPurpose: (
-        Literal[
-            'BASIC_SCIENCE',
-            'DEVICE_FEASIBILITY',
-            'DIAGNOSTIC',
-            'ECT',
-            'HEALTH_SERVICES_RESEARCH',
-            'OTHER',
-            'PREVENTION',
-            'SCREENING',
-            'SUPPORTIVE_CARE',
-            'TREATMENT',
-        ]
-        | None
-    ) = Field(description='Primary purpose of the clinical trial (e.g. Treatment, Prevention)')
+    trialPrimaryPurpose: str | None = Field(
+        min_length=1, description='Primary purpose of the clinical trial (e.g. Treatment, Prevention)'
+    )
     title: str = Field(min_length=1, description='Title of the clinical report')
     trialNumberOfArms: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Number of arms in the clinical trial'
     )
-    trialOverallStatus: (
-        Literal[
-            'ACTIVE_NOT_RECRUITING',
-            'APPROVED_FOR_MARKETING',
-            'AVAILABLE',
-            'COMPLETED',
-            'ENROLLING_BY_INVITATION',
-            'NOT_YET_RECRUITING',
-            'NO_LONGER_AVAILABLE',
-            'RECRUITING',
-            'SUSPENDED',
-            'TEMPORARILY_NOT_AVAILABLE',
-            'TERMINATED',
-            'UNKNOWN',
-            'WITHDRAWN',
-        ]
-        | None
-    ) = Field(description='Overall status of the clinical trial (e.g. Completed, Terminated)')
+    trialOverallStatus: str | None = Field(
+        min_length=1, description='Overall status of the clinical trial (e.g. Completed, Terminated)'
+    )
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Year the report was registered or published'
     )

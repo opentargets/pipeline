@@ -59,19 +59,19 @@ class EvidenceClinicalPrecedence(DatasetModel):
         min_length=1, description='Identifier of the clinical report'
     )
     clinicalStage: Literal[
+        'WITHDRAWAL',
         'APPROVAL',
-        'EARLY_PHASE_1',
-        'IND',
-        'PHASE_1',
-        'PHASE_1_2',
-        'PHASE_2',
-        'PHASE_2_3',
-        'PHASE_3',
         'PHASE_4',
         'PREAPPROVAL',
+        'PHASE_3',
+        'PHASE_2_3',
+        'PHASE_2',
+        'PHASE_1_2',
+        'PHASE_1',
+        'EARLY_PHASE_1',
+        'IND',
         'PRECLINICAL',
         'UNKNOWN',
-        'WITHDRAWAL',
     ] = Field(
         description=("Clinical stage of the drug-disease pair in the clinical report (e.g. 'PHASE_1', 'PHASE_3')")
     )
@@ -124,7 +124,7 @@ class EvidenceClinicalPrecedence(DatasetModel):
             'the reason the trial was stopped'
         ),
     )
-    directionOnTrait: Literal['protect'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
     directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target based '

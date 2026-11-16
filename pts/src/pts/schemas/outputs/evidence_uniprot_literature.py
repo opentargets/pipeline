@@ -51,8 +51,8 @@ class EvidenceUniprotLiterature(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] = Field(
         description='PubMed identifiers cited by UniProt for the gene-disease association'
     )
-    targetModulation: Literal['up_or_down'] = Field(
-        description=("Effect of the disease on the target; 'up_or_down' as UniProt does not specify it")
+    targetModulation: str = Field(
+        min_length=1, description=("Effect of the disease on the target; 'up_or_down' as UniProt does not specify it")
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(

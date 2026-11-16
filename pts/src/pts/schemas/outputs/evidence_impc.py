@@ -130,8 +130,8 @@ class EvidenceImpc(DatasetModel):
             'relationship; the PhenoDigm score divided by 100'
         ),
     )
-    directionOnTrait: Literal['risk'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['LoF'] = Field(
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTarget: Literal['GoF', 'LoF'] = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

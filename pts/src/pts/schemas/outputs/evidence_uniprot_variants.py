@@ -53,8 +53,8 @@ class EvidenceUniprotVariants(DatasetModel):
     diseaseFromSource: str = Field(min_length=1, description='Disease name as curated by UniProt')
     diseaseFromSourceId: str = Field(min_length=1, description='OMIM identifier of the disease as curated by UniProt')
     literature: list[str] = Field(description='PubMed identifiers cited by UniProt for the disease-causing variant')
-    targetModulation: Literal['up_or_down'] = Field(
-        description=("Effect of the disease on the target; 'up_or_down' as UniProt does not specify it")
+    targetModulation: str = Field(
+        min_length=1, description=("Effect of the disease on the target; 'up_or_down' as UniProt does not specify it")
     )
     variantId: Annotated[str, Reference('variant', 'variantId')] | None = Field(
         min_length=1,

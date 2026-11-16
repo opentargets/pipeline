@@ -80,11 +80,7 @@ class EvidenceIntogen(DatasetModel):
     cohortDescription: str = Field(
         min_length=1, description='Description of the IntOGen cohort (tumour type and data source)'
     )
-    significantDriverMethods: list[
-        Literal[
-            'cbase', 'combination', 'dndscv', 'hotmaps', 'mutpanning', 'oncodriveclustl', 'oncodrivefml', 'smregions'
-        ]
-    ] = Field(
+    significantDriverMethods: list[Annotated[str, Field(min_length=1)]] = Field(
         description=(
             'IntOGen driver detection methods reporting the target as a '
             "significant cancer driver (e.g. 'dndscv', 'mutpanning')"
@@ -116,7 +112,7 @@ class EvidenceIntogen(DatasetModel):
             'relationship, derived from the log10 of the IntOGen combined q-value'
         ),
     )
-    directionOnTrait: Literal['risk'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
     directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '

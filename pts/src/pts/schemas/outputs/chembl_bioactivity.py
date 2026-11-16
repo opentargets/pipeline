@@ -112,20 +112,32 @@ class ChemblBioactivity(DatasetModel):
             'AGONIST',
             'ALLOSTERIC ANTAGONIST',
             'ANTAGONIST',
+            'ANTISENSE INHIBITOR',
             'BINDING AGENT',
             'BLOCKER',
+            'CROSS-LINKING AGENT',
             'DEGRADER',
             'DISRUPTING AGENT',
+            'EXOGENOUS GENE',
+            'EXOGENOUS PROTEIN',
+            'GENE EDITING NEGATIVE MODULATOR',
+            'HYDROLYTIC ENZYME',
             'INHIBITOR',
             'INVERSE AGONIST',
             'MODULATOR',
             'NEGATIVE ALLOSTERIC MODULATOR',
+            'NEGATIVE MODULATOR',
             'OPENER',
-            'OTHER',
             'PARTIAL AGONIST',
             'POSITIVE ALLOSTERIC MODULATOR',
+            'POSITIVE MODULATOR',
+            'PROTEOLYTIC ENZYME',
+            'RELEASING AGENT',
+            'RNAI INHIBITOR',
             'STABILISER',
             'SUBSTRATE',
+            'VACCINE ANTIGEN',
+            'OTHER',
         ]
         | None
     ) = Field(
@@ -140,20 +152,32 @@ class ChemblBioactivity(DatasetModel):
             'AGONIST',
             'ALLOSTERIC ANTAGONIST',
             'ANTAGONIST',
+            'ANTISENSE INHIBITOR',
             'BINDING AGENT',
             'BLOCKER',
+            'CROSS-LINKING AGENT',
             'DEGRADER',
+            'DISRUPTING AGENT',
+            'EXOGENOUS GENE',
+            'EXOGENOUS PROTEIN',
+            'GENE EDITING NEGATIVE MODULATOR',
+            'HYDROLYTIC ENZYME',
             'INHIBITOR',
             'INVERSE AGONIST',
             'MODULATOR',
             'NEGATIVE ALLOSTERIC MODULATOR',
+            'NEGATIVE MODULATOR',
             'OPENER',
             'PARTIAL AGONIST',
             'POSITIVE ALLOSTERIC MODULATOR',
             'POSITIVE MODULATOR',
+            'PROTEOLYTIC ENZYME',
             'RELEASING AGENT',
+            'RNAI INHIBITOR',
             'STABILISER',
             'SUBSTRATE',
+            'VACCINE ANTIGEN',
+            'OTHER',
         ]
     ] = Field(
         description=(
@@ -215,9 +239,7 @@ class ChemblBioactivity(DatasetModel):
         )
     )
     documentId: str = Field(pattern=CHEMBL_ID, description='ChEMBL identifier of the source document')
-    docType: Literal['DATASET', 'PATENT', 'PUBLICATION'] = Field(
-        description='Type of the source document (e.g., PUBLICATION, DATASET)'
-    )
+    docType: str = Field(min_length=1, description='Type of the source document (e.g., PUBLICATION, DATASET)')
     pubmedId: int | None = Field(ge=0, description='PubMed identifier of the source document')
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Publication year of the source document'

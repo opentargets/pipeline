@@ -59,50 +59,25 @@ class EvidenceCrisprScreen(DatasetModel):
         pattern=ONTOLOGY_ID,
         description=("Identifier of the project that generated the data ('crispr_brain' for CRISPRbrain)"),
     )
-    crisprScreenLibrary: Literal[
-        'Custom',
-        'Genome-wide',
-        'Genome-wide CRISPRa-v2',
-        'Genome-wide CRISPRi-v2',
-        'H1 Sublibrary CRISPRa-v2',
-        'H1 Sublibrary CRISPRi-v2',
-        'hCRISPRi_v2 H1 and H4',
-        'hCRISPRi_v2 H1 and custom human TFs library',
-    ] = Field(description=('CRISPR library screened in the CRISPRbrain screen (e.g. Genome-wide CRISPRi-v2)'))
-    studyOverview: str = Field(min_length=1, description='Description of the CRISPRbrain screen')
-    cellType: Literal['Astrocyte', 'Glutamatergic Neuron', 'Hematopoietic Stem and Progenitor Cell', 'Microglia'] = (
-        Field(description='Cell type in which the CRISPRbrain screen was performed')
+    crisprScreenLibrary: str = Field(
+        min_length=1, description=('CRISPR library screened in the CRISPRbrain screen (e.g. Genome-wide CRISPRi-v2)')
     )
-    geneticBackground: Literal['PSAP KO'] | None = Field(
-        description="Genetic background of the screened cells (e.g. 'PSAP KO')"
+    studyOverview: str = Field(min_length=1, description='Description of the CRISPRbrain screen')
+    cellType: str = Field(min_length=1, description='Cell type in which the CRISPRbrain screen was performed')
+    geneticBackground: str | None = Field(
+        min_length=1, description="Genetic background of the screened cells (e.g. 'PSAP KO')"
     )
     literature: list[Literal['30297964', '34031600', 'PPR387167', 'ppr393667']] | None = Field(
         description=('PubMed or Europe PMC preprint identifier of the publication describing the CRISPRbrain screen')
     )
-    diseaseFromSource: Literal[
-        'Leukemia ',
-        'essential genes / neurodegenerative disease',
-        'neurodegenerative disease',
-        'neurodegenerative disease, ageing',
-        'neurodegenerative disease, lysosomal storage disease, AD, PD, MS',
-        'neurodegenerative disease, lysosomal storage disease, ageing',
-        'neuroinflammatory disorders',
-    ] = Field(description=('Disease area associated with the CRISPRbrain screen, as curated by Open Targets'))
-    contrast: Literal[
-        'Expansion (CD34 Staining)',
-        'Immune Activation (CD38 levels)',
-        'Inflammatory activation (cell-surface VCAM1 levels)',
-        'Labile Iron (FeRhoNox Intensity)',
-        'Lysosome (Lysotracker Intensity)',
-        'Lysosome exocytosis (cell-surface LAMP1 levels)',
-        'Lysosome mass or pH (LysoTracker staining)',
-        'Peroxidized Lipids (Liperfluo Intensity)',
-        'Phagocytosis (pHRodo-rat synaptosomes)',
-        'Phagocytosis (pHrodo-labeled synaptosomes)',
-        'Reactive Oxygen Species (CellRox Intensity)',
-        'Survival',
-    ] = Field(
-        description=("Phenotype read out in the CRISPRbrain screen (e.g. 'Phagocytosis (pHrodo-labeled synaptosomes)')")
+    diseaseFromSource: str = Field(
+        min_length=1, description=('Disease area associated with the CRISPRbrain screen, as curated by Open Targets')
+    )
+    contrast: str = Field(
+        min_length=1,
+        description=(
+            "Phenotype read out in the CRISPRbrain screen (e.g. 'Phagocytosis (pHrodo-labeled synaptosomes)')"
+        ),
     )
     resourceScore: float = Field(ge=0.0, le=1.0, description='P-value of the target in the CRISPRbrain screen')
     statisticalTestTail: Literal['lower tail', 'upper tail'] = Field(

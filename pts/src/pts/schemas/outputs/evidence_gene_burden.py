@@ -90,19 +90,9 @@ class EvidenceGeneBurden(DatasetModel):
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
     datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
     datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
-    allelicRequirements: (
-        list[
-            Literal[
-                'Autosomal dominant inheritance',
-                'Autosomal recessive inheritance',
-                'Dominant/multiple',
-                'X-linked dominant/multiple',
-                'dominant',
-                'recessive',
-            ]
-        ]
-        | None
-    ) = Field(description="Genetic model of the burden test (e.g. 'dominant', 'recessive')")
+    allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        description="Genetic model of the burden test (e.g. 'dominant', 'recessive')"
+    )
     diseaseFromSource: str = Field(min_length=1, description='Trait or phenotype label as reported by the burden study')
     pValueMantissa: float = Field(ge=0.0, description='Mantissa of the p-value of the burden test')
     pValueExponent: int = Field(description='Exponent of the p-value of the burden test')
@@ -208,10 +198,10 @@ class EvidenceGeneBurden(DatasetModel):
             'relationship, derived from the log10 of the burden test p-value'
         ),
     )
-    directionOnTrait: Literal['protect', 'risk'] | None = Field(
+    directionOnTrait: Literal['risk', 'protect'] | None = Field(
         description='Predicted direction of effect on the trait'
     )
-    directionOnTarget: Literal['LoF'] = Field(
+    directionOnTarget: Literal['GoF', 'LoF'] = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

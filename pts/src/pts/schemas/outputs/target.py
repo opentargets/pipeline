@@ -119,7 +119,7 @@ class TargetClass(StructModel):
 
     id: int = Field(ge=0, description='Unique identifier for the target class')
     label: str = Field(min_length=1, description='Label for the target class')
-    level: Literal['l1', 'l2', 'l3', 'l4', 'l5', 'l6'] = Field(description='Hierarchical level of the target class')
+    level: str = Field(min_length=1, description='Hierarchical level of the target class')
 
 
 class ObsoleteSymbols(StructModel):

@@ -60,80 +60,26 @@ class EvidenceEva(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the gene the variant was assigned to by EVA'
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    alleleOrigins: (
-        list[Literal['biparental', 'de novo', 'germline', 'inherited', 'maternal', 'paternal', 'uniparental']] | None
-    ) = Field(description=("Origin(s) of the variant allele as reported in ClinVar (e.g. 'germline')"))
+    alleleOrigins: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        description=("Origin(s) of the variant allele as reported in ClinVar (e.g. 'germline')")
+    )
     datasourceId: Literal['eva'] = Field(description='Identifer of the evidence source')
     datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
-    allelicRequirements: (
-        list[
-            Literal[
-                'Autosomal dominant inheritance',
-                'Autosomal dominant inheritance with maternal imprinting',
-                'Autosomal dominant inheritance with paternal imprinting',
-                'Autosomal recessive inheritance',
-                'Autosomal unknown',
-                'Codominant',
-                'Genetic anticipation',
-                'Mitochondrial inheritance',
-                'Oligogenic inheritance',
-                'Other',
-                'Semidominant inheritance',
-                'Sex-limited autosomal dominant',
-                'Somatic mutation',
-                'Sporadic',
-                'Unknown mechanism',
-                'X-linked dominant inheritance',
-                'X-linked inheritance',
-                'X-linked recessive inheritance',
-                'Y-linked inheritance',
-                'autosomal unknown',
-            ]
-        ]
-        | None
-    ) = Field(description='Mode(s) of inheritance reported in the ClinVar submissions')
-    clinicalSignificances: list[
-        Literal[
-            'affects',
-            'association',
-            'association not found',
-            'benign',
-            'confers sensitivity',
-            'conflicting classifications of pathogenicity',
-            'drug response',
-            'established risk allele',
-            'evidence only',
-            'likely benign',
-            'likely pathogenic',
-            'likely risk allele',
-            'low penetrance',
-            'not provided',
-            'other',
-            'pathogenic',
-            'protective',
-            'risk factor',
-            'uncertain risk allele',
-            'uncertain significance',
-        ]
-    ] = Field(
+    allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        description='Mode(s) of inheritance reported in the ClinVar submissions'
+    )
+    clinicalSignificances: list[Annotated[str, Field(min_length=1)]] = Field(
         description=(
             'ClinVar clinical significance(s) of the variant for the condition '
             "(e.g. 'pathogenic', 'uncertain significance')"
         )
     )
-    confidence: Literal[
-        'criteria provided, conflicting classifications',
-        'criteria provided, multiple submitters, no conflicts',
-        'criteria provided, single submitter',
-        'no assertion criteria provided',
-        'no classification provided',
-        'practice guideline',
-        'reviewed by expert panel',
-    ] = Field(
+    confidence: str = Field(
+        min_length=1,
         description=(
             "ClinVar review status of the record (e.g. 'criteria provided, single "
             "submitter', 'reviewed by expert panel')"
-        )
+        ),
     )
     studyId: str = Field(min_length=1, description='ClinVar reference (RCV) accession of the variant-condition record')
     releaseDate: str = Field(pattern=ISO_DATE, description="Date of the release of the data in a 'YYYY-MM-DD' format")
@@ -176,10 +122,10 @@ class EvidenceEva(DatasetModel):
             'review status'
         ),
     )
-    directionOnTrait: Literal['protect', 'risk'] | None = Field(
+    directionOnTrait: Literal['risk', 'protect'] | None = Field(
         description='Predicted direction of effect on the trait'
     )
-    directionOnTarget: Literal['LoF'] | None = Field(
+    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

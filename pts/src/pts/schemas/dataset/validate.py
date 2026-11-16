@@ -15,11 +15,15 @@ be checked the same way. The dataset is read once, one parquet part at a time:
   a repeated hash are read again and compared on the key itself, so a hash collision is never
   reported as a duplicate.
 
+A part's failures are logged as soon as it is validated, then reduced to a count and a few examples
+per broken rule: however many values fail, only those are kept.
+
 Memory is bounded by the largest part plus 8 bytes per row: 310 million colocalisation rows (18 GB
 in 200 parts) validate in under a minute within 4 GB. A streaming `n_unique` over the hashes took ten
 times as long, and twice the memory.
 
-The result is a report with one row per broken rule, empty for a valid dataset. Run it over a local
+The result is a report with one row per broken rule -- the failures summed over the parts -- empty
+for a valid dataset. Run it over a local
 output directory, one folder per dataset::
 
     uv run python -m pts.schemas.dataset.validate ../work/output [dataset ...]
@@ -75,20 +79,21 @@ def validate_dataset(path: str, model: type[DatasetModel]) -> pl.DataFrame:
     key = list(dataset_spec(model).primary_key)
     hashes = _KeyHashes(pl.scan_parquet(parts).select(pl.len()).collect().item()) if key else None
 
-    failures = []
+    summaries = []
     for part in parts:
         frame = pl.read_parquet(part)
         try:
             schema.validate(frame, lazy=True)
         except pe.SchemaErrors as errors:
-            failures.append(
-                errors.failure_cases.select(
-                    pl.col('column'),
-                    pl.col('check'),
-                    pl.col('failure_case').cast(pl.String),
-                    pl.lit(part).alias('part'),
-                )
+            summary = _summarise_part(errors.failure_cases, part)
+            logger.warning(
+                '{} part {} breaks {} rule(s):\n{}',
+                model.dataset_name,
+                part,
+                summary.height,
+                format_report(summary.with_columns(dataset=pl.lit(model.dataset_name), parts=pl.lit(1))),
             )
+            summaries.append(summary)
         if hashes is not None:
             if set(key) <= set(frame.columns):
                 hashes.add(frame.select(_key_hash(key)).to_series())
@@ -96,7 +101,7 @@ def validate_dataset(path: str, model: type[DatasetModel]) -> pl.DataFrame:
                 hashes = None  # the missing key column is reported above; the key cannot be checked
 
     report = pl.concat([
-        _summarise(failures, model),
+        _summarise(summaries, model),
         _duplicate_keys(parts, key, hashes.repeated(), model) if hashes is not None else REPORT_SCHEMA.to_frame(),
     ])
     if report.is_empty():
@@ -140,20 +145,43 @@ def _key_hash(key: list[str]) -> pl.Expr:
     return pl.struct(key).hash(seed=0)
 
 
-def _summarise(failures: list[pl.DataFrame], model: type[DatasetModel]) -> pl.DataFrame:
-    if not failures:
-        return REPORT_SCHEMA.to_frame()
+def _summarise_part(failure_cases: pl.DataFrame, part: str) -> pl.DataFrame:
+    """One part's failures reduced to a count and a few examples per broken rule, so that only these are kept.
+
+    pandera lists every failing value; a part where most rows fail would otherwise be held in full until the
+    whole dataset is read.
+    """
     return (
-        pl
-        .concat(failures)
+        failure_cases
         .group_by('column', 'check', maintain_order=True)
         .agg(
             pl.len().cast(pl.Int64).alias('failures'),
-            pl.col('part').n_unique().cast(pl.Int64).alias('parts'),
-            pl.col('failure_case').unique(maintain_order=True).head(EXAMPLES).alias('examples'),
-            pl.col('part').first().alias('first_part'),
+            pl.col('failure_case').cast(pl.String).unique(maintain_order=True).head(EXAMPLES).alias('examples'),
+        )
+        .with_columns(first_part=pl.lit(part))
+    )
+
+
+def _summarise(summaries: list[pl.DataFrame], model: type[DatasetModel]) -> pl.DataFrame:
+    """The parts' summaries combined per broken rule: failures summed over the parts that had them."""
+    if not summaries:
+        return REPORT_SCHEMA.to_frame()
+    return (
+        pl
+        .concat(summaries)
+        .group_by('column', 'check', maintain_order=True)
+        .agg(
+            pl.col('failures').sum().cast(pl.Int64),
+            pl.len().cast(pl.Int64).alias('parts'),
+            pl
+            .col('examples')
+            .list.explode(keep_nulls=False, empty_as_null=False)
+            .unique(maintain_order=True)
+            .head(EXAMPLES),
+            pl.col('first_part').first(),
         )
         .select(pl.lit(model.dataset_name).alias('dataset'), pl.all())
+        .select(REPORT_SCHEMA.names())
     )
 
 

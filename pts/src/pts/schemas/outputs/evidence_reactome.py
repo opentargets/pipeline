@@ -69,18 +69,12 @@ class EvidenceReactome(DatasetModel):
     pathways: list[Pathways] = Field(description='Reactome pathways associated with the reaction')
     reactionId: str = Field(min_length=1, description='Reactome identifier of the disease reaction')
     reactionName: str = Field(min_length=1, description='Name of the Reactome disease reaction')
-    targetModulation: Literal[
-        'decreased_transcript_level',
-        'gain_of_function',
-        'increased_translational_product_level',
-        'loss_of_function',
-        'partial_loss_of_function',
-        'up_or_down',
-    ] = Field(
+    targetModulation: str = Field(
+        min_length=1,
         description=(
             'Effect of the disease variant on the target as annotated in Reactome '
             "(e.g. 'loss_of_function', 'gain_of_function')"
-        )
+        ),
     )
     variantAminoacidDescriptions: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description=('Protein-level descriptions of the disease variants annotated in Reactome')

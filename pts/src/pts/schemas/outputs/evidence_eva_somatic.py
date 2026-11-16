@@ -74,18 +74,12 @@ class EvidenceEvaSomatic(DatasetModel):
             "(e.g. 'pathogenic', 'uncertain significance')"
         )
     )
-    confidence: Literal[
-        'criteria provided, conflicting classifications',
-        'criteria provided, multiple submitters, no conflicts',
-        'criteria provided, single submitter',
-        'no assertion criteria provided',
-        'no classification provided',
-        'reviewed by expert panel',
-    ] = Field(
+    confidence: str = Field(
+        min_length=1,
         description=(
             "ClinVar review status of the record (e.g. 'criteria provided, single "
             "submitter', 'reviewed by expert panel')"
-        )
+        ),
     )
     studyId: str = Field(min_length=1, description='ClinVar reference (RCV) accession of the variant-condition record')
     releaseDate: str = Field(pattern=ISO_DATE, description="Date of the release of the data in a 'YYYY-MM-DD' format")
@@ -126,8 +120,10 @@ class EvidenceEvaSomatic(DatasetModel):
             'review status'
         ),
     )
-    directionOnTrait: Literal['risk'] | None = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['LoF'] | None = Field(
+    directionOnTrait: Literal['risk', 'protect'] | None = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

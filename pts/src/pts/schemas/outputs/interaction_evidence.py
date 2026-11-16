@@ -105,11 +105,11 @@ class InteractionEvidence(DatasetModel):
     interactionId: Annotated[int, Reference('interaction', 'interactionId')] = Field(
         description='Identifier of the molecular interaction this evidence supports'
     )
-    expansionMethodMiIdentifier: Annotated[Literal['MI:1060', 'MI:1061'], Bioregistry('mi')] | None = Field(
-        description='Molecular Interactions (MI) identifier for the expansion method used'
+    expansionMethodMiIdentifier: Annotated[str, Bioregistry('mi')] | None = Field(
+        pattern=r'^MI:\d{4}$', description='Molecular Interactions (MI) identifier for the expansion method used'
     )
-    expansionMethodShortName: Literal['matrix expansion', 'spoke expansion'] | None = Field(
-        description='Short name of the method used to expand the interaction dataset'
+    expansionMethodShortName: str | None = Field(
+        min_length=1, description='Short name of the method used to expand the interaction dataset'
     )
     hostOrganismScientificName: str | None = Field(
         min_length=1, description=('Scientific name of the host organism in which the interaction was observed')

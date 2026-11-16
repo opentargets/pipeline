@@ -26,20 +26,7 @@ class Flags(StructModel):
     label: Literal['appris', 'ensembl_canonical', 'gencode_primary', 'mane'] = Field(
         description=('Category of the transcript flag (e.g. mane, appris, gencode_primary, ensembl_canonical)')
     )
-    value: Literal[
-        'alternative_1',
-        'alternative_2',
-        'alternative_M',
-        'plus_clinical',
-        'principal_1',
-        'principal_2',
-        'principal_3',
-        'principal_4',
-        'principal_5',
-        'principal_M',
-        'select',
-        'true',
-    ] = Field(description='Value of the transcript flag within its category')
+    value: str = Field(min_length=1, description='Value of the transcript flag within its category')
 
 
 class Exons(StructModel):

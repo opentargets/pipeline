@@ -87,7 +87,7 @@ class EvidenceOrphanet(DatasetModel):
             'relationship, derived from the Orphanet assessment status'
         ),
     )
-    directionOnTrait: Literal['risk'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
     directionOnTarget: str | None = Field(
         min_length=1,
         description=(

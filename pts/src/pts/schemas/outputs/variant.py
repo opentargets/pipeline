@@ -11,8 +11,8 @@ adjusted by hand, checked against the same release:
   method-specific and unbounded.
 * `variantEffect[].assessmentFlag` holds LOFTEE flags, comma-separated: its shape is checked, not the
   combinations seen, since LOFTEE has more flags than one release shows.
-* `alleleFrequencies[].populationName` is gnomAD's population vocabulary (it only looks like an ontology
-  id by accident).
+* `alleleFrequencies[].populationName` is a gnomAD adjusted (`_adj`) ancestry group: its shape is checked,
+  not the groups, which gnomAD changes between versions (it only looks like an ontology id by accident).
 """
 
 from typing import Annotated, ClassVar, Literal
@@ -37,10 +37,8 @@ Chromosome = Literal[
     '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT',
 ]  # fmt: skip
 
-#: gnomAD's genetic ancestry groups, adjusted (`_adj`) frequencies.
-GnomadPopulation = Literal[
-    'afr_adj', 'ami_adj', 'amr_adj', 'asj_adj', 'eas_adj', 'fin_adj', 'mid_adj', 'nfe_adj', 'remaining_adj', 'sas_adj'
-]
+#: A gnomAD genetic ancestry group's adjusted (`_adj`) frequency: the groups themselves are gnomAD's to change.
+GNOMAD_POPULATION = r'^[a-z]+_adj$'
 
 
 class VariantEffect(StructModel):
@@ -81,9 +79,7 @@ class TranscriptConsequences(StructModel):
     codons: str | None = Field(min_length=1, description='Affected codon in the transcript')
     distanceFromFootprint: int = Field(ge=0, description='Distance of the variant from the transcript')
     distanceFromTss: int = Field(description='Distance of the variant from the transcription start site')
-    appris: Literal['A1', 'A2', 'AM', 'P1', 'P2', 'P3', 'P4', 'P5', 'PM'] | None = Field(
-        description='Appris annotation of the transcript'
-    )
+    appris: str | None = Field(min_length=1, description='Appris annotation of the transcript')
     maneSelect: str | None = Field(min_length=1, description='MANE annotation of the transcript')
     targetId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Target target identifier of the transcript'
@@ -108,7 +104,7 @@ class TranscriptConsequences(StructModel):
 class AlleleFrequencies(StructModel):
     """`alleleFrequencies[]`."""
 
-    populationName: GnomadPopulation = Field(description='Name of the population')
+    populationName: str = Field(pattern=GNOMAD_POPULATION, description='Name of the population')
     alleleFrequency: float | None = Field(
         ge=0.0, le=1.0, description='Frequency of the alternate allele in the population'
     )

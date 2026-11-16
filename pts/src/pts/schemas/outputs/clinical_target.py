@@ -55,17 +55,17 @@ class ClinicalTarget(DatasetModel):
         description=('List of clinical report identifiers associated with this target-drug pair')
     )
     maxClinicalStage: Literal[
+        'WITHDRAWAL',
         'APPROVAL',
-        'EARLY_PHASE_1',
-        'IND',
-        'PHASE_1',
-        'PHASE_1_2',
-        'PHASE_2',
-        'PHASE_2_3',
-        'PHASE_3',
         'PHASE_4',
         'PREAPPROVAL',
+        'PHASE_3',
+        'PHASE_2_3',
+        'PHASE_2',
+        'PHASE_1_2',
+        'PHASE_1',
+        'EARLY_PHASE_1',
+        'IND',
         'PRECLINICAL',
         'UNKNOWN',
-        'WITHDRAWAL',
     ] = Field(description='Maximum clinical stage reached for this target-drug pair')

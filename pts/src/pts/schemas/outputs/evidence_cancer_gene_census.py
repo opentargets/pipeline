@@ -103,7 +103,7 @@ class EvidenceCancerGeneCensus(DatasetModel):
             'relationship; equal to the COSMIC resource score'
         ),
     )
-    directionOnTrait: Literal['risk'] = Field(description='Predicted direction of effect on the trait')
+    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
     directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
         description=(
             'Gain of function for oncogenes and loss of function for tumour '

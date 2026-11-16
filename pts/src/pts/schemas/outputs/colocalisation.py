@@ -27,7 +27,8 @@ from pts.schemas.dataset import DatasetModel, Note, PrimaryKey, Reference, frame
 #: md5 hex digest: the shape of gentropy's credible set identifiers.
 MD5_HEX = r'^[0-9a-f]{32}$'
 
-StudyType = Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl']
+#: `pts.schemas.study.StudyType`, in its order (a test keeps the two in sync).
+StudyType = Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl']
 
 Chromosome = Literal[
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',

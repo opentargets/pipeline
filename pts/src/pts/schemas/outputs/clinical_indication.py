@@ -33,15 +33,17 @@ class ClinicalIndication(DatasetModel):
 
     id: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the clinical indication')
     maxClinicalStage: Literal[
+        'WITHDRAWAL',
         'APPROVAL',
+        'PHASE_4',
+        'PREAPPROVAL',
+        'PHASE_3',
+        'PHASE_2_3',
+        'PHASE_2',
+        'PHASE_1_2',
+        'PHASE_1',
         'EARLY_PHASE_1',
         'IND',
-        'PHASE_1',
-        'PHASE_1_2',
-        'PHASE_2',
-        'PHASE_2_3',
-        'PHASE_3',
-        'PREAPPROVAL',
         'PRECLINICAL',
         'UNKNOWN',
     ] = Field(description='Maximum clinical stage reached for this drug-disease indication')

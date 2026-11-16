@@ -4,7 +4,7 @@ Generated from the 26.12 release output (238,857 rows) and its croissant metadat
 `scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 from pydantic import Field
 
@@ -55,8 +55,11 @@ class EvidenceExpressionAtlas(DatasetModel):
     biosamplesFromSource: (
         list[Annotated[Annotated[str, Reference('biosample', 'biosampleId')], Field(pattern=ONTOLOGY_ID)]] | None
     ) = Field(description=('Identifiers of the tissues or cell types profiled in the Expression Atlas experiment'))
-    confidence: Literal['high', 'low', 'medium'] = Field(
-        description=("Confidence of the differential expression assigned by Expression Atlas ('low', 'medium', 'high')")
+    confidence: str = Field(
+        min_length=1,
+        description=(
+            "Confidence of the differential expression assigned by Expression Atlas ('low', 'medium', 'high')"
+        ),
     )
     contrast: str = Field(
         min_length=1,
