@@ -45,12 +45,17 @@ CANDIDATE_COLUMNS = [
 ]
 
 
-def stage_excluded(candidates: pl.DataFrame, exclude_stages: dict[str, list[str]]) -> pl.Expr:
+def stage_excluded(
+    candidates: pl.DataFrame,
+    exclude_stages: dict[str, list[str]],
+    exempt_drug_types: dict[str, list[str]] | None = None,
+) -> pl.Expr:
     """Whether a candidate's maximum clinical stage is one its source excludes.
 
     Args:
         candidates: The candidates the expression is for, whose ``source`` values are checked.
         exclude_stages: For each source, the maximum clinical stages excluded.
+        exempt_drug_types: For each source, the drug types never excluded by stage.
 
     Returns:
         pl.Expr: True for a candidate whose source excludes its stage, False otherwise.
@@ -63,11 +68,14 @@ def stage_excluded(candidates: pl.DataFrame, exclude_stages: dict[str, list[str]
         msg = f'exclude_stages has no entry for the candidate sources {missing}'
         raise ValueError(msg)
     excluded = pl.lit(False)
+    exempt = exempt_drug_types or {}
     for source, stages in exclude_stages.items():
-        excluded = excluded | (
-            (pl.col('source') == source)
-            & pl.col('maximumClinicalStage').is_in(pl.lit(stages, dtype=pl.List(pl.String))).fill_null(False)
-        )
+        rule = (pl.col('source') == source) & pl.col('maximumClinicalStage').is_in(
+            pl.lit(stages, dtype=pl.List(pl.String))
+        ).fill_null(False)
+        if exempt.get(source):
+            rule = rule & ~pl.col('drugType').is_in(pl.lit(exempt[source], dtype=pl.List(pl.String))).fill_null(False)
+        excluded = excluded | rule
     return excluded
 
 

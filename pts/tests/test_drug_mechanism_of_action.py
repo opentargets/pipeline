@@ -645,9 +645,10 @@ class TestMergeInferred:
         *rows: dict,
         minimum: float = 0.8,
         exclude_stages: dict[str, list[str]] | None = None,
+        exempt_drug_types: dict[str, list[str]] | None = None,
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
         excluded = EXCLUDE_APPROVED if exclude_stages is None else exclude_stages
-        return merge_inferred(chembl, candidates_frame(*rows), minimum, excluded)
+        return merge_inferred(chembl, candidates_frame(*rows), minimum, excluded, exempt_drug_types)
 
     def test_without_aact_only_curation_is_added(self, tables: dict) -> None:
         result = process_mechanism_of_action(**tables)
@@ -800,6 +801,26 @@ class TestMergeInferred:
         assert published.tail(1)['references'].to_list() == [
             [{'source': 'PubMed', 'ids': ['22'], 'urls': ['http://europepmc.org/abstract/MED/22']}]
         ]
+
+    def test_exempt_drug_types_publish_an_excluded_stage(self, chembl: pl.DataFrame) -> None:
+        antibody = candidate(maximumClinicalStage='APPROVAL', drugType='Antibody', mechanismOfAction='antibody')
+        small = candidate(
+            parentChemblId='CHEMBL91',
+            chemblIds=['CHEMBL91'],
+            maximumClinicalStage='APPROVAL',
+            mechanismOfAction='small',
+        )
+        untyped = candidate(
+            parentChemblId='CHEMBL92', chemblIds=['CHEMBL92'], maximumClinicalStage='APPROVAL', drugType=None
+        )
+        paper_antibody = paper(
+            parentChemblId='CHEMBL93', chemblIds=['CHEMBL93'], maximumClinicalStage='APPROVAL', drugType='Antibody'
+        )
+        merged, _ = self.merge(
+            chembl, antibody, small, untyped, paper_antibody, exempt_drug_types={'aact': ['Antibody']}
+        )
+        assert merged.height == chembl.height + 1
+        assert merged.tail(1)['mechanismOfAction'].to_list() == ['antibody']
 
     def test_filtering_comes_before_deduplication(self, chembl: pl.DataFrame) -> None:
         merged, _ = self.merge(
