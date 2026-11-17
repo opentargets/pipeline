@@ -7,7 +7,6 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
 from pts.schemas.outputs.so import So
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -53,4 +52,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `so` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: So})
+    So.validate_dataset(destination)

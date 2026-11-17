@@ -17,7 +17,6 @@ from otter.config.model import Config
 
 from pts.schemas.outputs.reactome import Reactome
 from pts.schemas.reactome import reactome_schema
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HUMAN = 'Homo sapiens'
@@ -139,4 +138,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `reactome` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Reactome})
+    Reactome.validate_dataset(destination)

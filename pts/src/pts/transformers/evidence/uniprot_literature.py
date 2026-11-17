@@ -7,7 +7,6 @@ from typing import Any
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_uniprot_literature import EvidenceUniprotLiterature
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.uniprot_variants import CONFIDENCE_SCORES
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
@@ -53,4 +52,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_uniprot_literature` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceUniprotLiterature})
+    EvidenceUniprotLiterature.validate_dataset(destination['evidence'])

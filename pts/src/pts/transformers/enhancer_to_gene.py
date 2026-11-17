@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.schemas.outputs.enhancer_to_gene import EnhancerToGene
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -311,4 +310,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `enhancer_to_gene` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: EnhancerToGene})
+    EnhancerToGene.validate_dataset(destination['output'])

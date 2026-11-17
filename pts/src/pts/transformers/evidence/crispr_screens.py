@@ -13,7 +13,6 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.evidence_crispr_screen import EvidenceCrisprScreen
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -229,4 +228,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_crispr_screen` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceCrisprScreen})
+    EvidenceCrisprScreen.validate_dataset(destination['evidence'])

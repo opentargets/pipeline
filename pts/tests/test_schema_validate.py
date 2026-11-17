@@ -8,7 +8,7 @@ import pytest
 from pydantic import Field
 
 from pts.schemas.dataset import DatasetModel, PrimaryKey, to_polars_schema, validate
-from pts.schemas.dataset.validate import DUPLICATE_KEY, main, validate_dataset
+from pts.schemas.dataset.validate import DUPLICATE_KEY, main, validation_report
 from pts.schemas.outputs.biosample import Biosample
 
 
@@ -46,7 +46,7 @@ def _scores(ids: list[str], scores: list[float]) -> pl.DataFrame:
 def test_a_valid_dataset_has_an_empty_report(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 1.0]), _scores(['c'], [0.0]))
 
-    assert validate_dataset(path, _Scores).is_empty()
+    assert validation_report(path, _Scores).is_empty()
 
 
 def test_widespread_violations_keep_only_counts_and_a_few_examples(tmp_path: Path, monkeypatch) -> None:
@@ -60,7 +60,7 @@ def test_widespread_violations_keep_only_counts_and_a_few_examples(tmp_path: Pat
     warnings: list[str] = []
     monkeypatch.setattr(validate.logger, 'warning', lambda message, *args: warnings.append(message.format(*args)))
 
-    report = validate_dataset(path, _Scores)
+    report = validation_report(path, _Scores)
 
     assert report.select('column', 'check', 'failures', 'parts').rows() == [('score', 'score: <= 1.0', 3 * rows, 3)]
     assert len(report['examples'].item()) == validate.EXAMPLES
@@ -77,7 +77,7 @@ def test_violations_are_counted_across_parts(tmp_path: Path) -> None:
         _scores(['d', 'e'], [2.0, 1.5]),
     )
 
-    report = validate_dataset(path, _Scores)
+    report = validation_report(path, _Scores)
 
     assert report.select('dataset', 'column', 'check', 'failures', 'parts').rows() == [
         ('_scores', 'score', 'score: <= 1.0', 3, 2)
@@ -89,7 +89,7 @@ def test_violations_are_counted_across_parts(tmp_path: Path) -> None:
 def test_missing_and_undeclared_columns_are_reported(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', pl.DataFrame({'id': ['a'], 'other': [1]}))
 
-    report = validate_dataset(path, _Scores)
+    report = validation_report(path, _Scores)
 
     assert sorted(report['check'].to_list()) == ['column_in_dataframe', 'column_in_schema']
 
@@ -97,7 +97,7 @@ def test_missing_and_undeclared_columns_are_reported(tmp_path: Path) -> None:
 def test_a_key_repeated_in_different_parts_is_a_duplicate(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 0.2]), _scores(['b', 'b', 'c'], [0.3, 0.4, 0.5]))
 
-    report = validate_dataset(path, _Scores)
+    report = validation_report(path, _Scores)
 
     assert report.select('column', 'check', 'failures', 'parts', 'examples').rows() == [
         ('id', DUPLICATE_KEY, 2, 2, ['b'])
@@ -110,7 +110,7 @@ def test_a_hash_collision_is_not_a_duplicate(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(validate, '_key_hash', lambda key: pl.first(key).str.len_bytes().cast(pl.UInt64))
     path = _write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 0.2]), _scores(['c', 'c'], [0.3, 0.4]))
 
-    report = validate_dataset(path, _Scores)
+    report = validation_report(path, _Scores)
 
     assert report.select('failures', 'examples').rows() == [(1, ['c'])]
 
@@ -118,7 +118,7 @@ def test_a_hash_collision_is_not_a_duplicate(tmp_path: Path, monkeypatch: pytest
 def test_a_missing_key_column_is_reported_once(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', pl.DataFrame({'score': [0.1, 0.1]}))
 
-    assert validate_dataset(path, _Scores)['check'].to_list() == ['column_in_dataframe']
+    assert validation_report(path, _Scores)['check'].to_list() == ['column_in_dataframe']
 
 
 def test_a_composite_key_is_unique_on_its_columns_together(tmp_path: Path) -> None:
@@ -126,8 +126,8 @@ def test_a_composite_key_is_unique_on_its_columns_together(tmp_path: Path) -> No
     unique = _write_parts(tmp_path / 'unique', pairs)
     repeated = _write_parts(tmp_path / 'repeated', pairs, pairs.head(1))
 
-    assert validate_dataset(unique, _Pairs).is_empty()
-    assert validate_dataset(repeated, _Pairs).select('column', 'failures', 'examples').rows() == [
+    assert validation_report(unique, _Pairs).is_empty()
+    assert validation_report(repeated, _Pairs).select('column', 'failures', 'examples').rows() == [
         ('left, right', 1, ['a, x'])
     ]
 
@@ -136,12 +136,30 @@ def test_a_single_parquet_file_is_validated(tmp_path: Path) -> None:
     path = tmp_path / 'ds.parquet'
     _scores(['a'], [3.0]).write_parquet(path)
 
-    assert validate_dataset(str(path), _Scores)['failures'].to_list() == [1]
+    assert validation_report(str(path), _Scores)['failures'].to_list() == [1]
 
 
 def _biosample(tmp_path: Path, rows: int) -> str:
     frame = pl.DataFrame([Biosample.example] * rows, schema=to_polars_schema(Biosample))
     return _write_parts(tmp_path / 'biosample', frame)
+
+
+def test_a_model_validates_a_valid_dataset_written_at_a_path(tmp_path: Path) -> None:
+    _Scores.validate_dataset(_write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 1.0])))
+
+
+def test_a_model_raises_for_a_dataset_breaking_it(tmp_path: Path) -> None:
+    path = _write_parts(tmp_path / 'ds', _scores(['a', 'a'], [0.1, 1.5]))
+
+    with pytest.raises(ValueError, match=r'breaks its model _Scores:\n') as raised:
+        _Scores.validate_dataset(path)
+    assert 'score: <= 1.0' in str(raised.value)
+    assert DUPLICATE_KEY in str(raised.value)
+
+
+def test_a_model_raises_for_a_dataset_that_was_not_written(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match='was not written, but must satisfy the model _Scores'):
+        _Scores.validate_dataset(str(tmp_path / 'ds'))
 
 
 def test_the_command_line_validates_an_output_directory(tmp_path: Path) -> None:

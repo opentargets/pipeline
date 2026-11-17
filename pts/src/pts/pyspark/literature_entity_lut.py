@@ -17,7 +17,6 @@ from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
 from pts.schemas.outputs.literature_entity_lut import LiteratureEntityLut
-from pts.task_validation import validate_outputs
 
 # Section importance ranks (from Scala reference.conf)
 _SECTION_RANKS = [
@@ -169,4 +168,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `literature_entity_lut` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['literature_entity_lut']: LiteratureEntityLut})
+    LiteratureEntityLut.validate_dataset(destination['literature_entity_lut'])

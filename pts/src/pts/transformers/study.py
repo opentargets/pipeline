@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.outputs.study import Study
 from pts.schemas.study import StudyType, study_schema
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -373,4 +372,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `study` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: Study})
+    Study.validate_dataset(destination['output'])

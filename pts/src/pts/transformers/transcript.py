@@ -15,7 +15,6 @@ from otter.config.model import Config
 
 from pts.schemas.outputs.transcript import Transcript
 from pts.schemas.transcript import transcript as transcript_schema
-from pts.task_validation import validate_outputs
 from pts.transformers.utils import ensembl
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.lists import tag
@@ -140,4 +139,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `transcript` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Transcript})
+    Transcript.validate_dataset(destination)

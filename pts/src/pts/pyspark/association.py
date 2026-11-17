@@ -17,7 +17,6 @@ from pts.schemas.outputs.association_by_datatype_direct import AssociationByData
 from pts.schemas.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
 from pts.schemas.outputs.association_overall_direct import AssociationOverallDirect
 from pts.schemas.outputs.association_overall_indirect import AssociationOverallIndirect
-from pts.task_validation import validate_outputs
 
 
 def association(
@@ -159,11 +158,9 @@ def validate(
     config: Config,
 ) -> None:
     """Validate every written output against its dataset model, in the task's validation phase."""
-    validate_outputs({
-        destination['overall_direct']: AssociationOverallDirect,
-        destination['overall_indirect']: AssociationOverallIndirect,
-        destination['by_datasource_direct']: AssociationByDatasourceDirect,
-        destination['by_datasource_indirect']: AssociationByDatasourceIndirect,
-        destination['by_datatype_direct']: AssociationByDatatypeDirect,
-        destination['by_datatype_indirect']: AssociationByDatatypeIndirect,
-    })
+    AssociationOverallDirect.validate_dataset(destination['overall_direct'])
+    AssociationOverallIndirect.validate_dataset(destination['overall_indirect'])
+    AssociationByDatasourceDirect.validate_dataset(destination['by_datasource_direct'])
+    AssociationByDatasourceIndirect.validate_dataset(destination['by_datasource_indirect'])
+    AssociationByDatatypeDirect.validate_dataset(destination['by_datatype_direct'])
+    AssociationByDatatypeIndirect.validate_dataset(destination['by_datatype_indirect'])

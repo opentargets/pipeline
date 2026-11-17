@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from otter.config.model import Config
+from otter.util.errors import TaskValidationError
 from pydantic import ValidationError
 
 from pts.tasks.transform import Transform, TransformSpec
@@ -90,19 +91,34 @@ def test_a_transformer_writing_no_output_may_have_no_validate_function() -> None
     assert Transform.load_validate('foldx') is None
 
 
-def test_validate_hands_the_paths_of_the_run_and_the_function_to_validate_task(monkeypatch) -> None:
-    """The validation phase is `validate_task`'s, as for a pyspark task (see `test_task_validation`)."""
-    validate, validate_task = Mock(), Mock()
+def _validating_task(monkeypatch, validate) -> Transform:
+    """A transform task whose run resolved its paths, with `validate` in its transformer's module."""
     monkeypatch.setattr(Transform, 'load_transformer', staticmethod(lambda _: Mock()))
     monkeypatch.setattr(Transform, 'load_validate', staticmethod(lambda _: validate))
-    monkeypatch.setattr('pts.tasks.transform.validate_task', validate_task)
     spec = TransformSpec(
         name='transform test', transformer='study', source='input/study', destination='output/study', settings={'a': 1}
     )
     task = Transform(spec, SimpleNamespace(config=Config.model_construct(step='study', work_path='/work')))
     task.srcs, task.dsts = '/work/input/study', '/work/output/study'
+    return task
+
+
+def test_validate_runs_the_module_validate_with_the_paths_of_the_run(monkeypatch) -> None:
+    validate = Mock()
+    task = _validating_task(monkeypatch, validate)
 
     assert unwrap(Transform.validate)(task) is task
-    validate_task.assert_called_once_with(
-        '/work/input/study', '/work/output/study', {'a': 1}, task.context.config, validate, 'pts.transformers.study'
-    )
+    validate.assert_called_once_with('/work/input/study', '/work/output/study', {'a': 1}, task.context.config)
+
+
+def test_a_failed_validate_is_a_task_validation_error(monkeypatch) -> None:
+    task = _validating_task(monkeypatch, Mock(side_effect=ValueError('output/study breaks its model Study')))
+
+    with pytest.raises(TaskValidationError, match='breaks its model Study'):
+        unwrap(Transform.validate)(task)
+
+
+def test_a_module_without_validate_is_valid(monkeypatch) -> None:
+    task = _validating_task(monkeypatch, None)
+
+    assert unwrap(Transform.validate)(task) is task

@@ -3,7 +3,7 @@
 * `base` -- `DatasetModel`/`StructModel` and the `Annotated` markers (`PrimaryKey`, `Reference`, ...).
 * `spec` -- the field tree every other module reads, and the supported subset of Pydantic.
 * `converter` -- the pandera schema a dataset is validated against (`to_pandera`).
-* `validate` -- validate a written dataset, one part at a time (`validate_dataset`).
+* `validate` -- validate a written dataset, one part at a time (`validation_report`).
 * `checks` -- procedural checks a model cannot state declaratively.
 * `docs` -- documentation JSON.
 * `discovery` -- every dataset model under `pts.schemas.outputs`, without a registry.

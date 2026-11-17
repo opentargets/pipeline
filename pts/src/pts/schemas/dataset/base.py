@@ -2,8 +2,9 @@ r"""Base classes and annotation markers for declaring PTS datasets as Pydantic m
 
 A dataset is declared once, as a `DatasetModel` subclass, and everything else is derived from it:
 the pandera schema written datasets are validated against (`pts.schemas.dataset.to_pandera`) and the
-documentation JSON (`pts.schemas.dataset.docs`). The models are a specification only -- they are
-never used to validate data row by row at runtime.
+documentation JSON (`pts.schemas.dataset.docs`). The models are a specification: Pydantic never
+validates data with them. `DatasetModel.validate_dataset` validates a written dataset through the
+derived pandera schema, one parquet part at a time (`pts.schemas.dataset.validate`).
 
 Facts a Pydantic `Field` has no slot for are attached as `Annotated` markers, so they can sit on a
 top-level column, a nested struct field or a list element alike::
@@ -65,6 +66,34 @@ class DatasetModel(SchemaModel):
     def is_concrete(cls) -> bool:
         """Whether this class is a dataset in its own right, rather than a shared base."""
         return 'dataset_name' in cls.__dict__
+
+    @classmethod
+    def validate_dataset(cls, path: str) -> None:
+        """Validate the dataset written at `path` against this model.
+
+        The call a transformer module's `validate` makes for each dataset it writes, e.g.
+        `EvidenceEncore.validate_dataset(destination['evidence'])`. Broken rules are logged as each
+        part is validated (`pts.schemas.dataset.validate.validation_report`).
+
+        Args:
+            path: the dataset: a directory of parquet parts, or a single parquet file. Local or remote.
+
+        Raises:
+            ValueError: if nothing was written at `path`, or the dataset breaks this model's rules.
+        """
+        # imported here: the validator and the storage layer import this module
+        from otter.storage.synchronous.handle import StorageHandle
+        from otter.util.errors import NotFoundError
+
+        from pts.schemas.dataset.validate import format_report, validation_report
+
+        try:
+            StorageHandle(path).stat()
+        except NotFoundError as error:
+            raise ValueError(f'{path} was not written, but must satisfy the model {cls.__name__}') from error
+        report = validation_report(path, cls)
+        if not report.is_empty():
+            raise ValueError(f'{path} breaks its model {cls.__name__}:\n{format_report(report)}')
 
 
 @dataclass(frozen=True)

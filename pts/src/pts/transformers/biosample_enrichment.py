@@ -17,7 +17,6 @@ from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
 from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
-from pts.task_validation import validate_outputs
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -462,4 +461,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `biosample_enrichment` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: BiosampleEnrichment})
+    BiosampleEnrichment.validate_dataset(destination)

@@ -8,7 +8,6 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.clinical_indication import ClinicalIndication as ClinicalIndicationOutput
-from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import ClinicalIndication
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import valid_rows
@@ -58,4 +57,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `clinical_indication` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: ClinicalIndicationOutput})
+    ClinicalIndicationOutput.validate_dataset(destination['output'])

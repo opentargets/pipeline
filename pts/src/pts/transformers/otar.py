@@ -15,7 +15,6 @@ from otter.config.model import Config
 
 from pts.schemas.otar import otar_schema
 from pts.schemas.outputs.otar import Otar
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
@@ -125,4 +124,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `otar` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Otar})
+    Otar.validate_dataset(destination)

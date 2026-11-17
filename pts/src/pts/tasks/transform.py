@@ -10,10 +10,10 @@ from otter.manifest.model import Artifact
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
+from otter.util.errors import TaskValidationError
 from otter.util.fs import check_destination
 
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
-from pts.task_validation import validate_task
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
 
@@ -42,12 +42,13 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
 
-        The module also holds a function named `validate`, next to the transformer.
-        It takes the same four arguments and runs in the validation phase of the task: it
-        validates each output against its dataset model (`validate_outputs`), and
-        checks any further rule, raising `ValueError` when the result is wrong. A
-        task writing to `output/` must have one, and it must validate every
-        `output/` destination (see `pts.task_validation`).
+        The module may also hold a function named `validate`, next to the transformer.
+        It takes the same four arguments and runs in the validation phase of the task:
+        it validates each dataset the transformer writes against its model
+        (`Model.validate_dataset(path)`), and checks any further rule, raising
+        `ValueError` when the result is wrong, which fails the task. Every dataset
+        written to `output/` must be validated: `tests/test_config_dataset_models.py`
+        enforces it for every task in the config.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -123,14 +124,12 @@ class Transform(Task):
 
     @report
     def validate(self) -> Self:
-        """Run the transformer's validate function, which must validate every `output/` destination."""
-        validate_task(
-            self.srcs,
-            self.dsts,
-            self.spec.settings or {},
-            self.context.config,
-            self.validate_function,
-            f'{TRANSFORMER_PACKAGE}.{self.spec.transformer}',
-        )
+        """Run the transformer module's `validate`, if it has one; a `ValueError` from it fails the task."""
+        if self.validate_function is None:
+            return self
+        try:
+            self.validate_function(self.srcs, self.dsts, self.spec.settings or {}, self.context.config)
+        except ValueError as error:
+            raise TaskValidationError(str(error)) from error
         return self
 

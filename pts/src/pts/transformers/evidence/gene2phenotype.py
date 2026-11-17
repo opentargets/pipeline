@@ -15,7 +15,6 @@ from otter.config.model import Config
 
 from pts.schemas.gene2phenotype import G2P_INPUT_SCHEMA
 from pts.schemas.outputs.evidence_gene2phenotype import EvidenceGene2phenotype
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -170,4 +169,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_gene2phenotype` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceGene2phenotype})
+    EvidenceGene2phenotype.validate_dataset(destination['evidence'])

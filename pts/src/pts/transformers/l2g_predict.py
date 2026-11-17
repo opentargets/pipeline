@@ -21,7 +21,6 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.l2g_prediction import L2gPrediction
-from pts.task_validation import validate_outputs
 from pts.transformers.l2g import explain as l2g_explain
 from pts.transformers.l2g import model as l2g_model
 from pts.transformers.l2g.features import FEATURES, impute_and_cast
@@ -159,4 +158,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `l2g_prediction` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: L2gPrediction})
+    L2gPrediction.validate_dataset(destination)

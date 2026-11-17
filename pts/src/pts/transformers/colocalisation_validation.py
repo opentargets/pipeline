@@ -17,7 +17,6 @@ from typing import Any
 from otter.config.model import Config
 
 from pts.schemas.outputs.colocalisation import Colocalisation
-from pts.task_validation import validate_outputs
 
 
 def colocalisation_validation(
@@ -44,4 +43,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the colocalisation gentropy wrote against its dataset model."""
-    validate_outputs({source['colocalisation']: Colocalisation})
+    Colocalisation.validate_dataset(source['colocalisation'])

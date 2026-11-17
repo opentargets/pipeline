@@ -18,7 +18,7 @@ from pts.schemas.dataset import DatasetModel, Reference, to_pandera, to_polars_s
 from pts.schemas.dataset.discovery import discover_datasets
 from pts.schemas.dataset.docs import write_docs
 from pts.schemas.dataset.spec import Node, dataset_spec, walk
-from pts.schemas.dataset.validate import format_report, validate_dataset
+from pts.schemas.dataset.validate import format_report, validation_report
 
 DATASETS = discover_datasets()
 MODELS = sorted(DATASETS.values(), key=lambda model: model.dataset_name)
@@ -79,7 +79,7 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
     if not location.exists():
         pytest.skip(f'no {location}')
 
-    report = validate_dataset(str(location), model)
+    report = validation_report(str(location), model)
     assert report.is_empty(), f'{model.dataset_name} breaks its model:\n{format_report(report)}'
 
 

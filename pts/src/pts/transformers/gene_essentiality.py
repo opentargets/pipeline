@@ -16,7 +16,6 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.target_essentiality import TargetEssentiality
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -242,4 +241,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `target_essentiality` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: TargetEssentiality})
+    TargetEssentiality.validate_dataset(destination)

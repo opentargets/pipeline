@@ -20,7 +20,6 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.target_safety_event import TargetSafetyEvent
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.spark_strings import spark_trim
 from pts.transformers.utils.target import ensg_lookup
@@ -420,4 +419,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `target_safety_event` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: TargetSafetyEvent})
+    TargetSafetyEvent.validate_dataset(destination)

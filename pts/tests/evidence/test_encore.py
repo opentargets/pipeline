@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.schemas.dataset.validate import format_report, validate_dataset
+from pts.schemas.dataset.validate import format_report, validation_report
 from pts.schemas.outputs.evidence_encore import EvidenceEncore
 from pts.transformers.evidence.encore import ENCORE, encore
 from tests.evidence.fixtures import write_disease, write_target
@@ -55,7 +55,7 @@ def test_cell_lines_tell_evidence_apart(tmp_path: Path) -> None:
     assert sorted(valid['score'].to_list()) == [0.25, 0.5]
     assert valid['targetId'].to_list() == ['ENSG00000000001', 'ENSG00000000001']
     assert failed.height == 1
-    report = validate_dataset(str(dst / 'valid'), EvidenceEncore)
+    report = validation_report(str(dst / 'valid'), EvidenceEncore)
     assert report.is_empty(), format_report(report)
 
 

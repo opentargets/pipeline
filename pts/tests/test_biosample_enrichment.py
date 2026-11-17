@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema
-from pts.schemas.dataset.validate import format_report, validate_dataset
+from pts.schemas.dataset.validate import format_report, validation_report
 from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
 from pts.transformers.biosample_enrichment import (
     Panel,
@@ -180,7 +180,7 @@ def test_output_has_the_pinned_schema(workspace) -> None:
 @pytest.mark.parametrize('pool_by_disease', [False, True], ids=['by_study', 'pooled'])
 def test_output_passes_its_dataset_model(workspace, pool_by_disease: bool) -> None:
     _run(workspace, pool_by_disease=pool_by_disease)
-    report = validate_dataset(workspace['out'], BiosampleEnrichment)
+    report = validation_report(workspace['out'], BiosampleEnrichment)
     assert report.is_empty(), format_report(report)
 
 

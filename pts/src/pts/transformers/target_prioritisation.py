@@ -15,7 +15,6 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.target_prioritisation import TargetPrioritisation
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 ONCOTSG = ['TSG', 'oncogene', 'Oncogene', 'oncogene,TSG', 'TSG,oncogene', 'fusion,oncogene', 'oncogene,fusion']
@@ -747,4 +746,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `target_prioritisation` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: TargetPrioritisation})
+    TargetPrioritisation.validate_dataset(destination)

@@ -9,7 +9,6 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.clinical_target import ClinicalTarget
-from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
@@ -112,4 +111,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `clinical_target` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: ClinicalTarget})
+    ClinicalTarget.validate_dataset(destination['output'])

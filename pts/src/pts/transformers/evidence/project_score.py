@@ -8,7 +8,6 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_crispr import EvidenceCrispr
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -172,4 +171,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_crispr` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceCrispr})
+    EvidenceCrispr.validate_dataset(destination['evidence'])

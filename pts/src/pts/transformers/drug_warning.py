@@ -13,7 +13,6 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.drug_warning import DrugWarning
-from pts.task_validation import validate_outputs
 from pts.transformers.utils import add_parent_chembl_ids
 from pts.transformers.utils.dataset import write_dataset
 
@@ -177,4 +176,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `drug_warning` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: DrugWarning})
+    DrugWarning.validate_dataset(destination)

@@ -14,7 +14,6 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.drug_mechanism_of_action import DrugMechanismOfAction
-from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action_candidates import (
     LABEL_COLUMNS,
@@ -594,4 +593,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `drug_mechanism_of_action` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: DrugMechanismOfAction})
+    DrugMechanismOfAction.validate_dataset(destination['output'])

@@ -8,7 +8,6 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_intogen import EvidenceIntogen
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present, log10_rescaled_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -154,4 +153,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_intogen` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceIntogen})
+    EvidenceIntogen.validate_dataset(destination['evidence'])

@@ -12,7 +12,6 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.pharmacovigilance import Pharmacovigilance
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 
 _ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
@@ -305,4 +304,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `pharmacovigilance` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Pharmacovigilance})
+    Pharmacovigilance.validate_dataset(destination)

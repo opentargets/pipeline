@@ -2,8 +2,9 @@
 
 For each such task in the config, its module must define `validate`, and `validate` must validate every
 `output/` destination of the task against the model of that dataset. It is called here with the configured
-destinations and a recording `validate_outputs`, so no data is needed. A new output without a model, or a
-`validate` that forgets an output or names the wrong model, fails here.
+destinations while `DatasetModel.validate_dataset` only records its calls, so no data is needed. A new output
+without a model, or a `validate` that forgets an output or names the wrong model, fails here. This test is the
+only place the rule is enforced: the tasks themselves run whatever `validate` a module defines.
 """
 
 from importlib import import_module
@@ -54,11 +55,13 @@ def test_every_output_is_validated_against_its_dataset_model(task: dict[str, Any
         validate = Pyspark.load_validate(name)
     assert validate is not None, (
         f'{task["name"]} writes {task["outputs"]}, so {module.__name__} must define validate() validating them '
-        '(see pts.task_validation)'
+        '(see TransformSpec in pts/src/pts/tasks/transform.py)'
     )
 
     validated: dict[str, type[DatasetModel]] = {}
-    monkeypatch.setattr(module, 'validate_outputs', lambda outputs: validated.update(outputs))
+    monkeypatch.setattr(
+        DatasetModel, 'validate_dataset', classmethod(lambda model, path: validated.update({path: model}))
+    )
     validate(task['source'], task['destination'], task.get('settings') or {}, None)
 
     for path in task['outputs']:

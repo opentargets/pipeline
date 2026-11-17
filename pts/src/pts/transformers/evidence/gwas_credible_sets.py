@@ -13,7 +13,6 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -133,4 +132,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_gwas_credible_sets` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceGwasCredibleSets})
+    EvidenceGwasCredibleSets.validate_dataset(destination['evidence'])

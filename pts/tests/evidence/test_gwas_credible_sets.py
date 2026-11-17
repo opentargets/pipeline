@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pts.schemas.dataset.validate import format_report, validate_dataset
+from pts.schemas.dataset.validate import format_report, validation_report
 from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
 from pts.transformers.evidence.gwas_credible_sets import build_raw_evidence, gwas_credible_sets
 from tests.credible_set_fixtures import published_credible_set
@@ -156,5 +156,5 @@ def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
         ('ENSG00000000001', 'EFO_1', 0.8, '2018-01-01', '2018-01-01')
     ]
     assert failed['targetFromSourceId'].to_list() == ['ENSG00000000009']
-    report = validate_dataset(str(dst / 'valid'), EvidenceGwasCredibleSets)
+    report = validation_report(str(dst / 'valid'), EvidenceGwasCredibleSets)
     assert report.is_empty(), format_report(report)

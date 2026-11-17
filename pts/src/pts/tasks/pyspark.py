@@ -5,13 +5,14 @@ from importlib import import_module
 from typing import Any, Self
 
 from loguru import logger
+from otter.config.model import Config
 from otter.manifest.model import Artifact
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
+from otter.util.errors import TaskValidationError
 
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
-from pts.task_validation import Validate, validate_task
 
 PYSPARK_PACKAGE = 'pts.pyspark'
 
@@ -19,6 +20,9 @@ pyspark_entrypoint = Callable[
     [SourcePaths, DestinationPaths, dict[str, Any], dict[str, str]],
     None,
 ]
+
+#: An entry point module's `validate`: the task's paths, settings and the otter config.
+validate_type = Callable[[SourcePaths, DestinationPaths, dict[str, Any], Config], None]
 
 
 class PysparkSpec(Spec):
@@ -34,13 +38,13 @@ class PysparkSpec(Spec):
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
 
-        The module also holds a function named `validate`, next to the entry point,
-        taking the source and destination paths, the settings and the otter config. It runs in the
-        validation phase of the task: it validates each output against its dataset
-        model (`validate_outputs`), and checks any further rule, raising
-        `ValueError` when the result is wrong. A task writing to `output/` must
-        have one, and it must validate every `output/` destination (see
-        `pts.task_validation`).
+        The module may also hold a function named `validate`, next to the entry
+        point, taking the source and destination paths, the settings and the otter
+        config. It runs in the validation phase of the task: it validates each
+        dataset the job writes against its model (`Model.validate_dataset(path)`),
+        and checks any further rule, raising `ValueError` when the result is wrong,
+        which fails the task. Every dataset written to `output/` must be validated:
+        `tests/test_config_dataset_models.py` enforces it for every task in the config.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -77,7 +81,7 @@ class Pyspark(Task):
             raise ModuleNotFoundError(f'{pyspark_name} not found in {PYSPARK_PACKAGE}')
 
     @staticmethod
-    def load_validate(pyspark_name: str) -> Validate | None:
+    def load_validate(pyspark_name: str) -> validate_type | None:
         """The `validate` function of the entry point's module, if it has one."""
         module = import_module(f'{PYSPARK_PACKAGE}.{pyspark_name}')
         return getattr(module, 'validate', None)
@@ -109,13 +113,11 @@ class Pyspark(Task):
 
     @report
     def validate(self) -> Self:
-        """Run the entry point's validate function, which must validate every `output/` destination."""
-        validate_task(
-            self.srcs,
-            self.dsts,
-            self.spec.settings or {},
-            self.context.config,
-            self.validate_function,
-            f'{PYSPARK_PACKAGE}.{self.spec.pyspark}',
-        )
+        """Run the entry point module's `validate`, if it has one; a `ValueError` from it fails the task."""
+        if self.validate_function is None:
+            return self
+        try:
+            self.validate_function(self.srcs, self.dsts, self.spec.settings or {}, self.context.config)
+        except ValueError as error:
+            raise TaskValidationError(str(error)) from error
         return self

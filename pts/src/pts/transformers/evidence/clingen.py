@@ -13,7 +13,6 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_clingen import EvidenceClingen
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
@@ -131,4 +130,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_clingen` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceClingen})
+    EvidenceClingen.validate_dataset(destination['evidence'])

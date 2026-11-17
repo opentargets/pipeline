@@ -15,7 +15,6 @@ from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
 from pts.schemas.outputs.drug_molecule import DrugMolecule
-from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
@@ -439,4 +438,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `drug_molecule` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: DrugMolecule})
+    DrugMolecule.validate_dataset(destination['output'])

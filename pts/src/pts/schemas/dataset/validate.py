@@ -46,7 +46,7 @@ from pts.transformers.utils.dataset import list_parts
 #: Example values kept per broken rule.
 EXAMPLES = 5
 
-#: The report `validate_dataset` returns: one row per broken rule.
+#: The report `validation_report` returns: one row per broken rule.
 REPORT_SCHEMA = pl.Schema({
     'dataset': pl.String,
     'column': pl.String,
@@ -61,7 +61,7 @@ REPORT_SCHEMA = pl.Schema({
 DUPLICATE_KEY = 'unique primary key'
 
 
-def validate_dataset(path: str, model: type[DatasetModel]) -> pl.DataFrame:
+def validation_report(path: str, model: type[DatasetModel]) -> pl.DataFrame:
     """Validate the dataset written at `path` against `model`.
 
     Args:
@@ -231,7 +231,7 @@ def main(argv: list[str]) -> int:
         if not location.exists():
             logger.warning('skipping {}: no {}', name, location)
             continue
-        reports.append(validate_dataset(str(location), models[name]))
+        reports.append(validation_report(str(location), models[name]))
 
     if not reports:
         print(f'no modelled dataset found under {output_dir}', file=sys.stderr)  # noqa: T201

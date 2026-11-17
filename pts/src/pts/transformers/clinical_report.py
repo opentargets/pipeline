@@ -9,7 +9,6 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
-from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import (
     ClinicalProvider,
     ClinicalReport,
@@ -729,4 +728,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `clinical_report` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['output']: ClinicalReportOutput})
+    ClinicalReportOutput.validate_dataset(destination['output'])

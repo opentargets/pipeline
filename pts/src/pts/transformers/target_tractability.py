@@ -17,7 +17,6 @@ from otter.config.model import Config
 
 from pts.schemas.outputs.target_tractability import TargetTractability
 from pts.schemas.target_tractability import tractability_schema
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 BUCKET_COLUMN = re.compile(r'.*_B\d+_.*')
@@ -101,4 +100,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `target_tractability` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: TargetTractability})
+    TargetTractability.validate_dataset(destination)

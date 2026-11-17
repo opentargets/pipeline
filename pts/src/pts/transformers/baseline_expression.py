@@ -17,7 +17,6 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.baseline_expression import BaselineExpression
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import QC_COLUMN, flag_rows
 from pts.transformers.utils.spark_csv import read_spark_csv
@@ -371,4 +370,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `baseline_expression` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['valid']: BaselineExpression})
+    BaselineExpression.validate_dataset(destination['valid'])

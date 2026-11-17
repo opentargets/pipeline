@@ -13,7 +13,6 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.chemical_probe import ChemicalProbe
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -297,4 +296,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `chemical_probe` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: ChemicalProbe})
+    ChemicalProbe.validate_dataset(destination)

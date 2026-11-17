@@ -14,7 +14,6 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.target import Target
-from pts.task_validation import validate_outputs
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
 from pts.transformers.target.assemble import assemble
 from pts.transformers.target.ensembl import build_ensembl
@@ -101,4 +100,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `target` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Target})
+    Target.validate_dataset(destination)

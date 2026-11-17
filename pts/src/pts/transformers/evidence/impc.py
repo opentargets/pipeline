@@ -16,7 +16,6 @@ from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
 from pts.schemas.outputs.evidence_impc import EvidenceImpc
-from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -234,4 +233,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `evidence_impc` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['evidence']: EvidenceImpc})
+    EvidenceImpc.validate_dataset(destination['evidence'])

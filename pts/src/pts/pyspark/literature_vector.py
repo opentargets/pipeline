@@ -18,7 +18,6 @@ from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
 from pts.schemas.outputs.literature_vector import LiteratureVector
-from pts.task_validation import validate_outputs
 
 _OUTPUT_COLUMNS = ['category', 'word', 'norm', 'vector']
 
@@ -76,4 +75,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `literature_vector` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination['vectors']: LiteratureVector})
+    LiteratureVector.validate_dataset(destination['vectors'])

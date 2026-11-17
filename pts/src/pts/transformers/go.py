@@ -11,7 +11,6 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
 from pts.schemas.outputs.go import Go
-from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -140,4 +139,4 @@ def validate(
     config: Config,
 ) -> None:
     """Validate the written `go` against its dataset model, in the task's validation phase."""
-    validate_outputs({destination: Go})
+    Go.validate_dataset(destination)
