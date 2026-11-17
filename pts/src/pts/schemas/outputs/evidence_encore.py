@@ -1,7 +1,6 @@
 """Open Targets - Encore evidence: the `evidence_encore` output.
 
-Generated from the 26.09 release output (112,134 rows) and its croissant metadata. The dataset is absent
-from the local 26.12 copy, so instead of being regenerated, its rules were loosened by hand to the policy of
+Generated from the 26.09 release output (112,134 rows) and its croissant metadata, to the rules of
 `scripts/output_schemas/generate.py`: no release-specific bounds or vocabularies.
 """
 

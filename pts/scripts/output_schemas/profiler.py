@@ -96,9 +96,7 @@ def profile(location: Path) -> dict:
 def _profile_values(series: pl.Series, path: str, values: dict[str, dict]) -> None:
     """Profile one value and, recursively, the values inside it.
 
-    Each nesting level is unpacked once and profiled as a column of its own: building every statistic as an
-    expression over the nested column unpacked the same lists again for each one, which took minutes per part
-    on deeply nested lists.
+    Each nesting level is unpacked once and profiled as a column of its own.
     """
     stat_exprs = stats(series.dtype, pl.col(path))
     row = series.to_frame(path).select(expr.alias(stat) for stat, expr in stat_exprs.items()).row(0, named=True)

@@ -17,9 +17,7 @@ be checked the same way. The dataset is read once, one parquet part at a time:
 A part's failures are logged as soon as it is validated, then reduced to a count and a few examples
 per broken rule: however many values fail, only those are kept.
 
-Memory is bounded by the largest part plus 8 bytes per row: 310 million colocalisation rows (18 GB
-in 200 parts) validate in under a minute within 4 GB. A streaming `n_unique` over the hashes took ten
-times as long, and twice the memory.
+Memory is bounded by the largest part plus 8 bytes per row.
 
 The result is a report with one row per broken rule -- the failures summed over the parts -- empty
 for a valid dataset. Run it over a local
