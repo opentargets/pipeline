@@ -92,7 +92,17 @@ gs://sle_map_data/prod/20261117T133750/
 
 - Filters: purity min r² ≥ 0.25 and lead p-value ≤ 0.001 (step defaults). MHC is left to validation.
 - Conditional effects are SuSiE's own, per standard deviation of genotype and expression.
-- Counts: not checked yet (run pending).
+
+Run `20261117T133750` on 2026-11-17 (gentropy `f8719e6`): 7 min in all, 1.5 min of Spark on 2 workers.
+
+| | Count |
+|---|---:|
+| studies | 10,097 |
+| credible sets | 11,221 |
+| members | 147,984 |
+| distinct variants | 83,476 |
+
+16 cell types, every study with a biosample and an LD population structure. Every credible set has a study, members and a log Bayes factor, its lead among the members, purity min r² ≥ 0.25, and posterior probabilities summing to 0.95–1.0. Every member has `reportedBeta`, `conditionalBeta`, `effectAlleleFrequency` and `sampleSize`. Ids are unique.
 
 ## Changelog
 
