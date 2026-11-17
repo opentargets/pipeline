@@ -9,6 +9,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -215,6 +216,7 @@ def generate(
     return evidence, excluded
 
 
+@writes(evidence=EvidenceClinicalPrecedence)
 def clinical_precedence(
     source: dict[str, str],
     destination: dict[str, str],
@@ -244,13 +246,3 @@ def clinical_precedence(
     )
     logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
     write_evidence(evidence, destination, alongside=[sink_dataset(excluded, destination['excluded_report'])])
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_clinical_precedence` against its dataset model, in the task's validation phase."""
-    EvidenceClinicalPrecedence.validate_dataset(destination['evidence'])

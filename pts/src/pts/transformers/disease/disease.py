@@ -8,6 +8,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.schemas.outputs.disease import Disease
+from pts.task_outputs import writes
 from pts.transformers.disease.coalescing import (
     absorb_obsolete_content,
     annotate_name_duplicates,
@@ -18,6 +20,7 @@ from pts.transformers.disease.coalescing import (
 from pts.transformers.utils.dataset import write_dataset
 
 
+@writes(Disease)
 def disease(
     source: str,
     destination: str,

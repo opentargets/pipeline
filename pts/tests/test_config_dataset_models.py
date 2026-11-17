@@ -1,22 +1,17 @@
-"""Every dataset a pts task writes to `output/` is validated against its dataset model, by code.
+"""Every dataset a pts task writes to `output/` has its model declared, in the config as configured.
 
-For each such task in the config, its module must define `validate`, and `validate` must validate every
-`output/` destination of the task against the model of that dataset. It is called here with the configured
-destinations while `DatasetModel.validate_dataset` only records its calls, so no data is needed. A new output
-without a model, or a `validate` that forgets an output or names the wrong model, fails here. This test is the
-only place the rule is enforced: the tasks themselves run whatever `validate` a module defines.
+For every task in the config, without data: each `output/` destination is declared with `@writes`, and each
+declared model is the model of the dataset it validates.
 """
 
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from pts.schemas.dataset import DatasetModel
-from pts.tasks.pyspark import PYSPARK_PACKAGE, Pyspark
-from pts.tasks.transform import TRANSFORMER_PACKAGE, Transform
+from pts.tasks.pyspark import Pyspark
+from pts.tasks.transform import Transform
 
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
 
@@ -44,28 +39,23 @@ def test_the_config_writes_outputs() -> None:
 
 
 @pytest.mark.parametrize('task', TASKS, ids=[f'{t["step"]}:{t["name"]}' for t in TASKS])
-def test_every_output_is_validated_against_its_dataset_model(task: dict[str, Any], monkeypatch) -> None:
+def test_every_output_is_declared_with_its_dataset_model(task: dict[str, Any]) -> None:
     if 'transformer' in task:
-        name = task['transformer']
-        module = import_module(f'{TRANSFORMER_PACKAGE}.{name}')
-        validate = Transform.load_validate(name)
+        validation = Transform.load_output_validation(task['transformer'])
     else:
-        name = task['pyspark']
-        module = import_module(f'{PYSPARK_PACKAGE}.{name}')
-        validate = Pyspark.load_validate(name)
-    assert validate is not None, (
-        f'{task["name"]} writes {task["outputs"]}, so {module.__name__} must define validate() validating them '
-        '(see TransformSpec in pts/src/pts/tasks/transform.py)'
-    )
+        validation = Pyspark.load_output_validation(task['pyspark'])
+    destination = task['destination']
 
-    validated: dict[str, type[DatasetModel]] = {}
-    monkeypatch.setattr(
-        DatasetModel, 'validate_dataset', classmethod(lambda model, path: validated.update({path: model}))
-    )
-    validate(task['source'], task['destination'], task.get('settings') or {}, None)
+    undeclared = [path for path in task['outputs'] if path not in _declared_paths(validation.outputs, destination)]
+    assert not undeclared, f'{validation.name} must declare the model of {undeclared} with @writes'
+    assert not validation.missing(destination), f'{validation.name} declares outputs {task["name"]} does not write'
+    for key, model in validation.outputs.items():
+        path = (destination[key] if key else destination).rstrip('/')
+        if path.startswith('output/'):
+            assert model.dataset_name == path.removeprefix('output/'), f'{validation.name} validates {path} as {model}'
 
-    for path in task['outputs']:
-        dataset = path.removeprefix('output/')
-        assert path in {p.rstrip('/') for p in validated}, f'{module.__name__}.validate() does not validate {path}'
-        model = validated.get(path) or validated[f'{path}/']
-        assert model.dataset_name == dataset, f'{module.__name__}.validate() validates {path} against {model.__name__}'
+
+def _declared_paths(outputs: dict, destination: str | dict[str, str]) -> set[str]:
+    if isinstance(destination, str):
+        return {destination.rstrip('/')} if None in outputs else set()
+    return {destination[key].rstrip('/') for key in outputs if key in destination}

@@ -17,6 +17,7 @@ from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
 from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
+from pts.task_outputs import writes
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -398,6 +399,7 @@ def score_panel(
     )
 
 
+@writes(BiosampleEnrichment)
 def biosample_enrichment(
     source: dict[str, str],
     destination: str,
@@ -452,13 +454,3 @@ def biosample_enrichment(
     )
     write_dataset(output, destination)
     logger.info(f'wrote {output.height} rows')
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `biosample_enrichment` against its dataset model, in the task's validation phase."""
-    BiosampleEnrichment.validate_dataset(destination)

@@ -15,6 +15,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.target_prioritisation import TargetPrioritisation
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 ONCOTSG = ['TSG', 'oncogene', 'Oncogene', 'oncogene,TSG', 'TSG,oncogene', 'fusion,oncogene', 'oncogene,fusion']
@@ -692,6 +693,7 @@ def baseline_query(queryset: pl.DataFrame, baseline_expression: pl.DataFrame | p
     )
 
 
+@writes(TargetPrioritisation)
 def target_prioritisation(
     source: dict[str, str],
     destination: str,
@@ -737,13 +739,3 @@ def target_prioritisation(
 
     logger.info(f'writing {result.height} targets to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `target_prioritisation` against its dataset model, in the task's validation phase."""
-    TargetPrioritisation.validate_dataset(destination)

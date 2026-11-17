@@ -9,6 +9,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.outputs.clinical_target import ClinicalTarget
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
@@ -19,6 +20,7 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import valid_rows
 
 
+@writes(output=ClinicalTarget)
 def clinical_target(
     source: dict[str, Path],
     destination: dict[str, Path],
@@ -102,13 +104,3 @@ def clinical_target(
     )
     logger.info(f'Destination path: {destination["output"]}')
     write_dataset(clinical_target, str(destination['output']))
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `clinical_target` against its dataset model, in the task's validation phase."""
-    ClinicalTarget.validate_dataset(destination['output'])

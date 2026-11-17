@@ -7,6 +7,7 @@ from typing import Any
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_uniprot_variants import EvidenceUniprotVariants
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -32,6 +33,7 @@ UNIPROT_VARIANTS = EvidenceDatasource(
 )
 
 
+@writes(evidence=EvidenceUniprotVariants)
 def uniprot_variants(
     source: dict[str, str],
     destination: dict[str, str],
@@ -49,13 +51,3 @@ def uniprot_variants(
     raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
     write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_uniprot_variants` against its dataset model, in the task's validation phase."""
-    EvidenceUniprotVariants.validate_dataset(destination['evidence'])

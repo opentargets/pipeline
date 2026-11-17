@@ -15,6 +15,7 @@ from otter.config.model import Config
 
 from pts.schemas.gene_burden import GENE_BURDEN_UNION
 from pts.schemas.outputs.evidence_gene_burden import EvidenceGeneBurden
+from pts.task_outputs import writes
 from pts.transformers.evidence.gene_burden.az import parse_az
 from pts.transformers.evidence.gene_burden.bipex import parse_bipex
 from pts.transformers.evidence.gene_burden.brava import parse_brava
@@ -144,6 +145,7 @@ def map_diseases(union: pl.DataFrame, disease_label_lut: str, disease_id_lut: st
     return check_union(coalesced.drop(CURATED_ID_COLUMN))
 
 
+@writes(evidence=EvidenceGeneBurden)
 def gene_burden(
     source: dict[str, str],
     destination: dict[str, str],
@@ -174,13 +176,3 @@ def gene_burden(
         .hash_long_variant_identifiers()
     )
     write_evidence(evidence, destination)
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_gene_burden` against its dataset model, in the task's validation phase."""
-    EvidenceGeneBurden.validate_dataset(destination['evidence'])

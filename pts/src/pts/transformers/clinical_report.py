@@ -9,6 +9,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     ClinicalProvider,
     ClinicalReport,
@@ -109,6 +110,7 @@ class ClinicalReportFlags(StrEnum):
     SAFETY_REPORT = 'SAFETY_REPORT'
 
 
+@writes(output=ClinicalReportOutput)
 def clinical_report(
     source: dict[str, str],
     destination: dict[str, str],
@@ -829,13 +831,3 @@ def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
     return ClinicalReport(
         df=flag_rows(reports.df, pl.col('type').eq(ClinicalReportType.SAFETY.value), ClinicalReportFlags.SAFETY_REPORT)
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `clinical_report` against its dataset model, in the task's validation phase."""
-    ClinicalReportOutput.validate_dataset(destination['output'])

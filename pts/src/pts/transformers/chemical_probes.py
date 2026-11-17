@@ -13,6 +13,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.chemical_probe import ChemicalProbe
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -71,6 +72,7 @@ _GROUPING_COLS = [
 ]
 
 
+@writes(ChemicalProbe)
 def chemical_probes(
     source: dict[str, str],
     destination: str,
@@ -287,13 +289,3 @@ def generate_chemical_probes_evidence(
         .agg(pl.struct(pl.col('datasourceId').alias('niceName'), 'url').unique().sort().alias('urls'))
         .rename({'pdid': 'drugFromSourceId'})
     )
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `chemical_probe` against its dataset model, in the task's validation phase."""
-    ChemicalProbe.validate_dataset(destination)

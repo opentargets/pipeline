@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
-from otter.config.model import Config
 
 from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise
 from pts.pyspark.colocalisation_utils.overlap import tags
@@ -18,8 +17,10 @@ from pts.schemas.colocalisation import CREDIBLE_SET_COLUMNS, CREDIBLE_SET_VARIAN
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.schemas.outputs.colocalisation import Colocalisation
 from pts.schemas.spark import to_spark_schema
+from pts.task_outputs import writes
 
 
+@writes(colocalisation=Colocalisation)
 def colocalisation(
     source: dict[str, str],
     destination: dict[str, str],
@@ -56,13 +57,3 @@ def colocalisation(
         destination['colocalisation']
     )
     all_tags.unpersist()
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `colocalisation` against its dataset model, in the task's validation phase."""
-    Colocalisation.validate_dataset(destination['colocalisation'])

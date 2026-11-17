@@ -17,6 +17,7 @@ from otter.config.model import Config
 
 from pts.schemas.outputs.reactome import Reactome
 from pts.schemas.reactome import reactome_schema
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HUMAN = 'Homo sapiens'
@@ -110,6 +111,7 @@ def _build_graph_documents(vertices: pl.DataFrame, edges: pl.DataFrame) -> pl.Da
     return pl.DataFrame(rows, schema=reactome_schema)
 
 
+@writes(Reactome)
 def reactome(
     source: dict[str, str],
     destination: str,
@@ -129,13 +131,3 @@ def reactome(
 
     logger.info(f'Writing Reactome output to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `reactome` against its dataset model, in the task's validation phase."""
-    Reactome.validate_dataset(destination)

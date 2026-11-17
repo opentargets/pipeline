@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.outputs.study import Study
 from pts.schemas.study import StudyType, study_schema
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -308,6 +309,7 @@ def collect_heritability(studies: pl.LazyFrame, heritability: pl.LazyFrame) -> p
     )
 
 
+@writes(output=Study)
 def study(
     source: dict[str, str | list[str]],
     destination: dict[str, str],
@@ -363,13 +365,3 @@ def study(
         sink_dataset(result.valid, destinations.output),
         sink_dataset(result.invalid, destinations.excluded),
     ])
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `study` against its dataset model, in the task's validation phase."""
-    Study.validate_dataset(destination['output'])

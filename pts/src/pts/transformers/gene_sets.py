@@ -16,6 +16,7 @@ from otter.config.model import Config
 from pts.postgres import read_dump_tables
 from pts.schemas.gene_sets import gene_sets_schema
 from pts.schemas.outputs.gene_sets import GeneSets
+from pts.task_outputs import writes
 from pts.transformers.target import chembl_class
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.lists import collect_set, explode
@@ -114,6 +115,7 @@ def _propagate(annotations: pl.LazyFrame, hierarchy: pl.LazyFrame) -> pl.LazyFra
     return hierarchy.drop('ancestors').join(targets, on='id', how='inner')
 
 
+@writes(GeneSets)
 def gene_sets(
     source: dict[str, str],
     destination: str,
@@ -155,13 +157,3 @@ def gene_sets(
 
     logger.info(f'writing {result.height} gene sets to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `gene_sets` against its dataset model, in the task's validation phase."""
-    GeneSets.validate_dataset(destination)

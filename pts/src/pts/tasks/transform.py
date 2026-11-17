@@ -10,9 +10,9 @@ from otter.manifest.model import Artifact
 from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import TaskValidationError
 from otter.util.fs import check_destination
 
+from pts.task_outputs import OutputValidation
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
 
 TRANSFORMER_PACKAGE = 'pts.transformers'
@@ -21,7 +21,6 @@ transformer_type = Callable[
     [SourcePaths, DestinationPaths, dict[str, Any] | None, Config | None],
     None,
 ]
-validate_type = transformer_type
 
 
 class TransformSpec(Spec):
@@ -42,13 +41,9 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
 
-        The module may also hold a function named `validate`, next to the transformer.
-        It takes the same four arguments and runs in the validation phase of the task:
-        it validates each dataset the transformer writes against its model
-        (`Model.validate_dataset(path)`), and checks any further rule, raising
-        `ValueError` when the result is wrong, which fails the task. Every dataset
-        written to `output/` must be validated: `tests/test_config_dataset_models.py`
-        enforces it for every task in the config.
+        The transformer declares the model of each dataset it writes with
+        `@writes` (`pts.task_outputs`), and its module may define `validate` for
+        further rules; both run in the validation phase of the task.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -69,7 +64,7 @@ class Transform(Task):
         super().__init__(spec, context)
         self.spec: TransformSpec
         self.transformer = self.load_transformer(spec.transformer)
-        self.validate_function = self.load_validate(spec.transformer)
+        self.output_validation = self.load_output_validation(spec.transformer)
 
     def _prepare_dirs(self, paths: DestinationPaths) -> None:
         if isinstance(paths, dict):
@@ -93,10 +88,10 @@ class Transform(Task):
             raise ModuleNotFoundError(f'{transformer_name} not found in {TRANSFORMER_PACKAGE}')
 
     @staticmethod
-    def load_validate(transformer_name: str) -> validate_type | None:
-        """The `validate` function of the transformer's module, if it has one."""
+    def load_output_validation(transformer_name: str) -> OutputValidation:
+        """What the transformer declares with `writes`, and its module's `validate`."""
         module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
-        return getattr(module, 'validate', None)
+        return OutputValidation.of(getattr(module, transformer_name.rsplit('.', 1)[-1]), module)
 
     @report
     def run(self) -> Self:
@@ -124,12 +119,8 @@ class Transform(Task):
 
     @report
     def validate(self) -> Self:
-        """Run the transformer module's `validate`, if it has one; a `ValueError` from it fails the task."""
-        if self.validate_function is None:
-            return self
-        try:
-            self.validate_function(self.srcs, self.dsts, self.spec.settings or {}, self.context.config)
-        except ValueError as error:
-            raise TaskValidationError(str(error)) from error
+        """Validate the datasets the transformer's module declares, then run its `validate`."""
+        self.output_validation.run(
+            self.spec.destination, self.srcs, self.dsts, self.spec.settings or {}, self.context.config
+        )
         return self
-

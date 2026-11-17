@@ -11,12 +11,12 @@ import operator
 from typing import Any
 
 from loguru import logger
-from otter.config.model import Config
 from pyspark.sql import Column, DataFrame, Row
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
 from pts.schemas.outputs.literature_entity_lut import LiteratureEntityLut
+from pts.task_outputs import writes
 
 # Section importance ranks (from Scala reference.conf)
 _SECTION_RANKS = [
@@ -136,6 +136,7 @@ def _compute_relevance(matches: DataFrame) -> DataFrame:
     )
 
 
+@writes(literature_entity_lut=LiteratureEntityLut)
 def literature_entity_lut(
     source: dict[str, str] | str,
     destination: dict[str, str] | str,
@@ -159,13 +160,3 @@ def literature_entity_lut(
     logger.info(f'Writing literature entity LUT to {dest}')
     out = result.coalesce(partition_count) if partition_count is not None else result
     out.write.mode('overwrite').parquet(dest)
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `literature_entity_lut` against its dataset model, in the task's validation phase."""
-    LiteratureEntityLut.validate_dataset(destination['literature_entity_lut'])

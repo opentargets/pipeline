@@ -8,6 +8,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_reactome import EvidenceReactome
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -28,6 +29,7 @@ REACTOME = EvidenceDatasource(
 )
 
 
+@writes(evidence=EvidenceReactome)
 def reactome(
     source: dict[str, str],
     destination: dict[str, str],
@@ -50,13 +52,3 @@ def reactome(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_reactome` against its dataset model, in the task's validation phase."""
-    EvidenceReactome.validate_dataset(destination['evidence'])

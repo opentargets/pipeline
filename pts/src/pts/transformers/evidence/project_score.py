@@ -8,6 +8,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_crispr import EvidenceCrispr
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -139,6 +140,7 @@ def generate(gene_scores: str, cell_types: str, cell_passport: str, cell_line_ma
     )
 
 
+@writes(evidence=EvidenceCrispr)
 def project_score(
     source: dict[str, str],
     destination: dict[str, str],
@@ -162,13 +164,3 @@ def project_score(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_crispr` against its dataset model, in the task's validation phase."""
-    EvidenceCrispr.validate_dataset(destination['evidence'])

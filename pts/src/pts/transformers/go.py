@@ -11,6 +11,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
 from pts.schemas.outputs.go import Go
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -102,6 +103,7 @@ def _rows_from_obo(graph) -> list[dict]:
     return rows
 
 
+@writes(Go)
 def go(
     source: str,
     destination: str,
@@ -130,13 +132,3 @@ def go(
 
     logger.info('writing dataframe')
     write_dataset(df, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `go` against its dataset model, in the task's validation phase."""
-    Go.validate_dataset(destination)

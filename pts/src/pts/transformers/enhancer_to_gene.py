@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.schemas.outputs.enhancer_to_gene import EnhancerToGene
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -256,6 +257,7 @@ def validate_id_has_unique_score(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, pl.col('score').drop_nulls().n_unique().over(columns) > 1, QualityFlag.AMBIGUOUS_SCORE)
 
 
+@writes(output=EnhancerToGene)
 def enhancer_to_gene(
     source: dict[str, str],
     destination: dict[str, str],
@@ -301,13 +303,3 @@ def enhancer_to_gene(
         sink_dataset(result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output),
         sink_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded),
     ])
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `enhancer_to_gene` against its dataset model, in the task's validation phase."""
-    EnhancerToGene.validate_dataset(destination['output'])

@@ -16,6 +16,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.target_essentiality import TargetEssentiality
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -208,6 +209,7 @@ def resolve_target_ids(essentiality: pl.LazyFrame, lookup: pl.LazyFrame) -> pl.L
     )
 
 
+@writes(TargetEssentiality)
 def gene_essentiality(
     source: dict[str, str],
     destination: str,
@@ -232,13 +234,3 @@ def gene_essentiality(
     result = resolve_target_ids(aggregate(screens), ensg_lookup(target)).sort('targetId')
     logger.info(f'writing gene essentiality to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `target_essentiality` against its dataset model, in the task's validation phase."""
-    TargetEssentiality.validate_dataset(destination)

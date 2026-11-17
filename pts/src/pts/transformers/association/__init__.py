@@ -17,6 +17,7 @@ from pts.schemas.outputs.association_by_datatype_direct import AssociationByData
 from pts.schemas.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
 from pts.schemas.outputs.association_overall_direct import AssociationOverallDirect
 from pts.schemas.outputs.association_overall_indirect import AssociationOverallIndirect
+from pts.task_outputs import writes
 from pts.transformers.association.evidence import expand_disease, prepare_evidence
 from pts.transformers.association.novelty import GROUP, compute_novelty
 from pts.transformers.association.scoring import aggregate_by_datasource, aggregate_by_datatype, aggregate_overall
@@ -29,6 +30,14 @@ EVIDENCE_COLUMNS = ['targetId', 'diseaseId', 'datasourceId', 'datatypeId', 'scor
 OUTPUTS = [f'{kind}_{way}' for way in ('direct', 'indirect') for kind in ('by_datasource', 'overall', 'by_datatype')]
 
 
+@writes(
+    overall_direct=AssociationOverallDirect,
+    overall_indirect=AssociationOverallIndirect,
+    by_datasource_direct=AssociationByDatasourceDirect,
+    by_datasource_indirect=AssociationByDatasourceIndirect,
+    by_datatype_direct=AssociationByDatatypeDirect,
+    by_datatype_indirect=AssociationByDatatypeIndirect,
+)
 def association(
     source: dict[str, str],
     destination: dict[str, str],
@@ -104,18 +113,3 @@ def association(
         except BaseException:
             pool.shutdown(cancel_futures=True)
             raise
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate every written association table against its dataset model, in the task's validation phase."""
-    AssociationOverallDirect.validate_dataset(destination['overall_direct'])
-    AssociationOverallIndirect.validate_dataset(destination['overall_indirect'])
-    AssociationByDatasourceDirect.validate_dataset(destination['by_datasource_direct'])
-    AssociationByDatasourceIndirect.validate_dataset(destination['by_datasource_indirect'])
-    AssociationByDatatypeDirect.validate_dataset(destination['by_datatype_direct'])
-    AssociationByDatatypeIndirect.validate_dataset(destination['by_datatype_indirect'])
