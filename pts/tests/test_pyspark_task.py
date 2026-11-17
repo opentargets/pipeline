@@ -9,7 +9,7 @@ from otter.config.model import Config
 from otter.util.errors import TaskValidationError
 from pydantic import ValidationError
 
-from pts.pyspark.association import validate as association_validate
+from pts.pyspark.literature_vector import validate as literature_vector_validate
 from pts.tasks.pyspark import Pyspark, PysparkSpec
 
 
@@ -48,7 +48,7 @@ def test_run_resolves_source_lists_and_flattens_artifacts(tmp_path, monkeypatch)
 
 
 def test_an_entry_point_has_its_validate_function_loaded() -> None:
-    assert Pyspark.load_validate('association') is association_validate
+    assert Pyspark.load_validate('literature_vector') is literature_vector_validate
     assert Pyspark.load_validate('literature_publication_match') is None
 
 
@@ -58,7 +58,7 @@ def test_validate_runs_the_module_validate_and_fails_the_task_on_a_value_error(m
     monkeypatch.setattr(Pyspark, 'load_pyspark', staticmethod(lambda _: Mock()))
     monkeypatch.setattr(Pyspark, 'load_validate', staticmethod(lambda _: validate))
     spec = PysparkSpec(
-        name='pyspark test', pyspark='association', source='input/x', destination='output/x', settings={'a': 1}
+        name='pyspark test', pyspark='literature_vector', source='input/x', destination='output/x', settings={'a': 1}
     )
     task = Pyspark(spec, SimpleNamespace(config=Config.model_construct(step='x', work_path='/work')))
     task.srcs, task.dsts = '/work/input/x', '/work/output/x'

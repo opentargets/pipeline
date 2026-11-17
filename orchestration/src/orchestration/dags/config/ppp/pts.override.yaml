@@ -59,17 +59,20 @@ steps:
           - input/gwas/gcss_pics/study
           - input/gwas/gcss_susie/study
           - input/gwas/finngen_gwas/study
+          - input/molqtl/eqtl_catalogue/study
           - input/molqtl/ukb_ppp_eur/study
           - input/molqtl/finngen_multiome/study
-          - input/molqtl/sle_map/study
           # GWAS PPP
           - input/gwas/finngen_meta/study
+          - input/gwas/pgc/study
           # molQTL PPP
-          - input/molqtl/eqtl_catalogue/study
           - input/molqtl/otar2077/microglia/study
           - input/molqtl/eQTLGen/single_cell_eqtl/study
           - input/molqtl/eQTLGen/coeqtl/study
           - input/molqtl/deCODE_proteomics/study
+          - input/molqtl/sle_map/study
+          - input/molqtl/bigbrain/eqtl/study
+          - input/molqtl/bigbrain/sqtl/study
         target: output/target
         disease: output/disease
         biosample: output/biosample
@@ -91,8 +94,6 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
-        deprecated_project_ids:
-          - GTEx
 
   # PPP runs the platform credible set step on the platform and the PPP sources. Keep it identical
   # to the platform step apart from the sources; orchestration tests check it.
@@ -104,6 +105,7 @@ steps:
         - gwas/gcss_susie
         - gwas/finngen_gwas
         - gwas/finngen_meta
+        - gwas/pgc
         - molqtl/eqtl_catalogue
         - molqtl/ukb_ppp_eur
         - molqtl/finngen_multiome
@@ -112,6 +114,8 @@ steps:
         - molqtl/eQTLGen/coeqtl
         - molqtl/deCODE_proteomics
         - molqtl/sle_map
+        - molqtl/bigbrain/eqtl
+        - molqtl/bigbrain/sqtl
       do:
         - name: transform qc credible sets ${each}
           transformer: credible_set.set_qc
@@ -145,6 +149,7 @@ steps:
           - intermediate/qc/gwas/gcss_susie/credible_set
           - intermediate/qc/gwas/finngen_gwas/credible_set
           - intermediate/qc/gwas/finngen_meta/credible_set
+          - intermediate/qc/gwas/pgc/credible_set
           - intermediate/qc/molqtl/eqtl_catalogue/credible_set
           - intermediate/qc/molqtl/ukb_ppp_eur/credible_set
           - intermediate/qc/molqtl/finngen_multiome/credible_set
@@ -153,12 +158,15 @@ steps:
           - intermediate/qc/molqtl/eQTLGen/coeqtl/credible_set
           - intermediate/qc/molqtl/deCODE_proteomics/credible_set
           - intermediate/qc/molqtl/sle_map/credible_set
+          - intermediate/qc/molqtl/bigbrain/eqtl/credible_set
+          - intermediate/qc/molqtl/bigbrain/sqtl/credible_set
         credible_set_variant:
           - intermediate/qc/gwas/gcca/credible_set_variant
           - intermediate/qc/gwas/gcss_pics/credible_set_variant
           - intermediate/qc/gwas/gcss_susie/credible_set_variant
           - intermediate/qc/gwas/finngen_gwas/credible_set_variant
           - intermediate/qc/gwas/finngen_meta/credible_set_variant
+          - intermediate/qc/gwas/pgc/credible_set_variant
           - intermediate/qc/molqtl/eqtl_catalogue/credible_set_variant
           - intermediate/qc/molqtl/ukb_ppp_eur/credible_set_variant
           - intermediate/qc/molqtl/finngen_multiome/credible_set_variant
@@ -167,6 +175,8 @@ steps:
           - intermediate/qc/molqtl/eQTLGen/coeqtl/credible_set_variant
           - intermediate/qc/molqtl/deCODE_proteomics/credible_set_variant
           - intermediate/qc/molqtl/sle_map/credible_set_variant
+          - intermediate/qc/molqtl/bigbrain/eqtl/credible_set_variant
+          - intermediate/qc/molqtl/bigbrain/sqtl/credible_set_variant
       destination:
         valid_set: intermediate/validated/credible_set
         valid_variant: intermediate/validated/credible_set_variant

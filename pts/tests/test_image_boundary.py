@@ -1,18 +1,22 @@
 """The lean pts image carries no torch, transformers, openai or pyspark."""
 
+import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import yaml
 
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
+PYPROJECT = Path(__file__).parents[1] / 'pyproject.toml'
+LOCK = Path(__file__).parents[1] / 'uv.lock'
 
 FORBIDDEN = ('torch', 'transformers', 'openai', 'pyspark')
 STAGING_STEPS = frozenset({
     'aact_moa',
     'moa_literature',
-    'aact_trial_extraction',
+    'aact_trial_extraction_v2',
     'aact_trial_models',
     'clinical_mining_models',
 })
@@ -77,3 +81,17 @@ def test_unified_vm_steps_import_without_heavy_dependencies():
 
     assert result.returncode == 0, result.stderr
     assert not [name for name in FORBIDDEN if f"No module named '{name}" in result.stderr]
+
+
+def _requirement_name(requirement: str) -> str:
+    return re.split(r'[\s;\[<>=!~]', requirement, maxsplit=1)[0].lower()
+
+
+def test_pts_does_not_depend_on_openai():
+    project = tomllib.loads(PYPROJECT.read_text())['project']
+    extras = project['optional-dependencies'].values()
+    requirements = [*project['dependencies'], *(r for extra in extras for r in extra)]
+    assert 'openai' not in {_requirement_name(r) for r in requirements}
+
+    packages = tomllib.loads(LOCK.read_text())['package']
+    assert 'openai' not in {package['name'] for package in packages}

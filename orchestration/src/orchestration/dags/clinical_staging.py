@@ -26,7 +26,11 @@ from airflow.sdk import DAG, chain, task_group
 from airflow.task.trigger_rule import TriggerRule
 
 from orchestration.dags.config.clinical_staging import ClinicalStagingConfig
-from orchestration.operators.gce import ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator
+from orchestration.operators.gce import (
+    DEFAULT_MAX_RUN_DURATION,
+    ComputeEngineRunContainerizedWorkloadSensor,
+    DeleteInstanceOperator,
+)
 from orchestration.operators.gcs import UploadStringOperator
 from orchestration.utils import resource_name, strhash, to_yaml
 from orchestration.utils.common import shared_dag_args
@@ -97,6 +101,7 @@ with DAG(
                 vm_service_account=config.service_account_for(step_name),
                 deferrable=True,
                 execution_timeout=config.execution_timeout_for(step_name),
+                max_run_duration=config.execution_timeout_for(step_name) or DEFAULT_MAX_RUN_DURATION,
             )
 
             t = DeleteInstanceOperator(

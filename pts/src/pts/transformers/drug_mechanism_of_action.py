@@ -67,6 +67,7 @@ DOC_KINDS = [
 ]
 """Each kind of doc id: its reference source and url, the pattern whose group is its id, and the id's prefix."""
 
+
 def drug_mechanism_of_action(
     source: dict[str, Path],
     destination: Path | dict[str, Path],
@@ -91,6 +92,8 @@ def drug_mechanism_of_action(
             - release_min_confidence: Minimum confidence of an inferred mechanism to publish.
             - exclude_stages: For each source, the maximum clinical stages whose inferred
               mechanisms are not published.
+            - stage_exempt_drug_types: Optional. For each source, the drug types published
+              whatever their stage.
             - report_min_confidence, link_share, class_level_genes, suggestion_min_confidence:
               The candidate filters of ``drug_mechanism_of_action_candidates``.
         config: Config object, for ``work_path``.
@@ -128,6 +131,7 @@ def drug_mechanism_of_action(
             candidates,
             settings['release_min_confidence'],
             settings['exclude_stages'],
+            settings.get('stage_exempt_drug_types'),
         )
         if destinations.get('chembl_report') is not None:
             logger.info(f'Writing the candidate report for ChEMBL to {destinations["chembl_report"]}')
@@ -256,12 +260,14 @@ def merge_inferred(
     candidates: pl.DataFrame,
     release_min_confidence: float,
     exclude_stages: dict[str, list[str]],
+    exempt_drug_types: dict[str, list[str]] | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Append the inferred mechanisms to the ChEMBL ones and build the side file for ChEMBL.
 
     A candidate is published when its drug has no ChEMBL mechanism (``new_moa``), its confidence
-    is at least ``release_min_confidence`` and its stage is not excluded for its source. Of the
-    published candidates of one drug and gene set, the most confident gives the row, and the
+    is at least ``release_min_confidence`` and its stage is not excluded for its source, unless its
+    drug type is exempt for that source. Of the published candidates of one drug and gene set,
+    the most confident gives the row, and the
     doc ids of all of them give its references, classified by ``DOC_KINDS``: NCT ids as
     ``ClinicalTrials``, ``pmid<digits>`` as ``PubMed``, ``pmc<digits>`` and ``pmidPMC<digits>`` as
     ``PMC`` and ``pmidPPR<digits>`` as ``EuropePMC``, the prefixes in any case. Other doc ids are
@@ -275,6 +281,8 @@ def merge_inferred(
         release_min_confidence: Minimum confidence of a ``new_moa`` candidate to publish.
         exclude_stages: For each candidate source, the maximum clinical stages whose
             ``new_moa`` candidates are not published.
+        exempt_drug_types: For each candidate source, the drug types whose ``new_moa``
+            candidates are published whatever their stage.
 
     Returns:
         The mechanism table with the published candidates appended, and the side file: the most
@@ -284,7 +292,7 @@ def merge_inferred(
     Raises:
         ValueError: If a candidate source has no ``exclude_stages`` entry.
     """
-    excluded = stage_excluded(candidates, exclude_stages)
+    excluded = stage_excluded(candidates, exclude_stages, exempt_drug_types)
     classified = _classify(chembl_rows, candidates)
     report = _most_confident(classified.filter(pl.col('category').is_not_null()), by_source=True)
     eligible = classified.filter(

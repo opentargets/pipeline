@@ -4,6 +4,7 @@ We expect a predefined set of test genes, which limits the space of possible tes
 positive genes of that set are used, so it stays valid when credible set ids change.
 """
 
+import hashlib
 from typing import Any
 
 import polars as pl
@@ -12,6 +13,9 @@ from pts.transformers.l2g.gold_standard import LABEL_COLUMN
 
 POSITIVE = 'positive'
 NEGATIVE = 'negative'
+
+UNIT_COLUMN = 'associationUnitId'
+"""SHA-256 of a credible set's lead variant and sorted positive genes."""
 
 
 def encode_labels(frame: pl.LazyFrame, column: str = LABEL_COLUMN) -> pl.LazyFrame:
@@ -85,6 +89,47 @@ def derive_splits(
     return train.collect(), test.collect()
 
 
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def annotate_association_units(partition: pl.DataFrame, lead_variants: pl.LazyFrame) -> pl.DataFrame:
+    """Tag each credible set of one partition with its association unit.
+
+    The same association is often fine-mapped in many studies, so the labelled set holds many
+    near-identical credible sets. An association unit is a credible set's lead variant plus its
+    sorted positive genes, so {A, B} and {A} at the same lead are different units, and negatives do
+    not change the unit. `associationUnitId` is the SHA-256 of `"<variantId>|<gene>,<gene>"`.
+
+    Ports the unit key of gentropy `LocusToGeneTrainTestSplitStep._annotate_association_units`
+    (opentargets/gentropy#1314), which hashes the same strings with Spark's `sha2`. Nothing is
+    dropped: training and the held-out metrics weight rows by unit.
+
+    Args:
+        partition: train or test rows with `credibleSetId`, `geneId` and integer labels.
+        lead_variants: `credibleSetId` and its lead `variantId`.
+
+    Returns:
+        `partition` in its row order, with `associationUnitId`.
+    """
+    loci = (
+        partition.lazy()
+        .group_by('credibleSetId')
+        .agg(pl.col('geneId').filter(pl.col(LABEL_COLUMN) == 1).unique().sort().alias('positiveGeneIds'))
+        .join(lead_variants.select('credibleSetId', 'variantId'), on='credibleSetId', how='left')
+        .collect()
+    )
+    # concat_ws semantics: a null lead variant is skipped, an empty gene list stays as ''
+    keys = [
+        '|'.join(part for part in (variant, ','.join(genes)) if part is not None)
+        for variant, genes in zip(loci['variantId'], loci['positiveGeneIds'], strict=True)
+    ]
+    loci = loci.with_columns(pl.Series(UNIT_COLUMN, [_sha256(key) for key in keys], dtype=pl.String))
+    return partition.join(
+        loci.select('credibleSetId', UNIT_COLUMN), on='credibleSetId', how='left', maintain_order='left'
+    )
+
+
 def count_test_genes(predefined_test: pl.LazyFrame) -> int:
     """Count the distinct positive genes of the predefined test set.
 
@@ -110,15 +155,19 @@ def _set_stats(frame: pl.DataFrame) -> dict[str, int]:
         frame: a train or test partition with integer labels.
 
     Returns:
-        Counts of positives, negatives, distinct loci and distinct positive genes.
+        Counts of positives, negatives, distinct loci and distinct positive genes, and of
+        association units when the partition carries them.
     """
     positive = frame.filter(pl.col(LABEL_COLUMN) == 1)
-    return {
+    stats = {
         'n_positive': positive.height,
         'n_negative': frame.filter(pl.col(LABEL_COLUMN) == 0).height,
         'n_unique_loci': frame['credibleSetId'].n_unique(),
         'n_unique_positive_genes': positive['geneId'].n_unique(),
     }
+    if UNIT_COLUMN in frame.columns:
+        stats['n_association_units'] = frame[UNIT_COLUMN].n_unique()
+    return stats
 
 
 def split_stats(

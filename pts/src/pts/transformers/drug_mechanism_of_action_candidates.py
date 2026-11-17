@@ -25,6 +25,21 @@ LABEL_COLUMNS = ['id', *FIELDS, *LOCATION_FIELDS]
 SOURCE_AACT = 'aact'
 SOURCE_LITERATURE = 'literature'
 
+DRUG_TYPES = frozenset({
+    'Antibody',
+    'Antibody drug conjugate',
+    'Cell',
+    'Enzyme',
+    'Gene',
+    'Oligonucleotide',
+    'Oligosaccharide',
+    'Protein',
+    'Small molecule',
+    'Unknown',
+    'Vaccine component',
+})
+"""The ``drugType`` values of ChEMBL molecules."""
+
 CANDIDATE_COLUMNS = [
     'parentChemblId',
     'chemblIds',
@@ -45,29 +60,46 @@ CANDIDATE_COLUMNS = [
 ]
 
 
-def stage_excluded(candidates: pl.DataFrame, exclude_stages: dict[str, list[str]]) -> pl.Expr:
+def stage_excluded(
+    candidates: pl.DataFrame,
+    exclude_stages: dict[str, list[str]],
+    exempt_drug_types: dict[str, list[str]] | None = None,
+) -> pl.Expr:
     """Whether a candidate's maximum clinical stage is one its source excludes.
 
     Args:
         candidates: The candidates the expression is for, whose ``source`` values are checked.
         exclude_stages: For each source, the maximum clinical stages excluded.
+        exempt_drug_types: For each source, the drug types never excluded by stage.
 
     Returns:
         pl.Expr: True for a candidate whose source excludes its stage, False otherwise.
 
     Raises:
-        ValueError: If a source of ``candidates`` has no ``exclude_stages`` entry.
+        ValueError: If a source of ``candidates`` has no ``exclude_stages`` entry, or
+            ``exempt_drug_types`` names a source without one or an unknown drug type.
     """
     missing = sorted(set(candidates['source'].unique().to_list()) - set(exclude_stages))
     if missing:
         msg = f'exclude_stages has no entry for the candidate sources {missing}'
         raise ValueError(msg)
+    exempt = exempt_drug_types or {}
+    unknown_sources = sorted(set(exempt) - set(exclude_stages))
+    if unknown_sources:
+        msg = f'exempt_drug_types names sources with no exclude_stages entry: {unknown_sources}'
+        raise ValueError(msg)
+    unknown_types = sorted({drug_type for types in exempt.values() for drug_type in types} - DRUG_TYPES)
+    if unknown_types:
+        msg = f'exempt_drug_types names unknown drug types {unknown_types}; known: {sorted(DRUG_TYPES)}'
+        raise ValueError(msg)
     excluded = pl.lit(False)
     for source, stages in exclude_stages.items():
-        excluded = excluded | (
-            (pl.col('source') == source)
-            & pl.col('maximumClinicalStage').is_in(pl.lit(stages, dtype=pl.List(pl.String))).fill_null(False)
-        )
+        rule = (pl.col('source') == source) & pl.col('maximumClinicalStage').is_in(
+            pl.lit(stages, dtype=pl.List(pl.String))
+        ).fill_null(False)
+        if exempt.get(source):
+            rule = rule & ~pl.col('drugType').is_in(pl.lit(exempt[source], dtype=pl.List(pl.String))).fill_null(False)
+        excluded = excluded | rule
     return excluded
 
 

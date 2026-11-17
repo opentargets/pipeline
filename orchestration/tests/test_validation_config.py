@@ -8,11 +8,14 @@ from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 
 PPP_ONLY = [
     'gwas/finngen_meta',
+    'gwas/pgc',
     'molqtl/sle_map',
     'molqtl/otar2077/microglia',
     'molqtl/eQTLGen/single_cell_eqtl',
     'molqtl/eQTLGen/coeqtl',
     'molqtl/deCODE_proteomics',
+    'molqtl/bigbrain/eqtl',
+    'molqtl/bigbrain/sqtl',
 ]
 BOTH = ['molqtl/eqtl_catalogue', 'molqtl/ukb_ppp_eur', 'molqtl/finngen_multiome']
 
@@ -150,6 +153,6 @@ def test_credible_set_annotation_runs_after_the_variant_index(monkeypatch, ppp):
     assert 'pts_credible_set_annotation' in config.steps('pts_')
     assert config.step_definition('pts_credible_set_annotation')['depends_on'] == ['pts_variant']
     assert 'pts_credible_set' in config.step_definition('pts_variant')['depends_on']
-    assert config.step_definition('gentropy_colocalisation')['depends_on'] == ['pts_credible_set_annotation']
+    assert config.step_definition('pts_colocalisation')['depends_on'] == ['pts_credible_set_annotation']
     [annotation] = config.pts.config['steps']['credible_set_annotation']
     assert annotation['source']['variant'] == 'output/variant'

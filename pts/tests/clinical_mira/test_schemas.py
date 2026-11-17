@@ -6,6 +6,8 @@ from pts.transformers.clinical_mira.schemas import (
     ClinicalProvider,
     ClinicalReportExtractionSchema,
     ClinicalSource,
+    RoleDrug,
+    TrialLink,
 )
 
 MIRA_1_0_5_EXTRACTION_SCHEMA_DIGEST = '82af315af6273f063cac40e605abdd11e33bbfa128db92d3f8d2078139626061'
@@ -31,3 +33,8 @@ def test_fda_owns_drugs_at_fda() -> None:
     assert ClinicalSource.DRUGS_AT_FDA.value == 'Drugs@FDA'
     assert ClinicalProvider.owns_source('FDA', 'Drugs@FDA')
     assert not ClinicalProvider.owns_source('ChEMBL', 'Drugs@FDA')
+
+
+def test_trial_link_carries_synonyms() -> None:
+    for model in (TrialLink, RoleDrug):
+        assert 'synonyms' in model.model_json_schema()['required']

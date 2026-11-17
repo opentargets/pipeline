@@ -7,11 +7,15 @@ import json
 import re
 import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
 
 import polars as pl
 import pytest
+from loguru import logger
 
+from pts.transformers.clinical_mira import staged_outputs
+from pts.transformers.clinical_mira.aact_trial_extraction_v2 import AactTrialExtractionV2Settings
 from pts.transformers.clinical_mira.moa import literature, schemas
 from pts.transformers.clinical_mira.ner import (
     BIOBERT_LABELS,
@@ -25,6 +29,7 @@ from pts.transformers.clinical_mira.ner import (
     DRUGTEMIST_LABELS,
     DRUGTEMIST_MODEL,
 )
+from pts.transformers.clinical_mira.providers.aact_context import RENDER_VERSION
 from pts.transformers.clinical_mira.providers.aact_llm import TRIAL_FIELDS
 from pts.transformers.clinical_mira.record_store import publish_snapshot, read_records
 from pts.transformers.clinical_mira.schemas import ClinicalReportExtractionSchema
@@ -32,11 +37,15 @@ from pts.transformers.clinical_mira.staged_outputs import (
     DISEASE_ENTITIES,
     DRUG_ENTITIES,
     EXTRACTION,
+    EXTRACTION_V2,
+    EXTRACTION_V2_MAX_TOKENS,
+    EXTRACTION_V2_PROMPT,
     MOA,
     MOA_LITERATURE,
     STOP_REASONS,
     MoaOutput,
     StagedOutput,
+    extraction_v2_revision,
     schema_digest,
 )
 from pts.transformers.clinical_mira.stop_reasons import (
@@ -44,6 +53,7 @@ from pts.transformers.clinical_mira.stop_reasons import (
     STOP_REASONS_THRESHOLD,
     predict_trial_stop_reasons,
 )
+from tests.clinical_mira.extraction_v2_fixtures import v2_frame, v2_link
 
 REVISIONS = {STOP_REASONS_MODEL: 'a0', CHEMICAL_MODEL: 'b1', DRUGTEMIST_MODEL: 'c2', DISEASE_MODEL: 'd3'}
 
@@ -454,3 +464,111 @@ def test_moa_literature_tag() -> None:
         assert MOA_LITERATURE.params[key] == value
         changed = {**MOA_LITERATURE.params, key: [value, 'changed']}
         assert dataclasses.replace(MOA_LITERATURE, params=changed).tag() != MOA_LITERATURE.tag()
+
+
+def extraction_v2_snapshot(tmp_path: Path, name: str, df: pl.DataFrame | None = None, **overrides: object) -> str:
+    metadata = {**EXTRACTION_V2.metadata('a' * 64, None), **overrides}
+    return snapshot(tmp_path, name, v2_frame({'NCT1': {}}) if df is None else df, metadata)
+
+
+def test_revision_changes_with_prompt_schema_model_renderer_effort_and_max_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
+
+    assert extraction_v2_revision('m', 'prompt 2', 1, 'medium', 16000) != base
+    assert extraction_v2_revision('m2', 'prompt', 1, 'medium', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 2, 'medium', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 1, 'high', 16000) != base
+    assert extraction_v2_revision('m', 'prompt', 1, 'medium', 8000) != base
+    monkeypatch.setattr(staged_outputs, 'schema_digest', lambda _: 'other')
+    assert extraction_v2_revision('m', 'prompt', 1, 'medium', 16000) != base
+
+
+def test_revision_is_stable_for_the_same_inputs() -> None:
+    revision = extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
+
+    assert revision == extraction_v2_revision('m', 'prompt', 1, 'medium', 16000)
+    assert re.fullmatch(r'[0-9a-f]{64}', revision)
+
+
+def test_extraction_v2_release_tag_is_the_default_step_extraction() -> None:
+    package, filename = EXTRACTION_V2_PROMPT
+    prompt = (resources.files(package) / filename).read_text(encoding='utf-8')
+    settings = AactTrialExtractionV2Settings(store_uri='gs://b/store', snapshot='v1')
+    revision = extraction_v2_revision(settings.model, prompt, RENDER_VERSION, settings.effort, EXTRACTION_V2_MAX_TOKENS)
+
+    assert EXTRACTION_V2.release_tag() == EXTRACTION_V2.tag(revision, None)
+
+
+def test_extraction_v2_release_tag_is_the_staged_snapshot() -> None:
+    """The release copies this snapshot; a change that moves the tag re-extracts every trial."""
+    assert EXTRACTION_V2.release_tag() == '6e643deca5bd-p3b89ab7e'
+
+
+def test_extraction_v2_tag_and_metadata() -> None:
+    revision = 'ab' * 32
+
+    assert re.fullmatch(r'abababababab-p[0-9a-f]{8}', EXTRACTION_V2.tag(revision, None))
+    assert EXTRACTION_V2.tag(revision, None) != EXTRACTION_V2.tag(revision, 5)
+    assert EXTRACTION_V2.metadata(revision, 5) == {
+        'kind': 'extraction_v2',
+        'model': 'aact_trial_extraction_v2',
+        'tag': EXTRACTION_V2.tag(revision, 5),
+        'model_revisions': {'aact_trial_extraction_v2': revision},
+    }
+
+
+def test_extraction_v2_read_accepts_the_release_tag_and_an_expected_tag(tmp_path: Path) -> None:
+    release = extraction_v2_snapshot(tmp_path, 'release', tag=EXTRACTION_V2.release_tag())
+    sampled = extraction_v2_snapshot(tmp_path, 'sampled', tag=EXTRACTION_V2.tag('c' * 64, 5))
+
+    assert EXTRACTION_V2.read(release).height == 1
+    assert EXTRACTION_V2.read(sampled, EXTRACTION_V2.tag('c' * 64, 5)).height == 1
+
+
+def test_read_refuses_a_snapshot_of_another_kind(tmp_path: Path) -> None:
+    uri = extraction_snapshot(tmp_path, 'v1')
+
+    with pytest.raises(ValueError, match="kind 'extraction'"):
+        EXTRACTION_V2.read(uri)
+
+
+def test_read_refuses_another_tag(tmp_path: Path) -> None:
+    uri = extraction_v2_snapshot(tmp_path, 'other', tag='abcdef012345-p00000000')
+
+    with pytest.raises(ValueError, match='abcdef012345-p00000000') as error:
+        EXTRACTION_V2.read(uri)
+    assert EXTRACTION_V2.release_tag() in str(error.value)
+
+
+def test_extraction_v2_read_gives_confidences_as_fractions_and_drops_the_rest(tmp_path: Path) -> None:
+    links = [
+        v2_link('a', 'asthma', 85.0),
+        v2_link('b', 'copd', 0.79),
+        v2_link('c', 'gout', 100.0),
+        v2_link('d', 'acne', 1.0),
+        v2_link('e', 'flu', -0.9),
+        v2_link('f', 'cold', 850.0),
+        v2_link('g', 'rash', None),
+    ]
+    frame = v2_frame({'NCT1': {'links': links}, 'NCT2': {}, 'NCT3': {'links': [v2_link('h', 'pain', 0.5)]}})
+    uri = extraction_v2_snapshot(tmp_path, 'percent', frame, tag=EXTRACTION_V2.release_tag())
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(message.record['message']), level='INFO')
+    try:
+        read = EXTRACTION_V2.read(uri)
+    finally:
+        logger.remove(sink)
+
+    confidences = {
+        row['id']: [(link['drug'], link['confidence']) for link in row['links']]
+        for row in read.select('id', 'links').to_dicts()
+    }
+    assert confidences == {
+        'NCT1': [('a', 0.85), ('b', 0.79), ('c', 1.0), ('d', 1.0), ('g', None)],
+        'NCT2': [],
+        'NCT3': [('h', 0.5)],
+    }
+    assert read.drop('links').equals(frame.drop('links'))
+    assert any('2 link confidences' in m and '2 links' in m for m in messages), messages

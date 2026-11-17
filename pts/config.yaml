@@ -121,8 +121,6 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
-        deprecated_project_ids:
-          - GTEx
 
   #: GO STEP :######################################################################################
   go:
@@ -245,15 +243,27 @@ steps:
         trans_qtl_threshold: 5000000
   ##################################################################################################
 
-  #: COLOCALISATION VALIDATION STEP :###############################################################
-  # gentropy writes colocalisation, so no pts task validates it as it writes it: this step reads it and
-  # validates it against its model, failing on any violation. It writes nothing.
-  colocalisation_validation:
-    - name: transform colocalisation_validation
-      transformer: colocalisation_validation
+  #: COLOCALISATION STEP :##########################################################################
+  # Runs on the published credible sets of the credible_set_annotation step.
+  colocalisation:
+    - name: pyspark colocalisation
+      pyspark: colocalisation
       source:
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+      destination:
         colocalisation: output/colocalisation
-      destination: {}
+      properties:
+        spark.executor.memory: 22g
+        spark.executor.memoryOverhead: 4g
+        spark.executor.cores: '4'
+        spark.memory.fraction: '0.8'
+        spark.memory.storageFraction: '0.2'
+      settings:
+        priorc1: 1.0e-4
+        priorc2: 1.0e-4
+        priorc12: 1.0e-5
+        output_partitions: 200
   ##################################################################################################
 
   #: OTAR STEP :####################################################################################
@@ -997,6 +1007,13 @@ steps:
             - APPROVAL
           literature:
             - APPROVAL
+        stage_exempt_drug_types:
+          aact:
+            - Antibody
+            - Antibody drug conjugate
+            - Enzyme
+            - Oligonucleotide
+            - Protein
         report_min_confidence: 0.70
         link_share: 0.8
         class_level_genes: 20
@@ -1023,7 +1040,7 @@ steps:
       source:
         chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
-        aact_trial_extraction: input/clinical_report/aact_trial_extraction
+        aact_trial_extraction: input/clinical_report/aact_trial_extraction_v2
       destination: intermediate/chembl_molecule
   ##################################################################################################
 
@@ -1045,25 +1062,22 @@ steps:
           - PHASE_IV_NOT_APPROVED
   ##################################################################################################
 
-  #: AACT_TRIAL_EXTRACTION STEP :##################################################################
+  #: AACT_TRIAL_EXTRACTION_V2 STEP :###############################################################
   # Not part of a release. The `clinical_staging` DAG runs this step with
   # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below
   # resolves inside that snapshot, except for the record store
-  aact_trial_extraction:
-    - name: transform aact_trial_extraction
-      transformer: clinical_mira.aact_trial_extraction
+  aact_trial_extraction_v2:
+    - name: transform aact_trial_extraction_v2
+      transformer: clinical_mira.aact_trial_extraction_v2
       source:
         aact: input/aact.zip
       destination:
-        extraction: extraction
+        extraction_v2: extraction_v2
       settings:
         store_uri: gs://clinical_staging/store
         # the AACT version, prefixing the store runs this step writes
         snapshot: '{{snapshot}}'
-        model: gpt-5-nano-2025-08-07
-        service_tier: auto
-        concurrency: 75
-        shard_size: 200
+        model: claude-haiku-5-5
   ##################################################################################################
 
   #: AACT_TRIAL_MODELS STEP :######################################################################
@@ -1074,7 +1088,7 @@ steps:
       transformer: clinical_mira.aact_trial_models
       source:
         aact: input/aact.zip
-        extraction: extraction
+        extraction: extraction_v2
         models: input/models
       destination:
         stop_reasons: stop_reasons
@@ -1091,9 +1105,9 @@ steps:
       transformer: clinical_mira.aact_moa
       source:
         aact: input/aact.zip
-        extraction: extraction
+        extraction: extraction_v2
       destination:
-        moa: extraction
+        moa: extraction_v2
       settings:
         store_uri: gs://clinical_staging/store
         snapshot: '{{snapshot}}'
@@ -1155,7 +1169,7 @@ steps:
         chembl: input/chembl/chembl.tar.gz
         aact: input/clinical_report/aact.zip
         chembl_curation: input/clinical_report/chembl_mapping.parquet
-        trial_extraction: input/clinical_report/aact_trial_extraction
+        trial_extraction: input/clinical_report/aact_trial_extraction_v2
         aact_stop_reasons: input/clinical_report/aact_stop_reasons
         aact_drug_entities: input/clinical_report/aact_drug_entities
         mining_drug_entities: input/clinical_report/mining_drug_entities
@@ -1167,6 +1181,8 @@ steps:
         drugs_at_fda: input/clinical_report/drugs_at_fda.json.zip
       destination:
         output: output/clinical_report
+      settings:
+        min_link_confidence: 0.8
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################
@@ -1222,8 +1238,8 @@ steps:
 
   #: ASSOCIATION STEP :#############################################################################
   association:
-    - name: pyspark association
-      pyspark: association
+    - name: transform association
+      transformer: association
       source:
         evidence: output/evidence_*
         disease: output/disease
@@ -1234,17 +1250,9 @@ steps:
         by_datasource_indirect: output/association_by_datasource_indirect
         by_datatype_direct: output/association_by_datatype_direct
         by_datatype_indirect: output/association_by_datatype_indirect
-        temporary: intermediate/indirect_association_intermediate
-      properties:
-        spark.driver.memory: '12g'
       settings:
-        partition_count:
-          overall_direct: 14
-          overall_indirect: 39
-          by_datasource_direct: 14
-          by_datasource_indirect: 43
-          by_datatype_direct: 15
-          by_datatype_indirect: 41
+        bucket_count: 64
+        concurrency: 8
         novelty_scale: 2 # 2 for long tailed slow decays
         novelty_shift: 3 # 3 for long tailed slow decays
         novelty_window: 10
@@ -1465,15 +1473,12 @@ steps:
 
   #: ASSOCIATION_OTF STEP :#########################################################################
   association_otf:
-    - name: pyspark association_otf
-      pyspark: association_otf
-      properties:
-        spark.driver.memory: '20g'
+    - name: transform association_otf
+      transformer: association_otf
       source:
         disease: output/disease
         evidence: output/evidence_*
         target: output/target
-        tractability: output/target_tractability
         association_direct: output/association_overall_direct
         association_indirect: output/association_overall_indirect
       destination: view/association_otf
@@ -1530,15 +1535,16 @@ steps:
           - credibleSetConfidence
           - transPQtlColocH4Maximum
           - transPQtlColocH4MaximumNeighbourhood
-        # Pinned in #123.
+        # 26.09 values (gentropy 300/5/0.05), restored from the #123 pin (200/4/0.025). Must match
+        # DEFAULT_HYPERPARAMETERS.
         hyperparameters:
           objective: binary:logistic
           eval_metric: aucpr
           random_state: 777
-          n_estimators: 200
-          max_depth: 4
+          n_estimators: 300
+          max_depth: 5
           min_child_weight: 10
-          eta: 0.025
+          eta: 0.05
           subsample: 0.8
           colsample_bytree: 0.8
           reg_alpha: 1
@@ -1549,6 +1555,10 @@ steps:
         train_on_full_dataset: true
         shap_background_size: 100
         shap_background_seed: 42
+        # Repeated credible sets of one association unit (lead variant + positive genes) weighted
+        # min(1, sqrt(k / n)): units of up to k credible sets keep full weight.
+        weight_by_association_unit: true
+        association_unit_weight_k: 5
     - name: transform l2g_predict
       requires:
         - transform l2g_train
@@ -1624,16 +1634,17 @@ steps:
 
   #: ASSOCIATION_TIMESERIES_VIEW STEP :#############################################################
   association_timeseries_view:
-    - name: pyspark timeseries view
-      pyspark: association_timeseries_view
+    - name: transform association_timeseries_view
+      transformer: association_timeseries_view
       source:
         association_overall_direct: output/association_overall_direct
         association_overall_indirect: output/association_overall_indirect
         association_by_datasource_direct: output/association_by_datasource_direct
         association_by_datasource_indirect: output/association_by_datasource_indirect
       destination: view/association_timeseries
-      properties:
-        spark.driver.memory: 12g
+      settings:
+        file_count: 300
+        concurrency: 8
   ##################################################################################################
 
   #: GENE_SETS STEP :###############################################################################

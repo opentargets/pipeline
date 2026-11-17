@@ -13,7 +13,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import ValidationError
 
 from pts.transformers.clinical_mira.aact_trial_extraction import IMPORT_COMPUTED_AT
-from pts.transformers.clinical_mira.moa import llm, schemas
+from pts.transformers.clinical_mira.moa import claude, schemas
 from pts.transformers.clinical_mira.moa.claude import read_usage, run_batch_cached
 from pts.transformers.clinical_mira.moa.staging import prompt_sha256
 from pts.transformers.clinical_mira.record_store import import_run, record_schema, text_sha256
@@ -269,7 +269,7 @@ def literature_compute(
                 out.append((None, errors.get(key, 'missing')))
                 continue
             drug = listed[key]
-            result_key = llm.result_key(drug['request'], system_prompt, schemas.MoaExtraction, MOA_LITERATURE.model)
+            result_key = claude.result_key(drug['request'], system_prompt, schemas.MoaExtraction, MOA_LITERATURE.model)
             output = record_output(
                 drug['parent'],
                 drug['sentences'],
