@@ -50,7 +50,9 @@ Local service is exposed to the `localhost:8080` by default.
 > [!NOTE]
 > The directory containing the orchestration code is mounted into the Airflow service
 containers, so you can edit the code locally in your IDE and see the changes reflected
-in the Airflow UI.
+in the Airflow UI. The `pis` and `pts` directories are mounted read-only in the same
+way, so changes to their `config.yaml` (including a `git pull`) reach the DAG on its
+next parse.
 
 The default credentials used in airflow UI are `airflow`/`airflow`.
 
