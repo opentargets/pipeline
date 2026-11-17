@@ -1,7 +1,6 @@
 """Drug - mechanism of action: the `drug_mechanism_of_action` output.
 
-Generated from the 26.12 release output (8,375 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (8,375 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

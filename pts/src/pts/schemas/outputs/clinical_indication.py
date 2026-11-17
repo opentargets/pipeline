@@ -1,7 +1,6 @@
 """Clinical indication: the `clinical_indication` output.
 
-Generated from the 26.12 release output (88,300 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (88,300 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

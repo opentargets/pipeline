@@ -1,7 +1,6 @@
 """EuropePMC evidence: the `evidence_europepmc` output.
 
-Generated from the 26.12 release output (28,772,039 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (28,772,039 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

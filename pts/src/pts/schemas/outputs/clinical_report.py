@@ -1,7 +1,6 @@
 """Clinical report: the `clinical_report` output.
 
-Generated from the 26.12 release output (296,494 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (296,494 rows) and its croissant metadata.
 """
 
 import datetime

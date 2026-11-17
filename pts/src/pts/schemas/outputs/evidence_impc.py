@@ -1,7 +1,6 @@
 """IMPC evidence: the `evidence_impc` output.
 
-Generated from the 26.12 release output (4,659,348 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (4,659,348 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

@@ -1,7 +1,6 @@
 """Uniprot variants evidence: the `evidence_uniprot_variants` output.
 
-Generated from the 26.12 release output (34,765 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (34,765 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

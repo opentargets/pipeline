@@ -1,7 +1,6 @@
 """Cancer Gene Census evidence: the `evidence_cancer_gene_census` output.
 
-Generated from the 26.12 release output (74,341 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (74,341 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

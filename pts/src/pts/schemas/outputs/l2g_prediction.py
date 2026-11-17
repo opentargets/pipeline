@@ -1,7 +1,6 @@
 """Locus-to-Gene (L2G) prediction: the `l2g_prediction` output.
 
-Generated from the 26.12 release output (3,312,601 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (3,312,601 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar

@@ -1,7 +1,6 @@
 """Baseline expression: the `baseline_expression` output.
 
-Generated from the 26.12 release output (83,290,030 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (83,290,030 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

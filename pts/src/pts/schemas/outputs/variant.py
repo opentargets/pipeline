@@ -1,8 +1,7 @@
 """Variant: the `variant` output.
 
-Generated from the 26.12 release output (8,518,109 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules, then
-adjusted by hand, checked against the same release:
+Generated from the 26.12 release output (8,518,109 rows) and its croissant metadata, then adjusted by
+hand, checked against the same release:
 
 * `variantId` is `{chromosome}_{position}_{ref}_{alt}` (underscores, not the dashes croissant's description
   shows), or, for a variant too long to spell out, `OTVAR_{chromosome}_{position}_{md5}` (2,114 rows).

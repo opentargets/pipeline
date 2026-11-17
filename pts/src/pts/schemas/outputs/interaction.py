@@ -1,7 +1,6 @@
 """Molecular interactions: the `interaction` output.
 
-Generated from the 26.12 release output (12,067,375 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (12,067,375 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

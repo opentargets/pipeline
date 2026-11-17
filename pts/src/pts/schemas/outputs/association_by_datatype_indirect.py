@@ -1,7 +1,6 @@
 """Associations - indirect (by data type): the `association_by_datatype_indirect` output.
 
-Generated from the 26.12 release output (18,486,009 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (18,486,009 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal
