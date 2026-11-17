@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 from pts.schemas.dataset.base import DatasetModel
-from pts.schemas.dataset.checks import registered_checks
 from pts.schemas.dataset.discovery import discover_datasets
 from pts.schemas.dataset.spec import FieldSpec, Node, dataset_spec
 
@@ -41,10 +40,7 @@ def dataset_doc(model: type[DatasetModel]) -> dict[str, Any]:
         'primary_key': list(spec.primary_key),
         'strict': True,
         'fields': [_field_doc(f, top_level=True) for f in spec.fields],
-        'checks': [
-            {'name': check.name, 'column': check.column, 'description': check.description}
-            for check in registered_checks(model)
-        ],
+        'checks': [{'name': check.name, 'description': check.description} for check in model.row_checks],
         'example': spec.example,
     }
 

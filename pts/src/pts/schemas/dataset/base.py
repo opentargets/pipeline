@@ -39,6 +39,21 @@ class StructModel(SchemaModel):
     """
 
 
+@dataclass(frozen=True, eq=False)
+class RowCheck:
+    """A rule each row must satisfy, across its columns, that no field constraint states.
+
+    Attributes:
+        name: the rule's name, e.g. `h3_and_h4_are_exclusive`.
+        description: what the rule requires, shown in failures and the documentation.
+        passes: a boolean expression over the row's columns, true where the row passes.
+    """
+
+    name: str
+    description: str
+    passes: pl.Expr
+
+
 class DatasetModel(SchemaModel):
     """One output dataset.
 
@@ -54,6 +69,8 @@ class DatasetModel(SchemaModel):
         dataset_tags: categories the dataset belongs to, e.g. `Target-Disease`.
         example: one valid row, used by the test suite and shown in the documentation. Every list
             in it should hold at least one element, so every nested field is exercised.
+        row_checks: rules across a row's columns that no field constraint states. Inherited, so a
+            dataset adds to its base's with `Base.row_checks + (...)`.
     """
 
     dataset_name: ClassVar[str]
@@ -61,6 +78,7 @@ class DatasetModel(SchemaModel):
     dataset_description: ClassVar[str]
     dataset_tags: ClassVar[tuple[str, ...]] = ()
     example: ClassVar[dict[str, Any]]
+    row_checks: ClassVar[tuple[RowCheck, ...]] = ()
 
     @classmethod
     def is_concrete(cls) -> bool:

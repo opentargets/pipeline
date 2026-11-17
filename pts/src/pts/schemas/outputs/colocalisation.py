@@ -19,10 +19,12 @@ Rules confirmed against the 26.12 release (310,901,029 rows in 200 parts):
 from typing import Annotated, ClassVar, Literal
 
 import polars as pl
-from pandera.polars import PolarsData
 from pydantic import Field
 
-from pts.schemas.dataset import DatasetModel, Note, PrimaryKey, Reference, frame_check
+from pts.schemas.dataset import DatasetModel, Note, PrimaryKey, Reference, RowCheck
+
+#: Rounding slack allowed on a sum of probabilities.
+_TOLERANCE = 1e-9
 
 #: md5 hex digest: the shape of gentropy's credible set identifiers.
 MD5_HEX = r'^[0-9a-f]{32}$'
@@ -58,6 +60,13 @@ class Colocalisation(DatasetModel):
         'clpp': 0.41,
         'betaRatioSignAverage': 1.0,
     }
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        RowCheck(
+            'h3_and_h4_are_exclusive',
+            '`h3 + h4` is at most 1: they are posterior probabilities of exclusive hypotheses.',
+            pl.col('h3') + pl.col('h4') <= 1.0 + _TOLERANCE,
+        ),
+    )
 
     leftLocusId: Annotated[
         str,
@@ -103,13 +112,3 @@ class Colocalisation(DatasetModel):
         le=1.0,
         description='Average sign of the beta ratio between colocalised variants',
     )
-
-
-#: Rounding slack allowed on a sum of probabilities.
-_TOLERANCE = 1e-9
-
-
-@frame_check(Colocalisation)
-def h3_and_h4_are_exclusive(data: PolarsData) -> pl.LazyFrame:
-    """`h3 + h4` is at most 1: they are posterior probabilities of exclusive hypotheses."""
-    return data.lazyframe.select(pl.col('h3') + pl.col('h4') <= 1.0 + _TOLERANCE)

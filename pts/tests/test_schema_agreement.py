@@ -1,6 +1,6 @@
 """Agreement between each dataset model and the pandera schema derived from it.
 
-The rule checked: the derived pandera schema (before registered checks, which Pydantic cannot see)
+The rule checked: the derived pandera schema (without its row checks, which Pydantic cannot see)
 accepts a one-row frame exactly when Pydantic, in strict mode, accepts that row -- with NaN turned
 into None for Pydantic first. That is a deliberate deviation, not a gap in the test: the derived
 schema treats NaN as null, so a non-nullable float rejects NaN and a nullable one accepts it

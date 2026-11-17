@@ -7,8 +7,7 @@ be checked the same way. The dataset is read once, one parquet part at a time:
 * **Every rule but the primary key, per part.** Each part is validated on its own against the
   model's pandera schema without its primary-key check. Every derived rule decides a row on that row
   alone, so validating the parts one by one finds the same violations as validating the whole.
-  Registered procedural checks (`pts.schemas.dataset.checks`) also run per part, so a check
-  comparing rows only sees the rows of one part.
+  A model's `row_checks` are rules within a row too.
 * **The primary key, over the whole dataset.** While a part is in memory, a 64-bit hash of each
   row's key is kept, in one array sized from the parquet footers. Once every part is read, the array
   is sorted in place and neighbours compared. No repeated hash proves the key unique; the rows behind

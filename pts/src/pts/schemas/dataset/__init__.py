@@ -4,7 +4,6 @@
 * `spec` -- the field tree every other module reads, and the supported subset of Pydantic.
 * `converter` -- the pandera schema a dataset is validated against (`to_pandera`).
 * `validate` -- validate a written dataset, one part at a time (`validation_report`).
-* `checks` -- procedural checks a model cannot state declaratively.
 * `docs` -- documentation JSON.
 * `discovery` -- every dataset model under `pts.schemas.outputs`, without a registry.
 """
@@ -16,9 +15,9 @@ from pts.schemas.dataset.base import (
     PolarsDtype,
     PrimaryKey,
     Reference,
+    RowCheck,
     StructModel,
 )
-from pts.schemas.dataset.checks import column_check, frame_check
 from pts.schemas.dataset.converter import to_pandera, to_polars_schema
 from pts.schemas.dataset.spec import SchemaDefinitionError
 
@@ -29,10 +28,9 @@ __all__ = [
     'PolarsDtype',
     'PrimaryKey',
     'Reference',
+    'RowCheck',
     'SchemaDefinitionError',
     'StructModel',
-    'column_check',
-    'frame_check',
     'to_pandera',
     'to_polars_schema',
 ]
