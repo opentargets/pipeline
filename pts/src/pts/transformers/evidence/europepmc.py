@@ -8,6 +8,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_europepmc import EvidenceEuropepmc
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -119,6 +120,7 @@ def compute_evidence(cooccurrences: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+@writes(evidence=EvidenceEuropepmc)
 def europepmc(
     source: dict[str, str],
     destination: dict[str, str],
@@ -141,13 +143,3 @@ def europepmc(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_europepmc` against its dataset model, in the task's validation phase."""
-    EvidenceEuropepmc.validate_dataset(destination['evidence'])

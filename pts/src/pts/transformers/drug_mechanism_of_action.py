@@ -14,6 +14,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.outputs.drug_mechanism_of_action import DrugMechanismOfAction
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action_candidates import (
     LABEL_COLUMNS,
@@ -68,6 +69,7 @@ DOC_KINDS = [
 """Each kind of doc id: its reference source and url, the pattern whose group is its id, and the id's prefix."""
 
 
+@writes(output=DrugMechanismOfAction)
 def drug_mechanism_of_action(
     source: dict[str, Path],
     destination: Path | dict[str, Path],
@@ -592,13 +594,3 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
         )
         .select(output_cols)
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `drug_mechanism_of_action` against its dataset model, in the task's validation phase."""
-    DrugMechanismOfAction.validate_dataset(destination['output'])

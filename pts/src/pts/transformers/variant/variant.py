@@ -23,6 +23,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.variant import Variant
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent
 from pts.transformers.variant.chromosome import Pools, annotate_chromosomes
 from pts.transformers.variant.inputs import COPY_BYTES, chromosome_rows, prepared_chromosomes, shared_inputs
@@ -30,6 +32,7 @@ from pts.transformers.variant.prepared import ChunkSettings
 from pts.transformers.variant.settings import VariantDestination, VariantSettings, VariantSource
 
 
+@writes(output=Variant)
 def variant(
     source: dict[str, Any],
     destination: dict[str, str],

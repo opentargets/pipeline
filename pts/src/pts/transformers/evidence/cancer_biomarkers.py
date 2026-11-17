@@ -9,6 +9,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_cancer_biomarkers import EvidenceCancerBiomarkers
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -291,6 +292,7 @@ def generate(associations: str, source: str, biomarker_disease: str, drugs: str)
     )
 
 
+@writes(evidence=EvidenceCancerBiomarkers)
 def cancer_biomarkers(
     source: dict[str, str],
     destination: dict[str, str],
@@ -314,13 +316,3 @@ def cancer_biomarkers(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_cancer_biomarkers` against its dataset model, in the task's validation phase."""
-    EvidenceCancerBiomarkers.validate_dataset(destination['evidence'])

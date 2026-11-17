@@ -9,9 +9,11 @@ from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
 from pts.schemas.outputs.disease_phenotype import DiseasePhenotype
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
+@writes(DiseasePhenotype)
 def disease_phenotype(
     source: dict[str, str],
     destination: str,
@@ -279,13 +281,3 @@ def disease_phenotype(
     # raise NotImplementedError
     write_dataset(grouped_phenotypes, destination)
     logger.info('transformation complete')
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `disease_phenotype` against its dataset model, in the task's validation phase."""
-    DiseasePhenotype.validate_dataset(destination)

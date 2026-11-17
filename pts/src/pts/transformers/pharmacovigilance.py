@@ -12,6 +12,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.pharmacovigilance import Pharmacovigilance
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 
 _ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
@@ -253,6 +254,7 @@ def read_archives(archives: list[str], drugs: pl.DataFrame, blacklist: pl.DataFr
     return pl.concat([f for f in frames if f is not None]).unique()
 
 
+@writes(Pharmacovigilance)
 def pharmacovigilance(
     source: dict[str, str],
     destination: str,
@@ -295,13 +297,3 @@ def pharmacovigilance(
     result = significant_events(table, critical)
     logger.info(f'{result.height} significant drug-event pairs from {table.height} scored')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `pharmacovigilance` against its dataset model, in the task's validation phase."""
-    Pharmacovigilance.validate_dataset(destination)

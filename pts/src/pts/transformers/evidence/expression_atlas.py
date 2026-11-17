@@ -8,6 +8,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_expression_atlas import EvidenceExpressionAtlas
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -69,6 +70,7 @@ EXPRESSION_ATLAS = EvidenceDatasource(
 )
 
 
+@writes(evidence=EvidenceExpressionAtlas)
 def expression_atlas(
     source: dict[str, str],
     destination: dict[str, str],
@@ -91,13 +93,3 @@ def expression_atlas(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_expression_atlas` against its dataset model, in the task's validation phase."""
-    EvidenceExpressionAtlas.validate_dataset(destination['evidence'])

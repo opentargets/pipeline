@@ -19,6 +19,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.outputs.pharmacogenomics import Pharmacogenomics
 from pts.schemas.pharmacogenetics import CLINPGX_SCHEMA, PHARMACOGENOMICS, PHENOTYPES_SCHEMA
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.ontology import MAPPED_ID_COLUMN, add_efo_mapping
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -186,6 +187,7 @@ def enrich_with_drugs(
     )
 
 
+@writes(associations=Pharmacogenomics)
 def pharmacogenetics(
     source: dict[str, str],
     destination: dict[str, str],
@@ -234,13 +236,3 @@ def pharmacogenetics(
         enriched.select(pl.col(name).cast(dtype) for name, dtype in PHARMACOGENOMICS.items()),
         destination['associations'],
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `pharmacogenomics` against its dataset model, in the task's validation phase."""
-    Pharmacogenomics.validate_dataset(destination['associations'])

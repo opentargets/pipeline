@@ -15,6 +15,7 @@ from otter.config.model import Config
 
 from pts.schemas.otar import otar_schema
 from pts.schemas.outputs.otar import Otar
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 REFERENCE_PREFIX = 'http://home.opentargets.org/'
@@ -97,6 +98,7 @@ def _generate_otar_info(
     )
 
 
+@writes(Otar)
 def otar(
     source: dict[str, str],
     destination: str,
@@ -115,13 +117,3 @@ def otar(
 
     logger.info(f'Writing otar output to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `otar` against its dataset model, in the task's validation phase."""
-    Otar.validate_dataset(destination)

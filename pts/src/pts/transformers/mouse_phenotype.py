@@ -17,6 +17,7 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
 from pts.schemas.outputs.mouse_phenotype import MousePhenotype
+from pts.task_outputs import writes
 from pts.transformers.impc_common import (
     MODEL_ID,
     biological_model_id,
@@ -159,6 +160,7 @@ def split_by_target(mouse_phenotypes: pl.DataFrame, target_ids: pl.Series) -> tu
     return known, unknown.select('targetFromSourceId', pl.exclude('targetFromSourceId'))
 
 
+@writes(output=MousePhenotype)
 def mouse_phenotype(
     source: dict[str, str],
     destination: dict[str, str],
@@ -202,13 +204,3 @@ def mouse_phenotype(
     logger.info(f'{output.height} mouse phenotypes, {excluded.height} excluded')
     write_dataset(output, destination['output'])
     write_dataset(excluded, destination['excluded'])
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `mouse_phenotype` against its dataset model, in the task's validation phase."""
-    MousePhenotype.validate_dataset(destination['output'])

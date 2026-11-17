@@ -8,9 +8,11 @@ from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
 from pts.schemas.outputs.disease_hpo import DiseaseHpo
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 
 
+@writes(DiseaseHpo)
 def disease_hpo(
     source: Path,
     destination: Path,
@@ -97,13 +99,3 @@ def disease_hpo(
 
     logger.debug('writing processed hpo data')
     write_dataset(n_complete, str(destination))
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `disease_hpo` against its dataset model, in the task's validation phase."""
-    DiseaseHpo.validate_dataset(destination)

@@ -7,6 +7,7 @@ from typing import Any
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_uniprot_literature import EvidenceUniprotLiterature
+from pts.task_outputs import writes
 from pts.transformers.evidence.uniprot_variants import CONFIDENCE_SCORES
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
@@ -21,6 +22,7 @@ UNIPROT_LITERATURE = EvidenceDatasource(
 )
 
 
+@writes(evidence=EvidenceUniprotLiterature)
 def uniprot_literature(
     source: dict[str, str],
     destination: dict[str, str],
@@ -43,13 +45,3 @@ def uniprot_literature(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_uniprot_literature` against its dataset model, in the task's validation phase."""
-    EvidenceUniprotLiterature.validate_dataset(destination['evidence'])

@@ -13,6 +13,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -94,6 +95,7 @@ def generate(l2g_predictions: str, credible_set: str, study_index: str, threshol
     )
 
 
+@writes(evidence=EvidenceGwasCredibleSets)
 def gwas_credible_sets(
     source: dict[str, str],
     destination: dict[str, str],
@@ -123,13 +125,3 @@ def gwas_credible_sets(
         literature=source['literature'],
         destination=destination,
     )
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_gwas_credible_sets` against its dataset model, in the task's validation phase."""
-    EvidenceGwasCredibleSets.validate_dataset(destination['evidence'])

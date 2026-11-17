@@ -8,6 +8,7 @@ import polars as pl
 from otter.config.model import Config
 
 from pts.schemas.outputs.evidence_intogen import EvidenceIntogen
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present, log10_rescaled_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -120,6 +121,7 @@ def generate(genes: str, cohorts: str, disease_mapping: str) -> pl.LazyFrame:
     )
 
 
+@writes(evidence=EvidenceIntogen)
 def intogen(
     source: dict[str, str],
     destination: dict[str, str],
@@ -144,13 +146,3 @@ def intogen(
         .hash_long_variant_identifiers()
     )
     write_evidence(evidence, destination)
-
-
-def validate(
-    source: Any,
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `evidence_intogen` against its dataset model, in the task's validation phase."""
-    EvidenceIntogen.validate_dataset(destination['evidence'])

@@ -15,6 +15,7 @@ from otter.config.model import Config
 
 from pts.schemas.outputs.transcript import Transcript
 from pts.schemas.transcript import transcript as transcript_schema
+from pts.task_outputs import writes
 from pts.transformers.utils import ensembl
 from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.lists import tag
@@ -109,6 +110,7 @@ def build_transcripts(transcripts: pl.DataFrame, xrefs: pl.DataFrame, rnacentral
     )
 
 
+@writes(Transcript)
 def transcript(
     source: dict[str, str],
     destination: str,
@@ -130,13 +132,3 @@ def transcript(
 
     logger.info(f'writing {result.height} transcripts from Ensembl {dump.release} to {destination}')
     write_dataset(result, destination)
-
-
-def validate(
-    source: Any,
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Validate the written `transcript` against its dataset model, in the task's validation phase."""
-    Transcript.validate_dataset(destination)
