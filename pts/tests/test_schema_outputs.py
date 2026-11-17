@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 
+import pandera.errors as pa_errors
 import polars as pl
 import pytest
 
@@ -86,3 +87,22 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
 def test_every_dataset_has_a_title() -> None:
     for name, model in discover_datasets().items():
         assert model.dataset_title, name
+
+
+#: (dataset, a change to its example that only its row check rejects, the check)
+ROW_CHECK_VIOLATIONS = [
+    ('colocalisation', {'h3': 0.7, 'h4': 0.7}, 'h3_and_h4_are_exclusive'),
+    ('biosample_enrichment', {'studyId': 'GCST90000001'}, 'one_study_or_one_pooled_disease'),
+]
+
+
+@pytest.mark.parametrize(
+    ('dataset', 'change', 'check'), ROW_CHECK_VIOLATIONS, ids=[d for d, _, _ in ROW_CHECK_VIOLATIONS]
+)
+def test_row_checks_reject_what_they_describe(dataset: str, change: dict, check: str) -> None:
+    model = DATASETS[dataset]
+    frame = pl.DataFrame([model.example | change], schema=to_polars_schema(model))
+
+    with pytest.raises(pa_errors.SchemaErrors) as caught:
+        to_pandera(model).validate(frame, lazy=True)
+    assert {failure.split(':')[0] for failure in caught.value.failure_cases['check'].to_list()} == {check}

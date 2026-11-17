@@ -1,7 +1,7 @@
-"""Tests for pts.schemas.dataset.converter and the procedural-check registry.
+"""Tests for pts.schemas.dataset.converter.
 
 How each declarative rule is enforced is covered exhaustively by `test_schema_agreement.py`,
-against Pydantic; this file covers what that comparison cannot see: keys, registered checks, and
+against Pydantic; this file covers what that comparison cannot see: keys, row checks, and
 the error messages a failing write produces.
 """
 
@@ -12,17 +12,15 @@ from typing import Annotated, ClassVar
 import pandera.errors as pe
 import polars as pl
 import pytest
-from pandera.polars import PolarsData
 from pydantic import Field, ValidationError
 
 from pts.schemas.dataset import (
     DatasetModel,
     PolarsDtype,
     PrimaryKey,
+    RowCheck,
     SchemaDefinitionError,
     StructModel,
-    column_check,
-    frame_check,
     to_pandera,
     to_polars_schema,
 )
@@ -34,6 +32,10 @@ class _Sample(StructModel):
 
 
 class _Base(DatasetModel):
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        RowCheck('value_is_finite', '`value` must be finite.', pl.col('value').is_finite()),
+    )
+
     id: Annotated[str, PrimaryKey()]
     value: float = Field(ge=0.0)
 
@@ -43,20 +45,16 @@ class _Measurement(_Base):
     dataset_title: ClassVar[str] = 'test dataset'
     dataset_description: ClassVar[str] = 'test dataset'
     example: ClassVar[dict] = {'id': 'a', 'value': 1.0, 'samples': [{'code': 'A1'}]}
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        *_Base.row_checks,
+        RowCheck(
+            'has_samples_or_value',
+            'A row with no samples has a positive `value`.',
+            ~(pl.col('samples').list.len() == 0) | (pl.col('value') > 0),
+        ),
+    )
 
     samples: list[_Sample]
-
-
-@column_check(_Base, 'value')
-def value_is_finite(data: PolarsData) -> pl.LazyFrame:
-    """`value` must be finite."""
-    return data.lazyframe.select(pl.col(data.key).is_finite())
-
-
-@frame_check(_Measurement)
-def sorted_by_id(data: PolarsData) -> pl.LazyFrame:
-    """Rows must be sorted by `id`."""
-    return data.lazyframe.select(pl.col('id') >= pl.col('id').shift(1).fill_null(pl.col('id')))
 
 
 class _Pair(DatasetModel):
@@ -79,38 +77,34 @@ def _failed_checks(model: type[DatasetModel], frame: pl.DataFrame) -> set[str]:
     return set(caught.value.failure_cases['check'].to_list())
 
 
-def test_registered_checks_are_appended_to_derived_ones_and_inherited_from_bases() -> None:
+def test_row_checks_follow_the_derived_ones_and_extend_the_base() -> None:
     schema = to_pandera(_Measurement)
-    base = to_base_pandera(_Measurement)
 
-    assert [check.name for check in schema.columns['value'].checks] == [
-        *(check.name for check in base.columns['value'].checks),
-        'value_is_finite',
-    ]
-    assert [check.name for check in schema.checks or []] == ['sorted_by_id']
-    assert base.checks == []
+    assert [check.name for check in schema.checks or []] == ['value_is_finite', 'has_samples_or_value']
+    assert to_base_pandera(_Measurement).checks == []
 
 
-def test_registered_checks_run() -> None:
+def test_row_checks_run() -> None:
     frame = _frame(
-        _Measurement, [{'id': 'b', 'value': math.inf, 'samples': []}, {'id': 'a', 'value': 1.0, 'samples': []}]
+        _Measurement, [{'id': 'b', 'value': math.inf, 'samples': []}, {'id': 'a', 'value': 0.0, 'samples': []}]
     )
 
     assert _failed_checks(_Measurement, frame) == {
         'value_is_finite: `value` must be finite.',
-        'sorted_by_id: Rows must be sorted by `id`.',
+        'has_samples_or_value: A row with no samples has a positive `value`.',
     }
 
 
-def test_a_check_on_an_undeclared_column_is_rejected() -> None:
+def test_a_row_check_on_an_undeclared_column_is_rejected() -> None:
     class Orphan(DatasetModel):
         dataset_name: ClassVar[str] = '_orphan'
         dataset_title: ClassVar[str] = 'orphan'
         dataset_description: ClassVar[str] = 'orphan'
         example: ClassVar[dict] = {}
+        row_checks: ClassVar[tuple[RowCheck, ...]] = (
+            RowCheck('orphan', 'reads a missing column', pl.col('missing') > 0),
+        )
         x: str
-
-    column_check(Orphan, 'missing')(value_is_finite)
 
     with pytest.raises(SchemaDefinitionError, match=r"undeclared column\(s\) \['missing'\]"):
         to_pandera(Orphan)

@@ -5,7 +5,7 @@ from `pts.schemas.biosample_enrichment`, descriptions and references from croiss
 `biosample_enrichment.json`, and rules only where `pts.transformers.biosample_enrichment` guarantees them:
 
 * each row is one study on its own (`studyId`) or one disease's studies pooled (`diseaseId`), never both
-  nor neither -- a registered check, as it spans two columns;
+  nor neither -- a row check, as it spans two columns;
 * `tissueBiosampleId` is set only for a tissue x cell type panel;
 * `enrichmentApproach` is the transformer's constant; `biosampleDataset` comes from the step's settings, so
   it is not a closed vocabulary;
@@ -19,10 +19,9 @@ columns, so none is declared.
 from typing import Annotated, ClassVar, Literal
 
 import polars as pl
-from pandera.polars import PolarsData
 from pydantic import Field
 
-from pts.schemas.dataset import DatasetModel, Reference, frame_check
+from pts.schemas.dataset import DatasetModel, Reference, RowCheck
 from pts.schemas.outputs.patterns import ONTOLOGY_ID
 
 
@@ -48,6 +47,13 @@ class BiosampleEnrichment(DatasetModel):
         'betaError': 0.03,
         'pValue': 0.0004,
     }
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        RowCheck(
+            'one_study_or_one_pooled_disease',
+            "Exactly one of `studyId` and `diseaseId` is set: a study on its own, or a disease's studies pooled.",
+            pl.col('studyId').is_null() != pl.col('diseaseId').is_null(),
+        ),
+    )
 
     diseaseId: Annotated[str | None, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID,
@@ -81,9 +87,3 @@ class BiosampleEnrichment(DatasetModel):
     beta: float | None = Field(description='Estimated effect size of the biosample enrichment')
     betaError: float | None = Field(ge=0.0, description='Standard error of the biosample enrichment effect size')
     pValue: float | None = Field(ge=0.0, le=1.0, description='P-value for the biosample enrichment')
-
-
-@frame_check(BiosampleEnrichment)
-def one_study_or_one_pooled_disease(data: PolarsData) -> pl.LazyFrame:
-    """Exactly one of `studyId` and `diseaseId` is set: a study on its own, or a disease's studies pooled."""
-    return data.lazyframe.select(pl.col('studyId').is_null() != pl.col('diseaseId').is_null())

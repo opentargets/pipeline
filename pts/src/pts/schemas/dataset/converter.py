@@ -19,7 +19,7 @@ checks this agreement for every dataset):
 * A null list, or a null struct, passes every rule on its elements or fields; whether the list or
   struct itself may be null is its own nullability.
 
-Registered procedural checks (`pts.schemas.dataset.checks`) are appended after the derived ones.
+A model's `row_checks` run after the derived checks, over the whole frame.
 """
 
 import functools
@@ -27,17 +27,13 @@ import functools
 import pandera.polars as pa
 import polars as pl
 
-from pts.schemas.dataset.base import DatasetModel
-from pts.schemas.dataset.checks import RegisteredCheck, registered_checks
+from pts.schemas.dataset.base import DatasetModel, RowCheck
 from pts.schemas.dataset.spec import Node, SchemaDefinitionError, dataset_spec
 
 
 @functools.cache
 def to_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFrameSchema:
-    """The pandera schema of a dataset: derived checks plus its registered procedural checks.
-
-    Cached per model, so checks must be registered (at import of the model's module) before the
-    first conversion.
+    """The pandera schema of a dataset: derived checks plus its `row_checks`.
 
     Args:
         model: the dataset model.
@@ -46,15 +42,15 @@ def to_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFram
             time and its key checked separately (`pts.schemas.dataset.validate`).
 
     Raises:
-        SchemaDefinitionError: if the model is not convertible, or a check is registered on a
-            column the model does not declare.
+        SchemaDefinitionError: if the model is not convertible, or a row check reads a column the
+            model does not declare.
     """
-    return _build(model, registered_checks(model), unique=unique)
+    return _build(model, model.row_checks, unique=unique)
 
 
 @functools.cache
 def to_base_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFrameSchema:
-    """The pandera schema of a dataset derived from its model alone, without registered checks.
+    """The pandera schema of a dataset derived from its fields alone, without its `row_checks`.
 
     `unique` is as for `to_pandera`: without it, each row is judged on its own.
     """
@@ -101,19 +97,18 @@ def node_conditions(node: Node, value: pl.Expr, path: str) -> list[tuple[str, pl
     return conditions
 
 
-def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...], *, unique: bool = True) -> pa.DataFrameSchema:
+def _build(model: type[DatasetModel], row_checks: tuple[RowCheck, ...], *, unique: bool = True) -> pa.DataFrameSchema:
     spec = dataset_spec(model)
     columns = {f.name for f in spec.fields}
-    unknown = sorted({check.column for check in extra if check.column is not None} - columns)
+    unknown = sorted({name for check in row_checks for name in check.passes.meta.root_names()} - columns)
     if unknown:
-        raise SchemaDefinitionError(f'{model.__name__}: checks registered on undeclared column(s) {unknown}')
+        raise SchemaDefinitionError(f'{model.__name__}: row checks read undeclared column(s) {unknown}')
 
     single_key = spec.primary_key[0] if unique and len(spec.primary_key) == 1 else None
     schema_columns = {
         f.name: pa.Column(
             f.node.dtype,
-            checks=[_check(rule, passes) for rule, passes in node_conditions(f.node, pl.col(f.name), f.name)]
-            + [_registered(check) for check in extra if check.column == f.name],
+            checks=[_check(rule, passes) for rule, passes in node_conditions(f.node, pl.col(f.name), f.name)],
             nullable=f.node.nullable,
             required=f.required,
             unique=f.name == single_key,
@@ -123,7 +118,7 @@ def _build(model: type[DatasetModel], extra: tuple[RegisteredCheck, ...], *, uni
     }
     return pa.DataFrameSchema(
         schema_columns,
-        checks=[_registered(check) for check in extra if check.column is None],
+        checks=[_row_check(check) for check in row_checks],
         strict=True,
         unique=list(spec.primary_key) if unique and len(spec.primary_key) > 1 else None,
         name=spec.name,
@@ -173,6 +168,7 @@ def _check(rule: str, passes: pl.Expr) -> pa.Check:
     return pa.Check(lambda data: data.lazyframe.select(passes), name=rule, error=rule, ignore_na=False)
 
 
-def _registered(check: RegisteredCheck) -> pa.Check:
-    error = f'{check.name}: {check.description}' if check.description else check.name
-    return pa.Check(check.function, name=check.name, error=error)
+def _row_check(check: RowCheck) -> pa.Check:
+    return pa.Check(
+        lambda data: data.lazyframe.select(check.passes), name=check.name, error=f'{check.name}: {check.description}'
+    )
