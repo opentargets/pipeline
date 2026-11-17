@@ -1,7 +1,6 @@
 """GWAS/QTL Study: the `study` output.
 
-Generated from the 26.12 release output (3,969,781 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (3,969,781 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

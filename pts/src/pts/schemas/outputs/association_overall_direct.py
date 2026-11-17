@@ -1,7 +1,6 @@
 """Associations - direct (overall score): the `association_overall_direct` output.
 
-Generated from the 26.12 release output (6,275,487 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (6,275,487 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

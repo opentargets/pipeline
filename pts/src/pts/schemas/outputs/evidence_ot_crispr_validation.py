@@ -1,7 +1,6 @@
 """Open Targets - Validation Lab evidence: the `evidence_ot_crispr_validation` output.
 
-Generated from the 26.09 release output (1,095 rows) and its croissant metadata, to the rules of
-`scripts/output_schemas/generate.py`: no release-specific bounds or vocabularies.
+Generated from the 26.09 release output (1,095 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal

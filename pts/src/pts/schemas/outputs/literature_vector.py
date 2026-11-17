@@ -1,7 +1,6 @@
 """Literature vector: the `literature_vector` output.
 
-Generated from the 26.12 release output (57,568 rows) and its croissant metadata by
-`scripts/output_schemas/generate.py`, whose docstring lists which observations become rules.
+Generated from the 26.12 release output (57,568 rows) and its croissant metadata.
 """
 
 from typing import Annotated, ClassVar, Literal
