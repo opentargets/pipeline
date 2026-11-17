@@ -77,25 +77,15 @@ class Hallmarks(StructModel):
     )
 
 
-class Synonyms(StructModel):
-    """`synonyms[]`."""
+class TargetSynonym(StructModel):
+    """A synonym of the target: `synonyms[]`, `symbolSynonyms[]` and `nameSynonyms[]`."""
 
     label: str = Field(min_length=1, description='Synonym label for the target')
     source: Literal['HGNC', 'NCBI_entrez', 'uniprot'] = Field(description='Source database of the synonym')
 
 
-class SymbolSynonyms(StructModel):
-    """`symbolSynonyms[]`."""
-
-    label: str = Field(min_length=1, description='Symbol synonym label for the target')
-    source: Literal['HGNC', 'NCBI_entrez', 'uniprot'] = Field(description='Source of the symbol synonym')
 
 
-class NameSynonyms(StructModel):
-    """`nameSynonyms[]`."""
-
-    label: str = Field(min_length=1, description='Name synonym label for the target')
-    source: Literal['HGNC', 'NCBI_entrez', 'uniprot'] = Field(description='Source of the name synonym')
 
 
 class SubcellularLocations(StructModel):
@@ -122,18 +112,13 @@ class TargetClass(StructModel):
     level: str = Field(min_length=1, description='Hierarchical level of the target class')
 
 
-class ObsoleteSymbols(StructModel):
-    """`obsoleteSymbols[]`."""
+class ObsoleteLabel(StructModel):
+    """A symbol or name previously used for the target: `obsoleteSymbols[]` and `obsoleteNames[]`."""
 
-    label: str = Field(min_length=1, description='Obsolete symbol label')
-    source: Literal['HGNC'] = Field(description='Source of the obsolete symbol')
+    label: str = Field(min_length=1, description='Obsolete symbol or name of the target')
+    source: Literal['HGNC'] = Field(description='Source of the obsolete symbol or name')
 
 
-class ObsoleteNames(StructModel):
-    """`obsoleteNames[]`."""
-
-    label: str = Field(min_length=1, description='Obsolete name label')
-    source: Literal['HGNC'] = Field(description='Source of the obsolete name')
 
 
 class Constraint(StructModel):
@@ -292,9 +277,9 @@ class Target(DatasetModel):
     approvedName: str = Field(description='Approved full name of the target gene')
     go: list[Go] | None = Field(description='List of Gene Ontology (GO) annotations related to the target')
     hallmarks: Hallmarks | None = Field(description='Hallmarks related to the target gene sourced from COSMIC')
-    synonyms: list[Synonyms] = Field(description='List of synonyms for the target gene')
-    symbolSynonyms: list[SymbolSynonyms] = Field(description='List of symbol-based synonyms for the target gene')
-    nameSynonyms: list[NameSynonyms] = Field(description='List of name-based synonyms for the target gene')
+    synonyms: list[TargetSynonym] = Field(description='List of synonyms for the target gene')
+    symbolSynonyms: list[TargetSynonym] = Field(description='List of symbol-based synonyms for the target gene')
+    nameSynonyms: list[TargetSynonym] = Field(description='List of name-based synonyms for the target gene')
     functionDescriptions: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description='Functional descriptions of the target gene sourced from UniProt'
     )
@@ -302,10 +287,10 @@ class Target(DatasetModel):
         description='List of subcellular locations where the target protein is found'
     )
     targetClass: list[TargetClass] | None = Field(description='Target classification categories from ChEMBL')
-    obsoleteSymbols: list[ObsoleteSymbols] = Field(
+    obsoleteSymbols: list[ObsoleteLabel] = Field(
         description='List of obsolete symbols previously used for the target gene'
     )
-    obsoleteNames: list[ObsoleteNames] = Field(description='List of obsolete names previously used for the target gene')
+    obsoleteNames: list[ObsoleteLabel] = Field(description='List of obsolete names previously used for the target gene')
     constraint: list[Constraint] | None = Field(description='Constraint scores for the target gene from gnomAD')
     proteinIds: list[ProteinIds] | None = Field(description='Protein identifiers associated with the target')
     dbXrefs: list[DbXrefs] = Field(description='Database cross-references for the target')

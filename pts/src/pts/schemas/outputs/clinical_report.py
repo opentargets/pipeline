@@ -11,6 +11,7 @@ import polars as pl
 from pydantic import Field
 
 from pts.schemas.dataset import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from pts.schemas.outputs.common import MappedDisease
 from pts.schemas.outputs.patterns import CHEMBL_ID, DIGITS, ONTOLOGY_ID
 
 
@@ -32,13 +33,6 @@ class TrialSponsor(StructModel):
     name: str = Field(min_length=1, description='Name of the lead sponsor associated with the clinical trial')
 
 
-class Diseases(StructModel):
-    """`diseases[]`."""
-
-    diseaseFromSource: str = Field(min_length=1, description='Disease name as reported in the source')
-    diseaseId: Annotated[str, Reference('disease', 'id')] | None = Field(
-        pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
-    )
 
 
 class TrialLiterature(StructModel):
@@ -162,7 +156,7 @@ class ClinicalReport(DatasetModel):
         min_length=1, description='Official title of the clinical trial as registered'
     )
     trialSponsor: TrialSponsor | None = Field(description='Lead sponsor associated with the clinical trial')
-    diseases: list[Diseases] | None = Field(description='Diseases associated with the clinical report')
+    diseases: list[MappedDisease] | None = Field(description='Diseases associated with the clinical report')
     trialLiterature: list[TrialLiterature] | None = Field(
         description='Literature references associated with the clinical trial'
     )

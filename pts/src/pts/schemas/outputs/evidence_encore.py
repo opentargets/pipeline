@@ -10,14 +10,8 @@ from typing import Annotated, ClassVar, Literal
 from pydantic import Field
 
 from pts.schemas.dataset import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
+from pts.schemas.outputs.common import Biomarker
 from pts.schemas.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
-
-
-class BiomarkerList(StructModel):
-    """`biomarkerList[]`."""
-
-    description: str = Field(min_length=1, description='One biomarker for the model')
-    name: str = Field(min_length=1, description='Short name of the biomarker')
 
 
 class DiseaseCellLines(StructModel):
@@ -90,7 +84,7 @@ class EvidenceEncore(DatasetModel):
         ),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    biomarkerList: list[BiomarkerList] = Field(description='List of biomarkers associated with the biological model')
+    biomarkerList: list[Biomarker] = Field(description='List of biomarkers associated with the biological model')
     datasourceId: Literal['encore'] = Field(description='Identifer of the evidence source')
     datatypeId: Literal['ot_partner'] = Field(description='Type of the evidence')
     diseaseCellLines: list[DiseaseCellLines] = Field(description='Cancer cell lines used to generate evidence')

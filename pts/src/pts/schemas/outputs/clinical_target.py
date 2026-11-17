@@ -8,17 +8,9 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from pts.schemas.dataset import DatasetModel, PrimaryKey, Reference, StructModel
-from pts.schemas.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID, ONTOLOGY_ID
-
-
-class Diseases(StructModel):
-    """`diseases[]`."""
-
-    diseaseFromSource: str = Field(min_length=1, description='Disease name as reported in the source')
-    diseaseId: Annotated[str, Reference('disease', 'id')] | None = Field(
-        pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
-    )
+from pts.schemas.dataset import DatasetModel, PrimaryKey, Reference
+from pts.schemas.outputs.common import MappedDisease
+from pts.schemas.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID
 
 
 class ClinicalTarget(DatasetModel):
@@ -50,7 +42,7 @@ class ClinicalTarget(DatasetModel):
     targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
-    diseases: list[Diseases | None] = Field(description='Diseases associated with this target-drug clinical pair')
+    diseases: list[MappedDisease | None] = Field(description='Diseases associated with this target-drug clinical pair')
     clinicalReportIds: list[Annotated[Annotated[str, Reference('clinical_report', 'id')], Field(min_length=1)]] = Field(
         description=('List of clinical report identifiers associated with this target-drug pair')
     )
