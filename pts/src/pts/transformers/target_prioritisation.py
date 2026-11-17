@@ -740,7 +740,7 @@ def target_prioritisation(
     write_dataset(result, destination)
 
 
-def target_prioritisation_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

@@ -100,7 +100,7 @@ def disease_hpo(
     write_dataset(n_complete, str(destination))
 
 
-def disease_hpo_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

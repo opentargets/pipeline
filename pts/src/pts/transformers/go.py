@@ -133,7 +133,7 @@ def go(
     write_dataset(df, destination)
 
 
-def go_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

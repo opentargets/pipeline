@@ -165,7 +165,7 @@ def project_score(
     )
 
 
-def project_score_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

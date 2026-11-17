@@ -11,7 +11,7 @@ import pytest
 from otter.config.model import Config
 from otter.util.errors import TaskValidationError
 
-from pts.pyspark.association import association_validate
+from pts.pyspark.association import validate as association_validate
 from pts.schemas.dataset import to_polars_schema
 from pts.schemas.outputs.biosample import Biosample
 from pts.task_validation import validate_outputs, validate_task
@@ -55,7 +55,7 @@ def test_a_validate_function_covering_every_output_passes(tmp_path: Path, config
     destination = {'output': output, 'excluded': str(tmp_path / 'excluded/biosample')}
     validate = _validates({output: Biosample})
 
-    validate_task('input/x', destination, {'a': 1}, config, validate, 'biosample_validate')
+    validate_task('input/x', destination, {'a': 1}, config, validate, 'pts.transformers.biosample')
 
     validate.assert_called_once_with('input/x', destination, {'a': 1}, config)
 
@@ -63,8 +63,8 @@ def test_a_validate_function_covering_every_output_passes(tmp_path: Path, config
 def test_a_task_writing_output_without_a_validate_function_fails(tmp_path: Path, config: Config) -> None:
     output = _write_biosample(tmp_path / 'output/biosample')
 
-    with pytest.raises(TaskValidationError, match=r'defines no biosample_validate\(\)'):
-        validate_task('input/x', output, {}, config, None, 'biosample_validate')
+    with pytest.raises(TaskValidationError, match=r'pts\.transformers\.biosample defines no validate\(\)'):
+        validate_task('input/x', output, {}, config, None, 'pts.transformers.biosample')
 
 
 def test_a_task_writing_no_output_needs_no_validate_function(tmp_path: Path, config: Config) -> None:
@@ -113,5 +113,5 @@ def test_pyspark_validate_hands_the_paths_of_the_run_and_the_function_to_validat
 
     assert unwrap(Pyspark.validate)(task) is task
     validate_task_mock.assert_called_once_with(
-        '/work/input/x', '/work/output/x', {'a': 1}, task.context.config, validate, 'association_validate'
+        '/work/input/x', '/work/output/x', {'a': 1}, task.context.config, validate, 'pts.pyspark.association'
     )

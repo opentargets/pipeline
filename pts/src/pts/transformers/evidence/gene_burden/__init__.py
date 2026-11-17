@@ -177,7 +177,7 @@ def gene_burden(
     write_evidence(evidence, destination)
 
 
-def gene_burden_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

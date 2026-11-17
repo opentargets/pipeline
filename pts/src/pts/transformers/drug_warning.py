@@ -170,7 +170,7 @@ def _deduplicate_warnings(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def drug_warning_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

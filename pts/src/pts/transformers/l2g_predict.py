@@ -152,7 +152,7 @@ def l2g_predict(
     logger.info('prediction complete')
 
 
-def l2g_predict_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

@@ -51,7 +51,7 @@ def clinical_indication(
     write_dataset(indications, str(destination['output']))
 
 
-def clinical_indication_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

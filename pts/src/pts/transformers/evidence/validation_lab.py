@@ -54,7 +54,7 @@ def validation_lab(
     )
 
 
-def validation_lab_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

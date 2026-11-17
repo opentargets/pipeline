@@ -25,7 +25,7 @@ of the same name: load the module itself with `importlib.import_module`.
 
 from pts.transformers.credible_set.annotation import annotation
 from pts.transformers.credible_set.set_qc import set_qc
-from pts.transformers.credible_set.validation import validation, validation_validate
+from pts.transformers.credible_set.validation import validation
 from pts.transformers.credible_set.variant_qc import variant_qc
 
-__all__ = ['annotation', 'set_qc', 'validation', 'validation_validate', 'variant_qc']
+__all__ = ['annotation', 'set_qc', 'validation', 'variant_qc']

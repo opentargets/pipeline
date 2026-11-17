@@ -126,7 +126,7 @@ def gwas_credible_sets(
     )
 
 
-def gwas_credible_sets_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

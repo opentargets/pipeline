@@ -282,7 +282,7 @@ def disease_phenotype(
     logger.info('transformation complete')
 
 
-def disease_phenotype_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

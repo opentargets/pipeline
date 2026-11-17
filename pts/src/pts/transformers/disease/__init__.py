@@ -11,7 +11,7 @@ from pts.transformers.disease.disease import disease
 __all__ = ['disease']
 
 
-def disease_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

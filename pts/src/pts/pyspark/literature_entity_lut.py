@@ -162,7 +162,7 @@ def literature_entity_lut(
     out.write.mode('overwrite').parquet(dest)
 
 
-def literature_entity_lut_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

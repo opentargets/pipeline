@@ -413,7 +413,7 @@ def target_safety_event(
     write_dataset(result, destination)
 
 
-def target_safety_event_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

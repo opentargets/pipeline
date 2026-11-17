@@ -290,7 +290,7 @@ def generate_chemical_probes_evidence(
     )
 
 
-def chemical_probes_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

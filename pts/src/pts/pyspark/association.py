@@ -152,7 +152,7 @@ def association(
     indirect_intermediate.unpersist()
 
 
-def association_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

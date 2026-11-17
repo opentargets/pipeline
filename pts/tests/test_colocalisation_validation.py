@@ -7,7 +7,7 @@ import pytest
 
 from pts.schemas.dataset import to_polars_schema
 from pts.schemas.outputs.colocalisation import Colocalisation
-from pts.transformers.colocalisation_validation import colocalisation_validation, colocalisation_validation_validate
+from pts.transformers.colocalisation_validation import colocalisation_validation, validate
 
 
 def _colocalisation(tmp_path: Path, **overrides) -> dict[str, str]:
@@ -22,7 +22,7 @@ def test_a_valid_colocalisation_passes_and_nothing_is_written(tmp_path: Path) ->
     source = _colocalisation(tmp_path)
 
     colocalisation_validation(source, {}, {}, None)
-    colocalisation_validation_validate(source, {}, {}, None)
+    validate(source, {}, {}, None)
 
     assert [p.name for p in tmp_path.iterdir()] == ['output']
 
@@ -31,7 +31,7 @@ def test_a_colocalisation_breaking_its_model_fails(tmp_path: Path) -> None:
     source = _colocalisation(tmp_path, h4=1.5)
 
     with pytest.raises(ValueError, match='breaks its model Colocalisation'):
-        colocalisation_validation_validate(source, {}, {}, None)
+        validate(source, {}, {}, None)
 
 
 def test_the_step_refuses_a_destination(tmp_path: Path) -> None:

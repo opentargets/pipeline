@@ -281,7 +281,7 @@ def panel_app(
     )
 
 
-def panel_app_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

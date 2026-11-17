@@ -169,7 +169,7 @@ def clinvar(
     run_eva(source, destination, EVA)
 
 
-def clinvar_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

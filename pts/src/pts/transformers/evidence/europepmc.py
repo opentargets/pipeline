@@ -144,7 +144,7 @@ def europepmc(
     )
 
 
-def europepmc_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

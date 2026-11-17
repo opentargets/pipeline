@@ -366,7 +366,7 @@ def study(
     ])
 
 
-def study_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

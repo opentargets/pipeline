@@ -124,7 +124,7 @@ def clingen(
     run_evidence(raw.lazy(), CLINGEN, disease=source['disease'], target=source['target'], destination=destination)
 
 
-def clingen_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

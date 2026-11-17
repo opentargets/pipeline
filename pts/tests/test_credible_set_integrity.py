@@ -11,7 +11,7 @@ from polars.io.plugins import register_io_source
 
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag
-from pts.transformers.credible_set.validation import validation, validation_validate
+from pts.transformers.credible_set.validation import validate, validation
 from pts.transformers.utils import dataset as dataset_module
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -79,7 +79,7 @@ DESTINATIONS = ('valid_set', 'valid_variant', 'excluded_set', 'excluded_variant'
 
 
 def _check(root: Path, sets: Path, variants: Path) -> None:
-    validation_validate(
+    validate(
         source={'credible_set': [str(sets)], 'credible_set_variant': [str(variants)]},
         destination={name: str(root / 'out' / name) for name in DESTINATIONS},
         settings={},

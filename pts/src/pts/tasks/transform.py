@@ -42,9 +42,8 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
 
-        The module also holds the transformer's validate function, named after it
-        with a `_validate` suffix (`encore_validate` for `evidence.encore`). It takes
-        the same four arguments and runs in the validation phase of the task: it
+        The module also holds a function named `validate`, next to the transformer.
+        It takes the same four arguments and runs in the validation phase of the task: it
         validates each output against its dataset model (`validate_outputs`), and
         checks any further rule, raising `ValueError` when the result is wrong. A
         task writing to `output/` must have one, and it must validate every
@@ -94,9 +93,9 @@ class Transform(Task):
 
     @staticmethod
     def load_validate(transformer_name: str) -> validate_type | None:
-        """The `<transformer>_validate` function of the transformer's module, if it has one."""
+        """The `validate` function of the transformer's module, if it has one."""
         module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
-        return getattr(module, validate_name(transformer_name), None)
+        return getattr(module, 'validate', None)
 
     @report
     def run(self) -> Self:
@@ -131,11 +130,7 @@ class Transform(Task):
             self.spec.settings or {},
             self.context.config,
             self.validate_function,
-            validate_name(self.spec.transformer),
+            f'{TRANSFORMER_PACKAGE}.{self.spec.transformer}',
         )
         return self
 
-
-def validate_name(transformer_name: str) -> str:
-    """The name of a transformer's validate function: `encore_validate` for `evidence.encore`."""
-    return f'{transformer_name.rsplit(".", 1)[-1]}_validate'

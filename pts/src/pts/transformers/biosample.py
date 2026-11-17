@@ -215,7 +215,7 @@ def _merge_indices(indices: list[pl.DataFrame]) -> pl.DataFrame:
     )
 
 
-def biosample_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

@@ -54,7 +54,7 @@ def encore(
     )
 
 
-def encore_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

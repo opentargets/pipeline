@@ -105,7 +105,7 @@ def clinical_target(
     write_dataset(clinical_target, str(destination['output']))
 
 
-def clinical_target_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

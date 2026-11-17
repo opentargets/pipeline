@@ -31,7 +31,7 @@ def clinvar_somatic(
     run_eva(source, destination, EVA_SOMATIC)
 
 
-def clinvar_somatic_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

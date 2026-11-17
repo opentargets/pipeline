@@ -432,7 +432,7 @@ def _join_semantic(items: list[str]) -> str:
     return f'{", ".join(items[:-1])} and {items[-1]}'
 
 
-def drug_molecule_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

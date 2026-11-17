@@ -34,9 +34,8 @@ class PysparkSpec(Spec):
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
 
-        The module also holds the entry point's validate function, named after it
-        with a `_validate` suffix (`association_validate`), taking the source and
-        destination paths, the settings and the otter config. It runs in the
+        The module also holds a function named `validate`, next to the entry point,
+        taking the source and destination paths, the settings and the otter config. It runs in the
         validation phase of the task: it validates each output against its dataset
         model (`validate_outputs`), and checks any further rule, raising
         `ValueError` when the result is wrong. A task writing to `output/` must
@@ -79,9 +78,9 @@ class Pyspark(Task):
 
     @staticmethod
     def load_validate(pyspark_name: str) -> Validate | None:
-        """The `<pyspark>_validate` function of the entry point's module, if it has one."""
+        """The `validate` function of the entry point's module, if it has one."""
         module = import_module(f'{PYSPARK_PACKAGE}.{pyspark_name}')
-        return getattr(module, f'{pyspark_name}_validate', None)
+        return getattr(module, 'validate', None)
 
     @report
     def run(self) -> Self:
@@ -117,6 +116,6 @@ class Pyspark(Task):
             self.spec.settings or {},
             self.context.config,
             self.validate_function,
-            f'{self.spec.pyspark}_validate',
+            f'{PYSPARK_PACKAGE}.{self.spec.pyspark}',
         )
         return self

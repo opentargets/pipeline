@@ -94,7 +94,7 @@ def expression_atlas(
     )
 
 
-def expression_atlas_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

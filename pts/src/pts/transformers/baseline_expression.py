@@ -364,7 +364,7 @@ def baseline_expression(
     pl.collect_all([sink_dataset(valid, destination['valid']), sink_dataset(failed, destination['failed'])])
 
 
-def baseline_expression_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

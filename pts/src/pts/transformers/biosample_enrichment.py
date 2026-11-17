@@ -455,7 +455,7 @@ def biosample_enrichment(
     logger.info(f'wrote {output.height} rows')
 
 
-def biosample_enrichment_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

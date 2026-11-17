@@ -461,7 +461,7 @@ def _shape(rows: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def chembl_bioactivity_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

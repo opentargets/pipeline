@@ -722,7 +722,7 @@ def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
     )
 
 
-def clinical_report_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

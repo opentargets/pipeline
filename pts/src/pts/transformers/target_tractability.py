@@ -94,7 +94,7 @@ def target_tractability(
     write_dataset(result, destination)
 
 
-def target_tractability_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

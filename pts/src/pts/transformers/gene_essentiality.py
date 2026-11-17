@@ -235,7 +235,7 @@ def gene_essentiality(
     write_dataset(result, destination)
 
 
-def gene_essentiality_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

@@ -576,7 +576,7 @@ def interaction(
     write_dataset(unmatched_ids, destination['interactions_unmatched'])
 
 
-def interaction_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

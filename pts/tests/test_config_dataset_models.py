@@ -1,9 +1,9 @@
 """Every dataset a pts task writes to `output/` is validated against its dataset model, by code.
 
-For each such task in the config, its module must define a validate function, and that function must
-validate every `output/` destination of the task against the model of that dataset. The function is called
-here with the configured destinations and a recording `validate_outputs`, so no data is needed. A new output
-without a model, or a validate function that forgets an output or names the wrong model, fails here.
+For each such task in the config, its module must define `validate`, and `validate` must validate every
+`output/` destination of the task against the model of that dataset. It is called here with the configured
+destinations and a recording `validate_outputs`, so no data is needed. A new output without a model, or a
+`validate` that forgets an output or names the wrong model, fails here.
 """
 
 from importlib import import_module
@@ -15,7 +15,7 @@ import yaml
 
 from pts.schemas.dataset import DatasetModel
 from pts.tasks.pyspark import PYSPARK_PACKAGE, Pyspark
-from pts.tasks.transform import TRANSFORMER_PACKAGE, Transform, validate_name
+from pts.tasks.transform import TRANSFORMER_PACKAGE, Transform
 
 CONFIG = Path(__file__).parents[1] / 'config.yaml'
 
@@ -45,15 +45,15 @@ def test_the_config_writes_outputs() -> None:
 @pytest.mark.parametrize('task', TASKS, ids=[f'{t["step"]}:{t["name"]}' for t in TASKS])
 def test_every_output_is_validated_against_its_dataset_model(task: dict[str, Any], monkeypatch) -> None:
     if 'transformer' in task:
-        name, function = task['transformer'], validate_name(task['transformer'])
+        name = task['transformer']
         module = import_module(f'{TRANSFORMER_PACKAGE}.{name}')
         validate = Transform.load_validate(name)
     else:
-        name, function = task['pyspark'], f'{task["pyspark"]}_validate'
+        name = task['pyspark']
         module = import_module(f'{PYSPARK_PACKAGE}.{name}')
         validate = Pyspark.load_validate(name)
     assert validate is not None, (
-        f'{task["name"]} writes {task["outputs"]}, so {module.__name__} must define {function}() validating them '
+        f'{task["name"]} writes {task["outputs"]}, so {module.__name__} must define validate() validating them '
         '(see pts.task_validation)'
     )
 
@@ -63,6 +63,6 @@ def test_every_output_is_validated_against_its_dataset_model(task: dict[str, Any
 
     for path in task['outputs']:
         dataset = path.removeprefix('output/')
-        assert path in {p.rstrip('/') for p in validated}, f'{function}() does not validate {path}'
+        assert path in {p.rstrip('/') for p in validated}, f'{module.__name__}.validate() does not validate {path}'
         model = validated.get(path) or validated[f'{path}/']
-        assert model.dataset_name == dataset, f'{function}() validates {path} against {model.__name__}'
+        assert model.dataset_name == dataset, f'{module.__name__}.validate() validates {path} against {model.__name__}'

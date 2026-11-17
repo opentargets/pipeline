@@ -205,7 +205,7 @@ def mouse_phenotype(
     write_dataset(excluded, destination['excluded'])
 
 
-def mouse_phenotype_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

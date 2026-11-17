@@ -222,7 +222,7 @@ def crispr_screens(
     )
 
 
-def crispr_screens_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

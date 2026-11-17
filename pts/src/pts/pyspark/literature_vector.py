@@ -69,7 +69,7 @@ def literature_vector(
     result.write.mode('overwrite').parquet(dest)
 
 
-def literature_vector_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

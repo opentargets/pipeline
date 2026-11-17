@@ -335,7 +335,7 @@ def ot_crispr(
     )
 
 
-def ot_crispr_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

@@ -158,7 +158,7 @@ def gene_sets(
     write_dataset(result, destination)
 
 
-def gene_sets_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

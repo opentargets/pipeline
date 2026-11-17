@@ -46,7 +46,7 @@ def uniprot_literature(
     )
 
 
-def uniprot_literature_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

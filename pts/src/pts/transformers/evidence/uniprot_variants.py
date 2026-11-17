@@ -52,7 +52,7 @@ def uniprot_variants(
     write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)
 
 
-def uniprot_variants_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

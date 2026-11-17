@@ -132,7 +132,7 @@ def reactome(
     write_dataset(result, destination)
 
 
-def reactome_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

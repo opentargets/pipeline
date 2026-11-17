@@ -247,7 +247,7 @@ def clinical_precedence(
     write_evidence(evidence, destination, alongside=[sink_dataset(excluded, destination['excluded_report'])])
 
 
-def clinical_precedence_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

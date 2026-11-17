@@ -9,8 +9,9 @@ from otter.config.model import Config
 from pydantic import ValidationError
 
 from pts.tasks.transform import Transform, TransformSpec
-from pts.transformers.credible_set.validation import validation_validate
-from pts.transformers.evidence.encore import encore, encore_validate
+from pts.transformers.credible_set.validation import validate as validation_validate
+from pts.transformers.evidence.encore import encore
+from pts.transformers.evidence.encore import validate as encore_validate
 from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
 
@@ -103,5 +104,5 @@ def test_validate_hands_the_paths_of_the_run_and_the_function_to_validate_task(m
 
     assert unwrap(Transform.validate)(task) is task
     validate_task.assert_called_once_with(
-        '/work/input/study', '/work/output/study', {'a': 1}, task.context.config, validate, 'study_validate'
+        '/work/input/study', '/work/output/study', {'a': 1}, task.context.config, validate, 'pts.transformers.study'
     )

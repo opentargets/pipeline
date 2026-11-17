@@ -14,7 +14,7 @@ excluded row carries the flag that says why. A credible set is excluded with all
 5. keep one copy of an id that several sources share (`_flag_duplicated_ids`);
 6. split each source's variants by the decision on their set (`_split_variants`), and write.
 
-`validation_validate` then runs in otter's validation phase, and checks that every input row was
+`validate` then runs in otter's validation phase, and checks that every input row was
 written, valid or excluded.
 """
 
@@ -204,7 +204,7 @@ def validation(
     ])
 
 
-def validation_validate(
+def validate(
     source: dict[str, str | list[str]],
     destination: dict[str, str],
     settings: dict[str, Any],

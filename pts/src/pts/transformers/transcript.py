@@ -133,7 +133,7 @@ def transcript(
     write_dataset(result, destination)
 
 
-def transcript_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],

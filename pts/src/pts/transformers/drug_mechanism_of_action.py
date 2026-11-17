@@ -587,7 +587,7 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def drug_mechanism_of_action_validate(
+def validate(
     source: Any,
     destination: dict[str, str],
     settings: dict[str, Any],

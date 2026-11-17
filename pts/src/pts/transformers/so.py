@@ -46,7 +46,7 @@ def so(
     logger.info('transformation complete')
 
 
-def so_validate(
+def validate(
     source: Any,
     destination: str,
     settings: dict[str, Any],
