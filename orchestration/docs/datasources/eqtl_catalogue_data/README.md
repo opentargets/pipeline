@@ -3,21 +3,21 @@
 This document was updated on 2026-11-17.
 
 ```sh
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/bin/                                 # gentropy cli.py and cluster init script of the run
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/config/eqtl_catalogue_ingestion.yaml # DAG config of the run
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/docs/
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/output/study_index/
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/output/credible_set/
-gs://eqtl_catalogue_data/r8/prod/20261117T083511/output/credible_set_variant/
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/bin/                                 # gentropy cli.py and cluster init script of the run
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/config/eqtl_catalogue_ingestion.yaml # DAG config of the run
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/docs/
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/output/study_index/
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/output/credible_set/
+gs://eqtl_catalogue_data/r8/prod/20261117T103813/output/credible_set_variant/
 ```
 
-`r8/prod/20261117T083511/` is the DAG output, unpatched. It replaces the v4 run `r8/prod/20261105T130431/`, described in the README of earlier commits, whose credible set variants had no `effectAlleleFrequency`, so PTS could not rescale their effects ([opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)). Apart from that frequency, the two runs hold the same data.
+`r8/prod/20261117T103813/` is the DAG output, unpatched. It replaces the v4 run `r8/prod/20261105T130431/`, described in the README of earlier commits, whose credible set variants had no `effectAlleleFrequency`, so PTS could not rescale their effects ([opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)). Apart from that frequency, the two runs hold the same data. The run `r8/prod/20261117T083511/`, on gentropy `v4.0.0-dev.14`, is superseded: 76 of its frequencies were 1 or above (see below).
 
 The run is in the gentropy v4 schema: credible sets (`credible_set`) and their variants (`credible_set_variant`). PIS stages it for PTS (`staging_eqtl_catalogue_ts` in `pis/config.yaml`).
 
 Data contained in the run is the [eQTL Catalogue](https://www.ebi.ac.uk/eqtl/) release 8 SuSiE fine-mapping, ingested as a study index, credible sets and credible set variants. The eQTL Catalogue r8 already contains GTEx v10, IBDverse and MAGE, so they are not ingested on their own.
 
-Data is produced by the **eqtl_catalogue_ingestion DAG**. The DAG configuration is in `config/eqtl_catalogue_ingestion.yaml` of the run folder. The run uses gentropy [`v4.0.0-dev.14`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.14) (`GENTROPY_REF`), the gentropy dev branch after `v4.0.0-rc.3` with the effect allele frequency of the credible set variants ([opentargets/gentropy#1349](https://github.com/opentargets/gentropy/pull/1349)), and the [`eqtl_catalogue`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/eqtl_catalogue.py) step. It also has the `pubmedId` fix ([opentargets/gentropy#1334](https://github.com/opentargets/gentropy/pull/1334)), one full SuSiE row per variant, region and trait ([#1338](https://github.com/opentargets/gentropy/pull/1338)) and a negative region start parsed as a locus start of 1 ([#1344](https://github.com/opentargets/gentropy/pull/1344)). The links below refer to that tag.
+Data is produced by the **eqtl_catalogue_ingestion DAG**. The DAG configuration is in `config/eqtl_catalogue_ingestion.yaml` of the run folder. The run uses gentropy [`v4.0.0-dev.15`](https://github.com/opentargets/gentropy/tree/v4.0.0-dev.15) (`GENTROPY_REF`), the gentropy dev branch after `v4.0.0-rc.3` with the effect allele frequency of the credible set variants ([opentargets/gentropy#1349](https://github.com/opentargets/gentropy/pull/1349)), null where the allele count reaches 2 × `sample_size` ([opentargets/gentropy#1353](https://github.com/opentargets/gentropy/pull/1353)), and the [`eqtl_catalogue`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/eqtl_catalogue.py) step. It also has the `pubmedId` fix ([opentargets/gentropy#1334](https://github.com/opentargets/gentropy/pull/1334)), one full SuSiE row per variant, region and trait ([#1338](https://github.com/opentargets/gentropy/pull/1338)) and a negative region start parsed as a locus start of 1 ([#1344](https://github.com/opentargets/gentropy/pull/1344)). The links below refer to that tag.
 
 Inputs of the run:
 
@@ -38,7 +38,7 @@ The DAG has 1 step, run on one Dataproc cluster:
 
 ## ingestion
 
-The step, gentropy `eqtl_catalogue` ([`eqtl_catalogue.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/eqtl_catalogue.py)) joins the SuSiE credible sets, their log Bayes factors, the full SuSiE posterior and the dataset metadata ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/datasource/eqtl_catalogue/finemapping.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/datasource/eqtl_catalogue/study_index.py)):
+The step, gentropy `eqtl_catalogue` ([`eqtl_catalogue.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/eqtl_catalogue.py)) joins the SuSiE credible sets, their log Bayes factors, the full SuSiE posterior and the dataset metadata ([`finemapping.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/datasource/eqtl_catalogue/finemapping.py), [`study_index.py`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/datasource/eqtl_catalogue/study_index.py)):
 
 - One study per dataset and molecular trait. `studyType` comes from the quantification method (gene expression, exon, transcript and microarray give `eqtl`; Leafcutter and MAJIQ give `sqtl`; txrevise gives `tuqtl`; aptamer gives `pqtl`), with an `sc` prefix for single-cell datasets.
 - One credible set per SuSiE component (1 to 10) of a molecular trait in a region. The lead is the member with the top posterior probability, ties broken by variant id.
@@ -47,10 +47,10 @@ The step, gentropy `eqtl_catalogue` ([`eqtl_catalogue.py`](https://github.com/op
 - Variants with alleles other than A, C, G and T (e.g. `<DEL>`, `<DUP>` in AFR_LCL/QTS000044 and MAGE/QTS000055) are removed from the credible sets, as they gave duplicate entries.
 - Some studies (e.g. CommonMind/QTS000008, Kim-Hellmuth/QTS000042) report the SuSiE PIP instead of the per-component alpha. Their posterior probabilities are recomputed from the log Bayes factors, so they sum to at most 1 per credible set ([opentargets/issues#4496](https://github.com/opentargets/issues/issues/4496)).
 - The conditional statistics of a member are the SuSiE posterior mean and standard deviation of the credible set's own effect, from the full SuSiE posterior, on the scale SuSiE was fitted on.
-- The effect allele is the ALT allele, and `ac` in the credible sets is its count. The credible sets have no total allele count `an`, which the eQTL Catalogue gives as 2 × `sample_size` ([eQTL-Catalogue/eQTL-Catalogue-resources#63](https://github.com/eQTL-Catalogue/eQTL-Catalogue-resources/issues/63#issuecomment-6850159973)). So `effectAlleleFrequency` is `ac / (2 × sample_size)` on chromosomes 1 to 22, and null on chrX, as datasets count the chrX alleles differently (Alasoo_2018 counts each male once). `sample_size` is an upper bound of the samples genotyped at a variant: where genotypes are missing, the frequency is slightly low (by at most 6.2%, 0.055 in absolute terms, in GTEx_v10 adipose). The minor allele frequency `maf` is not used ([opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)).
+- The effect allele is the ALT allele, and `ac` in the credible sets is its count. The credible sets have no total allele count `an`, which the eQTL Catalogue gives as 2 × `sample_size` ([eQTL-Catalogue/eQTL-Catalogue-resources#63](https://github.com/eQTL-Catalogue/eQTL-Catalogue-resources/issues/63#issuecomment-6850159973)). So `effectAlleleFrequency` is `ac / (2 × sample_size)` on chromosomes 1 to 22, and null on chrX, as datasets count the chrX alleles differently (Alasoo_2018 counts each male once). Where genotypes are missing, the frequency is slightly low (by at most 6.2%, 0.055 in absolute terms, in GTEx_v10 adipose). Where the metadata undercounts the genotyped samples, it is too high: the frequency is null where `ac` reaches 2 × `sample_size`. The minor allele frequency `maf` is not used ([opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)).
 - A credible set whose lead has a p-value above 1e-3 (`lead_pvalue_threshold`) is dropped. The v3 run flagged them `Subsignificant p-value` instead.
 
-## Contents of the run 20261117T083511
+## Contents of the run 20261117T103813
 
 | Study type | Studies | Credible sets |
 |---|---:|---:|
@@ -68,7 +68,8 @@ The step, gentropy `eqtl_catalogue` ([`eqtl_catalogue.py`](https://github.com/op
 - 4,401,954 credible sets is the number of v3 credible sets with a lead p-value of at most 1e-3. 38 credible sets in each direction cross the threshold, because v3 and v4 break ties of the top posterior probability differently.
 - Chromosomes `1` to `22` and `X`. `locusStart` is set for every credible set, and is 1 for 121,931.
 - The posterior probabilities of a credible set sum to 0.95 to 1 for 4,398,811 sets, and to more than 1 for none. 3,143 sets sum to less than 0.95, 2,100 to less than 0.94, mostly in QTS000055 (1,260) and QTS000044 (710), where members with non-ATGC alleles were removed.
-- `effectAlleleFrequency` is set for the 96,931,541 variants on chromosomes 1 to 22 (98.9%), median 0.274, and null for the 1,111,776 on chrX. 76 variants of the 3 `INTERVAL_RNA_WGS` datasets (QTD001003 to QTD001005, `sample_size` 2,892) have a frequency of 1 (10) or above 1 (66, at most 1.0035): their `ac` exceeds 2 × `sample_size` by up to 20 alleles, so the metadata undercounts their samples. PTS does not rescale these 76 variants.
+- `effectAlleleFrequency` is set for 96,931,465 of the 96,931,541 variants on chromosomes 1 to 22, between 0.0048 and 0.99983, median 0.274, and null for the 1,111,776 on chrX. It is null for 76 variants of the 3 `INTERVAL_RNA_WGS` datasets (QTD001003 to QTD001005), whose `ac` reaches 2 × `sample_size`: their metadata `sample_size` is 2,892, while their summary statistics count up to 2,917 samples (`an` up to 5,834, [eQTL-Catalogue/eQTL-Catalogue-resources#65](https://github.com/eQTL-Catalogue/eQTL-Catalogue-resources/issues/65)). The other frequencies of these datasets are about 0.9% too high.
+- Against the run `20261117T083511` (gentropy `v4.0.0-dev.14`), only these 76 frequencies change, from 1 (10) or above 1 (66, at most 1.0035) to null; the study index, the credible sets and every other variant value are the same, but for `logBayesFactor` of 1,815,716 credible sets, which differs by at most 1.2e-12.
 - Against the v4 run `20261105T130431`, the study index, the credible sets and the variants are the same, but for `effectAlleleFrequency` (null there) and `logBayesFactor` of 1,816,777 credible sets, which differs by at most 1e-12.
 - Against the v3 run `20261029T162303`, the 4,401,916 credible sets in both runs have the same members, p-values, `reportedBeta` and `reportedStandardError`; posterior probabilities differ by at most 3e-8. 529,094 of them have a different lead of the same top posterior probability: v4 breaks the tie by variant id.
 - Against the v4 run `20261030T164426`, only the 121,931 credible sets with a negative region start change, `locusStart` (null to 1) and `id`, besides `effectAlleleFrequency`.
@@ -97,7 +98,7 @@ One row per dataset and molecular trait.
 
 ### credible_set
 
-One row per credible set, in the gentropy v4 [`CredibleSet`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/dataset/credible_set.py) schema.
+One row per credible set, in the gentropy v4 [`CredibleSet`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/dataset/credible_set.py) schema.
 
 | Column | Type | Description |
 |---|---|---|
@@ -117,7 +118,7 @@ One row per credible set, in the gentropy v4 [`CredibleSet`](https://github.com/
 
 ### credible_set_variant
 
-One row per member of a credible set, in the gentropy v4 [`CredibleSetVariant`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.14/src/gentropy/dataset/credible_set.py) schema.
+One row per member of a credible set, in the gentropy v4 [`CredibleSetVariant`](https://github.com/opentargets/gentropy/blob/v4.0.0-dev.15/src/gentropy/dataset/credible_set.py) schema.
 
 | Column | Type | Description |
 |---|---|---|
@@ -125,7 +126,7 @@ One row per member of a credible set, in the gentropy v4 [`CredibleSetVariant`](
 | `variantId` | `string` | Member, `<chromosome>_<position>_<ref>_<alt>` on GRCh38. |
 | `pValueMantissa` | `float` | Mantissa of the marginal p-value (p = mantissa × 10^exponent). |
 | `pValueExponent` | `integer` | Exponent of the marginal p-value. |
-| `effectAlleleFrequency` | `float` | Frequency of the ALT (effect) allele, `ac / (2 × sample_size)`, on chromosomes 1 to 22; null on chrX. |
+| `effectAlleleFrequency` | `float` | Frequency of the ALT (effect) allele, `ac / (2 × sample_size)`, on chromosomes 1 to 22; null on chrX, and where `ac` reaches 2 × `sample_size`. |
 | `sampleSize` | `integer` | Null: the source gives no sample size per variant; the dataset `sample_size` is only an upper bound. |
 | `reportedBeta` | `double` | Marginal effect size reported by the study. |
 | `reportedStandardError` | `double` | Standard error of `reportedBeta`. |
@@ -143,7 +144,8 @@ One row per member of a credible set, in the gentropy v4 [`CredibleSetVariant`](
 
 ### 2026-11-17
 
-- feat: rerun r8 on gentropy v4.0.0-dev.14 into `gs://eqtl_catalogue_data/r8/prod/20261117T083511/`, with `effectAlleleFrequency` set to `ac / (2 × sample_size)` on chromosomes 1 to 22 ([opentargets/gentropy#1349](https://github.com/opentargets/gentropy/pull/1349), [opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)), so PTS can rescale the effects. PIS stages this run.
+- feat: rerun r8 on gentropy v4.0.0-dev.14 into `gs://eqtl_catalogue_data/r8/prod/20261117T083511/`, with `effectAlleleFrequency` set to `ac / (2 × sample_size)` on chromosomes 1 to 22 ([opentargets/gentropy#1349](https://github.com/opentargets/gentropy/pull/1349), [opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)), so PTS can rescale the effects.
+- fix: rerun r8 on gentropy v4.0.0-dev.15 into `gs://eqtl_catalogue_data/r8/prod/20261117T103813/`. The run `20261117T083511` gave 76 `INTERVAL_RNA_WGS` variants a frequency of 1 or above, as the metadata undercounts the samples of these datasets ([eQTL-Catalogue/eQTL-Catalogue-resources#65](https://github.com/eQTL-Catalogue/eQTL-Catalogue-resources/issues/65)); the frequency is now null where `ac` reaches 2 × `sample_size` ([opentargets/gentropy#1353](https://github.com/opentargets/gentropy/pull/1353)). PIS stages this run.
 
 ### 2026-11-05
 
