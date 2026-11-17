@@ -44,8 +44,8 @@ GNOMAD_POPULATION = r'^[a-z]+_adj$'
 class VariantEffect(StructModel):
     """`variantEffect[]`."""
 
-    method: Literal['AlphaMissense', 'FoldX', 'GERP', 'GPN-Star', 'LOFTEE', 'SIFT', 'VEP'] = Field(
-        description='Method name used to predict the effect of the variant'
+    method: Literal['AlphaMissense', 'FoldX', 'GERP', 'GPN-Star', 'LOFTEE', 'LossOfFunctionCuration', 'SIFT', 'VEP'] = (
+        Field(description='Method name used to predict the effect of the variant')
     )
     assessment: str | None = Field(min_length=1, description='Textual assessment of the variant effect')
     score: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(description='Score of the variant effect')

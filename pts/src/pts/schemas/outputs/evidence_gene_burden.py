@@ -15,9 +15,9 @@ from pts.schemas.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTO
 class Urls(StructModel):
     """`urls[]`."""
 
-    niceName: Literal['AstraZeneca PheWAS Portal', 'Broad CVDI Human Disease Portal'] = Field(
-        description='Human readable label of the remote reference'
-    )
+    niceName: Literal[
+        'AstraZeneca PheWAS Portal', 'BipEx browser', 'Broad CVDI Human Disease Portal', 'SCHEMA browser'
+    ] = Field(description='Human readable label of the remote reference')
     url: str = Field(min_length=1, description='URL to remote resource')
 
 
@@ -123,6 +123,7 @@ class EvidenceGeneBurden(DatasetModel):
             'EUR',
             'East Asian',
             'European',
+            'Middle Eastern',
             'Pakistani and Bangladeshi',
             'SAS',
             'finnish',
@@ -136,7 +137,7 @@ class EvidenceGeneBurden(DatasetModel):
             'Identifier of the ancestry of the population included in the burden analysis in the HANCESTRO ontology'
         ),
     )
-    literature: list[Annotated[str, Field(pattern=DIGITS)]] = Field(
+    literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description='PubMed identifiers of the publications describing the burden study'
     )
     projectId: str | None = Field(
