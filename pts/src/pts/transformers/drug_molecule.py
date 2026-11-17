@@ -14,6 +14,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
+from pts.schemas.outputs.drug_molecule import DrugMolecule
+from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
@@ -428,3 +430,13 @@ def _join_semantic(items: list[str]) -> str:
     if len(items) == 1:
         return items[0]
     return f'{", ".join(items[:-1])} and {items[-1]}'
+
+
+def drug_molecule_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `drug_molecule` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['output']: DrugMolecule})

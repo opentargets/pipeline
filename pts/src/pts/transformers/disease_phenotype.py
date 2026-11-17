@@ -8,6 +8,8 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
+from pts.schemas.outputs.disease_phenotype import DiseasePhenotype
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
@@ -278,3 +280,13 @@ def disease_phenotype(
     # raise NotImplementedError
     write_dataset(grouped_phenotypes, destination)
     logger.info('transformation complete')
+
+
+def disease_phenotype_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `disease_phenotype` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: DiseasePhenotype})

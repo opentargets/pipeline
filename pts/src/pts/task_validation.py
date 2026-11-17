@@ -1,18 +1,24 @@
-"""The validation phase of every pts task, run by otter after the task has written its outputs.
+"""Explicit validation of what pts tasks write, run by otter in the task's validation phase.
 
-`Transform` and `Pyspark` tasks validate the same way, through `validate_task`:
+Every transformer (and pyspark entry point) that writes a dataset to `output/` defines a validate
+function next to it, named after it with a `_validate` suffix, which states the dataset model of each
+output it writes::
 
-* every destination the task wrote is validated against the dataset model written there
-  (`pts.schemas.dataset.DatasetModel.location`, by default `output/<dataset_name>`), if there is one;
-* then the task module's optional `<name>_check` runs: the place for rules a single dataset's model
-  cannot state, such as rows conserved between a task's inputs and its outputs.
+    from pts.schemas.outputs.evidence_encore import EvidenceEncore
+    from pts.task_validation import validate_outputs
 
-Every failure is collected before raising, so one run reports all of them. A failure fails the task, and
-otter aborts the step.
+    def encore_validate(source: Any, destination: dict[str, str], settings: dict[str, Any], config: Config) -> None:
+        validate_outputs({destination['evidence']: EvidenceEncore})
+
+The same function is where any further rule of the task goes -- one no single model can state, such as
+rows conserved between the task's inputs and outputs -- raising `ValueError` when it is broken.
+
+`validate_task` runs it, and makes validation mandatory: a task writing to `output/` fails if its module
+has no validate function, or if the function does not validate every `output/` destination of the task.
 """
 
-import functools
-from collections.abc import Callable
+import contextvars
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from loguru import logger
@@ -21,46 +27,43 @@ from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError, StorageError, TaskValidationError
 
 from pts.schemas.dataset import DatasetModel
-from pts.schemas.dataset.discovery import datasets_by_location
 from pts.schemas.dataset.validate import format_report, validate_dataset
 from pts.task_paths import DestinationPaths, SourcePaths
 
-#: A task module's `<name>_check`: same arguments as the task, raising `ValueError` when the result is wrong.
-Check = Callable[[SourcePaths, DestinationPaths, dict[str, Any], Config], None]
+#: A module's validate function: the task's paths, settings and config; raises `ValueError` when an output is wrong.
+Validate = Callable[[SourcePaths, DestinationPaths, dict[str, Any], Config], None]
+
+#: The release-relative prefix of the datasets every task must validate.
+OUTPUT_PREFIX = 'output/'
+
+#: The paths `validate_outputs` validated during the current `validate_task`.
+_validated: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar('validated', default=None)
 
 
-@functools.cache
-def _models() -> dict[str, type[DatasetModel]]:
-    return datasets_by_location()
+def validate_outputs(outputs: Mapping[str, type[DatasetModel]]) -> None:
+    """Validate each written dataset against its dataset model.
 
+    Args:
+        outputs: dataset paths, each with the model it must satisfy.
 
-def model_for(path: str, config: Config) -> type[DatasetModel] | None:
-    """The dataset model written at `path`, if any: matched on the path relative to the release root."""
-    try:
-        relative = StorageHandle(path, config).relative
-    except StorageError:
-        return None  # outside the release, so no model can be written there
-    return _models().get(relative.rstrip('/'))
-
-
-def validate_outputs(destination: DestinationPaths, config: Config) -> list[str]:
-    """Validate every destination a dataset model is written at; the broken rules, one entry per dataset."""
-    paths = list(destination.values()) if isinstance(destination, dict) else [destination]
+    Raises:
+        ValueError: listing every dataset that was not written or breaks its model.
+    """
     errors = []
-    for path in paths:
-        model = model_for(path, config)
-        if model is None:
-            logger.debug(f'no dataset model is written at {path}; not validated')
-            continue
+    for path, model in outputs.items():
+        recorded = _validated.get()
+        if recorded is not None:
+            recorded.append(path)
         try:
-            StorageHandle(path, config).stat()
+            StorageHandle(path).stat()
         except NotFoundError:
-            errors.append(f'{path} was not written, but the model {model.__name__} is written there')
+            errors.append(f'{path} was not written, but must satisfy the model {model.__name__}')
             continue
         report = validate_dataset(path, model)
         if not report.is_empty():
             errors.append(f'{path} breaks its model {model.__name__}:\n{format_report(report)}')
-    return errors
+    if errors:
+        raise ValueError('\n'.join(errors))
 
 
 def validate_task(
@@ -68,18 +71,57 @@ def validate_task(
     destination: DestinationPaths,
     settings: dict[str, Any],
     config: Config,
-    check: Check | None,
+    validate: Validate | None,
+    validate_name: str,
 ) -> None:
-    """Validate a task's outputs against their models, then run its module's check.
+    """Run a task's validate function, and require it to validate every `output/` destination of the task.
+
+    Args:
+        source: the task's resolved source paths.
+        destination: the task's resolved destination paths.
+        settings: the task's settings.
+        config: the otter config of the run.
+        validate: the module's validate function, if it has one.
+        validate_name: the name the validate function has, or would have, for the error messages.
 
     Raises:
-        TaskValidationError: listing every broken model rule and the check's failure, if any.
+        TaskValidationError: listing the function's failure and every `output/` destination it left unvalidated.
     """
-    errors = validate_outputs(destination, config)
-    if check is not None:
-        try:
-            check(source, destination, settings, config)
-        except ValueError as error:
-            errors.append(str(error))
+    required = _outputs(destination, config)
+    if validate is None:
+        if required:
+            raise TaskValidationError(
+                f'the task writes {sorted(required)}, but its module defines no {validate_name}() to validate them'
+            )
+        return
+
+    errors = []
+    token = _validated.set([])
+    try:
+        validate(source, destination, settings, config)
+    except ValueError as error:
+        errors.append(str(error))
+    finally:
+        validated = {path.rstrip('/') for path in _validated.get() or []}
+        _validated.reset(token)
+
+    unvalidated = sorted(required - validated)
+    if unvalidated:
+        errors.append(f'{validate_name}() did not validate {unvalidated}: every output/ dataset must be validated')
     if errors:
         raise TaskValidationError('\n'.join(errors))
+    logger.info(f'{validate_name}() validated {sorted(validated)}')
+
+
+def _outputs(destination: DestinationPaths, config: Config) -> set[str]:
+    """The destinations under `output/` of the release: the ones a task must validate."""
+    paths = list(destination.values()) if isinstance(destination, dict) else [destination]
+    outputs = set()
+    for path in paths:
+        try:
+            relative = StorageHandle(path, config).relative
+        except StorageError:
+            continue  # outside the release
+        if relative.startswith(OUTPUT_PREFIX):
+            outputs.add(path.rstrip('/'))
+    return outputs

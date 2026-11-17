@@ -297,6 +297,6 @@ def test_every_credible_set_task_runs_an_entry_point_the_package_exports() -> No
         for spec in [task, *task.get('do', [])]
         if spec.get('transformer', '').startswith('credible_set.')
     }
-    assert names == {f'credible_set.{name}' for name in credible_set.__all__} - {'credible_set.validation_check'}
+    assert names == {f'credible_set.{name}' for name in credible_set.__all__} - {'credible_set.validation_validate'}
     for name in names:
         assert Transform.load_transformer(name) is getattr(credible_set, name.removeprefix('credible_set.'))

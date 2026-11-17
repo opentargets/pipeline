@@ -13,6 +13,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.drug_mechanism_of_action import DrugMechanismOfAction
+from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action_candidates import (
     LABEL_COLUMNS,
@@ -583,3 +585,13 @@ def _consolidate_duplicate_references(df: pl.DataFrame) -> pl.DataFrame:
         )
         .select(output_cols)
     )
+
+
+def drug_mechanism_of_action_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `drug_mechanism_of_action` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['output']: DrugMechanismOfAction})

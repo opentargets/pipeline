@@ -12,6 +12,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.evidence_crispr_screen import EvidenceCrisprScreen
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -218,3 +220,13 @@ def crispr_screens(
         literature=source['literature'],
         destination=destination,
     )
+
+
+def crispr_screens_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_crispr_screen` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceCrisprScreen})

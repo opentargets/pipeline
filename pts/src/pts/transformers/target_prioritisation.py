@@ -14,6 +14,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.target_prioritisation import TargetPrioritisation
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 ONCOTSG = ['TSG', 'oncogene', 'Oncogene', 'oncogene,TSG', 'TSG,oncogene', 'fusion,oncogene', 'oncogene,fusion']
@@ -736,3 +738,13 @@ def target_prioritisation(
 
     logger.info(f'writing {result.height} targets to {destination}')
     write_dataset(result, destination)
+
+
+def target_prioritisation_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `target_prioritisation` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: TargetPrioritisation})

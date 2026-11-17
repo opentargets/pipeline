@@ -13,6 +13,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.target import Target
+from pts.task_validation import validate_outputs
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
 from pts.transformers.target.assemble import assemble
 from pts.transformers.target.ensembl import build_ensembl
@@ -90,3 +92,13 @@ def target(
     )
     logger.info(f'writing {result.height} targets to {destination}')
     write_dataset(result, destination)
+
+
+def target_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `target` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: Target})

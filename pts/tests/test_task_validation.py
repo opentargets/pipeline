@@ -1,9 +1,9 @@
-"""The validation phase every pts task shares: outputs against their dataset models, then the module's check."""
+"""Explicit task validation: a module's validate function names each output's model, and must cover every output."""
 
+import re
 from inspect import unwrap
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
 from unittest.mock import Mock
 
 import polars as pl
@@ -11,22 +11,11 @@ import pytest
 from otter.config.model import Config
 from otter.util.errors import TaskValidationError
 
-from pts import task_validation
-from pts.schemas.dataset import DatasetModel, to_polars_schema
-from pts.schemas.dataset.discovery import datasets_by_location
+from pts.pyspark.association import association_validate
+from pts.schemas.dataset import to_polars_schema
 from pts.schemas.outputs.biosample import Biosample
-from pts.task_validation import model_for, validate_outputs, validate_task
+from pts.task_validation import validate_outputs, validate_task
 from pts.tasks.pyspark import Pyspark, PysparkSpec
-
-
-class _Intermediate(DatasetModel):
-    dataset_name: ClassVar[str] = '_intermediate'
-    dataset_title: ClassVar[str] = 'intermediate'
-    dataset_description: ClassVar[str] = 'a dataset validated where it is written, under intermediate/'
-    dataset_path: ClassVar[str] = 'intermediate/validated/_intermediate'
-    example: ClassVar[dict] = {'id': 'a'}
-
-    id: str
 
 
 @pytest.fixture
@@ -40,103 +29,81 @@ def _write_biosample(path: Path, rows: int = 1) -> str:
     return str(path)
 
 
-def test_a_model_is_found_by_where_it_is_written(tmp_path: Path, config: Config) -> None:
-    assert model_for(str(tmp_path / 'output/biosample'), config) is Biosample
-    assert model_for(f'{tmp_path}/output/biosample/', config) is Biosample
+def test_a_valid_output_passes(tmp_path: Path) -> None:
+    validate_outputs({_write_biosample(tmp_path / 'output/biosample'): Biosample})
 
 
-@pytest.mark.parametrize('path', ['excluded/biosample', 'intermediate/biosample', 'output/no_such_dataset'])
-def test_a_path_no_model_is_written_at_has_none(tmp_path: Path, config: Config, path: str) -> None:
-    assert model_for(str(tmp_path / path), config) is None
+def test_an_output_breaking_its_model_is_reported(tmp_path: Path) -> None:
+    path = _write_biosample(tmp_path / 'output/biosample', rows=2)
+
+    with pytest.raises(ValueError, match=r'breaks its model Biosample:\n.*unique primary key'):
+        validate_outputs({path: Biosample})
 
 
-def test_a_path_outside_the_release_has_no_model(config: Config) -> None:
-    assert model_for('/elsewhere/output/biosample', config) is None
+def test_an_output_that_was_not_written_is_reported(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match='was not written'):
+        validate_outputs({str(tmp_path / 'output/biosample'): Biosample})
 
 
-def test_a_model_can_be_written_outside_output(tmp_path: Path, config: Config, monkeypatch) -> None:
-    """An intermediate dataset is validated by setting `dataset_path`; nothing else changes."""
-    monkeypatch.setattr(task_validation, '_models', lambda: {_Intermediate.location(): _Intermediate})
-
-    assert _Intermediate.location() == 'intermediate/validated/_intermediate'
-    assert model_for(str(tmp_path / 'intermediate/validated/_intermediate'), config) is _Intermediate
+def _validates(outputs: dict[str, type]) -> Mock:
+    """A module validate function validating `outputs`."""
+    return Mock(side_effect=lambda *_: validate_outputs(outputs))
 
 
-def test_every_model_is_written_at_output_by_default() -> None:
-    assert Biosample.location() == 'output/biosample'
-    assert all(location.startswith('output/') for location in datasets_by_location())
+def test_a_validate_function_covering_every_output_passes(tmp_path: Path, config: Config) -> None:
+    output = _write_biosample(tmp_path / 'output/biosample')
+    destination = {'output': output, 'excluded': str(tmp_path / 'excluded/biosample')}
+    validate = _validates({output: Biosample})
+
+    validate_task('input/x', destination, {'a': 1}, config, validate, 'biosample_validate')
+
+    validate.assert_called_once_with('input/x', destination, {'a': 1}, config)
 
 
-def test_two_models_at_one_location_are_refused(monkeypatch) -> None:
-    class _Twin(_Intermediate):
-        dataset_name: ClassVar[str] = '_twin'
+def test_a_task_writing_output_without_a_validate_function_fails(tmp_path: Path, config: Config) -> None:
+    output = _write_biosample(tmp_path / 'output/biosample')
 
-    monkeypatch.setattr(
-        'pts.schemas.dataset.discovery.discover_datasets', lambda package: {'a': _Intermediate, 'b': _Twin}
-    )
-    with pytest.raises(ValueError, match='is the location of two models'):
-        datasets_by_location()
+    with pytest.raises(TaskValidationError, match=r'defines no biosample_validate\(\)'):
+        validate_task('input/x', output, {}, config, None, 'biosample_validate')
 
 
-def test_a_valid_output_passes(tmp_path: Path, config: Config) -> None:
-    destination = {'output': _write_biosample(tmp_path / 'output/biosample')}
-
-    assert validate_outputs(destination, config) == []
+def test_a_task_writing_no_output_needs_no_validate_function(tmp_path: Path, config: Config) -> None:
+    validate_task('input/x', str(tmp_path / 'intermediate/x'), {}, config, None, 'x_validate')
 
 
-def test_an_output_breaking_its_model_is_reported(tmp_path: Path, config: Config) -> None:
-    destination = _write_biosample(tmp_path / 'output/biosample', rows=2)
+def test_an_output_the_validate_function_leaves_out_fails_the_task(tmp_path: Path, config: Config) -> None:
+    validated = _write_biosample(tmp_path / 'output/biosample')
+    forgotten = _write_biosample(tmp_path / 'output/other')
 
-    (error,) = validate_outputs(destination, config)
-    assert 'breaks its model Biosample' in error
-    assert 'unique primary key' in error
-
-
-def test_an_output_that_was_not_written_is_reported(tmp_path: Path, config: Config) -> None:
-    (error,) = validate_outputs(str(tmp_path / 'output/biosample'), config)
-    assert 'was not written' in error
+    with pytest.raises(TaskValidationError, match=f'did not validate .*{re.escape(forgotten)}'):
+        validate_task('input/x', {'a': validated, 'b': forgotten}, {}, config, _validates({validated: Biosample}), 'v')
 
 
-def test_destinations_without_a_model_are_not_validated(tmp_path: Path, config: Config) -> None:
-    excluded = tmp_path / 'excluded/biosample'
-    excluded.mkdir(parents=True)
-    (excluded / 'part.parquet').write_text('not parquet at all')
+def test_further_rules_are_reported_with_the_model_failures(tmp_path: Path, config: Config) -> None:
+    output = _write_biosample(tmp_path / 'output/biosample', rows=2)
 
-    assert validate_outputs({'excluded': str(excluded), 'other': str(tmp_path / 'intermediate/x')}, config) == []
-
-
-def test_the_check_runs_with_the_paths_of_the_task(tmp_path: Path, config: Config) -> None:
-    check = Mock()
-    destination = {'output': _write_biosample(tmp_path / 'output/biosample')}
-
-    validate_task('input/x', destination, {'a': 1}, config, check)
-
-    check.assert_called_once_with('input/x', destination, {'a': 1}, config)
-
-
-def test_model_and_check_failures_are_reported_together(tmp_path: Path, config: Config) -> None:
-    destination = _write_biosample(tmp_path / 'output/biosample', rows=2)
-    check = Mock(side_effect=ValueError('3 input rows != 2 written rows'))
+    def validate(*_) -> None:
+        try:
+            validate_outputs({output: Biosample})
+        finally:
+            raise ValueError('3 input rows != 2 written rows')
 
     with pytest.raises(TaskValidationError) as raised:
-        validate_task('input/x', destination, {}, config, check)
-    assert 'unique primary key' in str(raised.value)
+        validate_task('input/x', output, {}, config, validate, 'v')
     assert '3 input rows != 2 written rows' in str(raised.value)
+    assert 'did not validate' not in str(raised.value)
 
 
-def test_a_task_without_a_check_or_a_model_is_valid(tmp_path: Path, config: Config) -> None:
-    validate_task('input/x', str(tmp_path / 'intermediate/x'), {}, config, None)
+def test_a_pyspark_entry_point_has_its_validate_function_loaded() -> None:
+    assert Pyspark.load_validate('association') is association_validate
+    assert Pyspark.load_validate('literature_publication_match') is None
 
 
-def test_a_pyspark_entry_point_without_a_check_has_none() -> None:
-    assert Pyspark.load_check('association') is None
-
-
-def test_pyspark_validate_hands_the_paths_of_the_run_and_the_check_to_validate_task(monkeypatch) -> None:
+def test_pyspark_validate_hands_the_paths_of_the_run_and_the_function_to_validate_task(monkeypatch) -> None:
     """The validation phase is the same as a transform task's."""
-    check, validate_task_mock = Mock(), Mock()
+    validate, validate_task_mock = Mock(), Mock()
     monkeypatch.setattr(Pyspark, 'load_pyspark', staticmethod(lambda _: Mock()))
-    monkeypatch.setattr(Pyspark, 'load_check', staticmethod(lambda _: check))
+    monkeypatch.setattr(Pyspark, 'load_validate', staticmethod(lambda _: validate))
     monkeypatch.setattr('pts.tasks.pyspark.validate_task', validate_task_mock)
     spec = PysparkSpec(
         name='pyspark test', pyspark='association', source='input/x', destination='output/x', settings={'a': 1}
@@ -145,4 +112,6 @@ def test_pyspark_validate_hands_the_paths_of_the_run_and_the_check_to_validate_t
     task.srcs, task.dsts = '/work/input/x', '/work/output/x'
 
     assert unwrap(Pyspark.validate)(task) is task
-    validate_task_mock.assert_called_once_with('/work/input/x', '/work/output/x', {'a': 1}, task.context.config, check)
+    validate_task_mock.assert_called_once_with(
+        '/work/input/x', '/work/output/x', {'a': 1}, task.context.config, validate, 'association_validate'
+    )

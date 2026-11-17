@@ -16,6 +16,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.baseline_expression import BaselineExpression
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import QC_COLUMN, flag_rows
 from pts.transformers.utils.spark_csv import read_spark_csv
@@ -360,3 +362,13 @@ def baseline_expression(
     failed = flagged.filter(pl.col(QC_COLUMN).list.len() != 0)
     logger.info(f'writing {destination["valid"]} and {destination["failed"]}')
     pl.collect_all([sink_dataset(valid, destination['valid']), sink_dataset(failed, destination['failed'])])
+
+
+def baseline_expression_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `baseline_expression` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['valid']: BaselineExpression})

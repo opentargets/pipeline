@@ -15,6 +15,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.orphanet import ORPHANET_SCHEMA
+from pts.schemas.outputs.evidence_orphanet import EvidenceOrphanet
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -198,3 +200,13 @@ def orphanet(
         .hash_long_variant_identifiers()
     )
     write_evidence(evidence, destination)
+
+
+def orphanet_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_orphanet` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceOrphanet})

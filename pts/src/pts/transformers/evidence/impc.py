@@ -15,6 +15,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
+from pts.schemas.outputs.evidence_impc import EvidenceImpc
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -223,3 +225,13 @@ def impc(
         .hash_long_variant_identifiers()
     )
     write_evidence(evidence, destination)
+
+
+def impc_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_impc` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceImpc})

@@ -3,6 +3,7 @@
 from typing import Any
 
 from loguru import logger
+from otter.config.model import Config
 from pyspark.storagelevel import StorageLevel
 
 from pts.pyspark.associations_utils.association import Association
@@ -10,6 +11,13 @@ from pts.pyspark.associations_utils.evidence import Evidence
 from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import polars_schema_to_spark
 from pts.schemas.evidence import evidence_schema
+from pts.schemas.outputs.association_by_datasource_direct import AssociationByDatasourceDirect
+from pts.schemas.outputs.association_by_datasource_indirect import AssociationByDatasourceIndirect
+from pts.schemas.outputs.association_by_datatype_direct import AssociationByDatatypeDirect
+from pts.schemas.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
+from pts.schemas.outputs.association_overall_direct import AssociationOverallDirect
+from pts.schemas.outputs.association_overall_indirect import AssociationOverallIndirect
+from pts.task_validation import validate_outputs
 
 
 def association(
@@ -142,3 +150,20 @@ def association(
 
     # Free the cache.
     indirect_intermediate.unpersist()
+
+
+def association_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate every written output against its dataset model, in the task's validation phase."""
+    validate_outputs({
+        destination['overall_direct']: AssociationOverallDirect,
+        destination['overall_indirect']: AssociationOverallIndirect,
+        destination['by_datasource_direct']: AssociationByDatasourceDirect,
+        destination['by_datasource_indirect']: AssociationByDatasourceIndirect,
+        destination['by_datatype_direct']: AssociationByDatatypeDirect,
+        destination['by_datatype_indirect']: AssociationByDatatypeIndirect,
+    })

@@ -9,8 +9,8 @@ from otter.config.model import Config
 from pydantic import ValidationError
 
 from pts.tasks.transform import Transform, TransformSpec
-from pts.transformers.credible_set.validation import validation_check
-from pts.transformers.evidence.encore import encore
+from pts.transformers.credible_set.validation import validation_validate
+from pts.transformers.evidence.encore import encore, encore_validate
 from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
 
@@ -80,19 +80,20 @@ def test_raises_for_an_unknown_transformer() -> None:
         Transform.load_transformer('does_not_exist')
 
 
-def test_loads_the_check_next_to_the_transformer() -> None:
-    assert Transform.load_check('credible_set.validation') is validation_check
+def test_loads_the_validate_function_next_to_the_transformer() -> None:
+    assert Transform.load_validate('credible_set.validation') is validation_validate
+    assert Transform.load_validate('evidence.encore') is encore_validate
 
 
-def test_a_transformer_without_a_check_has_none() -> None:
-    assert Transform.load_check('reactome') is None
+def test_a_transformer_writing_no_output_may_have_no_validate_function() -> None:
+    assert Transform.load_validate('foldx') is None
 
 
-def test_validate_hands_the_paths_of_the_run_and_the_check_to_validate_task(monkeypatch) -> None:
+def test_validate_hands_the_paths_of_the_run_and_the_function_to_validate_task(monkeypatch) -> None:
     """The validation phase is `validate_task`'s, as for a pyspark task (see `test_task_validation`)."""
-    check, validate_task = Mock(), Mock()
+    validate, validate_task = Mock(), Mock()
     monkeypatch.setattr(Transform, 'load_transformer', staticmethod(lambda _: Mock()))
-    monkeypatch.setattr(Transform, 'load_check', staticmethod(lambda _: check))
+    monkeypatch.setattr(Transform, 'load_validate', staticmethod(lambda _: validate))
     monkeypatch.setattr('pts.tasks.transform.validate_task', validate_task)
     spec = TransformSpec(
         name='transform test', transformer='study', source='input/study', destination='output/study', settings={'a': 1}
@@ -102,5 +103,5 @@ def test_validate_hands_the_paths_of_the_run_and_the_check_to_validate_task(monk
 
     assert unwrap(Transform.validate)(task) is task
     validate_task.assert_called_once_with(
-        '/work/input/study', '/work/output/study', {'a': 1}, task.context.config, check
+        '/work/input/study', '/work/output/study', {'a': 1}, task.context.config, validate, 'study_validate'
     )

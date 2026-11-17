@@ -6,6 +6,8 @@ from typing import Any
 
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_eva_somatic import EvidenceEvaSomatic
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.clinvar import EVA, run_eva
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 
@@ -27,3 +29,13 @@ def clinvar_somatic(
         config: unused.
     """
     run_eva(source, destination, EVA_SOMATIC)
+
+
+def clinvar_somatic_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_eva_somatic` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceEvaSomatic})

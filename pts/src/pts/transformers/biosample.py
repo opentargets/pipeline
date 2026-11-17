@@ -35,6 +35,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node
+from pts.schemas.outputs.biosample import Biosample
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import write_dataset
 
 #: Edge predicates gentropy treats as parent-of relations for biosample (`utils.py`'s `df_parents`
@@ -211,3 +213,13 @@ def _merge_indices(indices: list[pl.DataFrame]) -> pl.DataFrame:
             ),
         )
     )
+
+
+def biosample_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `biosample` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: Biosample})

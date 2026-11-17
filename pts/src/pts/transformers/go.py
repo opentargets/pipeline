@@ -10,6 +10,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
+from pts.schemas.outputs.go import Go
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -129,3 +131,13 @@ def go(
 
     logger.info('writing dataframe')
     write_dataset(df, destination)
+
+
+def go_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `go` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: Go})

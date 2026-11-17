@@ -14,7 +14,7 @@ DAG = yaml.safe_load(DAG_CONFIG.read_text())['steps']
 
 def test_the_pts_step_reads_colocalisation_and_writes_nothing() -> None:
     (task,) = PTS['colocalisation_validation']
-    assert task['transformer'] == 'schema_validation'
+    assert task['transformer'] == 'colocalisation_validation'
     assert task['source'] == {'colocalisation': 'output/colocalisation'}
     assert task['destination'] == {}
 

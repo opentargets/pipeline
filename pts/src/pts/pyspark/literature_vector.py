@@ -10,12 +10,15 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from otter.config.model import Config
 from pyspark.ml.feature import Word2VecModel
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
+from pts.schemas.outputs.literature_vector import LiteratureVector
+from pts.task_validation import validate_outputs
 
 _OUTPUT_COLUMNS = ['category', 'word', 'norm', 'vector']
 
@@ -64,3 +67,13 @@ def literature_vector(
     dest = destination['vectors'] if isinstance(destination, dict) else destination
     logger.info(f'Writing vector index to {dest}')
     result.write.mode('overwrite').parquet(dest)
+
+
+def literature_vector_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `literature_vector` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['vectors']: LiteratureVector})

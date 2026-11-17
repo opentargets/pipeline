@@ -6,6 +6,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
+from pts.schemas.outputs.so import So
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -42,3 +44,13 @@ def so(
     # write the result locally
     write_dataset(output, destination)
     logger.info('transformation complete')
+
+
+def so_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `so` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: So})

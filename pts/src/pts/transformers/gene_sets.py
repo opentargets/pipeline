@@ -15,6 +15,8 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.gene_sets import gene_sets_schema
+from pts.schemas.outputs.gene_sets import GeneSets
+from pts.task_validation import validate_outputs
 from pts.transformers.target import chembl_class
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.lists import collect_set, explode
@@ -154,3 +156,13 @@ def gene_sets(
 
     logger.info(f'writing {result.height} gene sets to {destination}')
     write_dataset(result, destination)
+
+
+def gene_sets_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `gene_sets` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: GeneSets})

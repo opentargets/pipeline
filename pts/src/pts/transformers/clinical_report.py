@@ -8,6 +8,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
+from pts.task_validation import validate_outputs
 from pts.transformers.clinical_mira import (
     ClinicalProvider,
     ClinicalReport,
@@ -718,3 +720,13 @@ def flag_safety_reports(reports: ClinicalReport) -> ClinicalReport:
     return ClinicalReport(
         df=flag_rows(reports.df, pl.col('type').eq(ClinicalReportType.SAFETY.value), ClinicalReportFlags.SAFETY_REPORT)
     )
+
+
+def clinical_report_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `clinical_report` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['output']: ClinicalReportOutput})

@@ -16,6 +16,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
+from pts.schemas.outputs.mouse_phenotype import MousePhenotype
+from pts.task_validation import validate_outputs
 from pts.transformers.impc_common import (
     MODEL_ID,
     biological_model_id,
@@ -201,3 +203,13 @@ def mouse_phenotype(
     logger.info(f'{output.height} mouse phenotypes, {excluded.height} excluded')
     write_dataset(output, destination['output'])
     write_dataset(excluded, destination['excluded'])
+
+
+def mouse_phenotype_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `mouse_phenotype` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['output']: MousePhenotype})

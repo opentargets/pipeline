@@ -25,8 +25,8 @@ def test_destination_rejects_lists():
 def test_run_resolves_source_lists_and_flattens_artifacts(tmp_path, monkeypatch):
     job = Mock()
     monkeypatch.setattr(Pyspark, 'load_pyspark', staticmethod(lambda _: job))
-    # `variant` is a placeholder entry point: neither the job nor its check is loaded from pts.pyspark
-    monkeypatch.setattr(Pyspark, 'load_check', staticmethod(lambda _: None))
+    # `variant` is a placeholder entry point: neither the job nor its validate function is loaded from pts.pyspark
+    monkeypatch.setattr(Pyspark, 'load_validate', staticmethod(lambda _: None))
     spec = PysparkSpec(
         name='pyspark test',
         pyspark='variant',

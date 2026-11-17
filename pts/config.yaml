@@ -249,8 +249,8 @@ steps:
   # gentropy writes colocalisation, so no pts task validates it as it writes it: this step reads it and
   # validates it against its model, failing on any violation. It writes nothing.
   colocalisation_validation:
-    - name: transform schema_validation colocalisation
-      transformer: schema_validation
+    - name: transform colocalisation_validation
+      transformer: colocalisation_validation
       source:
         colocalisation: output/colocalisation
       destination: {}

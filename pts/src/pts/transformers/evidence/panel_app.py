@@ -15,7 +15,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_genomics_england import EvidenceGenomicsEngland
 from pts.schemas.panel_app import PANEL_APP_INPUT_SCHEMA, PANELS_SCHEMA
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
@@ -277,3 +279,13 @@ def panel_app(
         destination=destination,
         literature=source['literature'],
     )
+
+
+def panel_app_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_genomics_england` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceGenomicsEngland})

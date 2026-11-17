@@ -15,6 +15,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_ot_crispr import EvidenceOtCrispr
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence
 from pts.transformers.utils.dataset import scan_dataset
@@ -331,3 +333,13 @@ def ot_crispr(
         target=source['target'],
         destination=destination,
     )
+
+
+def ot_crispr_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `evidence_ot_crispr` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['evidence']: EvidenceOtCrispr})

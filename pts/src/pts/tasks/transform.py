@@ -21,7 +21,7 @@ transformer_type = Callable[
     [SourcePaths, DestinationPaths, dict[str, Any] | None, Config | None],
     None,
 ]
-check_type = transformer_type
+validate_type = transformer_type
 
 
 class TransformSpec(Spec):
@@ -42,12 +42,13 @@ class TransformSpec(Spec):
         The function should read the data from the source path, transform it,
         and write the result to the destination path. Both paths will be local.
 
-        In the validation phase of the task, every destination a dataset model is
-        written at is validated against it (see `pts.task_validation`). The module
-        may also hold a check of what a model cannot state, named after the
-        transformer with a `_check` suffix (`validation_check` for `validation`).
-        It takes the same four arguments, runs after the model validation, and
-        raises `ValueError` when the result is wrong.
+        The module also holds the transformer's validate function, named after it
+        with a `_validate` suffix (`encore_validate` for `evidence.encore`). It takes
+        the same four arguments and runs in the validation phase of the task: it
+        validates each output against its dataset model (`validate_outputs`), and
+        checks any further rule, raising `ValueError` when the result is wrong. A
+        task writing to `output/` must have one, and it must validate every
+        `output/` destination (see `pts.task_validation`).
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -68,7 +69,7 @@ class Transform(Task):
         super().__init__(spec, context)
         self.spec: TransformSpec
         self.transformer = self.load_transformer(spec.transformer)
-        self.check = self.load_check(spec.transformer)
+        self.validate_function = self.load_validate(spec.transformer)
 
     def _prepare_dirs(self, paths: DestinationPaths) -> None:
         if isinstance(paths, dict):
@@ -92,10 +93,10 @@ class Transform(Task):
             raise ModuleNotFoundError(f'{transformer_name} not found in {TRANSFORMER_PACKAGE}')
 
     @staticmethod
-    def load_check(transformer_name: str) -> check_type | None:
-        """The `<transformer>_check` function of the transformer's module, if it has one."""
+    def load_validate(transformer_name: str) -> validate_type | None:
+        """The `<transformer>_validate` function of the transformer's module, if it has one."""
         module = import_module(f'{TRANSFORMER_PACKAGE}.{transformer_name}')
-        return getattr(module, f'{transformer_name.rsplit(".", 1)[-1]}_check', None)
+        return getattr(module, validate_name(transformer_name), None)
 
     @report
     def run(self) -> Self:
@@ -123,6 +124,18 @@ class Transform(Task):
 
     @report
     def validate(self) -> Self:
-        """Validate the outputs against their dataset models, then run the transformer's check (`validate_task`)."""
-        validate_task(self.srcs, self.dsts, self.spec.settings or {}, self.context.config, self.check)
+        """Run the transformer's validate function, which must validate every `output/` destination."""
+        validate_task(
+            self.srcs,
+            self.dsts,
+            self.spec.settings or {},
+            self.context.config,
+            self.validate_function,
+            validate_name(self.spec.transformer),
+        )
         return self
+
+
+def validate_name(transformer_name: str) -> str:
+    """The name of a transformer's validate function: `encore_validate` for `evidence.encore`."""
+    return f'{transformer_name.rsplit(".", 1)[-1]}_validate'

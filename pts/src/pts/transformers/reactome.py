@@ -15,7 +15,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.reactome import Reactome
 from pts.schemas.reactome import reactome_schema
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HUMAN = 'Homo sapiens'
@@ -128,3 +130,13 @@ def reactome(
 
     logger.info(f'Writing Reactome output to {destination}')
     write_dataset(result, destination)
+
+
+def reactome_validate(
+    source: Any,
+    destination: str,
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `reactome` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination: Reactome})

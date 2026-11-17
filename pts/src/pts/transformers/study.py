@@ -8,7 +8,9 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pts.schemas.outputs.study import Study
 from pts.schemas.study import StudyType, study_schema
+from pts.task_validation import validate_outputs
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -362,3 +364,13 @@ def study(
         sink_dataset(result.valid, destinations.output),
         sink_dataset(result.invalid, destinations.excluded),
     ])
+
+
+def study_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `study` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['output']: Study})

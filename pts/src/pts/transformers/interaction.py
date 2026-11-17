@@ -18,6 +18,9 @@ import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.interaction import Interaction
+from pts.schemas.outputs.interaction_evidence import InteractionEvidence
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SWAP = {
@@ -571,3 +574,16 @@ def interaction(
     write_dataset(evidences, destination['interactions_evidence'])
     logger.info(f'writing {unmatched_ids.height} unmatched interactors to {destination["interactions_unmatched"]}')
     write_dataset(unmatched_ids, destination['interactions_unmatched'])
+
+
+def interaction_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate every written output against its dataset model, in the task's validation phase."""
+    validate_outputs({
+        destination['interactions']: Interaction,
+        destination['interactions_evidence']: InteractionEvidence,
+    })

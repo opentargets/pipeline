@@ -28,6 +28,8 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.chembl_bioactivity import chembl_bioactivity_schema
+from pts.schemas.outputs.chembl_bioactivity import ChemblBioactivity
+from pts.task_validation import validate_outputs
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import chembl_accession_lookup
 
@@ -457,3 +459,13 @@ def _shape(rows: pl.DataFrame) -> pl.DataFrame:
         .cast(chembl_bioactivity_schema)
         .sort('activityId', 'targetId')
     )
+
+
+def chembl_bioactivity_validate(
+    source: Any,
+    destination: dict[str, str],
+    settings: dict[str, Any],
+    config: Config,
+) -> None:
+    """Validate the written `chembl_bioactivity` against its dataset model, in the task's validation phase."""
+    validate_outputs({destination['bioactivity']: ChemblBioactivity})
