@@ -11,7 +11,7 @@ gs://eqtl_catalogue_data/r8/prod/20261117T103813/output/credible_set/
 gs://eqtl_catalogue_data/r8/prod/20261117T103813/output/credible_set_variant/
 ```
 
-`r8/prod/20261117T103813/` is the DAG output, unpatched. It replaces the v4 run `r8/prod/20261105T130431/`, described in the README of earlier commits, whose credible set variants had no `effectAlleleFrequency`, so PTS could not rescale their effects ([opentargets/issues#4683](https://github.com/opentargets/issues/issues/4683)). Apart from that frequency, the two runs hold the same data. The run `r8/prod/20261117T083511/`, on gentropy `v4.0.0-dev.14`, is superseded: 76 of its frequencies were 1 or above (see below).
+`r8/prod/20261117T103813/` is the DAG output, unpatched.
 
 The run is in the gentropy v4 schema: credible sets (`credible_set`) and their variants (`credible_set_variant`). PIS stages it for PTS (`staging_eqtl_catalogue_ts` in `pis/config.yaml`).
 
