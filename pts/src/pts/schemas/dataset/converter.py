@@ -90,8 +90,7 @@ def node_conditions(node: Node, value: pl.Expr, path: str) -> list[tuple[str, pl
         nested = _nullability(child.node, child_value, child_path) + node_conditions(
             child.node, child_value, child_path
         )
-        # `is_null() | passes`, not `when(is_null()).then(True).otherwise(passes)`: identical under Kleene logic,
-        # but the `when` form panics in polars on a multi-chunk frame once `passes` holds a `list.eval`
+        # not `when/then`: it panics on a multi-chunk frame once `passes` holds a `list.eval`
         conditions += [(rule, value.is_null() | passes) for rule, passes in nested]
 
     return conditions
