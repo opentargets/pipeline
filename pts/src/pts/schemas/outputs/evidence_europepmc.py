@@ -18,7 +18,7 @@ class TextMiningSentences(StructModel):
     dEnd: int = Field(ge=0, description='End position of the disease label in sentence')
     dStart: int = Field(ge=0, description='Start position of the disease label in the sentence')
     section: Literal[
-        'abstract', 'appendix', 'case', 'concl', 'discuss', 'intro', 'other', 'results', 'table', 'title'
+        'abstract', 'appendix', 'case', 'concl', 'discuss', 'figure', 'intro', 'other', 'results', 'table', 'title'
     ] = Field(description='Section of the publication the sentence was extracted from')
     tEnd: int = Field(ge=0, description='End position of the target label in the sentence')
     tStart: int = Field(ge=0, description='Start position of the target label in the sentence')

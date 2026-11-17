@@ -54,10 +54,10 @@ class EvidenceGene2phenotype(DatasetModel):
     studyId: str = Field(
         min_length=1, description=("Gene2Phenotype panel(s) the gene-disease pair belongs to (e.g. 'DD; Eye')")
     )
-    confidence: Literal['definitive', 'limited', 'moderate', 'strong'] = Field(
+    confidence: Literal['both RD and IF', 'definitive', 'limited', 'moderate', 'strong'] = Field(
         description=(
             'Gene2Phenotype confidence category of the gene-disease pair '
-            "('definitive', 'strong', 'moderate', 'limited')"
+            "('definitive', 'both RD and IF', 'strong', 'moderate', 'limited')"
         )
     )
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] = Field(
