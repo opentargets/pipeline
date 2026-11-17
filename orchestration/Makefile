@@ -88,6 +88,7 @@ build-dag-svgs: ## Generate visual representations of Airflow DAGs for documenta
 		datasources/decode_data/decode_ingestion \
 		datasources/decode_data/decode_smp_finemapping/decode_smp_finemapping \
 		datasources/eqtlgen_data/eqtlgen_ingestion/eqtlgen_ingestion \
+		datasources/sle_map_data/sle_map_ingestion \
 		credible_set_qc/credible_set_qc \
 		unified_pipeline/unified_pipeline, \
 		AIRFLOW__CORE__LOAD_EXAMPLES=false AIRFLOW__CORE__DAGS_FOLDER=src/orchestration/dags uv run --frozen airflow dags show --save docs/$(dag).svg $(notdir $(dag));)
@@ -137,7 +138,7 @@ upload-eqtlgen-ingestion-readme: ## Upload the eqtlgen ingestion readme to a run
 
 upload-sle-map-readme: ## Upload the sle_map_data readme to a run folder: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-sle-map-readme BUCKET=gs://sle_map_data/prod/<YYYYMMDDTHHMMSS>))
-	@gcloud storage cp docs/datasources/sle_map_data/README.md $(BUCKET)/docs/README.md
+	@gcloud storage rsync docs/datasources/sle_map_data $(BUCKET)/docs
 
 upload-otar2065-microglia-readme: ## Upload the OTAR2065 microglia readme to a run folder: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>
 	$(if $(BUCKET),,$(error BUCKET is not set: make upload-otar2065-microglia-readme BUCKET=gs://eqtl_catalogue_data/otar2065_microglia/prod/<YYYYMMDDTHHMMSS>))
