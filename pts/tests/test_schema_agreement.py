@@ -12,11 +12,21 @@ value at every depth: null, empty, NaN and infinities, each side of every bound,
 `Literal`, pattern-breaking strings, lengths around every length limit, a value of the wrong kind,
 an absent column and an undeclared one. Every discovered dataset is checked, plus a synthetic model
 using every supported construct, so a construct no real dataset uses yet is covered too.
+
+pandera judges the mutations in batches, not one frame each, which took ~40 ms a validation (minutes over
+all models): the mutations whose columns have the same dtypes are stacked into one frame, validated once
+without the primary-key check (every mutation keeps the example's key, and a one-row frame cannot repeat
+one), and a row is rejected if a failure names its index -- or if a failure names no row (a missing column,
+a wrong dtype), which applies to every row of the batch as it would to each row alone. A mutation that drops a
+column, adds one or changes a column's dtype has a frame of its own, judged on its columns and dtypes only
+(pandera's `SCHEMA_ONLY` depth): every other value in it is the example's, which is valid, so the value checks
+cannot change the verdict.
 """
 
 import copy
 import datetime
 import math
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Annotated, Any, ClassVar, Literal
@@ -24,6 +34,7 @@ from typing import Annotated, Any, ClassVar, Literal
 import pandera.errors as pe
 import polars as pl
 import pytest
+from pandera.config import ValidationDepth, config_context
 from pydantic import Field, ValidationError
 
 from pts.schemas.dataset import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
@@ -201,6 +212,29 @@ def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:
     return frame.row(0, named=True) if frame.width else {}
 
 
+def pandera_verdicts(model: type[DatasetModel], checked: list[Mutation]) -> list[bool]:
+    """Whether pandera accepts each mutation, validating the mutations with the same column dtypes together."""
+    schema = to_base_pandera(model, unique=False)
+    model_dtypes = dict(to_polars_schema(model))
+    frames = [as_frame(model, mutation) for mutation in checked]
+    batches: defaultdict[tuple, list[int]] = defaultdict(list)
+    for position, frame in enumerate(frames):
+        batches[tuple(frame.schema.items())].append(position)
+
+    verdicts = [True] * len(checked)
+    for dtypes, positions in batches.items():
+        depth = ValidationDepth.SCHEMA_AND_DATA if dict(dtypes) == model_dtypes else ValidationDepth.SCHEMA_ONLY
+        try:
+            with config_context(validation_depth=depth):
+                schema.validate(pl.concat([frames[p] for p in positions], how='vertical'), lazy=True)
+        except pe.SchemaErrors as errors:
+            failed_rows = errors.failure_cases['index']
+            rejected = range(len(positions)) if failed_rows.null_count() else set(failed_rows.to_list())
+            for row in rejected:
+                verdicts[positions[row]] = False
+    return verdicts
+
+
 def pandera_accepts(model: type[DatasetModel], mutation: Mutation) -> bool:
     frame = as_frame(model, mutation)
     try:
@@ -215,8 +249,8 @@ def test_pandera_agrees_with_pydantic_on_every_mutation(model: type[DatasetModel
     checked = list(mutations(model))
     disagreements = [
         f'{m.label}: pydantic {"accepts" if p else "rejects"}, pandera {"accepts" if q else "rejects"}'
-        for m in checked
-        if (p := pydantic_accepts(model, stored_row(model, m))) != (q := pandera_accepts(model, m))
+        for m, q in zip(checked, pandera_verdicts(model, checked), strict=True)
+        if (p := pydantic_accepts(model, stored_row(model, m))) != q
     ]
 
     assert pydantic_accepts(model, model.example)

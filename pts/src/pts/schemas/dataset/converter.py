@@ -53,9 +53,12 @@ def to_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFram
 
 
 @functools.cache
-def to_base_pandera(model: type[DatasetModel]) -> pa.DataFrameSchema:
-    """The pandera schema of a dataset derived from its model alone, without registered checks."""
-    return _build(model, ())
+def to_base_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.DataFrameSchema:
+    """The pandera schema of a dataset derived from its model alone, without registered checks.
+
+    `unique` is as for `to_pandera`: without it, each row is judged on its own.
+    """
+    return _build(model, (), unique=unique)
 
 
 def to_polars_schema(model: type[DatasetModel]) -> pl.Schema:
