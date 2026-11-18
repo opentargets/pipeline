@@ -79,6 +79,7 @@ class ClinicalStagingConfig:
                 template_context={'release_name': self.staging_version, 'snapshot': self.staging_version},
             )
             pts.config['release_uri'] = self.source_uri(source)
+            pts.config['scratchpad']['clinical_staging'] = self.bucket
             pts.config['work_path'] = '/mnt/disks/work'
             pts.config['log_level'] = 'INFO'
             pts.config['pool_size'] = 32

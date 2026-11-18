@@ -226,7 +226,7 @@ def test_moa_literature_reads_the_paths_pis_copies_to(config: ClinicalStagingCon
 def test_moa_literature_snapshot_lands_under_the_literature_root(config: ClinicalStagingConfig) -> None:
     """The destination is the literature root, so the snapshot is gs://clinical_staging/literature/<release>/..."""
     step = config.step_config('pts_moa_literature')['steps']['moa_literature'][0]
-    assert step['destination'] == {'moa': 'gs://clinical_staging/literature'}
+    assert step['destination'] == {'moa': '${clinical_staging}/literature'}
     shipped = yaml.safe_load(PTS_CONFIG.read_text())['steps']['moa_literature'][0]['settings']['input_release']
     assert step['settings']['input_release'] == shipped
 
@@ -251,3 +251,13 @@ def test_trial_extraction_runs_on_claude_without_openai_secret(config: ClinicalS
     for step_name in config.steps():
         assert 'openai-token' not in (config.step_definition(step_name).get('gce_secret_files') or {}), step_name
         assert step_name != 'pts_aact_trial_extraction'
+
+
+def test_clinical_paths_follow_the_bucket(config: ClinicalStagingConfig) -> None:
+    """Every record store and snapshot path comes from the DAG's bucket, so moving the bucket moves them all."""
+    for step in config.steps():
+        if not step.startswith('pts_'):
+            continue
+        pts = config.step_config(step)
+        assert pts['scratchpad']['clinical_staging'] == config.bucket
+        assert 'gs://clinical_staging' not in yaml.safe_dump(pts['steps']), step
