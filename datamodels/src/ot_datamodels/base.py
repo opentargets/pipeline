@@ -1,10 +1,9 @@
-r"""Base classes and annotation markers for declaring PTS datasets as Pydantic models.
+r"""Base classes and annotation markers for declaring datasets of the release as Pydantic models.
 
 A dataset is declared once, as a `DatasetModel` subclass, and everything else is derived from it:
 the pandera schema written datasets are validated against (`to_pandera` in pts) and the
 documentation JSON (`ot_datamodels.docs`). The models are a specification: Pydantic never
-validates data with them. `DatasetModel.validate_dataset` validates a written dataset through the
-derived pandera schema, one parquet part at a time (`validate` in pts).
+validates data with them; pts validates a written dataset through the derived pandera schema.
 
 Facts a Pydantic `Field` has no slot for are attached as `Annotated` markers, so they can sit on a
 top-level column, a nested struct field or a list element alike::
@@ -84,33 +83,6 @@ class DatasetModel(SchemaModel):
     def is_concrete(cls) -> bool:
         """Whether this class is a dataset in its own right, rather than a shared base."""
         return 'dataset_name' in cls.__dict__
-
-    @classmethod
-    def validate_dataset(cls, path: str) -> None:
-        """Validate the dataset written at `path` against this model.
-
-        The call a transformer module's `validate` makes for each dataset it writes, e.g.
-        `EvidenceEncore.validate_dataset(destination['evidence'])`. Broken rules are logged as each
-        part is validated (`validation_report` in pts).
-
-        Args:
-            path: the dataset: a directory of parquet parts, or a single parquet file. Local or remote.
-
-        Raises:
-            ValueError: if nothing was written at `path`, or the dataset breaks this model's rules.
-        """
-        # imported here: the validator and the storage layer import this module
-        from otter.storage.synchronous.handle import StorageHandle  # ty: ignore[unresolved-import]
-        from otter.util.errors import NotFoundError  # ty: ignore[unresolved-import]
-        from pts.schemas.dataset.validate import format_report, validation_report  # ty: ignore[unresolved-import]
-
-        try:
-            StorageHandle(path).stat()
-        except NotFoundError as error:
-            raise ValueError(f'{path} was not written, but must satisfy the model {cls.__name__}') from error
-        report = validation_report(path, cls)
-        if not report.is_empty():
-            raise ValueError(f'{path} breaks its model {cls.__name__}:\n{format_report(report)}')
 
 
 @dataclass(frozen=True)

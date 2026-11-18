@@ -1,4 +1,4 @@
-"""Models of the datasets PTS writes, one module per dataset (or family of datasets).
+"""Models of the datasets of the release, one module per dataset (or family of datasets).
 
 Every concrete `DatasetModel` defined anywhere in this package is discovered automatically by
 `ot_datamodels.discovery` -- there is nothing to register.

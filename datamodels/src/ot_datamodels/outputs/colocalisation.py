@@ -29,7 +29,7 @@ _TOLERANCE = 1e-9
 #: md5 hex digest: the shape of gentropy's credible set identifiers.
 MD5_HEX = r'^[0-9a-f]{32}$'
 
-#: `pts.schemas.study.StudyType`, in its order (a test keeps the two in sync).
+#: pts's `StudyType`, in its order (a test keeps the two in sync).
 StudyType = Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl']
 
 Chromosome = Literal[

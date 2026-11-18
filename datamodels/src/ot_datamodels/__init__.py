@@ -1,4 +1,4 @@
-"""Declare PTS datasets once, as Pydantic models, and derive their Polars schema and documentation.
+"""Declare the datasets of the release once, as Pydantic models, and derive their Polars schema and documentation.
 
 * `base` -- `DatasetModel`/`StructModel` and the `Annotated` markers (`PrimaryKey`, `Reference`, ...).
 * `spec` -- the field tree every other module reads, and the supported subset of Pydantic.

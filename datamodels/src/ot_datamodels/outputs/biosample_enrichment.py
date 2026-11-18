@@ -1,8 +1,8 @@
 """Biosample enrichment of L2G-prioritised genes: the `biosample_enrichment` output.
 
 Written by hand, as no release with this output was available to generate it from: dtypes and column order
-from `pts.schemas.biosample_enrichment`, descriptions and references from croissant's
-`biosample_enrichment.json`, and rules only where `pts.transformers.biosample_enrichment` guarantees them:
+from pts's `biosample_enrichment` schema, descriptions and references from croissant's
+`biosample_enrichment.json`, and rules only where pts's `biosample_enrichment` transformer guarantees them:
 
 * each row is one study on its own (`studyId`) or one disease's studies pooled (`diseaseId`), never both
   nor neither -- a row check, as it spans two columns;

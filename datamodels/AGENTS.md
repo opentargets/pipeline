@@ -58,8 +58,8 @@ No generator exists; write the model by hand.
 ## Validation
 
 Validation lives in pts: a model's pandera schema (`to_pandera`) and
-`DatasetModel.validate_dataset` run there, and each pts transformer validates what it
-writes against its model.
+`validate_dataset` (`pts.schemas.dataset.validate`) run there, and each pts transformer
+validates what it writes against its model.
 
 A change here also needs the pts and croissant tests: pts checks every output task
 against its model and the models against its enums, and croissant needs a record set
