@@ -14,10 +14,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.outputs.pharmacogenomics import Pharmacogenomics
 from pts.schemas.pharmacogenetics import CLINPGX_SCHEMA, PHARMACOGENOMICS, PHENOTYPES_SCHEMA
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.ontology import MAPPED_ID_COLUMN, add_efo_mapping

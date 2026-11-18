@@ -16,10 +16,10 @@ from typing import Any
 import polars as pl
 import polars_hash as plh
 from loguru import logger
+from ot_datamodels.outputs.interaction import Interaction
+from ot_datamodels.outputs.interaction_evidence import InteractionEvidence
 from otter.config.model import Config
 
-from pts.schemas.outputs.interaction import Interaction
-from pts.schemas.outputs.interaction_evidence import InteractionEvidence
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 

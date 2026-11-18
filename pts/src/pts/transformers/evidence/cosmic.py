@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
+from ot_datamodels.outputs.evidence_cancer_gene_census import EvidenceCancerGeneCensus
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_cancer_gene_census import EvidenceCancerGeneCensus
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present

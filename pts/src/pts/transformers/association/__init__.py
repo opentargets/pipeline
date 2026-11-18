@@ -9,14 +9,14 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.association_by_datasource_direct import AssociationByDatasourceDirect
+from ot_datamodels.outputs.association_by_datasource_indirect import AssociationByDatasourceIndirect
+from ot_datamodels.outputs.association_by_datatype_direct import AssociationByDatatypeDirect
+from ot_datamodels.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
+from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
+from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from otter.config.model import Config
 
-from pts.schemas.outputs.association_by_datasource_direct import AssociationByDatasourceDirect
-from pts.schemas.outputs.association_by_datasource_indirect import AssociationByDatasourceIndirect
-from pts.schemas.outputs.association_by_datatype_direct import AssociationByDatatypeDirect
-from pts.schemas.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
-from pts.schemas.outputs.association_overall_direct import AssociationOverallDirect
-from pts.schemas.outputs.association_overall_indirect import AssociationOverallIndirect
 from pts.task_outputs import writes
 from pts.transformers.association.evidence import expand_disease, prepare_evidence
 from pts.transformers.association.novelty import GROUP, compute_novelty

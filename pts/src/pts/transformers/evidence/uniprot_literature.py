@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ot_datamodels.outputs.evidence_uniprot_literature import EvidenceUniprotLiterature
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_uniprot_literature import EvidenceUniprotLiterature
 from pts.task_outputs import writes
 from pts.transformers.evidence.uniprot_variants import CONFIDENCE_SCORES
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource

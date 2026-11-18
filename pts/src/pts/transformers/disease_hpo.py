@@ -3,11 +3,11 @@ from typing import Any, cast
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.disease_hpo import DiseaseHpo
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
-from pts.schemas.outputs.disease_hpo import DiseaseHpo
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 

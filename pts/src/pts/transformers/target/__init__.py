@@ -10,10 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from ot_datamodels.outputs.target import Target
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.schemas.outputs.target import Target
 from pts.task_outputs import writes
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
 from pts.transformers.target.assemble import assemble

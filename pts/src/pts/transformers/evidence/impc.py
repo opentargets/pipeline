@@ -12,10 +12,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_impc import EvidenceImpc
 from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
-from pts.schemas.outputs.evidence_impc import EvidenceImpc
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present

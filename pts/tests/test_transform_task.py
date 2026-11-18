@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from ot_datamodels.outputs.evidence_encore import EvidenceEncore
 from otter.config.model import Config
 from pydantic import ValidationError
 
-from pts.schemas.outputs.evidence_encore import EvidenceEncore
 from pts.task_outputs import OutputValidation
 from pts.tasks.transform import Transform, TransformSpec
 from pts.transformers.credible_set.validation import validate as validation_validate

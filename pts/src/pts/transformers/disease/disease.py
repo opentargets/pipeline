@@ -4,11 +4,11 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.disease import Disease
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
-from pts.schemas.outputs.disease import Disease
 from pts.task_outputs import writes
 from pts.transformers.disease.coalescing import (
     absorb_obsolete_content,

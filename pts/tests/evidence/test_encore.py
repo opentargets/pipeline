@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
+from ot_datamodels.outputs.evidence_encore import EvidenceEncore
 
 from pts.schemas.dataset.validate import format_report, validation_report
-from pts.schemas.outputs.evidence_encore import EvidenceEncore
 from pts.transformers.evidence.encore import ENCORE, encore
 from tests.evidence.fixtures import write_disease, write_target
 

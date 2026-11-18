@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from ot_datamodels.outputs.colocalisation import Colocalisation
 
 from pts.pyspark.colocalisation_utils.coloc_pip_ecaviar import colocalise
 from pts.pyspark.colocalisation_utils.overlap import tags
@@ -15,7 +16,6 @@ from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
 from pts.schemas.colocalisation import CREDIBLE_SET_COLUMNS, CREDIBLE_SET_VARIANT_COLUMNS
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
-from pts.schemas.outputs.colocalisation import Colocalisation
 from pts.schemas.spark import to_spark_schema
 from pts.task_outputs import writes
 

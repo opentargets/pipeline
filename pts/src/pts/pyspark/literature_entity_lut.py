@@ -11,11 +11,11 @@ import operator
 from typing import Any
 
 from loguru import logger
+from ot_datamodels.outputs.literature_entity_lut import LiteratureEntityLut
 from pyspark.sql import Column, DataFrame, Row
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
-from pts.schemas.outputs.literature_entity_lut import LiteratureEntityLut
 from pts.task_outputs import writes
 
 # Section importance ranks (from Scala reference.conf)

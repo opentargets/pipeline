@@ -45,4 +45,6 @@ changes need a `pts_version` bump.
 - Shared schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes) go in the
   `src/pts/schemas/` folder, one module per step (follow `drug_molecule.py`), not
   in the transformer.
+- Output models live in `datamodels/` (`ot_datamodels.outputs`). A transformer's
+  `validate` imports its model from there; `datamodels/AGENTS.md` says how to declare one.
 - Read spreadsheets with `pts.transformers.utils.dataset.read_spreadsheet`.

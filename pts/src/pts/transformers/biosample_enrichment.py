@@ -13,10 +13,10 @@ from typing import Any, Literal, get_args
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.biosample_enrichment import BiosampleEnrichment
 from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
-from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
 from pts.task_outputs import writes
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors

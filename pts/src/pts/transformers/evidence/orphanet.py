@@ -11,11 +11,11 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_orphanet import EvidenceOrphanet
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.orphanet import ORPHANET_SCHEMA
-from pts.schemas.outputs.evidence_orphanet import EvidenceOrphanet
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present

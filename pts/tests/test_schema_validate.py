@@ -5,11 +5,12 @@ from typing import Annotated, ClassVar
 
 import polars as pl
 import pytest
+from ot_datamodels import DatasetModel, PrimaryKey, to_polars_schema
+from ot_datamodels.outputs.biosample import Biosample
 from pydantic import Field
 
-from pts.schemas.dataset import DatasetModel, PrimaryKey, to_polars_schema, validate
-from pts.schemas.dataset.validate import DUPLICATE_KEY, main, validation_report
-from pts.schemas.outputs.biosample import Biosample
+from pts.schemas.dataset import validate
+from pts.schemas.dataset.validate import DUPLICATE_KEY, main, validate_dataset, validation_report
 
 
 class _Scores(DatasetModel):
@@ -145,21 +146,21 @@ def _biosample(tmp_path: Path, rows: int) -> str:
 
 
 def test_a_model_validates_a_valid_dataset_written_at_a_path(tmp_path: Path) -> None:
-    _Scores.validate_dataset(_write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 1.0])))
+    validate_dataset(_Scores, _write_parts(tmp_path / 'ds', _scores(['a', 'b'], [0.1, 1.0])))
 
 
 def test_a_model_raises_for_a_dataset_breaking_it(tmp_path: Path) -> None:
     path = _write_parts(tmp_path / 'ds', _scores(['a', 'a'], [0.1, 1.5]))
 
     with pytest.raises(ValueError, match=r'breaks its model _Scores:\n') as raised:
-        _Scores.validate_dataset(path)
+        validate_dataset(_Scores, path)
     assert 'score: <= 1.0' in str(raised.value)
     assert DUPLICATE_KEY in str(raised.value)
 
 
 def test_a_model_raises_for_a_dataset_that_was_not_written(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match='was not written, but must satisfy the model _Scores'):
-        _Scores.validate_dataset(str(tmp_path / 'ds'))
+        validate_dataset(_Scores, str(tmp_path / 'ds'))
 
 
 def test_the_command_line_validates_an_output_directory(tmp_path: Path) -> None:

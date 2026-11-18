@@ -21,7 +21,20 @@ def fake(source, destination, settings, config) -> None:
 
 
 def _model(error: str | None = None) -> Mock:
-    return Mock(validate_dataset=Mock(side_effect=ValueError(error) if error else None))
+    return Mock(error=error)
+
+
+@pytest.fixture(autouse=True)
+def validated(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """`validate_dataset`, failing for a model made with an error."""
+
+    def check(model: Mock, path: str) -> None:
+        if model.error:
+            raise ValueError(model.error)
+
+    mock = Mock(side_effect=check)
+    monkeypatch.setattr('pts.task_outputs.validate_dataset', mock)
+    return mock
 
 
 def test_a_transformer_may_declare_nothing() -> None:
@@ -32,23 +45,22 @@ def test_a_transformer_may_declare_nothing() -> None:
     validation.run('intermediate/x', '/in', '/work/intermediate/x', {}, None)
 
 
-def test_a_single_destination_is_validated_against_its_model() -> None:
+def test_a_single_destination_is_validated_against_its_model(validated: Mock) -> None:
     model = _model()
     validation = OutputValidation('fake', {None: model}, None)
 
     validation.run('output/x', '/in', '/work/output/x', {}, None)
 
-    model.validate_dataset.assert_called_once_with('/work/output/x')
+    validated.assert_called_once_with(model, '/work/output/x')
 
 
-def test_each_declared_destination_is_validated_against_its_model() -> None:
+def test_each_declared_destination_is_validated_against_its_model(validated: Mock) -> None:
     first, second = _model(), _model()
     validation = OutputValidation('fake', {'a': first, 'b': second}, None)
 
     validation.run({'a': 'output/a', 'b': 'output/b'}, '/in', {'a': '/work/output/a', 'b': '/work/output/b'}, {}, None)
 
-    first.validate_dataset.assert_called_once_with('/work/output/a')
-    second.validate_dataset.assert_called_once_with('/work/output/b')
+    assert validated.mock_calls == [call(first, '/work/output/a'), call(second, '/work/output/b')]
 
 
 def test_writes_declares_a_single_destination_or_one_per_key() -> None:
@@ -74,13 +86,13 @@ def test_the_hook_is_the_module_validate() -> None:
     assert OutputValidation.of(fake, _module(validate=hook)).hook is hook
 
 
-def test_undeclared_destinations_are_not_validated() -> None:
+def test_undeclared_destinations_are_not_validated(validated: Mock) -> None:
     model = _model()
     validation = OutputValidation('fake', {'a': model}, None)
 
     validation.run({'a': 'output/a', 'b': 'output/b'}, '/in', {'a': '/a', 'b': '/b'}, {}, None)
 
-    model.validate_dataset.assert_called_once_with('/a')
+    validated.assert_called_once_with(model, '/a')
 
 
 def test_a_declared_output_the_task_does_not_write_fails_the_task() -> None:
@@ -97,16 +109,16 @@ def test_a_dataset_breaking_its_model_fails_the_task() -> None:
         validation.run('output/x', '/in', '/work/output/x', {}, None)
 
 
-def test_the_module_validate_runs_after_the_models_with_the_task_arguments() -> None:
+def test_the_module_validate_runs_after_the_models_with_the_task_arguments(validated: Mock) -> None:
     order = Mock()
     model = _model()
-    order.attach_mock(model.validate_dataset, 'model')
+    order.attach_mock(validated, 'model')
     order.attach_mock(hook := Mock(), 'hook')
     validation = OutputValidation('fake', {None: model}, hook)
 
     validation.run('output/x', '/in', '/work/output/x', {'s': 1}, None)
 
-    assert order.mock_calls == [call.model('/work/output/x'), call.hook('/in', '/work/output/x', {'s': 1}, None)]
+    assert order.mock_calls == [call.model(model, '/work/output/x'), call.hook('/in', '/work/output/x', {'s': 1}, None)]
 
 
 def test_a_failing_module_validate_fails_the_task() -> None:

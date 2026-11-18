@@ -12,9 +12,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.target_prioritisation import TargetPrioritisation
 from otter.config.model import Config
 
-from pts.schemas.outputs.target_prioritisation import TargetPrioritisation
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 

@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
+from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from otter.config.model import Config
 
-from pts.schemas.outputs.chemical_probe import ChemicalProbe
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup

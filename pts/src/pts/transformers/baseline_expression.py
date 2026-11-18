@@ -14,9 +14,9 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.baseline_expression import BaselineExpression
 from otter.config.model import Config
 
-from pts.schemas.outputs.baseline_expression import BaselineExpression
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import QC_COLUMN, flag_rows

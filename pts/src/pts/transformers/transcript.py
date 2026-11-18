@@ -11,9 +11,9 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.transcript import Transcript
 from otter.config.model import Config
 
-from pts.schemas.outputs.transcript import Transcript
 from pts.schemas.transcript import transcript as transcript_schema
 from pts.task_outputs import writes
 from pts.transformers.utils import ensembl

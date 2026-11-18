@@ -31,11 +31,11 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.biosample import Biosample
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node
-from pts.schemas.outputs.biosample import Biosample
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 

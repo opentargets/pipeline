@@ -8,6 +8,7 @@ requires-python = ">=3.12,<3.14"
 license = { text = "Apache-2.0" }
 
 dependencies = [
+  "ot-datamodels",
   "loguru>=0.7.3",
   "opentargets-otter>=26.9.1",
   "pyarrow>=22.0.0",
@@ -58,6 +59,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
+ot-datamodels = { path = "../datamodels", editable = true }
 cellex = { git = "https://github.com/perslab/CELLEX", rev = "119c7ca" }
 
 [project.scripts]

@@ -6,9 +6,9 @@ import re
 from typing import Any
 
 import polars as pl
+from ot_datamodels.outputs.evidence_cancer_biomarkers import EvidenceCancerBiomarkers
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_cancer_biomarkers import EvidenceCancerBiomarkers
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence

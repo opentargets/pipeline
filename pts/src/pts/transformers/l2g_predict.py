@@ -18,9 +18,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.l2g_prediction import L2gPrediction
 from otter.config.model import Config
 
-from pts.schemas.outputs.l2g_prediction import L2gPrediction
 from pts.task_outputs import writes
 from pts.transformers.l2g import explain as l2g_explain
 from pts.transformers.l2g import model as l2g_model

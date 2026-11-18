@@ -6,7 +6,7 @@ the model of its single destination, or one model per destination key::
     @writes(evidence=EvidenceEncore)
     def encore(source, destination, settings, config): ...
 
-Each declared dataset is validated against its model (`DatasetModel.validate_dataset`). The module
+Each declared dataset is validated against its model (`validate_dataset`). The module
 may also define `validate`, taking the transformer's four arguments, for rules no model states; it
 runs after the declared datasets.
 """
@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, Self, TypeVar
 
+from ot_datamodels import DatasetModel
 from otter.config.model import Config
 from otter.util.errors import TaskValidationError
 
-from pts.schemas.dataset import DatasetModel
+from pts.schemas.dataset.validate import validate_dataset
 from pts.task_paths import DestinationPaths, SourcePaths
 
 #: Where `writes` keeps a transformer's models, by destination key; `None` keys a single destination.
@@ -105,7 +106,7 @@ class OutputValidation:
             raise TaskValidationError(f'{self.name} declares {missing} with @writes, which the task does not write')
         try:
             for key, model in self.outputs.items():
-                model.validate_dataset(_path(destination, key))
+                validate_dataset(model, _path(destination, key))
             if self.hook is not None:
                 self.hook(source, destination, settings, config)
         except ValueError as error:

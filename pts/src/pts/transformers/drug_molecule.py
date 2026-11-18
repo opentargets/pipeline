@@ -11,10 +11,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.drug_molecule import DrugMolecule
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
-from pts.schemas.outputs.drug_molecule import DrugMolecule
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,

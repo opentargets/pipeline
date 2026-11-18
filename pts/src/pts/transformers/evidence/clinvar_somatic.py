@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ot_datamodels.outputs.evidence_eva_somatic import EvidenceEvaSomatic
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_eva_somatic import EvidenceEvaSomatic
 from pts.task_outputs import writes
 from pts.transformers.evidence.clinvar import EVA, run_eva
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource

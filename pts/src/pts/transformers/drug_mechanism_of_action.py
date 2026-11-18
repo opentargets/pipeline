@@ -10,10 +10,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.schemas.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action_candidates import (

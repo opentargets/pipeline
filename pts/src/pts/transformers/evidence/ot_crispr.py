@@ -13,9 +13,9 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_ot_crispr import EvidenceOtCrispr
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_ot_crispr import EvidenceOtCrispr
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.run import run_evidence

@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
+from ot_datamodels.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
 
 from pts.schemas.dataset.validate import format_report, validation_report
-from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
 from pts.transformers.evidence.gwas_credible_sets import build_raw_evidence, gwas_credible_sets
 from tests.credible_set_fixtures import published_credible_set
 from tests.evidence.fixtures import write_disease, write_literature, write_target

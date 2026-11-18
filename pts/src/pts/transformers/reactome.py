@@ -13,9 +13,9 @@ from typing import Any
 import networkx as nx
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.reactome import Reactome
 from otter.config.model import Config
 
-from pts.schemas.outputs.reactome import Reactome
 from pts.schemas.reactome import reactome_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset

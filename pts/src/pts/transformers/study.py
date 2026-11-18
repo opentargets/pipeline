@@ -5,10 +5,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.study import Study
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pts.schemas.outputs.study import Study
 from pts.schemas.study import StudyType, study_schema
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut

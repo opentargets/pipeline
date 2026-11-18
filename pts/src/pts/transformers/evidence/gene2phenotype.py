@@ -11,10 +11,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_gene2phenotype import EvidenceGene2phenotype
 from otter.config.model import Config
 
 from pts.schemas.gene2phenotype import G2P_INPUT_SCHEMA
-from pts.schemas.outputs.evidence_gene2phenotype import EvidenceGene2phenotype
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present

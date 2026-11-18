@@ -6,9 +6,9 @@ from typing import Any
 import polars as pl
 import polars_hash as plh
 from loguru import logger
+from ot_datamodels.outputs.clinical_target import ClinicalTarget
 from otter.config.model import Config
 
-from pts.schemas.outputs.clinical_target import ClinicalTarget
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,

@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from ot_datamodels.outputs.literature_vector import LiteratureVector
 from otter.config.model import Config
 from pydantic import ValidationError
 
-from pts.schemas.outputs.literature_vector import LiteratureVector
 from pts.task_outputs import OutputValidation
 from pts.tasks.pyspark import Pyspark, PysparkSpec
 
