@@ -7,68 +7,30 @@ directory holding one folder per dataset to run it::
     PTS_OUTPUT_DIR=../work/output uv run pytest tests/test_schema_outputs.py
 """
 
-import json
 import os
 from pathlib import Path
 
 import pandera.errors as pa_errors
 import polars as pl
 import pytest
+from ot_datamodels import DatasetModel, to_polars_schema
+from ot_datamodels.discovery import discover_datasets
 
-from pts.schemas.dataset import DatasetModel, Reference, to_pandera, to_polars_schema
-from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.docs import write_docs
-from pts.schemas.dataset.spec import Node, dataset_spec, walk
+from pts.schemas.dataset.converter import to_pandera
 from pts.schemas.dataset.validate import format_report, validation_report
 
 DATASETS = discover_datasets()
 MODELS = sorted(DATASETS.values(), key=lambda model: model.dataset_name)
-REFERENCES = [
-    (model, path, node) for model in MODELS for path, node in walk(dataset_spec(model)) if node.reference is not None
-]
 
 
 def _name(model: type[DatasetModel]) -> str:
     return model.dataset_name
 
 
-def test_discovers_the_migrated_datasets() -> None:
-    assert {'biosample', 'evidence_encore', 'evidence_gwas_credible_sets'} <= set(DATASETS)
-
-
 @pytest.mark.parametrize('model', MODELS, ids=_name)
 def test_example_is_valid(model: type[DatasetModel]) -> None:
     model.model_validate(model.example)
     to_pandera(model).validate(pl.DataFrame([model.example], schema=to_polars_schema(model)))
-
-
-def test_documentation_is_written_for_every_dataset(tmp_path: Path) -> None:
-    written = write_docs(tmp_path)
-
-    assert sorted(path.stem for path in written) == sorted(DATASETS)
-    assert all(json.loads(path.read_text())['fields'] for path in written)
-
-
-@pytest.mark.parametrize(
-    ('model', 'path', 'node'),
-    REFERENCES,
-    ids=[f'{m.dataset_name}:{p}' for m, p, _ in REFERENCES],
-)
-def test_reference_resolves_to_a_column(model: type[DatasetModel], path: str, node: Node) -> None:
-    """A reference is a look-up into another dataset: often its primary key, but not necessarily (croissant's
-    foreign keys also point at a column of a composite key, or at a dataset with no key)."""
-    reference = node.reference
-    assert isinstance(reference, Reference)
-    target = DATASETS.get(reference.dataset)
-    if target is None:
-        pytest.skip(f'{reference.dataset!r} has no model yet')
-
-    target_spec = dataset_spec(target)
-    target_field = next((f for f in target_spec.fields if f.name == reference.column), None)
-
-    assert target_field is not None, f'{reference.dataset} has no column {reference.column!r}'
-    assert target_field.node.dtype == node.dtype
-
 
 
 @pytest.mark.parametrize('model', MODELS, ids=_name)
@@ -82,11 +44,6 @@ def test_real_output_is_valid(model: type[DatasetModel]) -> None:
 
     report = validation_report(str(location), model)
     assert report.is_empty(), f'{model.dataset_name} breaks its model:\n{format_report(report)}'
-
-
-def test_every_dataset_has_a_title() -> None:
-    for name, model in discover_datasets().items():
-        assert model.dataset_title, name
 
 
 #: (dataset, a change to its example that only its row check rejects, the check)

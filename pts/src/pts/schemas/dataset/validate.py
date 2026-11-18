@@ -33,11 +33,11 @@ import numpy as np
 import pandera.errors as pe
 import polars as pl
 from loguru import logger
+from ot_datamodels.base import DatasetModel
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.spec import dataset_spec
 
-from pts.schemas.dataset.base import DatasetModel
 from pts.schemas.dataset.converter import to_pandera
-from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.spec import dataset_spec
 from pts.transformers.utils.dataset import list_parts
 
 #: Example values kept per broken rule.

@@ -26,9 +26,8 @@ import functools
 
 import pandera.polars as pa
 import polars as pl
-
-from pts.schemas.dataset.base import DatasetModel, RowCheck
-from pts.schemas.dataset.spec import Node, SchemaDefinitionError, dataset_spec
+from ot_datamodels.base import DatasetModel, RowCheck
+from ot_datamodels.spec import Node, SchemaDefinitionError, dataset_spec
 
 
 @functools.cache
@@ -55,11 +54,6 @@ def to_base_pandera(model: type[DatasetModel], *, unique: bool = True) -> pa.Dat
     `unique` is as for `to_pandera`: without it, each row is judged on its own.
     """
     return _build(model, (), unique=unique)
-
-
-def to_polars_schema(model: type[DatasetModel]) -> pl.Schema:
-    """The Polars schema of a dataset: its columns and their dtypes, in declaration order."""
-    return pl.Schema({f.name: f.node.dtype for f in dataset_spec(model).fields})
 
 
 def node_conditions(node: Node, value: pl.Expr, path: str) -> list[tuple[str, pl.Expr]]:
