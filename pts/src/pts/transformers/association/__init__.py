@@ -11,6 +11,13 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.association_by_datasource_direct import AssociationByDatasourceDirect
+from pts.schemas.outputs.association_by_datasource_indirect import AssociationByDatasourceIndirect
+from pts.schemas.outputs.association_by_datatype_direct import AssociationByDatatypeDirect
+from pts.schemas.outputs.association_by_datatype_indirect import AssociationByDatatypeIndirect
+from pts.schemas.outputs.association_overall_direct import AssociationOverallDirect
+from pts.schemas.outputs.association_overall_indirect import AssociationOverallIndirect
+from pts.task_outputs import writes
 from pts.transformers.association.evidence import expand_disease, prepare_evidence
 from pts.transformers.association.novelty import GROUP, compute_novelty
 from pts.transformers.association.scoring import aggregate_by_datasource, aggregate_by_datatype, aggregate_overall
@@ -23,6 +30,14 @@ EVIDENCE_COLUMNS = ['targetId', 'diseaseId', 'datasourceId', 'datatypeId', 'scor
 OUTPUTS = [f'{kind}_{way}' for way in ('direct', 'indirect') for kind in ('by_datasource', 'overall', 'by_datatype')]
 
 
+@writes(
+    overall_direct=AssociationOverallDirect,
+    overall_indirect=AssociationOverallIndirect,
+    by_datasource_direct=AssociationByDatasourceDirect,
+    by_datasource_indirect=AssociationByDatasourceIndirect,
+    by_datatype_direct=AssociationByDatatypeDirect,
+    by_datatype_indirect=AssociationByDatatypeIndirect,
+)
 def association(
     source: dict[str, str],
     destination: dict[str, str],

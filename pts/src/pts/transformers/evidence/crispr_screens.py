@@ -12,6 +12,8 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.evidence_crispr_screen import EvidenceCrisprScreen
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score
 from pts.transformers.evidence.utils.run import run_evidence
@@ -195,6 +197,7 @@ def generate(screens: str, studies_dir: str, disease_mapping: str) -> pl.LazyFra
     )
 
 
+@writes(evidence=EvidenceCrisprScreen)
 def crispr_screens(
     source: dict[str, str],
     destination: dict[str, str],

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
+from pts.schemas.dataset.validate import format_report, validation_report
+from pts.schemas.outputs.evidence_gwas_credible_sets import EvidenceGwasCredibleSets
 from pts.transformers.evidence.gwas_credible_sets import build_raw_evidence, gwas_credible_sets
 from tests.credible_set_fixtures import published_credible_set
 from tests.evidence.fixtures import write_disease, write_literature, write_target
@@ -112,11 +114,22 @@ class TestBuildRawEvidence:
         assert result.select('datatypeId', 'datasourceId').row(0) == ('genetic_association', 'gwas_credible_sets')
 
 
+#: md5-shaped, as the credible set ids the evidence model requires
+CREDIBLE_SET_ID = '0123456789abcdef0123456789abcdef'
+
+
 def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
     src = tmp_path / 'src'
     for name, frame in [
-        ('l2g', pl.DataFrame({'credibleSetId': ['SL1', 'SL1'], 'geneId': ['ENSG1', 'ENSG9'], 'score': [0.8, 0.6]})),
-        ('credible_set', published_credible_set({'id': 'SL1', 'studyId': 'GCST1', 'studyType': 'gwas'})),
+        (
+            'l2g',
+            pl.DataFrame({
+                'credibleSetId': [CREDIBLE_SET_ID, CREDIBLE_SET_ID],
+                'geneId': ['ENSG00000000001', 'ENSG00000000009'],
+                'score': [0.8, 0.6],
+            }),
+        ),
+        ('credible_set', published_credible_set({'id': CREDIBLE_SET_ID, 'studyId': 'GCST1', 'studyType': 'gwas'})),
         ('study', pl.DataFrame(one_study(pubmedId=['111'], publicationDate=['2019-05-01']), schema=STUDY_SCHEMA)),
     ]:
         (src / name).mkdir(parents=True)
@@ -129,7 +142,7 @@ def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
             'credible_set': str(src / 'credible_set'),
             'study_index': str(src / 'study'),
             'disease': write_disease(src / 'disease', ['EFO_1']),
-            'target': write_target(src / 'target', ['ENSG1']),
+            'target': write_target(src / 'target', ['ENSG00000000001']),
             'literature': write_literature(src / 'literature', {'111': '2018-01-01'}),
         },
         {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
@@ -140,6 +153,8 @@ def test_gwas_credible_sets_end_to_end(tmp_path: Path) -> None:
     valid = pl.read_parquet(dst / 'valid')
     failed = pl.read_parquet(dst / 'failed')
     assert valid.select('targetId', 'diseaseId', 'score', 'publicationDate', 'evidenceDate').rows() == [
-        ('ENSG1', 'EFO_1', 0.8, '2018-01-01', '2018-01-01')
+        ('ENSG00000000001', 'EFO_1', 0.8, '2018-01-01', '2018-01-01')
     ]
-    assert failed['targetFromSourceId'].to_list() == ['ENSG9']
+    assert failed['targetFromSourceId'].to_list() == ['ENSG00000000009']
+    report = validation_report(str(dst / 'valid'), EvidenceGwasCredibleSets)
+    assert report.is_empty(), format_report(report)

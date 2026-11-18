@@ -7,11 +7,14 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.clinical_indication import ClinicalIndication as ClinicalIndicationOutput
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import ClinicalIndication
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import valid_rows
 
 
+@writes(output=ClinicalIndicationOutput)
 def clinical_indication(
     source: Path,
     destination: dict[str, Path],

@@ -1,0 +1,280 @@
+"""Agreement between each dataset model and the pandera schema derived from it.
+
+The rule checked: the derived pandera schema (without its row checks, which Pydantic cannot see)
+accepts a one-row frame exactly when Pydantic, in strict mode, accepts that row -- with NaN turned
+into None for Pydantic first. That is a deliberate deviation, not a gap in the test: the derived
+schema treats NaN as null, so a non-nullable float rejects NaN and a nullable one accepts it
+whatever its bounds, whereas Pydantic accepts NaN in an unbounded float and rejects it under a
+bound. Without the conversion those cases would disagree by design.
+
+Rows are single-field mutations of the model's `example`, generated from its field tree for every
+value at every depth: null, empty, NaN and infinities, each side of every bound, values outside a
+`Literal`, pattern-breaking strings, lengths around every length limit, a value of the wrong kind,
+an absent column and an undeclared one. Every discovered dataset is checked, plus a synthetic model
+using every supported construct, so a construct no real dataset uses yet is covered too.
+
+pandera judges the mutations in batches, not one frame each, which took ~40 ms a validation (minutes over
+all models): the mutations whose columns have the same dtypes are stacked into one frame, validated once
+without the primary-key check (every mutation keeps the example's key, and a one-row frame cannot repeat
+one), and a row is rejected if a failure names its index -- or if a failure names no row (a missing column,
+a wrong dtype), which applies to every row of the batch as it would to each row alone. A mutation that drops a
+column, adds one or changes a column's dtype has a frame of its own, judged on its columns and dtypes only
+(pandera's `SCHEMA_ONLY` depth): every other value in it is the example's, which is valid, so the value checks
+cannot change the verdict.
+"""
+
+import copy
+import datetime
+import math
+from collections import defaultdict
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from typing import Annotated, Any, ClassVar, Literal
+
+import pandera.errors as pe
+import polars as pl
+import pytest
+from pandera.config import ValidationDepth, config_context
+from pydantic import Field, ValidationError
+
+from pts.schemas.dataset import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
+from pts.schemas.dataset.converter import to_base_pandera
+from pts.schemas.dataset.discovery import discover_datasets
+from pts.schemas.dataset.spec import Constraints, Node, dataset_spec, walk
+
+
+class _Leaf(StructModel):
+    code: str = Field(pattern=r'^[A-Z]\d$')
+    weight: float | None = Field(ge=0.0, lt=1.0)
+    tags: list[Annotated[str, Field(min_length=2)]]
+
+
+class _Branch(StructModel):
+    name: str
+    rank: Literal[1, 2, 3]
+    leaves: list[_Leaf] = Field(max_length=2)
+
+
+class _KitchenSink(DatasetModel):
+    dataset_name: ClassVar[str] = '_kitchen_sink'
+    dataset_title: ClassVar[str] = 'synthetic model using every supported construct'
+    dataset_description: ClassVar[str] = 'synthetic model using every supported construct'
+    example: ClassVar[dict] = {
+        'key': 'abcd',
+        'count': 3,
+        'ratio': 0.5,
+        'flag': True,
+        'kind': 'a',
+        'loose': 'ab123',
+        'branch': {'name': 'b', 'rank': 1, 'leaves': [{'code': 'A1', 'weight': 0.5, 'tags': ['xy']}]},
+        'branches': [{'name': 'c', 'rank': 2, 'leaves': [{'code': 'B2', 'weight': None, 'tags': ['zz']}]}],
+        'maybe_numbers': [1.5],
+        'optional_note': 'note',
+        'released': datetime.date(2020, 6, 1),
+    }
+
+    key: Annotated[str, PrimaryKey()] = Field(min_length=3, max_length=5)
+    count: Annotated[int, PolarsDtype(pl.Int32)] = Field(gt=0, le=10)
+    ratio: float | None = Field(gt=-1.0, lt=1.0)
+    flag: bool
+    kind: Literal['a', 'b']
+    loose: str = Field(pattern=r'\d{3}')  # unanchored: matches anywhere, as Pydantic's does
+    branch: _Branch | None
+    branches: list[_Branch] = Field(min_length=1)
+    maybe_numbers: list[float | None] | None
+    optional_note: str | None = None
+    released: datetime.date = Field(ge=datetime.date(2020, 1, 1), le=datetime.date(2020, 12, 31))
+
+
+_MODELS = [_KitchenSink, *sorted(discover_datasets().values(), key=lambda m: m.dataset_name)]
+
+
+@dataclass(frozen=True)
+class Mutation:
+    """A row to validate both ways.
+
+    Attributes:
+        label: what was changed.
+        row: the row.
+        inferred: columns whose dtype Polars infers from the value instead of taking the model's.
+    """
+
+    label: str
+    row: dict[str, Any]
+    inferred: frozenset[str] = field(default_factory=frozenset)
+
+
+def mutations(model: type[DatasetModel]) -> Iterator[Mutation]:
+    """Single-field mutations of `model.example`, for every value at every depth."""
+    example = model.example
+    for f in dataset_spec(model).fields:
+        yield Mutation(f'{f.name}: absent', {k: v for k, v in example.items() if k != f.name})
+        wrong = 1.5 if f.node.dtype in {pl.String(), pl.Boolean()} else 'text'
+        yield Mutation(f'{f.name}: {wrong!r}', {**example, f.name: wrong}, frozenset({f.name}))
+        for steps, path, node, value in locations(f.node, example[f.name], (f.name,), f.name):
+            for label, candidate in candidates(node, value):
+                yield Mutation(f'{path}: {label}', _replace(example, steps, candidate))
+    yield Mutation('undeclared column', {**example, 'undeclared': 'x'}, frozenset({'undeclared'}))
+
+
+def locations(node: Node, value: Any, steps: tuple, path: str) -> Iterator[tuple[tuple, str, Node, Any]]:
+    """Every value inside `value` the example actually reaches: the first element of each list."""
+    yield steps, path, node, value
+    if node.element is not None and value:
+        yield from locations(node.element, value[0], (*steps, 0), f'{path}[]')
+    if node.kind == 'struct' and value is not None:
+        for child in node.fields:
+            yield from locations(child.node, value[child.name], (*steps, child.name), f'{path}/{child.name}')
+
+
+def candidates(node: Node, value: Any) -> Iterator[tuple[str, Any]]:
+    """Replacement values probing each rule on `node`, given its current example `value`."""
+    yield 'null', None
+    if node.element is not None:
+        yield 'empty list', []
+    if node.dtype.is_float():
+        yield from [('NaN', math.nan), ('inf', math.inf), ('-inf', -math.inf)]
+    c = node.constraints
+    for bound in (c.ge, c.gt, c.le, c.lt):
+        if bound is not None:
+            for near in _around(bound, integer=node.dtype.is_integer(), date=node.dtype == pl.Date()):
+                yield repr(near), near
+    if c.allowed is not None:
+        yield 'not allowed', max(int(v) for v in c.allowed) + 1 if node.dtype.is_integer() else '__not_allowed__'
+    if c.pattern is not None:
+        yield from [('empty string', ''), ('prefixed', f'#{value}'), ('suffixed', f'{value}#')]
+    for limit in (c.min_length, c.max_length):
+        if limit is not None:
+            for length in (limit - 1, limit, limit + 1):
+                if length >= 0 and node.element is not None and value:
+                    yield f'{length} elements', [value[0]] * length
+                elif length >= 0 and node.element is None:
+                    yield f'{length} characters', 'a' * length
+
+
+def _around(bound: Any, *, integer: bool, date: bool) -> list[Any]:
+    if date:
+        return [bound - datetime.timedelta(days=1), bound, bound + datetime.timedelta(days=1)]
+    if integer:
+        return sorted({math.floor(bound) - 1, math.floor(bound), math.ceil(bound), math.ceil(bound) + 1})
+    return [math.nextafter(bound, -math.inf), bound, math.nextafter(bound, math.inf)]
+
+
+def _replace(row: dict[str, Any], steps: tuple, value: Any) -> dict[str, Any]:
+    row = copy.deepcopy(row)
+    target: Any = row
+    for step in steps[:-1]:
+        target = target[step]
+    target[steps[-1]] = value
+    return row
+
+
+def _nan_to_none(value: Any) -> Any:
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _nan_to_none(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_nan_to_none(v) for v in value]
+    return value
+
+
+def pydantic_accepts(model: type[DatasetModel], row: dict[str, Any]) -> bool:
+    try:
+        model.model_validate(_nan_to_none(row))
+    except ValidationError:
+        return False
+    return True
+
+
+def as_frame(model: type[DatasetModel], mutation: Mutation) -> pl.DataFrame:
+    schema = to_polars_schema(model)
+    return pl.DataFrame([
+        _series(name, value, schema[name])
+        if name in schema and name not in mutation.inferred
+        else pl.Series(name, [value])
+        for name, value in mutation.row.items()
+    ])
+
+
+def _series(name: str, value: Any, dtype: pl.DataType) -> pl.Series:
+    """`value` in the column's dtype -- or, for a value no Enum category holds, as the string column it would
+    arrive in (an Enum cannot store it)."""
+    if isinstance(dtype, pl.Enum) and value is not None and value not in dtype.categories:
+        return pl.Series(name, [value])
+    return pl.Series(name, [value], dtype=dtype, strict=True)
+
+
+def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:
+    """The row as the frame stores it: a narrower dtype (e.g. Float32) may round a value, and both sides
+    must judge the same value."""
+    frame = as_frame(model, mutation)
+    return frame.row(0, named=True) if frame.width else {}
+
+
+def pandera_verdicts(model: type[DatasetModel], checked: list[Mutation]) -> list[bool]:
+    """Whether pandera accepts each mutation, validating the mutations with the same column dtypes together."""
+    schema = to_base_pandera(model, unique=False)
+    model_dtypes = dict(to_polars_schema(model))
+    frames = [as_frame(model, mutation) for mutation in checked]
+    batches: defaultdict[tuple, list[int]] = defaultdict(list)
+    for position, frame in enumerate(frames):
+        batches[tuple(frame.schema.items())].append(position)
+
+    verdicts = [True] * len(checked)
+    for dtypes, positions in batches.items():
+        depth = ValidationDepth.SCHEMA_AND_DATA if dict(dtypes) == model_dtypes else ValidationDepth.SCHEMA_ONLY
+        try:
+            with config_context(validation_depth=depth):
+                schema.validate(pl.concat([frames[p] for p in positions], how='vertical'), lazy=True)
+        except pe.SchemaErrors as errors:
+            failed_rows = errors.failure_cases['index']
+            rejected = range(len(positions)) if failed_rows.null_count() else set(failed_rows.to_list())
+            for row in rejected:
+                verdicts[positions[row]] = False
+    return verdicts
+
+
+def pandera_accepts(model: type[DatasetModel], mutation: Mutation) -> bool:
+    frame = as_frame(model, mutation)
+    try:
+        to_base_pandera(model).validate(frame, lazy=True)
+    except pe.SchemaErrors:
+        return False
+    return True
+
+
+@pytest.mark.parametrize('model', _MODELS, ids=lambda m: m.dataset_name)
+def test_pandera_agrees_with_pydantic_on_every_mutation(model: type[DatasetModel]) -> None:
+    checked = list(mutations(model))
+    disagreements = [
+        f'{m.label}: pydantic {"accepts" if p else "rejects"}, pandera {"accepts" if q else "rejects"}'
+        for m, q in zip(checked, pandera_verdicts(model, checked), strict=True)
+        if (p := pydantic_accepts(model, stored_row(model, m))) != q
+    ]
+
+    assert pydantic_accepts(model, model.example)
+    assert pandera_accepts(model, Mutation('example', model.example))
+    assert not disagreements, '\n'.join(disagreements)
+    assert len(checked) > 3 * len(dataset_spec(model).fields)
+
+
+@pytest.mark.parametrize('model', _MODELS, ids=lambda m: m.dataset_name)
+def test_example_reaches_every_value(model: type[DatasetModel]) -> None:
+    """Without this, an empty list in an example would silently skip every rule inside it.
+
+    Exempt: the element of a list that must be empty (`max_length=0`), which can never be reached, and a
+    primitive element with no constraint -- a list the release never fills (e.g. `qualityControls` of a dataset
+    with no flag raised) has no real element to show, and leaves no rule but the element's not-null unexercised.
+    """
+    spec = dataset_spec(model)
+    reached = {path for f in spec.fields for _, path, _, _ in locations(f.node, model.example[f.name], (), f.name)}
+    always_empty = [
+        f'{path}[]' for path, node in walk(spec) if node.kind == 'list' and node.constraints.max_length == 0
+    ]
+    unconstrained = {
+        path for path, node in walk(spec) if node.kind == 'primitive' and node.constraints == Constraints()
+    }
+
+    unreached = [path for path, _ in walk(spec) if path not in reached and path not in unconstrained]
+    assert [path for path in unreached if not any(path.startswith(prefix) for prefix in always_empty)] == []

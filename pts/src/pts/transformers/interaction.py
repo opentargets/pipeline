@@ -18,6 +18,9 @@ import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.interaction import Interaction
+from pts.schemas.outputs.interaction_evidence import InteractionEvidence
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SWAP = {
@@ -490,6 +493,7 @@ def sort_evidences(evidences: pl.DataFrame, interactions: pl.DataFrame) -> pl.Da
     return evidences.join(order, on='interactionId', how='left').sort('_order', *evidences.columns).drop('_order')
 
 
+@writes(interactions=Interaction, interactions_evidence=InteractionEvidence)
 def interaction(
     source: dict[str, str],
     destination: dict[str, str],

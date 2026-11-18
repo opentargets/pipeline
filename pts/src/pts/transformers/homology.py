@@ -14,6 +14,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.homology import homology_schema, orthologs_schema
+from pts.schemas.outputs.homology import Homology
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.ensembl import CoreDump, gene_names
 from pts.transformers.utils.spark_casts import cast_double
@@ -171,6 +173,7 @@ def resolve_homology(orthologs: pl.DataFrame, target: pl.DataFrame) -> pl.DataFr
     )
 
 
+@writes(Homology)
 def homology(
     source: dict[str, str],
     destination: str,

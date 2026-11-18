@@ -11,6 +11,8 @@ from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
+from pts.schemas.outputs.enhancer_to_gene import EnhancerToGene
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -255,6 +257,7 @@ def validate_id_has_unique_score(frame: pl.LazyFrame) -> pl.LazyFrame:
     return flag_rows(frame, pl.col('score').drop_nulls().n_unique().over(columns) > 1, QualityFlag.AMBIGUOUS_SCORE)
 
 
+@writes(output=EnhancerToGene)
 def enhancer_to_gene(
     source: dict[str, str],
     destination: dict[str, str],

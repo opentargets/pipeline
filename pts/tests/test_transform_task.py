@@ -6,11 +6,12 @@ from unittest.mock import Mock
 
 import pytest
 from otter.config.model import Config
-from otter.util.errors import TaskValidationError
 from pydantic import ValidationError
 
+from pts.schemas.outputs.evidence_encore import EvidenceEncore
+from pts.task_outputs import OutputValidation
 from pts.tasks.transform import Transform, TransformSpec
-from pts.transformers.credible_set.validation import validation_check
+from pts.transformers.credible_set.validation import validate as validation_validate
 from pts.transformers.evidence.encore import encore
 from pts.transformers.evidence.reactome import reactome as reactome_evidence
 from pts.transformers.reactome import reactome
@@ -81,37 +82,28 @@ def test_raises_for_an_unknown_transformer() -> None:
         Transform.load_transformer('does_not_exist')
 
 
-def _validating_task(monkeypatch, check) -> Transform:
-    """A task whose run resolved its paths, with `check` next to its transformer."""
+def test_loads_what_the_transformer_writes_and_its_module_validate() -> None:
+    assert Transform.load_output_validation('evidence.encore') == OutputValidation(
+        'pts.transformers.evidence.encore.encore', {'evidence': EvidenceEncore}, None
+    )
+    assert Transform.load_output_validation('credible_set.validation').hook is validation_validate
+
+
+def test_a_transformer_writing_no_output_may_declare_nothing() -> None:
+    assert Transform.load_output_validation('foldx') == OutputValidation('pts.transformers.foldx.foldx', {}, None)
+
+
+def test_validate_validates_the_configured_destination_with_the_paths_of_the_run(monkeypatch) -> None:
+    validation = Mock()
     monkeypatch.setattr(Transform, 'load_transformer', staticmethod(lambda _: Mock()))
-    monkeypatch.setattr(Transform, 'load_check', staticmethod(lambda _: check))
-    spec = TransformSpec(name='transform test', transformer='study', source='input/study', destination='output/study')
+    monkeypatch.setattr(Transform, 'load_output_validation', staticmethod(lambda _: validation))
+    spec = TransformSpec(
+        name='transform test', transformer='study', source='input/study', destination='output/study', settings={'a': 1}
+    )
     task = Transform(spec, SimpleNamespace(config=Config.model_construct(step='study', work_path='/work')))
     task.srcs, task.dsts = '/work/input/study', '/work/output/study'
-    return task
 
-
-def test_loads_the_check_next_to_the_transformer() -> None:
-    assert Transform.load_check('credible_set.validation') is validation_check
-
-
-def test_a_transformer_without_a_check_has_none() -> None:
-    assert Transform.load_check('reactome') is None
-
-
-def test_validate_runs_the_check_with_the_paths_of_the_run(monkeypatch) -> None:
-    check = Mock()
-    task = _validating_task(monkeypatch, check)
-    unwrap(Transform.validate)(task)
-    check.assert_called_once_with('/work/input/study', '/work/output/study', {}, task.context.config)
-
-
-def test_a_failed_check_is_a_task_validation_error(monkeypatch) -> None:
-    task = _validating_task(monkeypatch, Mock(side_effect=ValueError('3 input rows != 2 written rows')))
-    with pytest.raises(TaskValidationError, match='3 input rows'):
-        unwrap(Transform.validate)(task)
-
-
-def test_a_transformer_without_a_check_is_valid(monkeypatch) -> None:
-    task = _validating_task(monkeypatch, None)
     assert unwrap(Transform.validate)(task) is task
+    validation.run.assert_called_once_with(
+        'output/study', '/work/input/study', '/work/output/study', {'a': 1}, task.context.config
+    )

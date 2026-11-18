@@ -13,6 +13,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.target import Target
+from pts.task_outputs import writes
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
 from pts.transformers.target.assemble import assemble
 from pts.transformers.target.ensembl import build_ensembl
@@ -20,6 +22,7 @@ from pts.transformers.utils.dataset import write_dataset
 from pts.transformers.utils.ensembl import CoreDump
 
 
+@writes(Target)
 def target(
     source: dict[str, str],
     destination: str,

@@ -8,6 +8,8 @@ import polars_hash as plh
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.clinical_target import ClinicalTarget
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,
     CATEGORY_RANKS_STR,
@@ -18,6 +20,7 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.quality_flags import valid_rows
 
 
+@writes(output=ClinicalTarget)
 def clinical_target(
     source: dict[str, Path],
     destination: dict[str, Path],

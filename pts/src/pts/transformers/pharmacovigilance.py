@@ -10,7 +10,9 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.pharmacovigilance import Pharmacovigilance
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 
 _ROW_COLUMNS = ['safetyreportid', 'chembl_id', 'event']
@@ -252,6 +254,7 @@ def read_archives(archives: list[str], drugs: pl.DataFrame, blacklist: pl.DataFr
     return pl.concat([f for f in frames if f is not None]).unique()
 
 
+@writes(Pharmacovigilance)
 def pharmacovigilance(
     source: dict[str, str],
     destination: str,

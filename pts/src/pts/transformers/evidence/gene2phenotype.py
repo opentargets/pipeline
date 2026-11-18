@@ -14,6 +14,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene2phenotype import G2P_INPUT_SCHEMA
+from pts.schemas.outputs.evidence_gene2phenotype import EvidenceGene2phenotype
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -129,6 +131,7 @@ def parse_gene2phenotype(paths: list[str]) -> pl.LazyFrame:
     )
 
 
+@writes(evidence=EvidenceGene2phenotype)
 def gene2phenotype(
     source: dict[str, str],
     destination: dict[str, str],

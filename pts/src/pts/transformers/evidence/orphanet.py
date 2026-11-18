@@ -15,6 +15,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.orphanet import ORPHANET_SCHEMA
+from pts.schemas.outputs.evidence_orphanet import EvidenceOrphanet
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score, direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -168,6 +170,7 @@ def process_orphanet(raw: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+@writes(evidence=EvidenceOrphanet)
 def orphanet(
     source: dict[str, str],
     destination: dict[str, str],

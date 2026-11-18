@@ -14,6 +14,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.gene_burden import GENE_BURDEN_UNION
+from pts.schemas.outputs.evidence_gene_burden import EvidenceGeneBurden
+from pts.task_outputs import writes
 from pts.transformers.evidence.gene_burden.az import parse_az
 from pts.transformers.evidence.gene_burden.bipex import parse_bipex
 from pts.transformers.evidence.gene_burden.brava import parse_brava
@@ -143,6 +145,7 @@ def map_diseases(union: pl.DataFrame, disease_label_lut: str, disease_id_lut: st
     return check_union(coalesced.drop(CURATED_ID_COLUMN))
 
 
+@writes(evidence=EvidenceGeneBurden)
 def gene_burden(
     source: dict[str, str],
     destination: dict[str, str],

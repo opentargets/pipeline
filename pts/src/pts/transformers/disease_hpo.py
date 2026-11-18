@@ -7,9 +7,12 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node, schema
+from pts.schemas.outputs.disease_hpo import DiseaseHpo
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 
 
+@writes(DiseaseHpo)
 def disease_hpo(
     source: Path,
     destination: Path,

@@ -8,6 +8,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -214,6 +216,7 @@ def generate(
     return evidence, excluded
 
 
+@writes(evidence=EvidenceClinicalPrecedence)
 def clinical_precedence(
     source: dict[str, str],
     destination: dict[str, str],

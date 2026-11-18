@@ -8,9 +8,12 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
+from pts.schemas.outputs.disease_phenotype import DiseasePhenotype
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 
+@writes(DiseasePhenotype)
 def disease_phenotype(
     source: dict[str, str],
     destination: str,

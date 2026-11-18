@@ -16,6 +16,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.baseline_expression import BaselineExpression
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import QC_COLUMN, flag_rows
 from pts.transformers.utils.spark_csv import read_spark_csv
@@ -326,6 +328,7 @@ def _read_parents(path: str) -> pl.DataFrame:
     return read_spark_csv(path, separator='\t').drop(PARENT_COUNT, strict=False)
 
 
+@writes(valid=BaselineExpression)
 def baseline_expression(
     source: dict[str, str],
     destination: dict[str, str],

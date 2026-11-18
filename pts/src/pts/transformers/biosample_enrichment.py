@@ -16,6 +16,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
+from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
+from pts.task_outputs import writes
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -397,6 +399,7 @@ def score_panel(
     )
 
 
+@writes(BiosampleEnrichment)
 def biosample_enrichment(
     source: dict[str, str],
     destination: str,

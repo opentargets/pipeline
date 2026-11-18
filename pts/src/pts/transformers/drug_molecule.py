@@ -14,6 +14,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.drug_molecule import drug_molecule_schema
+from pts.schemas.outputs.drug_molecule import DrugMolecule
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS_STR,
     RANK_TO_CATEGORY_STR,
@@ -63,6 +65,7 @@ def _friendly_stage_label(stage: str | None) -> str | None:
     return stage.replace('_', ' ').lower().title()
 
 
+@writes(output=DrugMolecule)
 def drug_molecule(
     source: dict[str, str],
     destination: dict[str, str],

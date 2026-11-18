@@ -8,7 +8,9 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from pts.schemas.outputs.study import Study
 from pts.schemas.study import StudyType, study_schema
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -307,6 +309,7 @@ def collect_heritability(studies: pl.LazyFrame, heritability: pl.LazyFrame) -> p
     )
 
 
+@writes(output=Study)
 def study(
     source: dict[str, str | list[str]],
     destination: dict[str, str],

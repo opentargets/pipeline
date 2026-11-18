@@ -15,7 +15,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_genomics_england import EvidenceGenomicsEngland
 from pts.schemas.panel_app import PANEL_APP_INPUT_SCHEMA, PANELS_SCHEMA
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
@@ -247,6 +249,7 @@ def parse_panel_app(evidence: str, panels: str) -> pl.LazyFrame:
     return raw.lazy()
 
 
+@writes(evidence=EvidenceGenomicsEngland)
 def panel_app(
     source: dict[str, str],
     destination: dict[str, str],

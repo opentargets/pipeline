@@ -35,6 +35,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge, node
+from pts.schemas.outputs.biosample import Biosample
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 
 #: Edge predicates gentropy treats as parent-of relations for biosample (`utils.py`'s `df_parents`
@@ -59,6 +61,7 @@ def _strip_url_prefixes(expr: pl.Expr) -> pl.Expr:
     return expr.str.replace_all(_URL_PREFIXES_TO_STRIP, '')
 
 
+@writes(Biosample)
 def biosample(
     source: dict[str, Path],
     destination: Path,

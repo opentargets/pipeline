@@ -10,6 +10,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
+from pts.schemas.outputs.go import Go
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 
 
@@ -101,6 +103,7 @@ def _rows_from_obo(graph) -> list[dict]:
     return rows
 
 
+@writes(Go)
 def go(
     source: str,
     destination: str,

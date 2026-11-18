@@ -15,9 +15,12 @@ from pts.pyspark.common.session import Session
 from pts.pyspark.common.utils import maybe_coalesce
 from pts.schemas.colocalisation import CREDIBLE_SET_COLUMNS, CREDIBLE_SET_VARIANT_COLUMNS
 from pts.schemas.credible_set import credible_set_schema, credible_set_variant_schema
+from pts.schemas.outputs.colocalisation import Colocalisation
 from pts.schemas.spark import to_spark_schema
+from pts.task_outputs import writes
 
 
+@writes(colocalisation=Colocalisation)
 def colocalisation(
     source: dict[str, str],
     destination: dict[str, str],

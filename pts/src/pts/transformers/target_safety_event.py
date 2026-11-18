@@ -18,7 +18,9 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.target_safety_event import TargetSafetyEvent
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.spark_strings import spark_trim
 from pts.transformers.utils.target import ensg_lookup
@@ -367,6 +369,7 @@ def _read_json_array(path: str, schema: pl.Schema) -> pl.DataFrame:
     return pl.read_json(io.BytesIO(data), schema=schema)
 
 
+@writes(TargetSafetyEvent)
 def target_safety_event(
     source: dict[str, str],
     destination: str,

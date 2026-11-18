@@ -16,6 +16,8 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
+from pts.schemas.outputs.mouse_phenotype import MousePhenotype
+from pts.task_outputs import writes
 from pts.transformers.impc_common import (
     MODEL_ID,
     biological_model_id,
@@ -158,6 +160,7 @@ def split_by_target(mouse_phenotypes: pl.DataFrame, target_ids: pl.Series) -> tu
     return known, unknown.select('targetFromSourceId', pl.exclude('targetFromSourceId'))
 
 
+@writes(output=MousePhenotype)
 def mouse_phenotype(
     source: dict[str, str],
     destination: dict[str, str],

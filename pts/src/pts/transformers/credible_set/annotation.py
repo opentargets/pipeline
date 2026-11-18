@@ -20,6 +20,9 @@ from loguru import logger
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
+from pts.schemas.outputs.credible_set import CredibleSet
+from pts.schemas.outputs.credible_set_variant import CredibleSetVariant
+from pts.task_outputs import writes
 from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.confidence import assign_confidence
 from pts.transformers.credible_set.flags import CredibleSetFlag
@@ -65,6 +68,7 @@ class AnnotationSettings(BaseModel):
     """The distance from the gene TSS beyond which a QTL variant is trans."""
 
 
+@writes(credible_set=CredibleSet, credible_set_variant=CredibleSetVariant)
 def annotation(
     source: dict[str, str | list[str]],
     destination: dict[str, str],

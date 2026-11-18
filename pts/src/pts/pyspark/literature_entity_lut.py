@@ -15,6 +15,8 @@ from pyspark.sql import Column, DataFrame, Row
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
+from pts.schemas.outputs.literature_entity_lut import LiteratureEntityLut
+from pts.task_outputs import writes
 
 # Section importance ranks (from Scala reference.conf)
 _SECTION_RANKS = [
@@ -134,6 +136,7 @@ def _compute_relevance(matches: DataFrame) -> DataFrame:
     )
 
 
+@writes(literature_entity_lut=LiteratureEntityLut)
 def literature_entity_lut(
     source: dict[str, str] | str,
     destination: dict[str, str] | str,

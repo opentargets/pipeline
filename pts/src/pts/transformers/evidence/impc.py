@@ -15,6 +15,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.schemas.impc import DISEASE_MODEL_SUMMARY_SCHEMA
+from pts.schemas.outputs.evidence_impc import EvidenceImpc
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
 from pts.transformers.evidence.utils.luts import build_luts
@@ -189,6 +191,7 @@ def deduplicate(evidence: pl.DataFrame) -> pl.DataFrame:
     return deduplicated
 
 
+@writes(evidence=EvidenceImpc)
 def impc(
     source: dict[str, str],
     destination: dict[str, str],

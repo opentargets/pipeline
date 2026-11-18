@@ -12,6 +12,8 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.chemical_probe import ChemicalProbe
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import read_spreadsheet, scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup
 
@@ -70,6 +72,7 @@ _GROUPING_COLS = [
 ]
 
 
+@writes(ChemicalProbe)
 def chemical_probes(
     source: dict[str, str],
     destination: str,

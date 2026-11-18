@@ -20,6 +20,8 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.l2g_prediction import L2gPrediction
+from pts.task_outputs import writes
 from pts.transformers.l2g import explain as l2g_explain
 from pts.transformers.l2g import model as l2g_model
 from pts.transformers.l2g.features import FEATURES, impute_and_cast
@@ -81,6 +83,7 @@ def build_output(
     ).select(OUTPUT_COLUMNS)
 
 
+@writes(L2gPrediction)
 def l2g_predict(
     source: dict[str, str],
     destination: str,

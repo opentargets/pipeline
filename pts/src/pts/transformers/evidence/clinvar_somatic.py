@@ -6,12 +6,15 @@ from typing import Any
 
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_eva_somatic import EvidenceEvaSomatic
+from pts.task_outputs import writes
 from pts.transformers.evidence.clinvar import EVA, run_eva
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 
 EVA_SOMATIC = EvidenceDatasource(datasource_id='eva_somatic', unique_fields=EVA.unique_fields, score=EVA.score)
 
 
+@writes(evidence=EvidenceEvaSomatic)
 def clinvar_somatic(
     source: dict[str, str],
     destination: dict[str, str],

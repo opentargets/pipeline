@@ -7,6 +7,8 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_eva import EvidenceEva
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.luts import build_luts
@@ -150,6 +152,7 @@ def run_eva(source: dict[str, str], destination: dict[str, str], datasource: Evi
     write_evidence(evidence, destination)
 
 
+@writes(evidence=EvidenceEva)
 def clinvar(
     source: dict[str, str],
     destination: dict[str, str],

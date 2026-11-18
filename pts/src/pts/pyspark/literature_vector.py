@@ -16,6 +16,8 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
+from pts.schemas.outputs.literature_vector import LiteratureVector
+from pts.task_outputs import writes
 
 _OUTPUT_COLUMNS = ['category', 'word', 'norm', 'vector']
 
@@ -44,6 +46,7 @@ def _compute_vectors(vectors: DataFrame) -> DataFrame:
     )
 
 
+@writes(vectors=LiteratureVector)
 def literature_vector(
     source: dict[str, str] | str,
     destination: dict[str, str] | str,

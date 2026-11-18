@@ -28,6 +28,8 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.chembl_bioactivity import chembl_bioactivity_schema
+from pts.schemas.outputs.chembl_bioactivity import ChemblBioactivity
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import chembl_accession_lookup
 
@@ -114,6 +116,7 @@ screens, also on a few other datasets. Any other comment (free text from publica
 PubChem's ``Unspecified``) gives no outcome."""
 
 
+@writes(bioactivity=ChemblBioactivity)
 def chembl_bioactivity(
     source: dict[str, Path],
     destination: dict[str, str],

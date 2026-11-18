@@ -17,7 +17,9 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.outputs.pharmacogenomics import Pharmacogenomics
 from pts.schemas.pharmacogenetics import CLINPGX_SCHEMA, PHARMACOGENOMICS, PHENOTYPES_SCHEMA
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.ontology import MAPPED_ID_COLUMN, add_efo_mapping
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -185,6 +187,7 @@ def enrich_with_drugs(
     )
 
 
+@writes(associations=Pharmacogenomics)
 def pharmacogenetics(
     source: dict[str, str],
     destination: dict[str, str],

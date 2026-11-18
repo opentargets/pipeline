@@ -15,7 +15,9 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.outputs.target_tractability import TargetTractability
 from pts.schemas.target_tractability import tractability_schema
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 BUCKET_COLUMN = re.compile(r'.*_B\d+_.*')
@@ -64,6 +66,7 @@ def build_tractability(raw: pl.DataFrame, target_ids: pl.DataFrame) -> pl.DataFr
     )
 
 
+@writes(TargetTractability)
 def target_tractability(
     source: dict[str, str],
     destination: str,

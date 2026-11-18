@@ -12,6 +12,8 @@ from typing import Any
 import polars as pl
 from otter.config.model import Config
 
+from pts.schemas.outputs.evidence_clingen import EvidenceClingen
+from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import confidence_score
 from pts.transformers.evidence.utils.ontology import add_efo_mapping
@@ -99,6 +101,7 @@ def parse_clingen(path: str) -> pl.LazyFrame:
     )
 
 
+@writes(evidence=EvidenceClingen)
 def clingen(
     source: dict[str, str],
     destination: dict[str, str],

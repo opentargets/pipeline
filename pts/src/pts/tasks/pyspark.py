@@ -10,6 +10,7 @@ from otter.storage.util import make_absolute
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
+from pts.task_outputs import OutputValidation
 from pts.task_paths import DestinationPaths, SourcePaths, flatten_paths, resolve_source_paths
 
 PYSPARK_PACKAGE = 'pts.pyspark'
@@ -32,6 +33,11 @@ class PysparkSpec(Spec):
 
         The method should launch a pyspark job to operate on the data read from
         the input paths, and write the result to the destination paths.
+
+        The entry point declares the model of each dataset it writes with
+        `@writes` (`pts.task_outputs`), and its module may define `validate` for
+        further rules; both run in the validation phase of the task on the
+        Dataproc driver.
     """
     source: SourcePaths
     """A path or a dictionary whose values are paths or lists of paths."""
@@ -54,6 +60,7 @@ class Pyspark(Task):
         super().__init__(spec, context)
         self.spec: PysparkSpec
         self.pyspark = self.load_pyspark(spec.pyspark)
+        self.output_validation = self.load_output_validation(spec.pyspark)
 
     @staticmethod
     def load_pyspark(pyspark_name: str) -> pyspark_entrypoint:
@@ -65,6 +72,12 @@ class Pyspark(Task):
             return pyspark
         except ImportError:
             raise ModuleNotFoundError(f'{pyspark_name} not found in {PYSPARK_PACKAGE}')
+
+    @staticmethod
+    def load_output_validation(pyspark_name: str) -> OutputValidation:
+        """What the entry point declares with `writes`, and its module's `validate`."""
+        module = import_module(f'{PYSPARK_PACKAGE}.{pyspark_name}')
+        return OutputValidation.of(getattr(module, pyspark_name), module)
 
     @report
     def run(self) -> Self:
@@ -89,4 +102,12 @@ class Pyspark(Task):
         dsts = list(self.dsts.values()) if isinstance(self.dsts, dict) else self.dsts
         self.artifacts = [Artifact(source=srcs, destination=dsts)]
 
+        return self
+
+    @report
+    def validate(self) -> Self:
+        """Validate the datasets the entry point's module declares, then run its `validate`."""
+        self.output_validation.run(
+            self.spec.destination, self.srcs, self.dsts, self.spec.settings or {}, self.context.config
+        )
         return self

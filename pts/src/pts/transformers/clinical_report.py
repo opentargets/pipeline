@@ -8,6 +8,8 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
+from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     ClinicalProvider,
     ClinicalReport,
@@ -108,6 +110,7 @@ class ClinicalReportFlags(StrEnum):
     SAFETY_REPORT = 'SAFETY_REPORT'
 
 
+@writes(output=ClinicalReportOutput)
 def clinical_report(
     source: dict[str, str],
     destination: dict[str, str],

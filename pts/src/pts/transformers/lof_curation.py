@@ -11,6 +11,8 @@ from pts.schemas.variant_annotation import variant_annotation_schema
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.variant import hash_long_variant_ids
 
+METHOD = 'LossOfFunctionCuration'
+
 LOF_ASSESSMENTS: dict[str, tuple[str, float]] = {
     'lof': ('Assessed to cause LoF', 1.0),
     'likely_lof': ('Suspected to cause LoF', 0.5),
@@ -69,7 +71,7 @@ def _transform_lof_curation(frame: pl.LazyFrame) -> pl.LazyFrame:
             pl.col('position').str.extract(r'^([1-9][0-9]*)$', 1).cast(pl.Int32, strict=False),
             pl.concat_list(
                 pl.struct(
-                    pl.lit('LossOfFunctionCuration').alias('method'),
+                    pl.lit(METHOD).alias('method'),
                     pl.col('assessment'),
                     pl.lit(None, dtype=pl.Float32).alias('score'),
                     pl.lit(None, dtype=pl.String).alias('assessmentFlag'),

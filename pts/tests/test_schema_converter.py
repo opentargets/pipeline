@@ -1,0 +1,215 @@
+"""Tests for pts.schemas.dataset.converter.
+
+How each declarative rule is enforced is covered exhaustively by `test_schema_agreement.py`,
+against Pydantic; this file covers what that comparison cannot see: keys, row checks, and
+the error messages a failing write produces.
+"""
+
+import math
+from pathlib import Path
+from typing import Annotated, ClassVar
+
+import pandera.errors as pe
+import polars as pl
+import pytest
+from pydantic import Field, ValidationError
+
+from pts.schemas.dataset import (
+    DatasetModel,
+    PolarsDtype,
+    PrimaryKey,
+    RowCheck,
+    SchemaDefinitionError,
+    StructModel,
+    to_pandera,
+    to_polars_schema,
+)
+from pts.schemas.dataset.converter import to_base_pandera
+
+
+class _Sample(StructModel):
+    code: str = Field(pattern=r'^[A-Z]\d$')
+
+
+class _Base(DatasetModel):
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        RowCheck('value_is_finite', '`value` must be finite.', pl.col('value').is_finite()),
+    )
+
+    id: Annotated[str, PrimaryKey()]
+    value: float = Field(ge=0.0)
+
+
+class _Measurement(_Base):
+    dataset_name: ClassVar[str] = '_measurement'
+    dataset_title: ClassVar[str] = 'test dataset'
+    dataset_description: ClassVar[str] = 'test dataset'
+    example: ClassVar[dict] = {'id': 'a', 'value': 1.0, 'samples': [{'code': 'A1'}]}
+    row_checks: ClassVar[tuple[RowCheck, ...]] = (
+        *_Base.row_checks,
+        RowCheck(
+            'has_samples_or_value',
+            'A row with no samples has a positive `value`.',
+            ~(pl.col('samples').list.len() == 0) | (pl.col('value') > 0),
+        ),
+    )
+
+    samples: list[_Sample]
+
+
+class _Pair(DatasetModel):
+    dataset_name: ClassVar[str] = '_pair'
+    dataset_title: ClassVar[str] = 'composite key'
+    dataset_description: ClassVar[str] = 'composite key'
+    example: ClassVar[dict] = {'left': 'a', 'right': 1}
+
+    left: Annotated[str, PrimaryKey()]
+    right: Annotated[int, PrimaryKey()]
+
+
+def _frame(model: type[DatasetModel], rows: list[dict]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=to_polars_schema(model))
+
+
+def _failed_checks(model: type[DatasetModel], frame: pl.DataFrame) -> set[str]:
+    with pytest.raises(pe.SchemaErrors) as caught:
+        to_pandera(model).validate(frame, lazy=True)
+    return set(caught.value.failure_cases['check'].to_list())
+
+
+def test_row_checks_follow_the_derived_ones_and_extend_the_base() -> None:
+    schema = to_pandera(_Measurement)
+
+    assert [check.name for check in schema.checks or []] == ['value_is_finite', 'has_samples_or_value']
+    assert to_base_pandera(_Measurement).checks == []
+
+
+def test_row_checks_run() -> None:
+    frame = _frame(
+        _Measurement, [{'id': 'b', 'value': math.inf, 'samples': []}, {'id': 'a', 'value': 0.0, 'samples': []}]
+    )
+
+    assert _failed_checks(_Measurement, frame) == {
+        'value_is_finite: `value` must be finite.',
+        'has_samples_or_value: A row with no samples has a positive `value`.',
+    }
+
+
+def test_a_row_check_on_an_undeclared_column_is_rejected() -> None:
+    class Orphan(DatasetModel):
+        dataset_name: ClassVar[str] = '_orphan'
+        dataset_title: ClassVar[str] = 'orphan'
+        dataset_description: ClassVar[str] = 'orphan'
+        example: ClassVar[dict] = {}
+        row_checks: ClassVar[tuple[RowCheck, ...]] = (
+            RowCheck('orphan', 'reads a missing column', pl.col('missing') > 0),
+        )
+        x: str
+
+    with pytest.raises(SchemaDefinitionError, match=r"undeclared column\(s\) \['missing'\]"):
+        to_pandera(Orphan)
+
+
+def test_single_primary_key_is_unique() -> None:
+    frame = _frame(_Measurement, [{'id': 'a', 'value': 1.0, 'samples': []}] * 2)
+
+    assert 'field_uniqueness' in _failed_checks(_Measurement, frame)
+
+
+def test_composite_primary_key_is_unique_together_only() -> None:
+    to_pandera(_Pair).validate(_frame(_Pair, [{'left': 'a', 'right': 1}, {'left': 'a', 'right': 2}]))
+
+    assert 'multiple_fields_uniqueness' in _failed_checks(_Pair, _frame(_Pair, [{'left': 'a', 'right': 1}] * 2))
+
+
+def test_undeclared_columns_are_rejected() -> None:
+    frame = _frame(_Pair, [{'left': 'a', 'right': 1}]).with_columns(extra=pl.lit(0))
+
+    assert 'column_in_schema' in _failed_checks(_Pair, frame)
+
+
+def test_pattern_matches_anywhere_like_pydantic_does() -> None:
+    class Loose(DatasetModel):
+        dataset_name: ClassVar[str] = '_loose'
+        dataset_title: ClassVar[str] = 'unanchored pattern'
+        dataset_description: ClassVar[str] = 'unanchored pattern'
+        example: ClassVar[dict] = {}
+        x: str = Field(pattern=r'\d{3}')
+
+    to_pandera(Loose).validate(pl.DataFrame({'x': ['123', 'ab123', '123ab']}))
+    Loose.model_validate({'x': 'ab123'})
+
+
+def test_failures_name_the_nested_path_and_rule() -> None:
+    frame = _frame(_Measurement, [{'id': 'a', 'value': -1.0, 'samples': [{'code': 'A1'}, {'code': 'bad'}, None]}])
+
+    assert _failed_checks(_Measurement, frame) == {
+        'value: >= 0.0',
+        'samples[]: not null',
+        'samples[]/code: matches ^[A-Z]\\d$',
+    }
+
+
+def test_nan_counts_as_null() -> None:
+    class Floats(DatasetModel):
+        dataset_name: ClassVar[str] = '_floats'
+        dataset_title: ClassVar[str] = 'floats'
+        dataset_description: ClassVar[str] = 'floats'
+        example: ClassVar[dict] = {}
+        required: float = Field(le=1.0)
+        optional: float | None = Field(le=1.0)
+        elements: list[float]
+
+    frame = pl.DataFrame(
+        {'required': [math.nan], 'optional': [math.nan], 'elements': [[math.nan]]}, schema=to_polars_schema(Floats)
+    )
+
+    assert _failed_checks(Floats, frame) == {'not_nullable', 'elements[]: not null'}
+
+
+class _Single(DatasetModel):
+    dataset_name: ClassVar[str] = '_single'
+    dataset_title: ClassVar[str] = 'single precision'
+    dataset_description: ClassVar[str] = 'single precision'
+    example: ClassVar[dict] = {'x': 0.0}
+
+    x: Annotated[float, PolarsDtype(pl.Float32)] = Field(le=0.1)
+
+
+def test_float32_bounds_compare_the_stored_value_at_full_precision() -> None:
+    """A Float32 `0.1` is stored as 0.10000000149..., which is above 0.1 -- as Pydantic sees it too."""
+    frame = pl.DataFrame({'x': [0.1]}, schema={'x': pl.Float32})
+
+    with pytest.raises(ValidationError):
+        _Single.model_validate({'x': frame['x'].item()})
+    with pytest.raises(pe.SchemaErrors, match=r'x: <= 0.1'):
+        to_pandera(_Single).validate(frame, lazy=True)
+
+
+class _Entry(StructModel):
+    label: str
+
+
+class _Holder(StructModel):
+    entries: list[_Entry]
+
+
+class _Nested(DatasetModel):
+    dataset_name: ClassVar[str] = '_nested'
+    dataset_title: ClassVar[str] = 'nested'
+    dataset_description: ClassVar[str] = 'nested'
+    example: ClassVar[dict] = {'holder': {'entries': [{'label': 'a'}]}}
+
+    holder: _Holder | None
+
+
+def test_validates_a_list_inside_a_struct_read_from_several_row_groups(tmp_path: Path) -> None:
+    """A `when/then` over a struct field's `list.eval` panics in polars on such a frame."""
+    rows = [{'entries': [{'label': 'a'}]}, None, {'entries': [{'label': 'b'}, {'label': 'c'}]}] * 20
+    pl.DataFrame({'holder': rows}, schema=to_polars_schema(_Nested)).write_parquet(
+        tmp_path / 'part.parquet', row_group_size=7
+    )
+    frame = pl.read_parquet(tmp_path / 'part.parquet')
+
+    assert frame.n_chunks() > 1
+    to_pandera(_Nested).validate(frame, lazy=True)
