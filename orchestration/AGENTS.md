@@ -28,3 +28,5 @@ directory, UI at `localhost:8080`, creds `airflow`/`airflow`). New DAGs under
 
 Operating a run (the Airflow VM, triggering, re-running steps, checking output) is
 the `unified-pipeline-run` skill.
+Test-running a staging DAG (a package with its own `config.yaml`, read by
+`dags/config/staging_pipeline.py`) is the `staging-dag-run` skill.

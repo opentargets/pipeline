@@ -25,6 +25,7 @@ objects", "0 matches"), run a control query that should return something.
 | Run the pipeline end to end | `references/full-run.md` (templates in `references/reporting.md`) |
 | Re-run some steps inside an existing run | `references/partial-reruns.md` |
 | Check the output; compare against another run or release | `references/verification.md` |
+| Test pts or gentropy steps on real data without Airflow | `references/steps-outside-airflow.md` |
 
 ## Where things live
 
