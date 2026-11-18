@@ -1,0 +1,10 @@
+*
+!pts
+!datamodels
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.coverage
+**/tests
+pts/.test_durations
