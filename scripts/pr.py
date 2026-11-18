@@ -18,6 +18,8 @@ import sys
 from packaging.version import Version
 from tag import PACKAGES, bail, get_package_version, get_release_tags, subprocess_run
 
+DEPENDANTS: dict[str, tuple[str, ...]] = {'datamodels': ('pts', 'croissant')}
+
 
 def has_changed(package: str, versions: list[Version]) -> bool:
     if not versions:
@@ -30,6 +32,7 @@ def has_changed(package: str, versions: list[Version]) -> bool:
         'HEAD',
         '--',
         f'{package}/',
+        *(f'{dep}/' for dep, users in DEPENDANTS.items() if package in users),
     ])
     return bool(diff)
 
@@ -54,12 +57,14 @@ def get_next_version(package: str, current: Version, versions: list[Version]) ->
     return next_version
 
 
+def packages_to_bump() -> list[str]:
+    return [p for p in PACKAGES if has_changed(p, get_release_tags(p, merged='origin/main'))]
+
+
 def main():
     bumps = []
-    for package in PACKAGES:
+    for package in packages_to_bump():
         tags = get_release_tags(package, merged='origin/main')
-        if not has_changed(package, tags):
-            continue
         current = get_package_version(package)
         bumps.append((package, get_next_version(package, current, tags)))
 

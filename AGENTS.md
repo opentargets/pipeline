@@ -1,16 +1,18 @@
 # AGENTS.md
 
 The **Open Targets Data Pipeline** monorepo generates an Open Targets data release.
-It holds four independent Python packages, each with its own `pyproject.toml`,
+It holds five independent Python packages, each with its own `pyproject.toml`,
 `uv.lock` and `Dockerfile`:
 
 - **`pis`** (Pipeline Input Stage) fetches, validates and arranges input data.
 - **`pts`** (Pipeline Transformation Stage) turns inputs into the release datasets.
 - **`orchestration`** holds the Airflow 3 DAGs that run the pipeline on Google Cloud.
 - **`croissant`** generates the release's Croissant descriptor.
+- **`datamodels`** holds the dataset models (`ot_datamodels`). It is a library with no image; a change
+  there bumps and tests pts and croissant too.
 
 Before changing a package, read its own `AGENTS.md` (`pis/`, `pts/`, `orchestration/`,
-`croissant/`).
+`croissant/`, `datamodels/`).
 
 ## Commands
 

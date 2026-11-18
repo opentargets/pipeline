@@ -1,5 +1,5 @@
 ### HOUSEKEEPING TARGETS ###
-COMPONENTS := pis pts orchestration croissant
+COMPONENTS := pis pts orchestration croissant datamodels
 
 .PHONY: help clean test dev versions
 
