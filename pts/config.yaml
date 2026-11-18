@@ -5,6 +5,9 @@ pool_size: 4
 
 scratchpad:
   string_version: '12.5'
+  # the bucket the clinical staging steps keep their record stores and snapshots in;
+  # the `clinical_staging` DAG sets it from its own `bucket`
+  clinical_staging: gs://clinical_staging
 
 steps:
   #: VARIANT PPP STEP :############################################################################
@@ -1074,7 +1077,7 @@ steps:
       destination:
         extraction_v2: extraction_v2
       settings:
-        store_uri: gs://clinical_staging/store
+        store_uri: ${clinical_staging}/store
         # the AACT version, prefixing the store runs this step writes
         snapshot: '{{snapshot}}'
         model: claude-haiku-5-5
@@ -1093,7 +1096,7 @@ steps:
       destination:
         stop_reasons: stop_reasons
       settings:
-        store_uri: gs://clinical_staging/store
+        store_uri: ${clinical_staging}/store
         snapshot: '{{snapshot}}'
   ##################################################################################################
 
@@ -1109,7 +1112,7 @@ steps:
       destination:
         moa: extraction_v2
       settings:
-        store_uri: gs://clinical_staging/store
+        store_uri: ${clinical_staging}/store
         snapshot: '{{snapshot}}'
         max_compute: 5000
   ##################################################################################################
@@ -1125,11 +1128,11 @@ steps:
         match: input/literature/26.09/match
         drug_molecule: input/literature/26.09/drug_molecule
       destination:
-        moa: gs://clinical_staging/literature
+        moa: ${clinical_staging}/literature
       settings:
-        store_uri: gs://clinical_staging/store
+        store_uri: ${clinical_staging}/store
         input_release: '26.09'
-        import_experiment_cache: gs://clinical_staging/store/moa_literature/seed/moa_literature_seed-2026-11-09.jsonl
+        import_experiment_cache: ${clinical_staging}/store/moa_literature/seed/moa_literature_seed-2026-11-09.jsonl
         import_for_tag: claude-opus-5-5-p15139b69
         import_for_release: '26.09'
         min_seeded_share: 0.60
@@ -1152,7 +1155,7 @@ steps:
         drug_entities: drug_entities
         disease_entities: disease_entities
       settings:
-        store_uri: gs://clinical_staging/store
+        store_uri: ${clinical_staging}/store
         snapshot: '{{snapshot}}'
   ##################################################################################################
 

@@ -110,10 +110,12 @@ def test_release_copies_the_literature_moa_of_the_pinned_tag() -> None:
     scratchpad = _scratchpad()
     tag = MOA_LITERATURE.tag()
     assert scratchpad.get('moa_literature_tag') == tag, f'set moa_literature_tag in pis/config.yaml to {tag}'
-    staging = yaml.safe_load(PTS_CONFIG.read_text())['steps']['moa_literature'][0]
+    pts = yaml.safe_load(PTS_CONFIG.read_text())
+    staging = pts['steps']['moa_literature'][0]
     assert scratchpad['moa_literature_input_release'] == staging['settings']['input_release']
+    root = staging['destination']['moa'].replace('${clinical_staging}', pts['scratchpad']['clinical_staging'])
     directory = (
-        f'{staging["destination"]["moa"]}/{scratchpad["moa_literature_input_release"]}'
+        f'{root}/{scratchpad["moa_literature_input_release"]}'
         f'/moa_literature/{scratchpad["moa_literature_tag"]}'
     )
     sources = _copy_sources()['input/drug_mechanism_of_action/literature_moa']

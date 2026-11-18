@@ -39,4 +39,4 @@ def test_moa_literature_reads_the_input_release() -> None:
         'match': f'input/literature/{release}/match',
         'drug_molecule': f'input/literature/{release}/drug_molecule',
     }
-    assert task['destination'] == {'moa': 'gs://clinical_staging/literature'}
+    assert task['destination'] == {'moa': '${clinical_staging}/literature'}
