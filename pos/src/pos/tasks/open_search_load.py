@@ -42,7 +42,7 @@ class OpenSearchLoad(Task):
             self._index_name = self._get_index_name()
             self._id_field = self._config[self.spec.dataset].get('id_field')
             self._id_value = self._config[self.spec.dataset].get('id_value')
-            self._output_dir = self._config[self.spec.dataset]['output_dir']
+            self._input_dir = self._config[self.spec.dataset]['input_dir']
         except AttributeError:
             raise OpenSearchLoadError(f'Unable to load config for {self.spec.dataset}')
 
@@ -90,7 +90,7 @@ class OpenSearchLoad(Task):
                     yield doc
 
     def _get_json_files(self) -> list[Path]:
-        json_dir = Path(f'{self.context.config.work_path}/{self.spec.json_parent}/{self._output_dir}')
+        json_dir = Path(f'{self.context.config.work_path}/{self.spec.json_parent}/{self._input_dir}')
         return sorted(json_dir.glob('*.json'))
 
     def _get_index_name(self) -> str:

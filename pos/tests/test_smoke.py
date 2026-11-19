@@ -13,9 +13,7 @@ from otter.task.task_registry import TaskRegistry
 import pos.tasks as pos_tasks
 
 ROOT = Path(__file__).parents[1]
-CONFIGS = [ROOT / 'config' / 'config.yaml', ROOT / 'config' / 'config_ppp.yaml']
-# deleted with pos.gcp.snapshot_disk; the config rewrite drops its steps
-REMOVED = {'create_gcp_disk_snapshot'}
+CONFIGS = [ROOT / 'config' / 'config.yaml']
 
 
 def _registered() -> set[str]:
@@ -36,7 +34,7 @@ def _task_names(tasks: list[dict]) -> list[str]:
 
 def _config_task_types(config: Path) -> set[str]:
     steps = yaml.safe_load(config.read_text())['steps']
-    return {name.split(' ')[0] for tasks in steps.values() for name in _task_names(tasks)} - REMOVED
+    return {name.split(' ')[0] for tasks in steps.values() for name in _task_names(tasks)}
 
 
 def test_entrypoint_help():

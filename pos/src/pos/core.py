@@ -7,13 +7,14 @@ from loguru import logger
 from otter import Runner
 from otter.manifest.model import Result
 
-from pos.run import parse_release_uri
+from pos.run import for_product, parse_release_uri
 
 
 def main() -> None:
     runner = Runner('pos')
     try:
         run = parse_release_uri(runner.config.release_uri or '')
+        runner.specs = for_product(runner.specs, run.product, runner.config.step)
     except ValueError as e:
         logger.critical(e)
         raise SystemExit(errno.EINVAL)
