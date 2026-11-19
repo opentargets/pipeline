@@ -83,8 +83,6 @@ class MungeSettings(BaseModel):
     of SNPs the LD scores stand for; LDSC's `M_5_50` convention."""
     billing_project: str | None = None
     """Project billed for reading the summary statistics, when their bucket is requester pays."""
-    parallel_studies: int = Field(default=8, gt=0)
-    """Studies fetched and munged at the same time."""
 
 
 class PairsSource(BaseModel):
@@ -109,9 +107,5 @@ class PairsSettings(BaseModel):
     intercept: float | None = None
     """Fix the genetic covariance intercept; None estimates it."""
     min_overlap_snps: int = Field(default=50, gt=0)
-    parallel_pairs: int = Field(default=8, gt=0)
-    """Worker processes."""
-    worker_threads: int = Field(default=2, gt=0)
-    """Polars threads of each worker."""
     pairs_per_chunk: int = Field(default=200, gt=0)
-    """Pairs handed to a worker at a time."""
+    """Pairs in one Spark task."""

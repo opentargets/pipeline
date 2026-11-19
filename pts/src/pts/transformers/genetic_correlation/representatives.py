@@ -185,4 +185,4 @@ def representatives(
         chosen['studyId'].n_unique(),
         chosen.height,
     )
-    write_dataset(chosen.cast(dict(OUTPUT_SCHEMA)), destination)
+    write_dataset(chosen.cast(OUTPUT_SCHEMA), destination)

@@ -1,34 +1,23 @@
 """Genetic correlation of every pair of representative studies within an ancestry.
 
-Pairs are handed to worker processes in chunks, sorted so that consecutive pairs share their first
-study and a worker's small cache of loaded studies keeps hitting. The regression is numpy; each
-pair takes about a second of one core.
+`run_chunk` is one unit of work: a list of pairs, sorted so that consecutive pairs share their
+first study and the worker's small cache of loaded studies keeps hitting.
+`pts.pyspark.genetic_correlation_pairs` runs it for every chunk.
 """
 
 from __future__ import annotations
 
-import multiprocessing
-import os
-import shutil
 from collections import OrderedDict
-from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from contextlib import contextmanager
-from functools import partial
 from itertools import combinations
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 import numpy as np
 import polars as pl
-from loguru import logger
-from otter.config.model import Config
 
 from pts.transformers.genetic_correlation import ldsc
-from pts.transformers.genetic_correlation.munge import VARIANT_KEY, fetch, is_remote
-from pts.transformers.genetic_correlation.settings import PairsSettings, PairsSource
-from pts.transformers.utils.dataset import check_destinations_absent, list_parts, write_dataset
+from pts.transformers.genetic_correlation.munge import VARIANT_KEY, fetch
+from pts.transformers.genetic_correlation.settings import PairsSettings
 
 OUTPUT_SCHEMA = pl.Schema({
     'leftStudyId': pl.String,
@@ -148,109 +137,58 @@ def _row(status: str, n_snps: int, m: int, **values: Any) -> dict[str, Any]:
     return row
 
 
-def _load(munged: str, ancestry: str, study_id: str) -> pl.DataFrame:
+def _load(munged: str, ancestry: str, study_id: str, scratch: Path) -> pl.DataFrame:
     key = (ancestry, study_id)
     if key in _cache:
         _cache.move_to_end(key)
         return _cache[key]
-    frame = pl.read_parquet(f'{munged}/{ancestry}/{study_id}.parquet')
+    local = fetch(f'{munged}/{ancestry}/{study_id}.parquet', scratch / f'{ancestry}_{study_id}.parquet')
+    frame = pl.read_parquet(local)
+    if local.is_relative_to(scratch):
+        local.unlink()
     _cache[key] = frame
     while len(_cache) > _CACHE_SIZE:
         _cache.popitem(last=False)
     return frame
 
 
+def chunks(pairs: pl.DataFrame, size: int) -> list[list[tuple[str, str, str]]]:
+    """`pairs` from `study_pairs`, in order, as lists of up to `size` (ancestry, left, right) tuples."""
+    rows = list(pairs.select('ldAncestry', 'leftStudyId', 'rightStudyId').iter_rows())
+    return [rows[i : i + size] for i in range(0, len(rows), size)]
+
+
 def run_chunk(
-    chunk: list[tuple[str, str, str]], munged: str, m_snps: dict[str, int], options: PairsSettings
+    chunk: list[tuple[str, str, str]], munged: str, m_snps: dict[str, int], options: PairsSettings, scratch: Path
 ) -> list[dict[str, Any]]:
-    """Correlate a chunk of (ancestry, left, right) pairs, reading munged studies from `munged`."""
+    """Correlate a chunk of (ancestry, left, right) pairs.
+
+    Args:
+        chunk: the pairs, from `chunks`.
+        munged: the munged studies, as `munge.munge_one` writes them.
+        m_snps: the M of each ancestry's panel.
+        options: the regression's settings.
+        scratch: a local directory for the fetched munged studies.
+
+    Returns:
+        One row of `OUTPUT_SCHEMA` per pair.
+    """
+    scratch.mkdir(parents=True, exist_ok=True)
     rows = []
     for ancestry, left, right in chunk:
-        row = correlate(_load(munged, ancestry, left), _load(munged, ancestry, right), m_snps[ancestry], options)
+        row = correlate(
+            _load(munged, ancestry, left, scratch), _load(munged, ancestry, right, scratch), m_snps[ancestry], options
+        )
         row.update(leftStudyId=left, rightStudyId=right, ldAncestry=ancestry)
         rows.append(row)
     return rows
 
 
-def _stage_munged(munged: str, representatives: pl.DataFrame, scratch: Path, workers: int) -> str:
-    """The munged studies on local disk: `munged` itself, or a copy of the representatives' files."""
-    if not is_remote(munged):
-        return munged
-    files = [
-        (
-            f'{munged}/{row["ldAncestry"]}/{row["studyId"]}.parquet',
-            scratch / row['ldAncestry'] / f'{row["studyId"]}.parquet',
-        )
-        for row in representatives.select('ldAncestry', 'studyId').unique().iter_rows(named=True)
-    ]
-    logger.info('Fetching {} munged studies', len(files))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(lambda pair: fetch(*pair), files))
-    return str(scratch)
-
-
-def pairs(
-    source: dict[str, str],
-    destination: str,
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Correlate every pair of representatives.
-
-    Args:
-        source: the `PairsSource` paths.
-        destination: the genetic correlation dataset, one row per pair.
-        settings: the `PairsSettings`.
-        config: for `work_path`, where the munged studies are staged.
-    """
-    sources = PairsSource.model_validate(source)
-    options = PairsSettings.model_validate(settings)
-    check_destinations_absent([destination])
-    representatives = pl.read_parquet(list_parts(sources.representatives, '*.parquet'))
-    panels = pl.read_parquet(list_parts(sources.panels, '*.parquet'))
-    m_snps = dict(zip(panels['ldAncestry'], panels['mSnps'], strict=True))
-    all_pairs = study_pairs(representatives)
-    logger.info('{} pairs over {} studies', all_pairs.height, representatives['studyId'].n_unique())
-
-    with TemporaryDirectory(dir=config.work_path) as directory:
-        munged = _stage_munged(sources.munged, representatives, Path(directory), options.parallel_pairs)
-        rows = list(all_pairs.iter_rows())
-        chunks = [rows[i : i + options.pairs_per_chunk] for i in range(0, len(rows), options.pairs_per_chunk)]
-        work = partial(run_chunk, munged=munged, m_snps=m_snps, options=options)
-        results: list[dict[str, Any]] = []
-        with (
-            _worker_threads(options.worker_threads),
-            ProcessPoolExecutor(
-                max_workers=options.parallel_pairs, mp_context=multiprocessing.get_context('spawn')
-            ) as pool,
-        ):
-            for done, chunk_rows in enumerate(pool.map(work, chunks), start=1):
-                results.extend(chunk_rows)
-                if done % 50 == 0 or done == len(chunks):
-                    logger.info('{} of {} chunks done', done, len(chunks))
-        if is_remote(sources.munged):
-            shutil.rmtree(munged, ignore_errors=True)
-
-    output = (
+def results(rows: list[dict[str, Any]]) -> pl.DataFrame:
+    """Rows from `run_chunk` as the output dataset, sorted, with undefined estimates null."""
+    return (
         pl
-        .DataFrame(results, schema=OUTPUT_SCHEMA)
+        .DataFrame(rows, schema=OUTPUT_SCHEMA)
         .with_columns(pl.col(pl.Float64).fill_nan(None))
         .sort('ldAncestry', 'leftStudyId', 'rightStudyId')
     )
-    statuses = dict(output.group_by('runStatus').len().iter_rows())
-    logger.info('{} pairs: {}', output.height, statuses)
-    write_dataset(output, destination)
-
-
-@contextmanager
-def _worker_threads(threads: int) -> Iterator[None]:
-    """Set `POLARS_MAX_THREADS` for the spawned workers, which read it when they import polars."""
-    previous = os.environ.get('POLARS_MAX_THREADS')
-    os.environ['POLARS_MAX_THREADS'] = str(threads)
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop('POLARS_MAX_THREADS', None)
-        else:
-            os.environ['POLARS_MAX_THREADS'] = previous

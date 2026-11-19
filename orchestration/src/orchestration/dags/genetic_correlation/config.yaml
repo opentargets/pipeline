@@ -1,0 +1,118 @@
+---
+description: Open Targets Genetics — LDSC genetic correlation between representative GWAS studies
+env: prod
+
+environments:
+  prod:
+    input:
+      # the platform release whose study index the representatives are chosen from
+      platform: gs://open-targets-data-releases/26.09
+      # LDSC heritability estimates of the GWAS with summary statistics
+      heritability: gs://gwas_catalog_sumstats_susie/heritability_estimates
+      # gnomAD r2.1.1 LD scores per ancestry, those the heritability estimates use
+      ldscore: gs://genetics-portal-dev-analysis/xg1/LDSC_pyspark/inputs/custom_panel
+      sumstats: gs://gwas_catalog_inputs/harmonised_summary_statistics
+    output: gs://gwas_catalog_genetic_correlation/prod/20261119T120000
+    scratchpad:
+      # the pipeline ref pts is installed from on the cluster, and the setup files are read at
+      pipeline_ref: feat/genetic-correlation
+      # billed for the requester-pays release and summary statistics buckets
+      billing_project: open-targets-genetics-dev
+
+setup:
+  - from: https://raw.githubusercontent.com/opentargets/pipeline/{{pipeline_ref}}/orchestration/src/orchestration/assets/install_dependencies_on_cluster.sh
+    to: '{{output}}/bin/install_dependencies_on_cluster.sh'
+  - from: https://raw.githubusercontent.com/opentargets/pipeline/{{pipeline_ref}}/orchestration/src/orchestration/assets/dataproc_pts_task_run.py
+    to: '{{output}}/bin/dataproc_pts_task_run.py'
+
+infrastructure:
+  clusters:
+    otg-genetic-correlation:
+      project_id: open-targets-genetics-dev
+      # as the pts clusters of the unified pipeline
+      image_version: '3.0.3-debian13'
+      master_machine_type: n2d-highmem-8
+      master_disk_size: 128
+      num_workers: 4
+      worker_machine_type: n2d-standard-16
+      worker_disk_size: 128
+      idle_delete_ttl: 1800
+      metadata:
+        PTS_REF: '{{pipeline_ref}}'
+      properties:
+        'spark:spark.sql.ansi.enabled': 'false'
+        # every Spark task is one Python worker running polars and numpy: four per executor,
+        # with their memory outside the JVM
+        'spark:spark.executor.cores': '4'
+        'spark:spark.executor.memory': '2g'
+        'spark:spark.executor.memoryOverhead': '8g'
+        'spark:spark.executorEnv.POLARS_MAX_THREADS': '1'
+        'spark:spark.task.maxFailures': '4'
+      init_actions_uris:
+        - '{{output}}/bin/install_dependencies_on_cluster.sh'
+
+steps:
+  # the study index and heritability estimates, from requester-pays buckets, and the LD scores,
+  # copied into input/ of the run
+  stage:
+    kind: vm
+    definition:
+      image: gcr.io/google.com/cloudsdktool/google-cloud-cli:588.0.0-alpine@sha256:44924be6dcf684d4e76922c5cb015950305e8ded844587f915dbaeefe290f545
+      machine_type: e2-standard-2
+      command: |
+        sh -c 'set -eu; \
+          gcloud storage cp -r --billing-project={{billing_project}} {{input.platform}}/output/study {{output}}/input/; \
+          gcloud storage cp -r --billing-project={{billing_project}} {{input.heritability}} {{output}}/input/; \
+          gcloud storage cp -r {{input.ldscore}} {{output}}/input/ldscore'
+
+  representatives:
+    depends_on: [stage]
+    kind: dataproc
+    definition:
+      cluster: otg-genetic-correlation
+      main: '{{output}}/bin/dataproc_pts_task_run.py'
+      args: |
+        transformer genetic_correlation.representatives '{
+          "source": {
+            "study": "{{output}}/input/study",
+            "heritability": "{{output}}/input/heritability_estimates"
+          },
+          "destination": "{{output}}/output/representatives",
+          "settings": {"ancestries": ["nfe"]}
+        }'
+
+  munge:
+    depends_on: [representatives]
+    kind: dataproc
+    definition:
+      cluster: otg-genetic-correlation
+      main: '{{output}}/bin/dataproc_pts_task_run.py'
+      args: |
+        pyspark genetic_correlation_munge '{
+          "source": {
+            "representatives": "{{output}}/output/representatives",
+            "ldscore": "{{output}}/input/ldscore",
+            "sumstats": "{{input.sumstats}}"
+          },
+          "destination": {
+            "munged": "{{output}}/output/munged",
+            "panels": "{{output}}/output/panels"
+          },
+          "settings": {"billing_project": "{{billing_project}}"}
+        }'
+
+  pairs:
+    depends_on: [munge]
+    kind: dataproc
+    definition:
+      cluster: otg-genetic-correlation
+      main: '{{output}}/bin/dataproc_pts_task_run.py'
+      args: |
+        pyspark genetic_correlation_pairs '{
+          "source": {
+            "representatives": "{{output}}/output/representatives",
+            "munged": "{{output}}/output/munged",
+            "panels": "{{output}}/output/panels"
+          },
+          "destination": "{{output}}/output/genetic_correlation"
+        }'

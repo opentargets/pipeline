@@ -1,30 +1,22 @@
 """Each representative study's summary statistics joined to its ancestry's LD scores, once.
 
-A pair's regression needs the two studies' effects on the SNPs the LD panel covers. Joining every
-study to the panel here, and keeping only the columns the regression reads, makes each of the
-hundreds of thousands of pairs a join of two small files.
+`munge_one` is one unit of work: fetch a study's summary statistics, join them to the panel and
+write one parquet file. `pts.pyspark.genetic_correlation_munge` runs it for every representative.
 
 Summary statistics live in a bucket that may be requester pays, so the parts are fetched through
-otter with a billing project rather than scanned in place.
+otter, which bills the project of the surrounding `storage_context`, rather than scanned in place.
 """
 
 from __future__ import annotations
 
 import shutil
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 import polars as pl
-from loguru import logger
-from otter.config.model import Config
-from otter.storage.storage_context import storage_context
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.transformers.genetic_correlation.settings import MungeDestination, MungeSettings, MungeSource
-from pts.transformers.utils.dataset import check_destinations_absent, list_parts, write_dataset
+from pts.transformers.utils.dataset import list_parts
 
 COPY_BYTES = 16 * 1024 * 1024
 
@@ -79,13 +71,17 @@ def publish(local: Path, target: str) -> None:
     local.unlink()
 
 
-def read_panel(path: str) -> pl.DataFrame:
+def read_panel(path: str, scratch: Path) -> pl.DataFrame:
     """One ancestry's LD scores, a tab separated file or directory of parts, keyed by `VARIANT_KEY`.
+
+    Args:
+        path: the panel, local or remote.
+        scratch: where the parts of a remote panel are copied to be read.
 
     Returns:
         `chromosome`, `position`, `ref`, `alt`, `ldScore` and, when the panel has one, `alleleFrequency`.
     """
-    parts = list_parts(path, '*.csv*')
+    parts = [fetch(part, scratch / Path(part).name) for part in list_parts(path, '*.csv*')]
     scan = pl.scan_csv(parts, separator='\t', schema_overrides=_PANEL_COLUMNS)
     columns = scan.collect_schema().names()
     position = 'BP_hg38' if 'BP_hg38' in columns else 'BP'
@@ -145,64 +141,28 @@ def munge_study(sumstats: pl.LazyFrame, fallback_sample_size: float | None, pane
     )
 
 
-def _munge_one(
-    study: dict[str, Any], panel: pl.DataFrame, sources: MungeSource, destinations: MungeDestination, scratch: Path
-) -> int:
-    """Fetch, munge and publish one study; returns its SNP count."""
+def munge_one(study: dict[str, Any], panel: pl.DataFrame, sumstats: str, munged: str, scratch: Path) -> int:
+    """Fetch, munge and write one study.
+
+    Args:
+        study: `studyId`, `ldAncestry` and `effectiveSampleSize`, a row of the representatives.
+        panel: the study's ancestry's panel, from `read_panel`.
+        sumstats: the directory of every study's summary statistics, one dataset per `studyId`.
+        munged: the directory the study is written to, as `<ldAncestry>/<studyId>.parquet`.
+        scratch: a local directory for the fetched parts.
+
+    Returns:
+        The study's number of SNPs on the panel.
+    """
     study_id, ancestry = study['studyId'], study['ldAncestry']
     local = scratch / ancestry / study_id
     parts = [
-        fetch(part, local / 'parts' / Path(part).name)
-        for part in list_parts(f'{sources.sumstats}/{study_id}', '*.parquet')
+        fetch(part, local / 'parts' / Path(part).name) for part in list_parts(f'{sumstats}/{study_id}', '*.parquet')
     ]
-    munged = munge_study(pl.scan_parquet(parts), study['effectiveSampleSize'], panel)
+    frame = munge_study(pl.scan_parquet(parts), study['effectiveSampleSize'], panel)
     local.mkdir(parents=True, exist_ok=True)
     out = local / f'{study_id}.parquet'
-    munged.write_parquet(out, compression='zstd')
-    publish(out, f'{destinations.munged}/{ancestry}/{study_id}.parquet')
+    frame.write_parquet(out, compression='zstd')
+    publish(out, f'{munged}/{ancestry}/{study_id}.parquet')
     shutil.rmtree(local, ignore_errors=True)
-    return munged.height
-
-
-def munge(
-    source: dict[str, str],
-    destination: dict[str, str],
-    settings: dict[str, Any],
-    config: Config,
-) -> None:
-    """Munge every representative study.
-
-    Args:
-        source: the `MungeSource` paths.
-        destination: the `MungeDestination` paths.
-        settings: the `MungeSettings`.
-        config: for `work_path`, where the fetched parts go.
-    """
-    sources = MungeSource.model_validate(source)
-    destinations = MungeDestination.model_validate(destination)
-    options = MungeSettings.model_validate(settings)
-    check_destinations_absent([destinations.munged, destinations.panels])
-    studies = (
-        pl
-        .scan_parquet(list_parts(sources.representatives, '*.parquet'))
-        .select('studyId', 'ldAncestry', 'effectiveSampleSize')
-        .unique()
-        .sort('ldAncestry', 'studyId')
-        .collect()
-    )
-    panels: list[dict[str, Any]] = []
-    with (
-        TemporaryDirectory(dir=config.work_path) as directory,
-        storage_context(billing_project=options.billing_project),
-    ):
-        scratch = Path(directory)
-        for (ancestry,), group in studies.group_by('ldAncestry', maintain_order=True):
-            panel = read_panel(f'{sources.ldscore}/{options.ldscore_template.format(ancestry=ancestry)}')
-            m_snps = panel_size(panel, options.maf_threshold)
-            panels.append({'ldAncestry': ancestry, 'mSnps': m_snps})
-            logger.info('{}: {} panel SNPs, M = {}; munging {} studies', ancestry, panel.height, m_snps, group.height)
-            work = partial(_munge_one, panel=panel, sources=sources, destinations=destinations, scratch=scratch)
-            with ThreadPoolExecutor(max_workers=options.parallel_studies) as pool:
-                counts = list(pool.map(work, group.iter_rows(named=True)))
-            logger.info('{}: {} SNPs over {} studies', ancestry, sum(counts), len(counts))
-    write_dataset(pl.DataFrame(panels, schema=PANELS_SCHEMA), destinations.panels)
+    return frame.height

@@ -9,12 +9,11 @@ import numpy as np
 import polars as pl
 import pytest
 
-from pts.transformers.genetic_correlation import munge as munge_module
 from pts.transformers.genetic_correlation import pairs as pairs_module
-from pts.transformers.genetic_correlation import representatives as representatives_module
-from pts.transformers.genetic_correlation.munge import MUNGED_SCHEMA, munge
-from pts.transformers.genetic_correlation.pairs import merge_pair, pairs, study_pairs
+from pts.transformers.genetic_correlation.munge import MUNGED_SCHEMA, munge_one, panel_size, read_panel
+from pts.transformers.genetic_correlation.pairs import chunks, merge_pair, results, run_chunk, study_pairs
 from pts.transformers.genetic_correlation.representatives import OUTPUT_SCHEMA, ld_ancestry, representatives
+from pts.transformers.genetic_correlation.settings import PairsSettings
 from pts.transformers.study import QualityFlag
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -182,16 +181,13 @@ def munge_inputs(tmp_path: Path) -> tuple[dict[str, str], dict[str, str]]:
     return source, destination
 
 
-def test_munge_joins_each_study_to_its_panel(munge_inputs: tuple[dict, dict], tmp_path: Path) -> None:
+def test_munge_one_joins_a_study_to_its_panel(munge_inputs: tuple[dict, dict], tmp_path: Path) -> None:
     source, destination = munge_inputs
-    munge(
-        source,
-        destination,
-        {'ldscore_template': 'panel_{ancestry}.csv', 'parallel_studies': 2},
-        Mock(work_path=tmp_path),
-    )
-    panels = scan_dataset(destination['panels']).collect()
-    assert panels.to_dict(as_series=False) == {'ldAncestry': ['nfe'], 'mSnps': [49]}
+    panel = read_panel(f'{source["ldscore"]}/panel_nfe.csv', tmp_path / 'panel')
+    assert panel_size(panel, 0.05) == 49
+    for study in pl.read_parquet(f'{source["representatives"]}/*.parquet').iter_rows(named=True):
+        n_snps = munge_one(study, panel, source['sumstats'], destination['munged'], tmp_path / 'scratch')
+        assert n_snps == 47
     s1 = pl.read_parquet(f'{destination["munged"]}/nfe/S1.parquet')
     s2 = pl.read_parquet(f'{destination["munged"]}/nfe/S2.parquet')
     assert s1.schema == MUNGED_SCHEMA
@@ -280,11 +276,28 @@ def test_merge_pair_matches_swapped_alleles_with_the_effect_negated() -> None:
     assert merged['ldScore'].to_list() == [2.0, 3.0]
 
 
+def _run_pairs(source: dict[str, str], tmp_path: Path, **settings) -> pl.DataFrame:
+    representatives = pl.read_parquet(f'{source["representatives"]}/*.parquet')
+    options = PairsSettings.model_validate(settings)
+    rows = [
+        row
+        for chunk in chunks(study_pairs(representatives), options.pairs_per_chunk)
+        for row in run_chunk(chunk, source['munged'], {'nfe': 100_000}, options, tmp_path / 'scratch')
+    ]
+    return results(rows)
+
+
+def test_chunks_keep_the_pair_order() -> None:
+    pairs = study_pairs(pl.DataFrame({'ldAncestry': 'nfe', 'studyId': ['a', 'b', 'c', 'd']}))
+    assert chunks(pairs, 4) == [
+        [('nfe', 'a', 'b'), ('nfe', 'a', 'c'), ('nfe', 'a', 'd'), ('nfe', 'b', 'c')],
+        [('nfe', 'b', 'd'), ('nfe', 'c', 'd')],
+    ]
+
+
 def test_pairs_correlate_every_pair(pairs_inputs: tuple[dict, str], tmp_path: Path) -> None:
-    source, destination = pairs_inputs
-    settings = {'n_blocks': 20, 'parallel_pairs': 2, 'pairs_per_chunk': 2, 'worker_threads': 1}
-    pairs(source, destination, settings, Mock(work_path=tmp_path))
-    result = scan_dataset(destination).collect()
+    source, _ = pairs_inputs
+    result = _run_pairs(source, tmp_path, n_blocks=20, pairs_per_chunk=2)
     assert result.schema == pairs_module.OUTPUT_SCHEMA
     assert result.select('leftStudyId', 'rightStudyId').rows() == [('A', 'B'), ('A', 'C'), ('B', 'C')]
     assert result['runStatus'].to_list() == ['success'] * 3
@@ -297,15 +310,8 @@ def test_pairs_correlate_every_pair(pairs_inputs: tuple[dict, str], tmp_path: Pa
 
 
 def test_pairs_skip_pairs_with_too_few_shared_snps(pairs_inputs: tuple[dict, str], tmp_path: Path) -> None:
-    source, destination = pairs_inputs
-    pairs(source, destination, {'n_blocks': 5000, 'parallel_pairs': 1}, Mock(work_path=tmp_path))
-    result = scan_dataset(destination).collect()
+    source, _ = pairs_inputs
+    result = _run_pairs(source, tmp_path, n_blocks=5000)
     assert result['runStatus'].to_list() == ['skipped'] * 3
     assert result['skipReason'][0] == '3000 shared SNPs, fewer than 5000 jackknife blocks'
     assert result['rg'].null_count() == 3
-
-
-def test_modules_expose_their_transformers() -> None:
-    assert callable(representatives_module.representatives)
-    assert callable(munge_module.munge)
-    assert callable(pairs_module.pairs)
