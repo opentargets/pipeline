@@ -15,8 +15,10 @@ CREATE TABLE IF NOT EXISTS credible_sets ENGINE = EmbeddedRocksDB () PRIMARY KEY
         cs.studyType AS studyType,
         cs.chromosome AS chromosome,
         cs.leadVariantId AS leadVariantId,
-        -- variant ids are chromosome_position_ref_alt
-        toUInt32(splitByChar('_', cs.leadVariantId)[2]) AS leadPosition,
+        -- variant ids are chromosome_position_ref_alt, or OTVAR_chromosome_position_md5 or OTVAR_md5 when hashed
+        toUInt32OrNull(
+            splitByChar('_', cs.leadVariantId)[if(startsWith(cs.leadVariantId, 'OTVAR_'), 3, 2)]
+        ) AS leadPosition,
         v.pValueMantissa AS leadPValueMantissa,
         v.pValueExponent AS leadPValueExponent,
         v.reportedBeta AS leadBeta,
