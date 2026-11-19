@@ -2,6 +2,9 @@
 
 Create Platform backend (OpenSearch and Clickhouse) and release data.
 
+> This code moved from [`opentargets/pos`](https://github.com/opentargets/pos) into
+> the pipeline monorepo. Contributor and agent guidance is in [AGENTS.md](AGENTS.md).
+
 
 ## Summary
 

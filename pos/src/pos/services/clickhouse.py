@@ -200,7 +200,7 @@ def get_table_engine(client: Client, database: str, table: str) -> str | None:
     query = Template(
         """SELECT engine \
         FROM system.tables \
-        WHERE database='${database}' AND name='${table}'"""  # noqa: RUF027
+        WHERE database='${database}' AND name='${table}'"""
     ).substitute({'database': database, 'table': table})
     table_engine_query = client.query(query=query).first_row
     return table_engine_query[0] if table_engine_query else None

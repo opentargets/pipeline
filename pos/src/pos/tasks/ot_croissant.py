@@ -84,7 +84,7 @@ class OtCroissant(Task):
             gcp_location=self.spec.gcp_address,
             aws_location=self.spec.aws_address,
             version=release,
-            date_published=datetime.today().strftime('%Y-%m-%d'),
+            date_published=datetime.today().strftime('%Y-%m-%d'),  # ty: ignore[invalid-argument-type]
             data_integrity_hash='sha256',
         )
         logger.debug(f'Metadata generated: {metadata}')
