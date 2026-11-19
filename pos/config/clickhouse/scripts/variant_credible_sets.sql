@@ -24,7 +24,7 @@ WITH
     SELECT
       d.id AS id,
       any(d.name) AS name,
-      groupArrayIf ((ta.id, ta.name), d.taId != '') AS therapeuticAreas
+      groupArrayIf ((ta.id, ta.name), ta.id != '') AS therapeuticAreas
     FROM
       (
         SELECT
@@ -54,7 +54,7 @@ WITH
       any(sd.biosampleFromSourceId) AS biosampleId,
       groupArrayIf (
         (dt.id, dt.name, dt.therapeuticAreas),
-        sd.diseaseId != ''
+        dt.id != ''
       ) AS diseases
     FROM
       (
