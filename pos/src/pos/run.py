@@ -67,7 +67,13 @@ def parse_release_uri(uri: str) -> Run:
 
 def for_product(specs: Sequence[Spec], product: str, step: str) -> list[Spec]:
     """The step's specs that run for the product: those without `products:`, or listing it."""
-    kept = [s for s in specs if product in (s.model_extra or {}).get('products', [product])]
+    for s in specs:
+        extra = s.model_extra or {}
+        if unknown := set(extra.get('products', [])) - set(PRODUCTS):
+            raise ValueError(f'{s.name}: unknown product {", ".join(sorted(unknown))}, products are {sorted(PRODUCTS)}')
+        if gated := _gated_children(extra.get('do', [])):
+            raise ValueError(f'{s.name}: only top-level tasks take products:, not {", ".join(gated)}')
+    kept =[s for s in specs if product in (s.model_extra or {}).get('products', [product])]
     if specs and not kept:
         raise ValueError(f'step {step} does not run for {product}')
     dropped = {s.name for s in specs} - {s.name for s in kept}
@@ -75,3 +81,13 @@ def for_product(specs: Sequence[Spec], product: str, step: str) -> list[Spec]:
         if missing := dropped.intersection(s.requires):
             raise ValueError(f'{s.name} requires {", ".join(sorted(missing))}, which does not run for {product}')
     return kept
+
+
+def _gated_children(children: list[dict]) -> list[str]:
+    """Names of `do:` children, at any depth, that carry `products:`."""
+    gated = []
+    for child in children:
+        if 'products' in child:
+            gated.append(str(child.get('name')))
+        gated.extend(_gated_children(child.get('do', [])))
+    return gated

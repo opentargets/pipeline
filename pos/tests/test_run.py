@@ -130,3 +130,14 @@ def test_main_refuses_platform_only_step_for_ppp(tmp_path, monkeypatch, mocker):
     with pytest.raises(SystemExit) as e:
         _run_main(tmp_path, monkeypatch, mocker, 'gs://x/vh/ppp-2609-1', tasks)
     assert e.value.code != 0
+
+
+def test_for_product_rejects_unknown_product():
+    with pytest.raises(ValueError, match='unknown product plataform'):
+        for_product([Spec(name='hello_world a', products=['plataform'])], 'platform', 'x')
+
+
+def test_for_product_rejects_products_on_a_do_child():
+    spec = Spec(name='explode x', foreach=['a'], do=[{'name': 'hello_world ${each}', 'products': ['ppp']}])
+    with pytest.raises(ValueError, match='only top-level tasks'):
+        for_product([spec], 'platform', 'x')
