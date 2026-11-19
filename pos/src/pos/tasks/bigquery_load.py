@@ -11,6 +11,7 @@ class BigqueryLoadSpec(Spec):
     """Configuration fields for the BigQuery task.
 
     release_uri: the run whose `output/` is published
+    release: the release version written to `ot_release`
     project_id: project holding both datasets
     dataset_id: prod dataset, never deleted
     staging_dataset_id: dataset loaded and checked before the swap
@@ -18,6 +19,7 @@ class BigqueryLoadSpec(Spec):
     """
 
     release_uri: str
+    release: str
     project_id: str
     dataset_id: str
     staging_dataset_id: str
@@ -39,5 +41,5 @@ class BigqueryLoad(Task):
             staging=self.spec.staging_dataset_id,
             location=self.spec.location,
         )
-        release.publish(published_tables(self.spec.release_uri), self.spec.release_uri)
+        release.publish(published_tables(self.spec.release_uri), self.spec.release_uri, self.spec.release)
         return self

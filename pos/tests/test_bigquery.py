@@ -50,6 +50,13 @@ class FakeClient:
         rows = self.rows.get(name, 1)
         return self._job(name in self.fail_load, destination, lambda: self._put(destination, rows))
 
+    def load_table_from_json(self, rows, destination, job_config, location=None):
+        rows = list(rows)
+        schema = [(f.name, f.field_type) for f in job_config.schema]
+        self.calls.append(('load_json', rows, destination, job_config.write_disposition, schema))
+        name = destination.rsplit('.', 1)[-1]
+        return self._job(name in self.fail_load, destination, lambda: self._put(destination, len(rows)))
+
     def copy_table(self, source, destination, job_config, location=None):
         self.calls.append(('copy', source, destination, job_config.write_disposition))
         name = destination.rsplit('.', 1)[-1]
@@ -101,17 +108,17 @@ def test_published_tables(tmp_path):
 def test_mouse_phenotype_name(tmp_path):
     uri = _output(tmp_path, 'mouse_phenotype')
     client = FakeClient()
-    _release(client).publish(published_tables(uri), uri)
+    _release(client).publish(published_tables(uri), uri, '26.12')
     (load,) = client.made('load')
     assert load[1:3] == (f'{uri}/output/mouse_phenotype/*.parquet', f'{PROJECT}.{STAGING}.mouse_phenotype')
     assert load[3:] == ('WRITE_TRUNCATE', 'PARQUET')
-    assert client.prod() == {'mouse_phenotype'}
+    assert client.prod() == {'mouse_phenotype', 'ot_release'}
 
 
 def test_failed_load_never_touches_prod():
     client = FakeClient(prod=['disease', 'known_drug'], fail_load=['go'])
     with pytest.raises(BigQueryError, match=r'\bgo\b') as e:
-        _release(client).publish(['disease', 'go', 'so'], 'gs://b/r')
+        _release(client).publish(['disease', 'go', 'so'], 'gs://b/r', '26.12')
     assert 'disease' not in str(e.value)
     assert len(client.made('load')) == 3  # every job awaited before raising
     assert client.made('copy') == client.made('delete') == []
@@ -121,28 +128,42 @@ def test_failed_load_never_touches_prod():
 def test_empty_table_blocks_swap():
     client = FakeClient(prod=['disease'], rows={'so': 0})
     with pytest.raises(BigQueryError, match=r'\bso\b'):
-        _release(client).publish(['disease', 'so'], 'gs://b/r')
+        _release(client).publish(['disease', 'so'], 'gs://b/r', '26.12')
     assert client.made('copy') == client.made('delete') == []
 
 
 def test_swap_copies_and_prunes():
-    client = FakeClient(prod=['disease', 'known_drug'])
-    _release(client).publish(['disease', 'go'], 'gs://b/r')
+    client = FakeClient(prod=['disease', 'known_drug', 'ot_release'])
+    _release(client).publish(['disease', 'go'], 'gs://b/r', '26.12')
     copies = [c[1:] for c in client.made('copy')]
     assert copies == [
-        (f'{PROJECT}.{STAGING}.{t}', f'{PROJECT}.{PROD}.{t}', 'WRITE_TRUNCATE') for t in ['disease', 'go']
+        (f'{PROJECT}.{STAGING}.{t}', f'{PROJECT}.{PROD}.{t}', 'WRITE_TRUNCATE') for t in ['disease', 'go', 'ot_release']
     ]
     assert client.made('delete') == [('delete', f'{PROJECT}.{PROD}.known_drug')]
     # prune follows every copy
     kinds = [c[0] for c in client.calls]
     assert kinds.index('delete') > max(i for i, k in enumerate(kinds) if k == 'copy')
-    assert client.prod() == {'disease', 'go'}
+    assert client.prod() == {'disease', 'go', 'ot_release'}
+
+
+def test_ot_release_written_and_swapped():
+    client = FakeClient(prod=['ot_release'])
+    _release(client).publish(['disease'], 'gs://b/r', '26.12')
+    (load,) = client.made('load_json')
+    assert load[1:] == (
+        [{'release': '26.12'}],
+        f'{PROJECT}.{STAGING}.ot_release',
+        'WRITE_TRUNCATE',
+        [('release', 'STRING')],
+    )
+    assert (f'{PROJECT}.{STAGING}.ot_release', f'{PROJECT}.{PROD}.ot_release') in [c[1:3] for c in client.made('copy')]
+    assert client.made('delete') == []
 
 
 def test_swap_keeps_views():
     client = FakeClient(prod=['disease'])
     client.tables[f'{PROJECT}.{PROD}.a_view'] = _Table('a_view', 0, 'VIEW')
-    _release(client).publish(['disease'], 'gs://b/r')
+    _release(client).publish(['disease'], 'gs://b/r', '26.12')
     assert client.made('delete') == []
 
 
@@ -150,24 +171,24 @@ def test_swap_rerun_idempotent():
     tables = ['disease', 'go', 'so']
     client = FakeClient(prod=['disease', 'known_drug'], fail_copy=['go'])
     with pytest.raises(BigQueryError, match=r'\bgo\b'):
-        _release(client).publish(tables, 'gs://b/r')
+        _release(client).publish(tables, 'gs://b/r', '26.12')
     first = [c for c in client.calls if c[0] in ('load', 'copy')]
-    assert len(client.made('copy')) == 3  # the other copies still ran
+    assert len(client.made('copy')) == 4  # the other copies still ran
     assert client.made('delete') == []
     assert 'known_drug' in client.prod()
 
     client.fail_copy.clear()
     client.calls.clear()
-    _release(client).publish(tables, 'gs://b/r')
+    _release(client).publish(tables, 'gs://b/r', '26.12')
     assert [c for c in client.calls if c[0] in ('load', 'copy')] == first
     assert client.made('delete') == [('delete', f'{PROJECT}.{PROD}.known_drug')]
-    assert client.prod() == set(tables)
+    assert client.prod() == {*tables, 'ot_release'}
 
 
 def test_no_tables_refused():
     client = FakeClient(prod=['disease'])
     with pytest.raises(BigQueryError, match='no tables'):
-        _release(client).publish([], 'gs://b/r')
+        _release(client).publish([], 'gs://b/r', '26.12')
     assert client.calls == []
 
 
@@ -184,6 +205,7 @@ def test_bigquery_step_fields():
         'name': 'bigquery_load release tables',
         'products': ['platform'],
         'release_uri': '${data_source}',
+        'release': '${release}',
         'project_id': '${bigquery_project}',
         'dataset_id': '${bigquery_dataset}',
         'staging_dataset_id': '${bigquery_staging_dataset}',

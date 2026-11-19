@@ -14,6 +14,11 @@ class BigQueryError(OtterError):
     """A BigQuery load, check or swap failed."""
 
 
+#: One-row table holding the release version, swapped with the outputs.
+RELEASE_TABLE = 'ot_release'
+RELEASE_SCHEMA = [bigquery.SchemaField('release', 'STRING')]
+
+
 def published_tables(release_uri: str) -> list[str]:
     """Modelled datasets with at least one `*.parquet` in `<release_uri>/output/<name>/`."""
     found = StorageHandle(f'{release_uri.rstrip("/")}/output').glob('*/*.parquet')
@@ -36,16 +41,19 @@ class BigQueryRelease:
         self._staging = staging
         self._location = location
 
-    def publish(self, tables: list[str], release_uri: str) -> None:
+    def publish(self, tables: list[str], release_uri: str, release: str) -> None:
         """Load and check staging, then swap. Prod is untouched unless every table staged."""
         if not tables:
             raise BigQueryError('no tables to publish')
-        self.load_staging(tables, release_uri)
-        self.check_staging(tables)
-        self.swap(tables)
+        if RELEASE_TABLE in tables:
+            raise BigQueryError(f'{RELEASE_TABLE} is reserved for the release version')
+        swapped = [*tables, RELEASE_TABLE]
+        self.load_staging(tables, release_uri, release)
+        self.check_staging(swapped)
+        self.swap(swapped)
 
-    def load_staging(self, tables: Iterable[str], release_uri: str) -> None:
-        """Load each table's parquet into staging, replacing it."""
+    def load_staging(self, tables: Iterable[str], release_uri: str, release: str) -> None:
+        """Load each table's parquet, and the `ot_release` row, into staging, replacing them."""
         staging = bigquery.Dataset(f'{self._project}.{self._staging}')
         staging.location = self._location
         self._client.create_dataset(staging, exists_ok=True)
@@ -65,7 +73,20 @@ class BigQueryRelease:
                     location=self._location,
                 )
                 for t in tables
-            },
+            }
+            | {RELEASE_TABLE: lambda: self._load_release(release)},
+        )
+
+    def _load_release(self, release: str) -> Any:
+        config = bigquery.LoadJobConfig(
+            schema=RELEASE_SCHEMA,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        )
+        return self._client.load_table_from_json(
+            [{'release': release}],
+            self._id(self._staging, RELEASE_TABLE),
+            job_config=config,
+            location=self._location,
         )
 
     def check_staging(self, tables: Iterable[str]) -> None:
