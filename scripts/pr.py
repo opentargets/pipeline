@@ -13,7 +13,6 @@
 # For each package changed since its last release tag on main:
 # bump to the next rc version, commit, tag, and push.
 
-import subprocess
 import sys
 
 from packaging.version import Version
@@ -95,10 +94,7 @@ def main():
         subprocess_run(['uv', '--directory', package, 'version', str(version)])
 
     for package, _ in bumps:
-        try:
-            subprocess_run(['uv', '--directory', package, 'lock', '--check'])
-        except subprocess.CalledProcessError:
-            bail(f'{package}/uv.lock is stale after the bump')
+        subprocess_run(['uv', '--directory', package, 'lock', '--check'])
         subprocess_run(['git', 'add', f'{package}/pyproject.toml', f'{package}/uv.lock'])
 
     summary = ', '.join(f'{p} to {v}' for p, v in bumps)
