@@ -91,6 +91,12 @@
       commitMessagePrefix: 'croissant:',
       additionalBranchPrefix: 'croissant-',
     },
+    // pts and croissant lock ot-datamodels' requirements: relock them on these PRs
+    {
+      matchFileNames: ['datamodels/**'],
+      commitMessagePrefix: 'datamodels:',
+      additionalBranchPrefix: 'datamodels-',
+    },
     // lock maintenance covers in-range bumps elsewhere
     {
       matchManagers: ['pep621'],
