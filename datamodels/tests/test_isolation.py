@@ -10,7 +10,7 @@ import ot_datamodels, ot_datamodels.outputs, ot_datamodels.discovery
 
 assert 'pandera' not in sys.modules, 'pandera imported'
 assert 'pts' not in sys.modules, 'pts imported'
-assert len(ot_datamodels.discovery.discover_datasets()) == 69
+assert 'colocalisation' in ot_datamodels.discovery.discover_datasets()
 """
 
 

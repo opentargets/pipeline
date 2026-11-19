@@ -8,6 +8,10 @@ license = { text = "Apache-2.0" }
 
 dependencies = ["polars>=1.41.2", "pydantic>=2.13.4"]
 
+[tool.uv]
+# moved together with the polars major by Renovate (#146)
+constraint-dependencies = ["polars<3"]
+
 [dependency-groups]
 dev = ["ruff==0.16.10", "ty==0.0.85"]
 test = ["pytest>=9.0.3"]

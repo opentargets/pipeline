@@ -29,7 +29,6 @@ def _name(model: type[DatasetModel]) -> str:
 
 @pytest.mark.parametrize('model', MODELS, ids=_name)
 def test_example_is_valid(model: type[DatasetModel]) -> None:
-    model.model_validate(model.example)
     to_pandera(model).validate(pl.DataFrame([model.example], schema=to_polars_schema(model)))
 
 

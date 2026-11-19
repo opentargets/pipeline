@@ -2,6 +2,9 @@ version = 1
 revision = 5
 requires-python = ">=3.12, <3.14"
 
+[manifest]
+constraints = [{ name = "polars", specifier = "<3" }]
+
 [[package]]
 name = "annotated-types"
 version = "0.8.0"
