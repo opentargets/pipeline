@@ -64,8 +64,8 @@ jobs:
         name: Build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: ${{ inputs.package == 'pts' && '.' || format('./{0}', inputs.package) }}
-          file: ${{ inputs.package == 'pts' && './pts/Dockerfile' || '' }}
+          context: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && '.' || format('./{0}', inputs.package) }}
+          file: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && format('./{0}/Dockerfile', inputs.package) || '' }}
           platforms: linux/amd64,linux/arm64
           push: false
           target: ${{ inputs.package == 'pts' && 'lean' || '' }}
@@ -105,8 +105,8 @@ jobs:
         if: ${{ !inputs.final }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: ${{ inputs.package == 'pts' && '.' || format('./{0}', inputs.package) }}
-          file: ${{ inputs.package == 'pts' && './pts/Dockerfile' || '' }}
+          context: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && '.' || format('./{0}', inputs.package) }}
+          file: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && format('./{0}/Dockerfile', inputs.package) || '' }}
           platforms: linux/amd64,linux/arm64
           push: true
           target: ${{ inputs.package == 'pts' && 'lean' || '' }}
@@ -120,8 +120,8 @@ jobs:
         if: ${{ inputs.final }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: ${{ inputs.package == 'pts' && '.' || format('./{0}', inputs.package) }}
-          file: ${{ inputs.package == 'pts' && './pts/Dockerfile' || '' }}
+          context: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && '.' || format('./{0}', inputs.package) }}
+          file: ${{ contains(fromJSON('["pts","pos"]'), inputs.package) && format('./{0}/Dockerfile', inputs.package) || '' }}
           platforms: linux/amd64,linux/arm64
           push: true
           target: ${{ inputs.package == 'pts' && 'lean' || '' }}
