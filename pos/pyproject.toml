@@ -44,5 +44,5 @@ testpaths = ["tests"]
 extend = "../ruff.toml"
 
 [tool.deptry.per_rule_ignores]
-# python-box imports it for Box.from_yaml
+# python-box imports yaml for its from_yaml
 DEP002 = ["pyyaml"]
