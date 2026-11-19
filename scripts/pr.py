@@ -13,6 +13,7 @@
 # For each package changed since its last release tag on main:
 # bump to the next rc version, commit, tag, and push.
 
+import subprocess
 import sys
 
 from packaging.version import Version
@@ -58,7 +59,25 @@ def get_next_version(package: str, current: Version, versions: list[Version]) ->
 
 
 def packages_to_bump() -> list[str]:
-    return [p for p in PACKAGES if has_changed(p, get_release_tags(p, merged='origin/main'))]
+    changed = [p for p in PACKAGES if has_changed(p, get_release_tags(p, merged='origin/main'))]
+    return dependencies_first(changed)
+
+
+def dependencies_first(packages: list[str]) -> list[str]:
+    """Order `packages` so each one follows the packages in `DEPENDANTS` it depends on."""
+    ordered: list[str] = []
+
+    def visit(package: str) -> None:
+        if package in ordered:
+            return
+        for dep, users in DEPENDANTS.items():
+            if package in users and dep in packages:
+                visit(dep)
+        ordered.append(package)
+
+    for package in packages:
+        visit(package)
+    return ordered
 
 
 def main():
@@ -74,6 +93,12 @@ def main():
 
     for package, version in bumps:
         subprocess_run(['uv', '--directory', package, 'version', str(version)])
+
+    for package, _ in bumps:
+        try:
+            subprocess_run(['uv', '--directory', package, 'lock', '--check'])
+        except subprocess.CalledProcessError:
+            bail(f'{package}/uv.lock is stale after the bump')
         subprocess_run(['git', 'add', f'{package}/pyproject.toml', f'{package}/uv.lock'])
 
     summary = ', '.join(f'{p} to {v}' for p, v in bumps)
