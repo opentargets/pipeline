@@ -15,6 +15,7 @@ from pts.transformers.utils.disease_mapping.query import (
     alternative_translations,
     clean_disease_label,
     determine_track,
+    drop_plural_s,
     format_identifier,
 )
 from pts.transformers.utils.spark_strings import regexp_extract, spark_trim, spark_upper
@@ -306,7 +307,15 @@ def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None
     listed = acronym_allowlist.select(
         pl.col('acronym').alias('acronymKey'), pl.col('diseaseId').alias('entityId'), pl.lit(True).alias('listed')
     ).unique()
-    lut = pl.concat(frame.select(RAW_ENTITY_LUT.names()) for frame in raw)
+    disease_symbol = (
+        (pl.col('entityType') == 'DS') & (pl.col('entityKind') == 'label') & (pl.col('nlpPipelineTrack') == 'symbol')
+    )
+    singular = drop_plural_s(pl.col('entityLabel'))
+    lut = pl.concat(frame.select(RAW_ENTITY_LUT.names()) for frame in raw).with_columns(
+        # a label that lost its plural s only fills a key no unchanged label holds
+        pluralRank=(disease_symbol & (singular != pl.col('entityLabel'))).cast(pl.Int8),
+        entityLabel=pl.when(disease_symbol).then(singular).otherwise(pl.col('entityLabel')),
+    )
     normalised = (
         lut
         .select('entityLabel', 'nlpPipelineTrack')
@@ -330,6 +339,7 @@ def build_lut(raw: list[pl.DataFrame], *, acronym_allowlist: pl.DataFrame | None
         lut
         .join(normalised, on=['entityLabel', 'nlpPipelineTrack'], how='inner')
         .filter(pl.col('entityLabelNormalised').str.len_chars() > 0)
+        .filter(pl.col('pluralRank') == pl.col('pluralRank').min().over(key))
         # rank 1 of dense_rank by score desc; nulls rank last
         .filter(score.eq_missing(score.max().over(key)))
         .with_columns(acronymKey=acronym_key(pl.col('entityLabel')))
