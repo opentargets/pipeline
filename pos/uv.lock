@@ -1103,6 +1103,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "python-box" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "smart-open" },
     { name = "typer" },
@@ -1118,7 +1119,6 @@ dev = [
 test = [
     { name = "pytest" },
     { name = "pytest-mock" },
-    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1138,6 +1138,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-box", specifier = ">=7.3.2" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "smart-open", specifier = ">=7.1.0" },
     { name = "typer", specifier = ">=0.16.0" },
@@ -1153,7 +1154,6 @@ dev = [
 test = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [[package]]

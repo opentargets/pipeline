@@ -63,7 +63,7 @@ function install_packages() {
     cd /opt/pipeline/pos
     create_dir_for_group /opt/pipeline google-sudoers rwx
     curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pos_config" -H "Metadata-Flavor: Google" > /etc/opt/pos_config.yaml
-    uv --directory /opt/pipeline/pos sync
+    uv --directory /opt/pipeline/pos sync --frozen
     curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pos_run_script" -H "Metadata-Flavor: Google" > /opt/pos_run.sh
     chgrp -R google-sudoers /opt/pos_run.sh && chmod g+x /opt/pos_run.sh
     create_dir_for_group /var/log/pos/opensearch google-sudoers rwx

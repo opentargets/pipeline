@@ -33,7 +33,7 @@
 #
 #    <package>@v<version>
 #    pts@v26.9.0rc7
-#    croissant@v26.9.0
+#    pos@v26.12.0
 #
 
 import re

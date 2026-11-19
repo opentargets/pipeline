@@ -21,7 +21,7 @@ work/
 
 # credentials
 .credentials/
-config/clickhouse/config.d/s3.xml
+config/clickhouse/config.d/s3_config.xml
 
 # terraform files
 .terraform/

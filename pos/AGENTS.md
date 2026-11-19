@@ -8,7 +8,7 @@ an [Otter](https://opentargets.github.io/otter) application, like `pis` and `pts
 `config/config.yaml` (Platform) or `config/config_ppp.yaml` (PPP) is a list of tasks.
 
 Its code was imported with full history from `opentargets/pos`. It is not built into
-an image yet; the root `makefile` covers it for `dev`, `lint`, `test` and `clean`.
+an image yet; the root `Makefile` covers it for `dev`, `lint`, `test` and `clean`.
 
 ## Running
 
@@ -52,14 +52,14 @@ refuses to run when its snapshots or backups already exist.
 Until phase 3, `pos` runs on a VM that Terraform creates from `deployment/` (state in
 `gs://open-targets-ops/terraform/platform-pos-v2`). Its startup script
 (`deployment/startup.sh`) sparse-clones `https://github.com/opentargets/pipeline` at
-`--pos-branch` into `/opt/pipeline`, checking out only `pos/`, and runs `uv sync` and the
+`--pos-branch` into `/opt/pipeline`, checking out only `pos/`, and runs `uv sync --frozen` and the
 step from `/opt/pipeline/pos`. The branch must be pushed before `pos remote`.
 
 `config/clickhouse/` and `config/opensearch/` hold the database Dockerfiles, schemas
 and settings; `config/datasets.yaml` maps datasets to tables and indices;
 `config/aws_sync.txt` and `config/rclone.conf` drive the rclone sync.
-`.credentials/` and `config/clickhouse/config.d/s3.xml` are git-ignored; the VM
-fetches `s3.xml` from instance metadata.
+`.credentials/` and `config/clickhouse/config.d/s3_config.xml` are git-ignored; the VM
+fetches `s3_config.xml` from instance metadata.
 
 ## Croissant
 
@@ -145,7 +145,7 @@ done
     case " ${keep[*]} " in *" $b "*) ;; *) /usr/bin/git -C "$dest" branch -D --quiet "$b" ;; esac
   done
 
-(cd "$dest" && /opt/homebrew/bin/git-filter-repo --force \
+(cd "$dest" && git-filter-repo --force \
   --to-subdirectory-filter pos \
   --message-callback '
 import re
@@ -164,6 +164,12 @@ Then, in a monorepo worktree:
    keep their ids and `git merge FETCH_HEAD` brings in only the new ones. If there is
    no merge base, stop and ask.
 3. Resolve conflicts in `pos/` in favour of the monorepo's package conventions
-   (`pyproject.toml`, `uv.lock`, `makefile`, `AGENTS.md`), then relock with the pinned
+   (`pyproject.toml`, `uv.lock`, `Makefile`, `AGENTS.md`), then relock with the pinned
    uv.
 4. David pushes; do not push from a session.
+
+The import used git-filter-repo a40bce548d2c. The same SHAs need the same
+filter-repo version and options.
+
+To pin an interim release, pass `--pos-branch pos@v26.12.0rcN` (a tag): `main` moves
+with every bump.
