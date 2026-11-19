@@ -68,6 +68,15 @@ def determine_track(label: pl.Expr) -> pl.Expr:
     return pl.when(is_symbol).then(pl.lit('symbol')).otherwise(pl.lit('term'))
 
 
+def drop_plural_s(label: pl.Expr) -> pl.Expr:
+    """The label without a plural `s`: a final lowercase `s` after an uppercase letter or a digit.
+
+    For disease labels on the symbol track, where no stemming would drop it: `LSDs` reads as `LSD`
+    and `CMT2s` as `CMT2`, while `ALS` and `MS` are kept, their `S` being uppercase.
+    """
+    return label.str.replace(r'([\p{Lu}\p{N}])s(\s*)$', '${1}${2}')
+
+
 def clean_disease_label(label: pl.Expr) -> pl.Expr:
     """`clean_disease_label`: of a label containing `#`, the part after the last one, less a code prefix."""
     last = label.str.split('#').list.last()

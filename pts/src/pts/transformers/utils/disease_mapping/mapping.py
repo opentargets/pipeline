@@ -14,6 +14,8 @@ structs, the flags read from the lookup table; `non_acronym_ids` drops the flagg
 * The identifier lists are sorted, and rows keep their input order.
 * **A label's NLP pipeline track is decided on the trimmed label**, here and in the lookup tables, so
   a label padded with spaces, such as ' ALS ', takes the track of its trimmed form.
+* **A disease label on the symbol track loses a plural `s`** (`LSDs` maps as `LSD`), here and in the
+  lookup tables; see `drop_plural_s`.
 * Input columns are never touched. Working columns carry a random prefix that no input column has,
   and are dropped before returning; only an output column already in the input is refused.
 """
@@ -34,6 +36,7 @@ from pts.transformers.utils.disease_mapping.query import (
     alternative_translations,
     clean_disease_label,
     determine_track,
+    drop_plural_s,
     format_identifier,
     spelling_variant,
 )
@@ -113,6 +116,13 @@ def _query_labels(query: pl.LazyFrame, w: _Working) -> pl.LazyFrame:
             pl
             .when(entity_type == 'DS')
             .then(clean_disease_label(pl.col(w.label)))
+            .otherwise(pl.col(w.label))
+            .alias(w.label),
+        )
+        .with_columns(
+            pl
+            .when((entity_type == 'DS') & (pl.col(w.track) == 'symbol'))
+            .then(drop_plural_s(pl.col(w.label)))
             .otherwise(pl.col(w.label))
             .alias(w.label),
         )
