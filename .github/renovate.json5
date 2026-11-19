@@ -22,7 +22,7 @@
   },
   // also bumped by the tooling group below
   constraints: {
-    uv: '0.12.24',
+    uv: '0.13.4',
   },
   lockFileMaintenance: {
     enabled: true,
