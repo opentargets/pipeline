@@ -5,7 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pos.tasks.open_search_load import OpenSearchLoad, OpenSearchLoadSpec
+from pos.tasks import open_search_load
+from pos.tasks.open_search_load import OpenSearchLoad, OpenSearchLoadError, OpenSearchLoadSpec
 
 DATASETS = Path(__file__).parents[1] / 'config' / 'datasets.yaml'
 
@@ -27,3 +28,18 @@ def test_json_files_come_from_input_dir(tmp_path, dataset, folder):
     )
     task = OpenSearchLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     assert task._get_json_files() == [data / 'part-0.json']
+
+
+def test_open_search_load_fails_on_no_json(tmp_path, monkeypatch):
+    (tmp_path / 'release_data' / 'export' / 'search_disease').mkdir(parents=True)
+    monkeypatch.setattr(open_search_load, 'connect', lambda host, port: MagicMock())
+    spec = OpenSearchLoadSpec(
+        name='open_search_load dataset search_disease',
+        dataset='search_disease',
+        json_parent='release_data',
+        prefix='platform2612',
+        dataset_config_path=str(DATASETS),
+    )
+    task = OpenSearchLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+    with pytest.raises(OpenSearchLoadError, match=r'no \.json files'):
+        OpenSearchLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]

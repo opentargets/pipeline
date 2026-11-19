@@ -1,4 +1,4 @@
-# Data prep task
+# OpenSearch load task
 
 import json
 from collections.abc import Generator
@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from opensearchpy import OpenSearch, helpers
+from opensearchpy import helpers
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.opensearch import OpenSearchInstanceManager
+from pos.services.opensearch import connect
 from pos.utils import get_config
 
 
@@ -23,11 +23,9 @@ class OpenSearchLoadError(OtterError):
 class OpenSearchLoadSpec(Spec):
     """Configuration fields for the create index OpenSearch task."""
 
-    service_name: str = 'os-pos'
     dataset: str
     json_parent: str
     prefix: str
-    external_opensearch: bool = False
     es_host: str = 'localhost'
     es_port: int = 9200
     dataset_config_path: str = 'config/datasets.yaml'
@@ -49,16 +47,10 @@ class OpenSearchLoad(Task):
     @report
     def run(self) -> Task:
         logger.debug(f'loading data into index {self._index_name}')
-        if not self.spec.external_opensearch:
-            opensearch = OpenSearchInstanceManager(self.spec.service_name).client()
-        else:
-            opensearch = OpenSearch(
-                [{'host': self.spec.es_host, 'port': self.spec.es_port}], use_ssl=False, timeout=7200
-            )
         json_files = self._get_json_files()
         if not json_files:
-            logger.warning(f'no .json files found for dataset {self.spec.dataset}, no data loaded')
-            return self
+            raise OpenSearchLoadError(f'no .json files for dataset {self.spec.dataset} in {self._get_json_dir()}')
+        opensearch = connect(self.spec.es_host, self.spec.es_port)
         for success, info in helpers.parallel_bulk(
             opensearch,
             index=self._index_name,
@@ -89,9 +81,11 @@ class OpenSearchLoad(Task):
                 for doc in rows:
                     yield doc
 
+    def _get_json_dir(self) -> Path:
+        return Path(f'{self.context.config.work_path}/{self.spec.json_parent}/{self._input_dir}')
+
     def _get_json_files(self) -> list[Path]:
-        json_dir = Path(f'{self.context.config.work_path}/{self.spec.json_parent}/{self._input_dir}')
-        return sorted(json_dir.glob('*.json'))
+        return sorted(self._get_json_dir().glob('*.json'))
 
     def _get_index_name(self) -> str:
         return f'{self.spec.prefix}_{self._config[self.spec.dataset]["index"]}'
