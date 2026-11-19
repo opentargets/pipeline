@@ -5,7 +5,7 @@ from pathlib import Path
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 
-from pos.rclone.sync import Sync
+from pos.rclone.sync import Sync, strip_scheme
 
 
 class RcloneSyncSpec(Spec):
@@ -35,8 +35,8 @@ class RcloneSync(Task):
     @report
     def run(self) -> Task:
         sync = Sync(
-            Path(_remove_storage_prefix(self.spec.source)),
-            Path(_remove_storage_prefix(self.spec.destination)),
+            Path(strip_scheme(self.spec.source)),
+            Path(strip_scheme(self.spec.destination)),
             Path(self.spec.config),
             Path(self.spec.include),
         )
@@ -44,6 +44,3 @@ class RcloneSync(Task):
         sync.sync(sync_flags=flags)
         return self
 
-
-def _remove_storage_prefix(source: str) -> str:
-    return source.replace('gs://', '').replace('s3://', '')

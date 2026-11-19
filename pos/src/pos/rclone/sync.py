@@ -5,6 +5,11 @@ from subprocess import CompletedProcess
 from loguru import logger
 
 
+def strip_scheme(uri: str) -> str:
+    """Turn `gcs:gs://b/x` into the rclone form `gcs:b/x`."""
+    return uri.replace('gs://', '').replace('s3://', '')
+
+
 class Sync:
     """A class to handle rclone sync operations."""
 
