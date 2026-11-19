@@ -25,10 +25,11 @@ cannot do rather than half-doing it.
 from __future__ import annotations
 
 import io
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any, Literal
 
 import openpyxl
+import orjson
 import polars as pl
 from openpyxl.cell.cell import TYPE_ERROR, TYPE_NUMERIC
 from otter.storage.synchronous.handle import StorageHandle
@@ -361,6 +362,54 @@ def write_dataset(
         ValueError: if anything already exists at `path`, file or directory.
     """
     sink_dataset(frame, path, approximate_bytes_per_file=approximate_bytes_per_file).collect()
+
+
+def drop_nulls(value: Any) -> Any:
+    """`value` with every None removed from its dicts and lists, recursively."""
+    if isinstance(value, list):
+        return [drop_nulls(x) for x in value if x is not None]
+    if isinstance(value, dict):
+        return {k: drop_nulls(v) for k, v in value.items() if v is not None}
+    return value
+
+
+def _json_lines(frame: pl.LazyFrame | pl.DataFrame, rows_per_file: int) -> Iterator[bytes]:
+    """The frame as JSON-lines bytes, one chunk per `rows_per_file` rows."""
+    df = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+    for part in df.iter_slices(rows_per_file):
+        yield b''.join(orjson.dumps(drop_nulls(row), option=orjson.OPT_APPEND_NEWLINE) for row in part.to_dicts())
+
+
+def write_json_dataset(
+    frame: pl.LazyFrame | pl.DataFrame,
+    path: str,
+    *,
+    rows_per_file: int = 500_000,
+) -> None:
+    """Write a dataset as a directory of `part-NNNNN.json` JSON-lines files, nulls dropped.
+
+    Byte-for-byte what POS's parquet2json writes. Refuses an existing destination, like
+    `write_dataset`.
+
+    Raises:
+        ValueError: if anything already exists at `path`.
+    """
+    check_destinations_absent([path])
+    for i, chunk in enumerate(_json_lines(frame, rows_per_file)):
+        with StorageHandle(f'{path.rstrip("/")}/part-{i:05d}.json').open('wb') as f:
+            f.write(chunk)
+
+
+def write_json_file(frame: pl.LazyFrame | pl.DataFrame, path: str) -> None:
+    """Write a dataset as exactly one JSON-lines file at `path`, nulls dropped.
+
+    Raises:
+        ValueError: if anything already exists at `path`.
+    """
+    check_destinations_absent([path])
+    with StorageHandle(path).open('wb') as f:
+        for chunk in _json_lines(frame, 500_000):
+            f.write(chunk)
 
 
 def check_destinations_absent(paths: Iterable[str]) -> None:
