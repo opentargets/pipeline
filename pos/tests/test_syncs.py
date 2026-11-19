@@ -1,9 +1,11 @@
 """rclone bucket syncs and the packaged FTP script."""
 
 from importlib.resources import files
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from otter.task.model import Spec
 
 from pos.rclone.sync import strip_scheme
@@ -40,9 +42,10 @@ def test_ftp_script_packaged():
 
 
 def test_aws_sync_refuses_ppp():
-    spec = Spec(name='rclone_sync aws release data', products=['platform'])
+    config = yaml.safe_load((Path(__file__).parents[1] / 'config' / 'config.yaml').read_text())
+    specs = [Spec.model_validate(t) for t in config['steps']['aws_sync']]
     with pytest.raises(ValueError, match='step aws_sync does not run for ppp'):
-        for_product([spec], 'ppp', 'aws_sync')
+        for_product(specs, 'ppp', 'aws_sync')
 
 
 def test_strip_scheme_keeps_the_rclone_remote():
