@@ -9,7 +9,9 @@
   labels: ['dependencies'],
   semanticCommits: 'disabled',
   commitMessageAction: 'update',
-  dependencyDashboard: false,
+  dependencyDashboard: {
+    enabled: false,
+  },
   enabledManagers: ['pep621', 'github-actions', 'dockerfile', 'pre-commit', 'custom.regex'],
   'pre-commit': {
     enabled: true,
@@ -22,7 +24,7 @@
   },
   // also bumped by the tooling group below
   constraints: {
-    uv: '0.12.24',
+    uv: '0.13.4',
   },
   lockFileMaintenance: {
     enabled: true,
@@ -32,25 +34,19 @@
   customManagers: [
     {
       customType: 'regex',
-      description: 'uv installer and init action',
-      managerFilePatterns: [
-        '/^orchestration/deployment/startup_user\\.sh$/',
-        '/^orchestration/src/orchestration/assets/install_dependencies_on_cluster\\.sh$/',
-      ],
-      matchStrings: [
-        'astral\\.sh/uv/(?<currentValue>[^/\\s]+)/install\\.sh',
-        'UV_VERSION="(?<currentValue>[^"]+)"',
-      ],
-      depNameTemplate: 'uv',
-      datasourceTemplate: 'pypi',
+      description: 'uv in the dataproc init action',
+      managerFilePatterns: ['/^orchestration/src/orchestration/assets/install_dependencies_on_cluster\\.sh$/'],
+      matchStrings: ['UV_VERSION="(?<currentValue>[^"]+)"'],
+      depNameTemplate: 'astral-sh/uv',
+      datasourceTemplate: 'github-releases',
     },
     {
       customType: 'regex',
       description: 'uv constraint in this file',
       managerFilePatterns: ['/^\\.github/renovate\\.json5$/'],
       matchStrings: ["constraints: \\{\\s+uv: '(?<currentValue>[^']+)'"],
-      depNameTemplate: 'uv',
-      datasourceTemplate: 'pypi',
+      depNameTemplate: 'astral-sh/uv',
+      datasourceTemplate: 'github-releases',
     },
     {
       customType: 'regex',
@@ -124,7 +120,6 @@
         'astral-sh/ruff-pre-commit',
         'ty',
         'astral-sh/ty-pre-commit',
-        'uv',
         'uv-build',
         'astral-sh/uv',
         'ghcr.io/astral-sh/uv',
