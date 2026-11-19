@@ -28,6 +28,11 @@ repos:
         args: [--directory, croissant]
         files: ^croissant/
         always_run: false
+      - id: ty
+        name: ty datamodels
+        args: [--directory, datamodels]
+        files: ^datamodels/
+        always_run: false
 
   - repo: https://github.com/google/yamlfmt
     rev: v0.21.0

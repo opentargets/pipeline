@@ -11,10 +11,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_gene_burden import EvidenceGeneBurden
 from otter.config.model import Config
 
 from pts.schemas.gene_burden import GENE_BURDEN_UNION
-from pts.schemas.outputs.evidence_gene_burden import EvidenceGeneBurden
 from pts.task_outputs import writes
 from pts.transformers.evidence.gene_burden.az import parse_az
 from pts.transformers.evidence.gene_burden.bipex import parse_bipex

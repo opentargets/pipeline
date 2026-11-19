@@ -5,10 +5,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
-from pts.schemas.outputs.clinical_report import ClinicalReport as ClinicalReportOutput
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     ClinicalProvider,

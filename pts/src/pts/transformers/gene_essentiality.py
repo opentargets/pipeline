@@ -12,10 +12,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.target_essentiality import TargetEssentiality
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.outputs.target_essentiality import TargetEssentiality
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import ensg_lookup

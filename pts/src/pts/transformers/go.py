@@ -6,11 +6,11 @@ import networkx as nx
 import obonet
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.go import Go
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.go import go_schema
-from pts.schemas.outputs.go import Go
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 

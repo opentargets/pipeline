@@ -1660,6 +1660,28 @@ wheels = [
 ]
 
 [[package]]
+name = "ot-datamodels"
+version = "26.12.0rc0"
+source = { editable = "../datamodels" }
+dependencies = [
+    { name = "polars" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "polars", specifier = ">=1.41.2" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ruff", specifier = "==0.16.10" },
+    { name = "ty", specifier = "==0.0.85" },
+]
+test = [{ name = "pytest", specifier = ">=9.0.3" }]
+
+[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2048,6 +2070,7 @@ dependencies = [
     { name = "obonet" },
     { name = "openpyxl" },
     { name = "opentargets-otter" },
+    { name = "ot-datamodels" },
     { name = "pandera", extra = ["polars"] },
     { name = "pdfplumber" },
     { name = "pixeltable-pgserver" },
@@ -2112,6 +2135,7 @@ requires-dist = [
     { name = "obonet", specifier = ">=1.3.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "opentargets-otter", specifier = ">=26.9.1" },
+    { name = "ot-datamodels", editable = "../datamodels" },
     { name = "pandas", marker = "extra == 'baseline-expression'", specifier = ">=3.0.6" },
     { name = "pandera", extras = ["polars"], specifier = ">=0.33.1" },
     { name = "pdfplumber", specifier = ">=0.11.9" },

@@ -51,7 +51,7 @@ To build your own Docker image, run the following command from the root of the
 repository:
 
 ```sh
-docker build -t pts .
+docker build -f pts/Dockerfile -t pts .
 ```
 
 

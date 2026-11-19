@@ -36,10 +36,11 @@ ENV UV_LINK_MODE=copy
 # Version-free dependency lockfiles: a version bump changes pyproject.toml and
 # uv.lock but not these, so the dependency layers below stay cached.
 FROM base AS lock
-COPY pyproject.toml uv.lock /src/
-RUN uv export --project /src --quiet --frozen --no-dev --no-emit-project --format pylock.toml \
+COPY pts/pyproject.toml pts/uv.lock /src/
+COPY datamodels/pyproject.toml /datamodels/pyproject.toml
+RUN uv export --project /src --quiet --frozen --no-dev --no-emit-project --no-emit-package ot-datamodels --format pylock.toml \
     --extra l2g -o /lock/pylock.lean.toml && \
-  uv export --project /src --quiet --frozen --no-dev --no-emit-project --format pylock.toml \
+  uv export --project /src --quiet --frozen --no-dev --no-emit-project --no-emit-package ot-datamodels --format pylock.toml \
     --extra l2g --extra nlp --extra llm -o /lock/pylock.nlp.toml
 
 # Clinical staging steps: NER, stop-reason and LLM extraction.
@@ -48,7 +49,8 @@ COPY --from=lock /lock/pylock.nlp.toml /lock/pylock.nlp.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv venv /app/.venv && \
   uv pip install --python /app/.venv --preview-features pylock -r /lock/pylock.nlp.toml
-COPY . /app
+COPY datamodels /datamodels
+COPY pts /app
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --frozen --no-dev --extra l2g --extra nlp --extra llm
 ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pts"]
@@ -59,7 +61,8 @@ COPY --from=lock /lock/pylock.lean.toml /lock/pylock.lean.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv venv /app/.venv && \
   uv pip install --python /app/.venv --preview-features pylock -r /lock/pylock.lean.toml
-COPY . /app
+COPY datamodels /datamodels
+COPY pts /app
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --frozen --no-dev --extra l2g
 ENTRYPOINT ["uv", "run", "--frozen", "--no-sync", "pts"]

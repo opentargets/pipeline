@@ -2,13 +2,13 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
-from pts.schemas.outputs.disease_phenotype import DiseasePhenotype
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 

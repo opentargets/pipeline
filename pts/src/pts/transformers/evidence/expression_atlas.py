@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
+from ot_datamodels.outputs.evidence_expression_atlas import EvidenceExpressionAtlas
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_expression_atlas import EvidenceExpressionAtlas
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import log10_rescaled_score

@@ -17,11 +17,11 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.credible_set import CredibleSet
+from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.outputs.credible_set import CredibleSet
-from pts.schemas.outputs.credible_set_variant import CredibleSetVariant
 from pts.task_outputs import writes
 from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.confidence import assign_confidence

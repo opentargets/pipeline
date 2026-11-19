@@ -11,11 +11,11 @@ from typing import Any
 import networkx as nx
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.gene_sets import GeneSets
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.gene_sets import gene_sets_schema
-from pts.schemas.outputs.gene_sets import GeneSets
 from pts.task_outputs import writes
 from pts.transformers.target import chembl_class
 from pts.transformers.utils.dataset import scan_dataset, write_dataset

@@ -34,13 +34,13 @@ from typing import Annotated, Any, ClassVar, Literal
 import pandera.errors as pe
 import polars as pl
 import pytest
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from pandera.config import ValidationDepth, config_context
 from pydantic import Field, ValidationError
 
-from pts.schemas.dataset import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
 from pts.schemas.dataset.converter import to_base_pandera
-from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.spec import Constraints, Node, dataset_spec, walk
 
 
 class _Leaf(StructModel):

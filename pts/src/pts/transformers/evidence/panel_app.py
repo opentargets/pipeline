@@ -13,9 +13,9 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_genomics_england import EvidenceGenomicsEngland
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_genomics_england import EvidenceGenomicsEngland
 from pts.schemas.panel_app import PANEL_APP_INPUT_SCHEMA, PANELS_SCHEMA
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource

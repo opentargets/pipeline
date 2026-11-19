@@ -15,10 +15,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.outputs.target_safety_event import TargetSafetyEvent
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset

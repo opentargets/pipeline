@@ -2,11 +2,11 @@ from typing import Any, cast
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.so import So
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.ontology import node
-from pts.schemas.outputs.so import So
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import write_dataset
 

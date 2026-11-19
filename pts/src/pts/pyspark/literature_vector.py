@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from ot_datamodels.outputs.literature_vector import LiteratureVector
 from pyspark.ml.feature import Word2VecModel
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as f
 
 from pts.pyspark.common.session import Session
-from pts.schemas.outputs.literature_vector import LiteratureVector
 from pts.task_outputs import writes
 
 _OUTPUT_COLUMNS = ['category', 'word', 'norm', 'vector']

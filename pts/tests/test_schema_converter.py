@@ -12,19 +12,18 @@ from typing import Annotated, ClassVar
 import pandera.errors as pe
 import polars as pl
 import pytest
-from pydantic import Field, ValidationError
-
-from pts.schemas.dataset import (
+from ot_datamodels import (
     DatasetModel,
     PolarsDtype,
     PrimaryKey,
     RowCheck,
     SchemaDefinitionError,
     StructModel,
-    to_pandera,
     to_polars_schema,
 )
-from pts.schemas.dataset.converter import to_base_pandera
+from pydantic import Field, ValidationError
+
+from pts.schemas.dataset.converter import to_base_pandera, to_pandera
 
 
 class _Sample(StructModel):

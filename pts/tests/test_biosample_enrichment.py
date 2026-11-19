@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+from ot_datamodels.outputs.biosample_enrichment import BiosampleEnrichment
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema
 from pts.schemas.dataset.validate import format_report, validation_report
-from pts.schemas.outputs.biosample_enrichment import BiosampleEnrichment
 from pts.transformers.biosample_enrichment import (
     Panel,
     Settings,

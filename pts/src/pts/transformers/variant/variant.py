@@ -20,10 +20,10 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from loguru import logger
+from ot_datamodels.outputs.variant import Variant
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.outputs.variant import Variant
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent
 from pts.transformers.variant.chromosome import Pools, annotate_chromosomes

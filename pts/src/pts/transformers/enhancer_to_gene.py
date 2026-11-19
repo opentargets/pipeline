@@ -6,12 +6,12 @@ from typing import Any, Self
 import polars as pl
 import polars_hash as plh
 from loguru import logger
+from ot_datamodels.outputs.enhancer_to_gene import EnhancerToGene
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
-from pts.schemas.outputs.enhancer_to_gene import EnhancerToGene
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES

@@ -6,9 +6,9 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
 from otter.config.model import Config
 
-from pts.schemas.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present

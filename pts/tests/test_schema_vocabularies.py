@@ -11,10 +11,10 @@ from collections.abc import Iterable
 from enum import Enum
 
 import pytest
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.spec import dataset_spec, walk
 
 from pts.schemas.credible_set import Chromosome, FinemappingMethod
-from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.spec import dataset_spec, walk
 from pts.schemas.study import StudyType
 from pts.transformers.clinical_mira.moa.schemas import ActionType
 from pts.transformers.clinical_mira.schemas import ClinicalProvider, ClinicalReportType, ClinicalStageCategory
@@ -74,7 +74,7 @@ def test_the_model_lists_the_code_vocabulary_in_full_and_in_order(
 
     assert nodes[path].constraints.allowed == expected, (
         f'{dataset}:{path} must allow exactly {vocabulary.__module__}.{vocabulary.__name__}, in its order: '
-        f'update the Literal in pts/src/pts/schemas/outputs/{dataset}.py to {list(expected)}'
+        f'update the Literal in datamodels/src/ot_datamodels/outputs/{dataset}.py to {list(expected)}'
     )
 
 
@@ -86,4 +86,4 @@ def test_the_model_allows_every_value_the_code_writes(dataset: str, path: str, v
     assert allowed is not None, f'{dataset}:{path} is not a closed vocabulary'
 
     missing = sorted(set(values) - set(allowed))
-    assert not missing, f'add {missing} to the Literal at {path} in pts/src/pts/schemas/outputs/{dataset}.py'
+    assert not missing, f'add {missing} to the Literal at {path} in datamodels/src/ot_datamodels/outputs/{dataset}.py'

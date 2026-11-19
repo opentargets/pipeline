@@ -11,10 +11,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.homology import Homology
 from otter.config.model import Config
 
 from pts.schemas.homology import homology_schema, orthologs_schema
-from pts.schemas.outputs.homology import Homology
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.ensembl import CoreDump, gene_names

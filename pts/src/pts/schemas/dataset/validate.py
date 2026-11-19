@@ -33,11 +33,13 @@ import numpy as np
 import pandera.errors as pe
 import polars as pl
 from loguru import logger
+from ot_datamodels.base import DatasetModel
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.spec import dataset_spec
+from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import NotFoundError
 
-from pts.schemas.dataset.base import DatasetModel
 from pts.schemas.dataset.converter import to_pandera
-from pts.schemas.dataset.discovery import discover_datasets
-from pts.schemas.dataset.spec import dataset_spec
 from pts.transformers.utils.dataset import list_parts
 
 #: Example values kept per broken rule.
@@ -56,6 +58,28 @@ REPORT_SCHEMA = pl.Schema({
 
 #: The `check` of a report row for a repeated primary key.
 DUPLICATE_KEY = 'unique primary key'
+
+
+def validate_dataset(model: type[DatasetModel], path: str) -> None:
+    """Validate the dataset written at `path` against `model`.
+
+    The call a transformer's output validation makes for each dataset it writes. Broken rules are
+    logged as each part is validated (`validation_report`).
+
+    Args:
+        model: the dataset model to validate against.
+        path: the dataset: a directory of parquet parts, or a single parquet file. Local or remote.
+
+    Raises:
+        ValueError: if nothing was written at `path`, or the dataset breaks the model's rules.
+    """
+    try:
+        StorageHandle(path).stat()
+    except NotFoundError as error:
+        raise ValueError(f'{path} was not written, but must satisfy the model {model.__name__}') from error
+    report = validation_report(path, model)
+    if not report.is_empty():
+        raise ValueError(f'{path} breaks its model {model.__name__}:\n{format_report(report)}')
 
 
 def validation_report(path: str, model: type[DatasetModel]) -> pl.DataFrame:

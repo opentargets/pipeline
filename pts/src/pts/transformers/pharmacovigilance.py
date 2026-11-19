@@ -7,10 +7,10 @@ from typing import Any
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.outputs.pharmacovigilance import Pharmacovigilance
 from pts.schemas.pharmacovigilance import faers_schema, pharmacovigilance_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset

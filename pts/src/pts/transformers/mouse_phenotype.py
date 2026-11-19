@@ -12,11 +12,11 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.mouse_phenotype import MousePhenotype
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.mouse_phenotype import MOUSE_PHENOTYPE
-from pts.schemas.outputs.mouse_phenotype import MousePhenotype
 from pts.task_outputs import writes
 from pts.transformers.impc_common import (
     MODEL_ID,

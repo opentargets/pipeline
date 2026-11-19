@@ -11,10 +11,10 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.otar import Otar
 from otter.config.model import Config
 
 from pts.schemas.otar import otar_schema
-from pts.schemas.outputs.otar import Otar
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
