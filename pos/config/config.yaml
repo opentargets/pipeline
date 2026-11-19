@@ -1,0 +1,781 @@
+---
+# Platform Output Support Configuration File - PLATFORM
+work_path: ./work
+log_level: DEBUG
+release_uri: gs://open-targets-pipeline-runs/do/platform-2609-2
+scratchpad:
+  # ================================= SET THESE VALUES ====================================
+  release: '26.09' # e.g. 25.12
+  data_source: gs://open-targets-pipeline-runs/do/platform-2609-2
+  database_namespace: platform2609 # e.g. platform2512
+
+  # Google disk snapshot variables
+  opensearch_disk_name: platform-2609-os
+  opensearch_disk_snapshot_name: platform-2609-os
+  clickhouse_disk_name: platform-2609-ch
+  clickhouse_disk_snapshot_name: platform-2609-ch
+  # Compact disks: the data is rsynced to these smaller disks and they are snapshotted instead, so the
+  # snapshot can be restored to a disk just big enough. Must match the terraform compact disk names
+  # (default '<disk_name>-compact'). Leave empty to snapshot the data disks directly.
+  opensearch_compact_disk_name: ''
+  clickhouse_compact_disk_name: ''
+  # ========================= THESE VALUES RARELY NEED CHANGING ===========================
+  disk_snapshot_project_id: open-targets-eu-dev
+  release_gcs_bucket: gs://open-targets-data-releases
+
+  # temp file locations
+  local_data: release_data
+  prepared_data: prepared_data
+
+  # opensearch
+  opensearch_version: 3.5.0
+  opensearch_java_opts: -Xms40g -Xmx200g
+  opensearch_data: /mnt/opensearch/data
+  opensearch_logs: /var/log/pos/opensearch
+  opensearch_snapshot_repository: ot-os-snapshots
+  opensearch_snapshot_bucket: open-targets-data-backends
+  opensearch_snapshot_base_path: opensearch
+  opensearch_indices_to_restore: '*,-.*' # e.g. '*,-.*' to restore all except hidden indices
+
+  # clickhouse
+  clickhouse_version: 26.8.2.7
+  clickhouse_data: /mnt/clickhouse/data
+  clickhouse_logs: /var/log/pos/clickhouse
+  clickhouse_backup_base_path: https://storage.googleapis.com/open-targets-data-backends/clickhouse/
+
+  # bigquery
+  bq_prod_project_id: open-targets-prod
+
+  # ftp sync
+  ftp_sync_path_gcs_credentials_file: gs://open-targets-ops/credentials/pis-service_account.json
+
+  # aws sync
+  aws_address: s3://open-targets-public-data-releases/platform
+
+steps:
+  ##################################################################################################
+  # Full platform backend
+  ##################################################################################################
+  backend:
+    # sync data
+    - name: sync_bucket etl output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket etl view files
+      source: ${data_source}/view
+      destination: ${local_data}/view
+    # ot croissant
+    - name: ot_croissant generate release metadata
+      requires:
+        - sync_bucket etl output files
+      ftp_address: http://ftp.ebi.ac.uk/pub/databases/opentargets/platform/${release}/output/
+      gcp_address: ${release_gcs_bucket}/${release}/output/
+      aws_address: ${aws_address}/${release}/output/
+      dataset_path: ${local_data}/output
+      output: croissant.json
+      prepared_data_parent: ${prepared_data}
+    # opensearch
+    - name: open_search_start data loading instance
+      volume_data: ${opensearch_data}
+      volume_logs: ${opensearch_logs}
+      opensearch_version: ${opensearch_version}
+      opensearch_java_opts: ${opensearch_java_opts}
+      startup_wait: '60'
+    - name: explode prep and load all datasets
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - ot_croissant generate release metadata
+        - open_search_start data loading instance
+      foreach: &opensearch_datasets
+        - croissant
+        - facet_search_disease
+        - facet_search_target
+        - search_disease
+        - search_drug
+        - search_study
+        - search_target
+        - search_variant
+      do:
+        - name: explode_data_prep ${each}
+          dataset: ${each}
+          parquet_parent: ${local_data}
+          json_parent: ${prepared_data}
+          step: opensearch
+        - name: open_search_create_index ${each}
+          requires:
+            - explode_data_prep ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+        - name: open_search_load dataset ${each}
+          requires:
+            - open_search_create_index ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+          json_parent: ${prepared_data}
+    - name: open_search_stop data loading instance
+      requires:
+        - explode prep and load all datasets
+      service_name: os-pos
+    - name: create_gcp_disk_snapshot opensearch
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${opensearch_disk_name}
+      gcp_snapshot_name: ${opensearch_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${opensearch_data}
+      source_mount_point: /mnt/opensearch
+      compact_disk_name: ${opensearch_compact_disk_name}
+      compact_mount_point: /mnt/opensearch-compact
+      requires:
+        - open_search_stop data loading instance
+    # clickhouse
+    - name: clickhouse_start data loading instance
+      volume_data: ${clickhouse_data}
+      volume_logs: ${clickhouse_logs}
+      clickhouse_version: ${clickhouse_version}
+      clickhouse_database: ${database_namespace}
+    - name: explode load all datasets
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_start data loading instance
+      foreach: &clickhouse_datasets
+        - baseline_expression
+        - biosample
+        - credible_sets
+        - colocalisation
+        - disease_hpo
+        - drug
+        - drug_warnings
+        - enhancer_to_gene
+        - evidence
+        - go
+        - hpo
+        - interaction_evidence
+        - l2g_predictions
+        - literature_entity_lut
+        - mechanism_of_action
+        - mouse_phenotypes
+        - openfda_faers
+        - otar_projects
+        - pharmacogenomics
+        - protein_coding_coords
+        - so
+        - target_essentiality
+        - transcript
+        - variants
+        - w2v
+        - clinical_indication
+        - clinical_report
+        - clinical_target
+      do:
+        - name: clickhouse_load clickhouse load ${each}
+          dataset: ${each}
+          clickhouse_database: ${database_namespace}
+          data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse target_prioritisation
+      requires:
+        - clickhouse_load clickhouse load target_essentiality
+      dataset: target_prioritisation
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load interaction
+      requires:
+        - clickhouse_load clickhouse load interaction_evidence
+      dataset: interaction
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load studies
+      requires:
+        - clickhouse_load clickhouse load credible_sets
+      dataset: studies
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load targets
+      requires:
+        - clickhouse_load clickhouse load studies
+      dataset: targets
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load disease
+      requires:
+        - clickhouse_load clickhouse load studies
+      dataset: disease
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load aotf
+      requires:
+        - clickhouse_load clickhouse load disease
+      dataset: aotf
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_stop data loading instance
+      requires:
+        - explode load all datasets
+        - clickhouse_load clickhouse target_prioritisation
+        - clickhouse_load clickhouse load interaction
+        - clickhouse_load clickhouse load studies
+        - clickhouse_load clickhouse load disease
+        - clickhouse_load clickhouse load aotf
+        - clickhouse_load clickhouse load targets
+      clickhouse_database_name: ${database_namespace}
+    - name: create_gcp_disk_snapshot clickhouse
+      requires:
+        - clickhouse_stop data loading instance
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${clickhouse_disk_name}
+      gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${clickhouse_data}
+      source_mount_point: /mnt/clickhouse
+      compact_disk_name: ${clickhouse_compact_disk_name}
+      compact_mount_point: /mnt/clickhouse-compact
+    # exports
+    - name: explode_data_prep search_ebi_associations
+      dataset: search_ebi_associations
+      parquet_parent: ${local_data}
+      json_parent: ${prepared_data}
+      step: export
+      remote_path: etc/export/search_ebi_associations.json
+      requires:
+        - sync_bucket etl view files
+    - name: upload search_ebi_associations
+      requires:
+        - explode_data_prep search_ebi_associations
+      source: ${prepared_data}/search_ebi_associations/search_ebi_associations.json
+      destination: etc/export/search_ebi_associations/search_ebi_associations.json
+
+  ################################################################################################
+  # Tarballs
+  ################################################################################################
+  tarballs:
+    - name: tarball opensearch
+      source: /mnt/opensearch
+      destination: disk_images/opensearch.tgz
+    - name: tarball clickhouse
+      source: /mnt/clickhouse
+      destination: disk_images/clickhouse.tgz
+
+  ################################################################################################
+  # Sync data only
+  ################################################################################################
+  sync_data:
+    - name: sync_bucket etl output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket etl view files
+      source: ${data_source}/view
+      destination: ${local_data}/view
+
+  ################################################################################################
+  # OT Croissant
+  ################################################################################################
+  ot_croissant:
+    - name: sync_bucket etl output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: ot_croissant generate release metadata
+      requires:
+        - sync_bucket etl output files
+      ftp_address: http://ftp.ebi.ac.uk/pub/databases/opentargets/platform/${release}/output/
+      gcp_address: ${release_gcs_bucket}/${release}/output/
+      aws_address: ${aws_address}/${release}/output/
+      dataset_path: ${local_data}/output
+      output: croissant.json
+      prepared_data_parent: ${prepared_data}
+  ################################################################################################
+  # OpenSearch
+  ################################################################################################
+  opensearch:
+    - name: sync_bucket etl output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket etl view files
+      source: ${data_source}/view
+      destination: ${local_data}/view
+    - name: ot_croissant generate release metadata
+      requires:
+        - sync_bucket etl output files
+      ftp_address: http://ftp.ebi.ac.uk/pub/databases/opentargets/platform/${release}/output/
+      gcp_address: ${release_gcs_bucket}/${release}/output/
+      aws_address: ${aws_address}/${release}/output/
+      dataset_path: ${local_data}/output
+      output: croissant.json
+      prepared_data_parent: ${prepared_data}
+    - name: open_search_start data loading instance
+      volume_data: ${opensearch_data}
+      volume_logs: ${opensearch_logs}
+      opensearch_version: ${opensearch_version}
+      opensearch_java_opts: ${opensearch_java_opts}
+      startup_wait: '60'
+    - name: explode prep and load all datasets
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - ot_croissant generate release metadata
+        - open_search_start data loading instance
+      foreach: *opensearch_datasets
+      do:
+        - name: explode_data_prep ${each}
+          dataset: ${each}
+          parquet_parent: ${local_data}
+          json_parent: ${prepared_data}
+          step: opensearch
+        - name: open_search_create_index ${each}
+          requires:
+            - explode_data_prep ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+        - name: open_search_load dataset ${each}
+          requires:
+            - open_search_create_index ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+          json_parent: ${prepared_data}
+    - name: open_search_stop data loading instance
+      requires:
+        - explode prep and load all datasets
+      service_name: os-pos
+    - name: create_gcp_disk_snapshot opensearch
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${opensearch_disk_name}
+      gcp_snapshot_name: ${opensearch_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${opensearch_data}
+      source_mount_point: /mnt/opensearch
+      compact_disk_name: ${opensearch_compact_disk_name}
+      compact_mount_point: /mnt/opensearch-compact
+      requires:
+        - open_search_stop data loading instance
+  ################################################################################################
+  # OpenSearch - Modular Steps
+  ################################################################################################
+  opensearch_start:
+    - name: open_search_start data loading instance
+      service_name: os-pos
+      volume_data: ${opensearch_data}
+      volume_logs: ${opensearch_logs}
+      opensearch_version: ${opensearch_version}
+      opensearch_java_opts: ${opensearch_java_opts}
+  opensearch_disk_snapshot:
+    - name: create_gcp_disk_snapshot opensearch
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${opensearch_disk_name}
+      gcp_snapshot_name: ${opensearch_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${opensearch_data}
+      source_mount_point: /mnt/opensearch
+      compact_disk_name: ${opensearch_compact_disk_name}
+      compact_mount_point: /mnt/opensearch-compact
+  opensearch_snapshot: # create a snapshot of the opensearch data NOT the disk.
+    - name: open_search_start data loading instance
+      volume_data: ${opensearch_data}
+      volume_logs: ${opensearch_logs}
+      opensearch_version: ${opensearch_version}
+      opensearch_java_opts: ${opensearch_java_opts}
+      startup_wait: '60'
+    - name: open_search_snapshot data loading instance
+      requires:
+        - open_search_start data loading instance
+      snapshot_repository_name: ${opensearch_snapshot_repository}
+      snapshot_name: ${database_namespace}
+      snapshot_bucket: ${opensearch_snapshot_bucket}
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
+  opensearch_restore:
+    - name: open_search_restore indices
+      snapshot_repository_name: ${opensearch_snapshot_repository}
+      snapshot_name: ${database_namespace}
+      snapshot_bucket: ${opensearch_snapshot_bucket}
+      snapshot_base_path: ${opensearch_snapshot_base_path}/${database_namespace}
+      indices: ${opensearch_indices_to_restore}
+  opensearch_stop:
+    - name: open_search_stop data loading instance
+      service_name: os-pos
+  opensearch_tarball:
+    - name: tarball opensearch
+      source: /mnt/opensearch
+      destination: disk_images/opensearch.tgz
+  opensearch_prep_all:
+    - name: sync_bucket pipeline output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket pipeline view files
+      source: ${data_source}/view/
+      destination: ${local_data}/view
+    - name: explode prep all datasets
+      requires:
+        - sync_bucket pipeline output files
+        - sync_bucket pipeline view files
+      foreach: *opensearch_datasets
+      do:
+        - name: explode_data_prep ${each}
+          dataset: ${each}
+          parquet_parent: ${local_data}
+          json_parent: ${prepared_data}
+          step: opensearch
+  opensearch_load_all:
+    - name: open_search_start data loading instance
+      volume_data: ${opensearch_data}
+      volume_logs: ${opensearch_logs}
+      opensearch_version: ${opensearch_version}
+      opensearch_java_opts: ${opensearch_java_opts}
+    - name: explode load all datasets
+      foreach: *opensearch_datasets
+      do:
+        - name: open_search_create_index ${each}
+          requires:
+            - open_search_start data loading instance
+          dataset: ${each}
+          prefix: ${database_namespace}
+        - name: open_search_load dataset ${each}
+          requires:
+            - open_search_create_index ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+          json_parent: ${prepared_data}
+
+  ################################################################################################
+  # ClickHouse
+  ################################################################################################
+  clickhouse:
+    - name: sync_bucket etl output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket etl view files
+      source: ${data_source}/view
+      destination: ${local_data}/view
+    - name: clickhouse_start data loading instance
+      volume_data: ${clickhouse_data}
+      volume_logs: ${clickhouse_logs}
+      clickhouse_version: ${clickhouse_version}
+      clickhouse_database: ${database_namespace}
+    - name: explode load all datasets
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_start data loading instance
+      foreach: *clickhouse_datasets
+      do:
+        - name: clickhouse_load clickhouse load ${each}
+          dataset: ${each}
+          clickhouse_database: ${database_namespace}
+          data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse target_prioritisation
+      requires:
+        - clickhouse_load clickhouse load target_essentiality
+      dataset: target_prioritisation
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load interaction
+      requires:
+        - clickhouse_load clickhouse load interaction_evidence
+      dataset: interaction
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load studies
+      requires:
+        - clickhouse_load clickhouse load credible_sets
+      dataset: studies
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load targets
+      requires:
+        - clickhouse_load clickhouse load studies
+      dataset: targets
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load disease
+      requires:
+        - clickhouse_load clickhouse load studies
+      dataset: disease
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load aotf
+      requires:
+        - clickhouse_load clickhouse load disease
+      dataset: aotf
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_stop data loading instance
+      requires:
+        - explode load all datasets
+        - clickhouse_load clickhouse target_prioritisation
+        - clickhouse_load clickhouse load interaction
+        - clickhouse_load clickhouse load studies
+        - clickhouse_load clickhouse load disease
+        - clickhouse_load clickhouse load aotf
+        - clickhouse_load clickhouse load targets
+      clickhouse_database_name: ${database_namespace}
+    - name: create_gcp_disk_snapshot clickhouse
+      requires:
+        - clickhouse_stop data loading instance
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${clickhouse_disk_name}
+      gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${clickhouse_data}
+      source_mount_point: /mnt/clickhouse
+      compact_disk_name: ${clickhouse_compact_disk_name}
+      compact_mount_point: /mnt/clickhouse-compact
+  ################################################################################################
+  # ClickHouse - Modular Steps
+  ################################################################################################
+
+  clickhouse_start:
+    - name: clickhouse_start data loading instance
+      volume_data: ${clickhouse_data}
+      volume_logs: ${clickhouse_logs}
+      clickhouse_version: ${clickhouse_version}
+      clickhouse_database: ${database_namespace}
+  clickhouse_tarball:
+    - name: tarball clickhouse
+      source: /mnt/clickhouse
+      destination: disk_images/clickhouse.tgz
+  clickhouse_disk_snapshot:
+    - name: create_gcp_disk_snapshot clickhouse
+      gcp_project_id: ${disk_snapshot_project_id}
+      gcp_disk_name: ${clickhouse_disk_name}
+      gcp_snapshot_name: ${clickhouse_disk_snapshot_name}
+      gcp_disk_zone: europe-west1-d
+      mount_point: ${clickhouse_data}
+      source_mount_point: /mnt/clickhouse
+      compact_disk_name: ${clickhouse_compact_disk_name}
+      compact_mount_point: /mnt/clickhouse-compact
+  clickhouse_backup_all:
+    - name: clickhouse_start data loading instance
+      volume_data: ${clickhouse_data}
+      volume_logs: ${clickhouse_logs}
+      clickhouse_version: ${clickhouse_version}
+      clickhouse_database: ${database_namespace}
+    - name: explode backup clickhouse tables
+      requires:
+        - clickhouse_start data loading instance
+      foreach: &clickhouse_tables
+        - associations_otf_target
+        - associations_otf_disease
+        - baseline_expression
+        - biosample
+        - colocalisation
+        - credible_sets
+        - credible_sets_by_variant
+        - credible_sets_by_region
+        - credible_sets_locus
+        - disease_hpo
+        - disease
+        - drug_warnings
+        - drug
+        - enhancer_to_gene
+        - evidence
+        - evidence_by_variant
+        - evidence_by_disease_and_target
+        - gene_ontology
+        - hpo
+        - interaction
+        - l2g_predictions
+        - literature_entity_lut
+        - mechanism_of_action
+        - ml_w2v
+        - mouse_phenotypes
+        - openfda_faers
+        - otar_projects
+        - pharmacogenomics_by_drug
+        - pharmacogenomics_by_target
+        - pharmacogenomics_by_variant
+        - protein_coding_coords_by_target
+        - protein_coding_coords_by_variant
+        - sequence_ontology
+        - studies
+        - target_essentiality
+        - target_prioritisation
+        - targets
+        - variants
+        - clinical_indication_disease
+        - clinical_indication_drug
+        - clinical_report
+        - clinical_target
+      do:
+        - name: clickhouse_backup table ${each}
+          requires:
+            - clickhouse_start data loading instance
+          clickhouse_database: ${database_namespace}
+          table: ${each}
+          gcs_base_path: ${clickhouse_backup_base_path}
+  clickhouse_restore_all:
+    - name: clickhouse_create_database for restoration
+      clickhouse_database: ${database_namespace}
+    - name: explode restore clickhouse tables
+      requires:
+        - clickhouse_create_database for restoration
+      foreach: *clickhouse_tables
+      do:
+        - name: clickhouse_restore table ${each}
+          clickhouse_database: ${database_namespace}
+          table: ${each}
+          gcs_base_path: ${clickhouse_backup_base_path}
+  clickhouse_stop:
+    - name: clickhouse_stop data loading instance
+      clickhouse_database_name: ${database_namespace}
+  clickhouse_load_all:
+    - name: sync_bucket pipeline output files
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket pipeline view files
+      source: ${data_source}/view
+      destination: ${local_data}/view
+    - name: clickhouse_start data loading instance
+      volume_data: ${clickhouse_data}
+      volume_logs: ${clickhouse_logs}
+      clickhouse_version: ${clickhouse_version}
+      clickhouse_database: ${database_namespace}
+    - name: explode load all datasets
+      foreach: *clickhouse_datasets
+      do:
+        - name: clickhouse_load clickhouse load ${each}
+          requires:
+            - clickhouse_start data loading instance
+            - sync_bucket pipeline output files
+            - sync_bucket pipeline view files
+          dataset: ${each}
+          clickhouse_database: ${database_namespace}
+          data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load aotf
+      requires:
+        - clickhouse_load clickhouse load disease
+      dataset: aotf
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load targets
+      requires:
+        - clickhouse_load clickhouse load credible_sets
+        - clickhouse_load clickhouse load studies
+      dataset: targets
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+  ########################################################################################
+  # BigQuery
+  bigquery_dev_load_all:
+    - name: bigquery_reset dev
+      project_id: open-targets-eu-dev
+      dataset_id: platform_dev
+      location: eu
+      release: ${release}
+    - name: explode load bigquery tables
+      foreach: &bigquery_datasets
+        - association_by_datasource_direct
+        - association_by_datasource_indirect
+        - association_by_datatype_direct
+        - association_by_datatype_indirect
+        - association_by_overall_indirect
+        - association_overall_direct
+        - biosample
+        - colocalisation
+        - credible_set
+        - disease
+        - disease_hpo
+        - disease_phenotype
+        - drug_indication
+        - drug_mechanism_of_action
+        - drug_molecule
+        - drug_warning
+        - enhancer_to_gene
+        - evidence_cancer_biomarkers
+        - evidence_cancer_gene_census
+        - evidence_clinical_precedence
+        - evidence_clingen
+        - evidence_crispr
+        - evidence_crispr_screen
+        - evidence_europepmc
+        - evidence_eva
+        - evidence_eva_somatic
+        - evidence_expression_atlas
+        - evidence_gene2phenotype
+        - evidence_gene_burden
+        - evidence_genomics_england
+        - evidence_gwas_credible_sets
+        - evidence_impc
+        - evidence_intogen
+        - evidence_orphanet
+        - evidence_reactome
+        - evidence_uniprot_literature
+        - evidence_uniprot_variants
+        - go
+        - interaction
+        - interaction_evidence
+        - known_drug
+        - l2g_prediction
+        - literature_entity_lut
+        - literature_vector
+        - mouse_phenotypes
+        - openfda_significant_adverse_drug_reactions
+        - openfda_significant_adverse_target_reactions
+        - pharmacogenomics
+        - protein_coding_coords
+        - so
+        - study
+        - target
+        - target_essentiality
+        - target_prioritisation
+        - variant
+      do:
+        - name: bigquery_load dev ${each}
+          requires:
+            - bigquery_reset dev
+          dataset_id: platform_dev
+          project_id: open-targets-eu-dev
+          location: eu
+          table: ${each}
+          base_uri: ${release_gcs_bucket}/${release}
+  bigquery_prod_load_all:
+    - name: bigquery_reset prod
+      project_id: open-targets-prod
+      dataset_id: platform
+      location: eu
+      release: ${release}
+    - name: explode load bigquery tables
+      foreach: *bigquery_datasets
+      do:
+        - name: bigquery_load prod ${each}
+          requires:
+            - bigquery_reset prod
+          dataset_id: platform
+          project_id: open-targets-prod
+          location: eu
+          table: ${each}
+          base_uri: ${release_gcs_bucket}/${release}
+  exports:
+    # EBI Search
+    - name: sync_bucket search_ebi_associations
+      source: ${data_source}/view/search_ebi_associations
+      destination: ${local_data}/view/search_ebi_associations
+    - name: explode_data_prep search_ebi_associations
+      dataset: search_ebi_associations
+      parquet_parent: ${local_data}
+      json_parent: ${prepared_data}
+      step: export
+      remote_path: etc/export/search_ebi_associations.json
+      requires:
+        - sync_bucket search_ebi_associations
+    - name: upload search_ebi_associations
+      requires:
+        - explode_data_prep search_ebi_associations
+      source: ${prepared_data}/search_ebi_associations/search_ebi_associations.json
+      destination: etc/export/search_ebi_associations/search_ebi_associations.json
+  # gcs_sync
+  gcs_sync:
+    - name: sync_bucket gcs release data
+      source: ${data_source}/
+      destination: ${release_gcs_bucket}/${release}/
+  aws_sync:
+    - name: rclone_sync aws release data
+      source: gcs:${data_source}/
+      destination: aws:${aws_address}/${release}/
+      #sync_flags: --dry-run
+  # ftp_sync
+  ftp_sync:
+    - name: ftp_sync release data to ftp server
+      source_data: ${data_source}
+      release_id: ${release}
+      gcs_credentials_file_remote: ${ftp_sync_path_gcs_credentials_file}
+  test:
+    - name: hello_world test
+      who: Hello, Open Targets Platform Output Support!
