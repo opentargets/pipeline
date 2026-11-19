@@ -96,9 +96,9 @@ def test_search_writes_all_five_views_with_the_release_schema(tmp_path: Path) ->
     search(source, destination, None, None)
 
     for path in destination.values():
-        frame = pl.read_parquet(Path(path) / '**' / '*.parquet')
-        assert frame.columns == RELEASE_COLUMNS
-        assert frame.schema['multiplier'] == pl.Float64
+        frame = pl.read_ndjson(Path(path) / '*.json')
+        assert [c for c in RELEASE_COLUMNS if c in frame.columns] == frame.columns  # nulls are dropped
+        assert frame.schema.get('multiplier', pl.Float64) == pl.Float64
         assert frame.height == 1
 
 
@@ -118,8 +118,8 @@ def test_search_completes_when_no_evidence_dataset_carries_a_drug_id(tmp_path: P
     search(source, destination, None, None)
 
     for path in destination.values():
-        frame = pl.read_parquet(Path(path) / '**' / '*.parquet')
-        assert frame.columns == RELEASE_COLUMNS
+        frame = pl.read_ndjson(Path(path) / '*.json')
+        assert [c for c in RELEASE_COLUMNS if c in frame.columns] == frame.columns  # nulls are dropped
         assert frame.height == 1
 
 
@@ -134,7 +134,7 @@ def test_search_emits_one_document_per_source_entity(tmp_path: Path) -> None:
 
     expected = {'diseases': 'D1', 'targets': 'T1', 'drugs': 'CH1', 'variants': '1_100_A_G', 'studies': 'S1'}
     for name, identifier in expected.items():
-        frame = pl.read_parquet(Path(destination[name]) / '**' / '*.parquet')
+        frame = pl.read_ndjson(Path(destination[name]) / '*.json')
         assert frame['id'].to_list() == [identifier]
 
 
@@ -161,7 +161,7 @@ def test_search_indexes_the_mechanism_of_a_drug_with_only_an_electronic_one(tmp_
 
     search(source, destination, None, None)
 
-    drugs = pl.read_parquet(Path(destination['drugs']) / '**' / '*.parquet')
+    drugs = pl.read_ndjson(Path(destination['drugs']) / '*.json')
     assert sorted(drugs['id'].to_list()) == ['CH1', 'CH2']
     prefixes = dict(zip(drugs['id'].to_list(), drugs['prefixes'].to_list(), strict=True))
     assert any('zorbase' in p.lower() for p in prefixes['CH2'])

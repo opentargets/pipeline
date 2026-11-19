@@ -14,7 +14,7 @@ from loguru import logger
 from otter.config.model import Config
 
 from pts.transformers.gene_sets import CHEMBL_TARGET_CLASS_SOURCE, GO_SOURCE, REACTOME_SOURCE
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, write_json_dataset
 from pts.transformers.utils.lists import collect_set, explode
 
 DEFAULT_CATEGORIES: dict[str, str] = {
@@ -187,6 +187,6 @@ def search_facet(
     diseases = disease_facets(disease, categories).collect()
 
     logger.info(f'writing {targets.height} target facets to {destination["targets"]}')
-    write_dataset(targets, destination['targets'])
+    write_json_dataset(targets, destination['targets'])
     logger.info(f'writing {diseases.height} disease facets to {destination["diseases"]}')
-    write_dataset(diseases, destination['diseases'])
+    write_json_dataset(diseases, destination['diseases'])
