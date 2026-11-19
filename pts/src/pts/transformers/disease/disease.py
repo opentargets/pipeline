@@ -109,20 +109,6 @@ def disease(
         parents=pl.col('parents').fill_null(pl.Series([[]], dtype=pl.List(pl.String)))
     )
 
-    # get location_ids by filtering edges with 'located_in' predicate
-    location_ids = (
-        e
-        .filter(pl.col('pred') == 'http://purl.obolibrary.org/obo/BFO_0000050')
-        .with_columns(
-            id=pl.col('sub').str.split('/').list.last(),
-            directLocationIds=pl.col('obj').str.split('/').list.last(),
-        )
-        .group_by('id')
-        .agg(pl.col('directLocationIds').drop_nulls())
-        .drop('directLocationIds')
-    )
-    n_location_ids = n_parents.join(location_ids, on='id', how='left')
-
     # get synonyms by:
     # 1. exploding the synonyms column
     # 2. filtering the synonyms with the correct predicates
@@ -145,7 +131,7 @@ def disease(
     }
     synonym_columns = list(synonym_rename_mapping.values())
     synonyms = (
-        n_location_ids['id', 'synonyms']
+        n_parents['id', 'synonyms']
         .explode('synonyms', empty_as_null=True)
         .filter(
             pl.col('synonyms').struct['pred'].is_in(synonym_predicates),
@@ -173,7 +159,7 @@ def disease(
     )
 
     n_synonyms = (
-        n_location_ids
+        n_parents
         .drop('synonyms')
         .join(synonyms, on='id', how='left')
         .with_columns(
