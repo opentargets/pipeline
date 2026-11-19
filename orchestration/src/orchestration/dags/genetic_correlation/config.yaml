@@ -37,6 +37,8 @@ infrastructure:
       worker_machine_type: n2d-standard-16
       worker_disk_size: 128
       idle_delete_ttl: 1800
+      # the init action installs pts from GitHub and PyPI
+      internal_ip_only: false
       metadata:
         PTS_REF: '{{pipeline_ref}}'
       properties:
