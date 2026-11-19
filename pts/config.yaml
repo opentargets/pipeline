@@ -1672,8 +1672,8 @@ steps:
         gene_sets: output/gene_sets
         tractability: output/target_tractability
       destination:
-        targets: view/search_facet_target
-        diseases: view/search_facet_disease
+        targets: export/search_facet_target
+        diseases: export/search_facet_disease
   ##################################################################################################
 
   #: INTERACTION STEP :#############################################################################
@@ -1739,11 +1739,11 @@ steps:
         studies: output/study
         variants: output/variant
       destination:
-        diseases: view/search_disease
-        targets: view/search_target
-        drugs: view/search_drug
-        variants: view/search_variant
-        studies: view/search_study
+        diseases: export/search_disease
+        targets: export/search_target
+        drugs: export/search_drug
+        variants: export/search_variant
+        studies: export/search_study
   ##################################################################################################
 
   #: SEARCH_EBI STEP :##############################################################################
@@ -1754,10 +1754,8 @@ steps:
         disease: output/disease
         target: output/target
         association: output/association_overall_direct
-        evidence: output/evidence_gwas_credible_sets
       destination:
-        associations: view/search_ebi_associations
-        evidence: view/search_ebi_evidence
+        associations: etc/export/search_ebi_associations/search_ebi_associations.json
   ##################################################################################################
 
   #: LITERATURE STEPS (run on pts_literature cluster) :#############################################

@@ -427,8 +427,7 @@ def check_destinations_absent(paths: Iterable[str]) -> None:
         existing.append(path)
     if existing:
         msg = (
-            f'{", ".join(map(repr, existing))} already exists; write_dataset never overwrites. '
-            '`pl.PartitionBy` only adds parts, so writing there would leave the previous run behind. '
+            f'{", ".join(map(repr, existing))} already exists; refusing to overwrite existing output. '
             'Remove it first.'
         )
         raise ValueError(msg)

@@ -10,12 +10,12 @@ what moves this whole step onto a plain GCE VM -- do not reintroduce that prefix
 
 A retry is NOT idempotent, unlike the pyspark job it replaces. The pyspark job wrote each view
 with `.mode('overwrite')`, so re-running it after a partial failure silently replaced whatever
-was there. `write_dataset` refuses to write into an occupied destination instead (see its
+was there. `write_json_dataset` refuses to write into an occupied destination instead (see its
 docstring), so a `search` step that fails part-way through its five writes will fail its retry
 too, with an `already exists` error, until the destinations it already wrote are removed. This
 is deliberate: a loud refusal beats silently leaving a previous run's parts in place for a
 consumer glob to read as current data. It is not special to `search` -- every polars transformer
-in this package writes through `write_dataset` and inherits the same refusal. Note also that
+in this package writes through the `utils.dataset` writers and inherits the same refusal. Note also that
 `Transform._prepare_dirs` (`pts/tasks/transform.py`) only clears destinations when running
 locally (`not self.context.config.release_uri`); in a real release it does nothing, so this
 refusal is exactly what protects production, not a local-only detail.
@@ -46,7 +46,7 @@ from pts.transformers.search.lookups import (
 from pts.transformers.search.study import build_study_index
 from pts.transformers.search.target import build_target_index
 from pts.transformers.search.variant import build_variant_index
-from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_dataset
+from pts.transformers.utils.dataset import scan_dataset, scan_datasets, write_json_dataset
 
 
 def _evidence_with_drug_associations(pattern: str) -> pl.LazyFrame:
@@ -137,7 +137,7 @@ def search(
     drug_assocs = drug_associations(scored_drugs, total)
 
     logger.info('building search index for diseases')
-    write_dataset(
+    write_json_dataset(
         build_disease_index(
             diseases, phenotypes, scores, scored_drugs, t_lut, dr_lut, studies, nct_by(indication, 'diseaseId')
         ),
@@ -145,19 +145,22 @@ def search(
     )
 
     logger.info('building search index for targets')
-    write_dataset(build_target_index(targets, scores, d_lut, variants, scored_drugs, dr_lut), destination['targets'])
+    write_json_dataset(
+        build_target_index(targets, scores, d_lut, variants, scored_drugs, dr_lut),
+        destination['targets'],
+    )
 
     logger.info('building search index for drugs')
-    write_dataset(
+    write_json_dataset(
         build_drug_index(drugs, drug_assocs, t_lut, d_lut, nct_by(indication, 'drugId')),
         destination['drugs'],
     )
 
     logger.info('building search index for variants')
-    write_dataset(build_variant_index(variants), destination['variants'])
+    write_json_dataset(build_variant_index(variants), destination['variants'])
 
     logger.info('building search index for studies')
-    write_dataset(
+    write_json_dataset(
         build_study_index(studies, targets, scan_dataset(source['credible_sets'])),
         destination['studies'],
     )

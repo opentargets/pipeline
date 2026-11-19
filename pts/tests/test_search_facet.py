@@ -227,7 +227,7 @@ def test_search_facet_end_to_end(tmp_path: Path) -> None:
             {},
             None,
         )
-        return pl.read_parquet(dst / 'targets'), pl.read_parquet(dst / 'diseases')
+        return pl.read_ndjson(dst / 'targets' / '*.json'), pl.read_ndjson(dst / 'diseases' / '*.json')
 
     targets_out, diseases_out = run(tmp_path / 'a')
     assert targets_out.columns == TARGET_COLUMNS
