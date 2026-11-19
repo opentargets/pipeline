@@ -17,11 +17,11 @@ CREATE TABLE if not exists interaction_log (
     speciesA Tuple (
         mnemonic LowCardinality (String),
         scientificName LowCardinality (String),
-        taxonId UInt8
+        taxonId UInt32
     ),
     speciesB Tuple (
         mnemonic LowCardinality (String),
         scientificName LowCardinality (Nullable (String)),
-        taxonId Nullable (UInt8)
+        taxonId Nullable (UInt32)
     )
 ) engine = Log;
