@@ -278,7 +278,7 @@ order by
       targets
   );
 
-CREATE DICTIONARY target_symbols (id String, approvedSymbol String) PRIMARY KEY id SOURCE (CLICKHOUSE (TABLE 'targets')) LAYOUT (COMPLEX_KEY_HASHED ()) LIFETIME (0);
+CREATE DICTIONARY IF NOT EXISTS target_symbols (id String, approvedSymbol String) PRIMARY KEY id SOURCE (CLICKHOUSE (TABLE 'targets')) LAYOUT (COMPLEX_KEY_HASHED ()) LIFETIME (0);
 
 DROP TABLE IF EXISTS targets_log
 SYNC;
