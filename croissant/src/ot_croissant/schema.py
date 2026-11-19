@@ -64,6 +64,8 @@ def type_name(arrow_type: pa.DataType) -> str:
             return 'struct'
         case _ if pa.types.is_map(arrow_type):
             return 'map'
+        case _ if pa.types.is_dictionary(arrow_type):
+            return 'dictionary'
         case _ if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
             return 'binary'
         case _:
@@ -94,6 +96,8 @@ def _convert_type(arrow_type: pa.DataType, spark: dict[str, dict]) -> SchemaType
     if name == 'map':
         key, value = _convert_type(arrow_type.key_type, {}), _convert_type(arrow_type.item_type, {})
         return SchemaType(name, key=key, value=value)
+    if name == 'dictionary':
+        return SchemaType(type_name(arrow_type.value_type))
     return SchemaType(name)
 
 
