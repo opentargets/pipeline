@@ -51,6 +51,7 @@ class OpenSearchLoad(Task):
         if not json_files:
             raise OpenSearchLoadError(f'no .json files for dataset {self.spec.dataset} in {self._get_json_dir()}')
         opensearch = connect(self.spec.es_host, self.spec.es_port)
+        failed = 0
         for success, info in helpers.parallel_bulk(
             opensearch,
             index=self._index_name,
@@ -60,8 +61,11 @@ class OpenSearchLoad(Task):
             queue_size=-1,
         ):
             if not success:
+                failed += 1
                 logger.error(f'Failed to index document into {self._index_name}: {info}')
         opensearch.indices.refresh(index=self._index_name)
+        if failed:
+            raise OpenSearchLoadError(f'{failed} documents failed to index into {self._index_name}')
         return self
 
     def _generate_data(self, json_file: str | Path) -> Generator[dict[str, Any]] | Generator[str]:

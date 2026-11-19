@@ -73,7 +73,7 @@ def for_product(specs: Sequence[Spec], product: str, step: str) -> list[Spec]:
             raise ValueError(f'{s.name}: unknown product {", ".join(sorted(unknown))}, products are {sorted(PRODUCTS)}')
         if gated := _gated_children(extra.get('do', [])):
             raise ValueError(f'{s.name}: only top-level tasks take products:, not {", ".join(gated)}')
-    kept =[s for s in specs if product in (s.model_extra or {}).get('products', [product])]
+    kept = [s for s in specs if product in (s.model_extra or {}).get('products', [product])]
     if specs and not kept:
         raise ValueError(f'step {step} does not run for {product}')
     dropped = {s.name for s in specs} - {s.name for s in kept}

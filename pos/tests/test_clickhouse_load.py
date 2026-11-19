@@ -2,8 +2,25 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from pos.tasks import clickhouse_load
-from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadSpec
+from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, ClickhouseLoadSpec
+
+
+def test_clickhouse_load_fails_on_no_parquet(tmp_path, monkeypatch):
+    datasets = tmp_path / 'datasets.yaml'
+    datasets.write_text('clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n    preload_script: pre.sql\n')
+    (tmp_path / 'release_data' / 'output' / 't').mkdir(parents=True)
+    client = MagicMock()
+    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets)
+    )
+    task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+    with pytest.raises(ClickhouseLoadError, match=r'dataset t in .*release_data/output/t'):
+        ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
+    client.query.assert_not_called()
 
 
 def test_clickhouse_load_runs_split_statements(tmp_path, monkeypatch):

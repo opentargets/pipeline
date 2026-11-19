@@ -45,6 +45,11 @@ class ClickhouseLoad(Task):
 
     @report
     def run(self) -> Task:
+        files = list(self._get_parquet_path().glob(self._glob_pattern))
+        if not files:
+            raise ClickhouseLoadError(
+                f'no parquet files for dataset {self.spec.dataset} in {self._get_parquet_path()}/{self._glob_pattern}'
+            )
         client = connect(
             host=self.spec.clickhouse_host,
             port=self.spec.clickhouse_port,
@@ -53,7 +58,7 @@ class ClickhouseLoad(Task):
             database=self.spec.clickhouse_database,
         )
         self._execute_script(client, self._pre_load_sql)
-        for file in self._get_parquet_path().glob(self._glob_pattern):
+        for file in files:
             logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
             insert_file(client, self._table_name, str(file), fmt='Parquet')
         if self._post_load_sql is not None:
