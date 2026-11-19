@@ -95,7 +95,8 @@ PLURAL_LUT = _lut([
     [
         ('LSDs', 'DS', ['MONDO_0002561']),
         ('LSD', 'DS', ['MONDO_0002561']),
-        ('CMT2s', 'DS', ['MONDO_0018993']),
+        # an s after a digit is kept
+        ('CMT2s', 'DS', None),
         # an uppercase S is part of the acronym, not a plural
         ('ALS', 'DS', None),
         ('LSDS', 'DS', None),
