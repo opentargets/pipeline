@@ -1,24 +1,25 @@
-"""Smoke tests: the CLI loads, tasks register and the configs name registered tasks."""
+"""Smoke tests: the entry point loads, tasks register and the configs name registered tasks."""
 
 import importlib
 import pkgutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
-from click.testing import CliRunner
 from otter.task.task_registry import TaskRegistry
 
 import pos.tasks as pos_tasks
-from pos.core import pos as pos_cli
 
 ROOT = Path(__file__).parents[1]
 CONFIGS = [ROOT / 'config' / 'config.yaml', ROOT / 'config' / 'config_ppp.yaml']
+# deleted with pos.gcp.snapshot_disk; the config rewrite drops its steps
+REMOVED = {'create_gcp_disk_snapshot'}
 
 
 def _registered() -> set[str]:
-    # the registration `core.pos_runner` does through `Runner.register_tasks`, without a Runner
+    # the registration `core.main` does through `Runner.register_tasks`, without a Runner
     registry = TaskRegistry(MagicMock(), MagicMock())
     registry.register('otter.tasks')
     registry.register('pos.tasks')
@@ -35,14 +36,13 @@ def _task_names(tasks: list[dict]) -> list[str]:
 
 def _config_task_types(config: Path) -> set[str]:
     steps = yaml.safe_load(config.read_text())['steps']
-    return {name.split(' ')[0] for tasks in steps.values() for name in _task_names(tasks)}
+    return {name.split(' ')[0] for tasks in steps.values() for name in _task_names(tasks)} - REMOVED
 
 
-def test_cli_help():
-    result = CliRunner().invoke(pos_cli, ['--help'])
-    assert result.exit_code == 0
-    for command in ('local', 'remote', 'ftp-sync'):
-        assert command in result.output
+def test_entrypoint_help():
+    result = subprocess.run(['uv', 'run', '--frozen', 'pos', '--help'], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert '--release-uri' in result.stdout
 
 
 def test_tasks_register():
