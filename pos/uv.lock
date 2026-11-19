@@ -1026,6 +1026,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "python-box" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -1037,7 +1038,6 @@ dev = [
 test = [
     { name = "pytest" },
     { name = "pytest-mock" },
-    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1053,6 +1053,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-box", specifier = ">=7.3.2" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -1064,7 +1065,6 @@ dev = [
 test = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [[package]]

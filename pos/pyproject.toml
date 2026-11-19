@@ -16,11 +16,12 @@ dependencies = [
     "pyarrow>=25.0.1",
     "pydantic>=2.0",
     "python-box>=7.3.2",
+    "pyyaml>=6.0.2",
 ]
 
 [dependency-groups]
 dev = ["ruff==0.16.10", "ty==0.0.85", "deptry>=0.23.0"]
-test = ["pytest>=9.0.3", "pytest-mock>=3.14.1", "pyyaml>=6.0.2"]
+test = ["pytest>=9.0.3", "pytest-mock>=3.14.1"]
 
 [tool.uv.sources]
 ot-datamodels = { path = "../datamodels", editable = true }
@@ -41,3 +42,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 extend = "../ruff.toml"
+
+[tool.deptry.per_rule_ignores]
+# python-box imports it for Box.from_yaml
+DEP002 = ["pyyaml"]
