@@ -56,18 +56,19 @@ function install_packages() {
     create_dir_for_group /home/${POS_USER_NAME} google-sudoers rwx
     source "$HOME/.local/bin/env"
 
-    # Install POS repo, get the config and setup the log locations.
-    git clone https://github.com/opentargets/pos.git /opt/pos
-    cd /opt/pos
-    git checkout ${BRANCH}
-    create_dir_for_group /opt/pos google-sudoers rwx
+    # Install the pipeline monorepo (pos/ only), get the config and setup the log locations.
+    git clone --filter=blob:none --no-checkout https://github.com/opentargets/pipeline.git /opt/pipeline
+    git -C /opt/pipeline sparse-checkout set pos
+    git -C /opt/pipeline checkout ${BRANCH}
+    cd /opt/pipeline/pos
+    create_dir_for_group /opt/pipeline google-sudoers rwx
     curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pos_config" -H "Metadata-Flavor: Google" > /etc/opt/pos_config.yaml
-    uv --directory /opt/pos sync
+    uv --directory /opt/pipeline/pos sync
     curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pos_run_script" -H "Metadata-Flavor: Google" > /opt/pos_run.sh
     chgrp -R google-sudoers /opt/pos_run.sh && chmod g+x /opt/pos_run.sh
     create_dir_for_group /var/log/pos/opensearch google-sudoers rwx
     create_dir_for_group /var/log/pos/clickhouse google-sudoers rwx
-    curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/s3_config" -H "Metadata-Flavor: Google" > /opt/pos/config/clickhouse/config.d/s3_config.xml
+    curl "http://metadata.google.internal/computeMetadata/v1/instance/attributes/s3_config" -H "Metadata-Flavor: Google" > /opt/pipeline/pos/config/clickhouse/config.d/s3_config.xml
 }
 
 
@@ -97,15 +98,15 @@ function uv_run() {
     if [ -z "$processes" ]; then
         processes=10
     fi
-    GCE_METADATA_MTLS_MODE=none uv --directory /opt/pos run pos -c /etc/opt/pos_config.yaml -p $processes -s $step
+    GCE_METADATA_MTLS_MODE=none uv --directory /opt/pipeline/pos run pos -c /etc/opt/pos_config.yaml -p $processes -s $step
 }
 
 function copy_clickhouse_configs() {
   log "[INFO] Syncing ClickHouse configs"
   mkdir -p /mnt/clickhouse/config.d
   mkdir -p /mnt/clickhouse/users.d
-  cp -vR /opt/pos/config/clickhouse/config.d/config.xml /mnt/clickhouse/config.d/config.xml
-  cp -vR /opt/pos/config/clickhouse/users.d /mnt/clickhouse/
+  cp -vR /opt/pipeline/pos/config/clickhouse/config.d/config.xml /mnt/clickhouse/config.d/config.xml
+  cp -vR /opt/pipeline/pos/config/clickhouse/users.d /mnt/clickhouse/
 }
 
 

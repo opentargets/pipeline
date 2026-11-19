@@ -104,7 +104,7 @@ def remote_params(func):
         type=click.STRING,
         default='main',
         show_default=True,
-        help='The POS git branch to use for the remote run.',
+        help='The opentargets/pipeline git branch the remote run checks out.',
     )
     @click.option(
         '--tfvar',

@@ -83,7 +83,7 @@ variable "open_search_compact_disk_size" {
 }
 
 variable "pos_git_branch" {
-  description = "Git branch to use for POS deployment"
+  description = "opentargets/pipeline git branch the VM checks out and runs pos/ from"
   type        = string
   default     = "main"
 }

@@ -51,9 +51,9 @@ refuses to run when its snapshots or backups already exist.
 
 Until phase 3, `pos` runs on a VM that Terraform creates from `deployment/` (state in
 `gs://open-targets-ops/terraform/platform-pos-v2`). Its startup script
-(`deployment/startup.sh`) clones `https://github.com/opentargets/pos` at
-`--pos-branch` into `/opt/pos` and runs `uv sync`. That clone is the standalone repo,
-not this monorepo.
+(`deployment/startup.sh`) sparse-clones `https://github.com/opentargets/pipeline` at
+`--pos-branch` into `/opt/pipeline`, checking out only `pos/`, and runs `uv sync` and the
+step from `/opt/pipeline/pos`. The branch must be pushed before `pos remote`.
 
 `config/clickhouse/` and `config/opensearch/` hold the database Dockerfiles, schemas
 and settings; `config/datasets.yaml` maps datasets to tables and indices;
