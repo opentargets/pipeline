@@ -208,6 +208,7 @@ steps:
   bigquery:
     - name: bigquery_load release tables
       products: [platform]
+      release_uri: ${data_source}
       project_id: ${bigquery_project}
       dataset_id: ${bigquery_dataset}
       staging_dataset_id: ${bigquery_staging_dataset}

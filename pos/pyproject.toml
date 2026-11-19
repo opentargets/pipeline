@@ -11,6 +11,7 @@ dependencies = [
     "google-cloud-compute>=1.31.0",
     "loguru>=0.7.3",
     "mlcroissant>=1.0.17",
+    "ot-datamodels",
     "opensearch-py>=3.0.0",
     "opentargets-otter>=26.9.1",
     "orjson>=3.10.18",
@@ -28,6 +29,9 @@ dependencies = [
 [dependency-groups]
 dev = ["ruff==0.16.10", "ty==0.0.85", "deptry>=0.23.0", "types-docker>=7.1.0"]
 test = ["pytest>=9.0.3", "pytest-mock>=3.14.1"]
+
+[tool.uv.sources]
+ot-datamodels = { path = "../datamodels", editable = true }
 
 [project.scripts]
 ot_croissant = "pos.croissant.app:main"
