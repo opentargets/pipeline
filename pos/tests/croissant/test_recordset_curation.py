@@ -2,19 +2,25 @@
 
 import json
 import re
+from importlib import resources
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from ot_croissant.models import (
+from pos import croissant
+from pos.croissant.models import (
     DistributionAnnotation,
     InstanceAnnotation,
     RecordsetFieldAnnotation,
 )
 
-ASSETS_DIR = Path(__file__).parent.parent / 'src/ot_croissant/assets'
+ASSETS_DIR = Path(croissant.__file__).resolve().parent / 'assets'
 RECORDSET_DIR = ASSETS_DIR / 'recordset'
+
+
+def _repo_root() -> Path:
+    return next(p for p in Path(__file__).resolve().parents if (p / 'pis/config.yaml').is_file())
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +125,7 @@ def test_distribution_ids_are_unique():
 
 def test_chembl_bioactivity_names_the_chembl_release_the_pipeline_downloads():
     """The release is in the description rather than in every row, so a ChEMBL bump must update it."""
-    pis_config = (Path(__file__).parents[2] / 'pis/config.yaml').read_text()
+    pis_config = (_repo_root() / 'pis/config.yaml').read_text()
     match = re.search(r"^\s*chembl_version:\s*'?(\d+)'?\s*$", pis_config, re.MULTILINE)
     assert match, 'chembl_version not found in pis/config.yaml'
     entries = {e['id']: e for e in json.loads((ASSETS_DIR / 'distribution.json').read_text())}
@@ -140,3 +146,9 @@ def test_instance_file_conforms_to_model():
         except ValidationError as exc:
             errors.append(f'{entry.get("id", "?")}: {exc}')
     assert not errors, 'Instance entries failed model validation:\n' + '\n'.join(errors)
+
+
+def test_assets_ship_with_the_package():
+    assert (resources.files('pos.croissant') / 'assets/distribution.json').is_file()
+    assert (resources.files('pos.croissant') / 'assets/instance.json').is_file()
+    assert any((resources.files('pos.croissant') / 'assets/recordset').iterdir())

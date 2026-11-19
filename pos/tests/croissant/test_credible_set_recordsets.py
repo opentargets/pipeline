@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-RECORDSET_DIR = Path(__file__).parent.parent / 'src/ot_croissant/assets/recordset'
+from pos import croissant
+
+RECORDSET_DIR = Path(croissant.__file__).resolve().parent / 'assets/recordset'
 
 CREDIBLE_SET_FIELDS = {
     'id', 'chromosome', 'locusStart', 'locusEnd', 'studyId', 'studyType', 'leadVariantId', 'fineMappingMethod',

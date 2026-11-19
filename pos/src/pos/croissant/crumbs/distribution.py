@@ -2,8 +2,8 @@
 
 from mlcroissant import Context, FileObject, FileSet
 
-from ot_croissant.curation import DistributionCuration
-from ot_croissant.schema import partition_columns
+from pos.croissant.curation import DistributionCuration
+from pos.croissant.schema import partition_columns
 
 
 class PlatformOutputDistribution:

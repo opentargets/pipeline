@@ -5,9 +5,9 @@ from __future__ import annotations
 import mlcroissant as mlc
 from loguru import logger
 
-from ot_croissant.constants import TYPE_DICT
-from ot_croissant.curation import DistributionCuration, RecordsetCuration
-from ot_croissant.schema import SchemaField, read_schema
+from pos.croissant.constants import TYPE_DICT
+from pos.croissant.curation import DistributionCuration, RecordsetCuration
+from pos.croissant.schema import SchemaField, read_schema
 
 SNAKE_CASE_WARNING = "column '{field_name}' is snake_case, camelCase is expected"
 MISSING_KEY_WARNING = (

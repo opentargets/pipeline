@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from ot_croissant.crumbs.metadata import PlatformOutputMetadata
+from pos.croissant.crumbs.metadata import PlatformOutputMetadata
 
 LOCATIONS = {
     'ftp_location': 'https://ftp.ebi.ac.uk/pub/databases/opentargets/platform/26.12/output/',

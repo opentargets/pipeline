@@ -8,7 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from ot_croissant.crumbs.metadata import PlatformOutputMetadata
+from pos.croissant.crumbs.metadata import PlatformOutputMetadata
 
 # Remove default handler
 logger.remove()

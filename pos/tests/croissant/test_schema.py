@@ -8,9 +8,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from ot_croissant.crumbs.distribution import PlatformOutputDistribution
-from ot_croissant.crumbs.record_sets import PlatformOutputRecordSets
-from ot_croissant.schema import SPARK_METADATA_KEY, SchemaField, SchemaType, partition_columns, read_schema, type_name
+from pos.croissant.crumbs.distribution import PlatformOutputDistribution
+from pos.croissant.crumbs.record_sets import PlatformOutputRecordSets
+from pos.croissant.schema import SPARK_METADATA_KEY, SchemaField, SchemaType, partition_columns, read_schema, type_name
 
 
 @pytest.mark.parametrize(

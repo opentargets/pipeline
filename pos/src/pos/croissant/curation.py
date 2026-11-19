@@ -5,21 +5,18 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Generic, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel
 
-from ot_croissant.models import (
+from pos.croissant.models import (
     DistributionAnnotation,
     InstanceAnnotation,
     RecordsetFieldAnnotation,
 )
 
-T = TypeVar('T', bound=BaseModel)
 
-
-class BaseCuration(ABC, Generic[T]):
+class BaseCuration[T: BaseModel](ABC):
     """Abstract base class for single-file curation tables.
 
     Subclasses declare which file to load (``curation_path``) and which Pydantic
