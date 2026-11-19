@@ -27,7 +27,7 @@ from pathlib import Path
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGES = ('pis', 'pts', 'orchestration', 'croissant', 'datamodels')
+PACKAGES = ('pis', 'pts', 'orchestration', 'pos', 'datamodels')
 PYTHON_TOOLS = ('ruff', 'ty')
 HOOK_REPOS = {
     'https://github.com/astral-sh/ruff-pre-commit': 'ruff',

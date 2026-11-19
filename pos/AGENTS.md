@@ -8,7 +8,7 @@ an [Otter](https://opentargets.github.io/otter) application, like `pis` and `pts
 `config/config.yaml` (Platform) or `config/config_ppp.yaml` (PPP) is a list of tasks.
 
 Its code was imported with full history from `opentargets/pos`. It is not built into
-an image yet and is not in the root `makefile`.
+an image yet; the root `makefile` covers it for `dev`, `lint`, `test` and `clean`.
 
 ## Running
 

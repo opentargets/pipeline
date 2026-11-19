@@ -7,12 +7,13 @@ It holds five independent Python packages, each with its own `pyproject.toml`,
 - **`pis`** (Pipeline Input Stage) fetches, validates and arranges input data.
 - **`pts`** (Pipeline Transformation Stage) turns inputs into the release datasets.
 - **`orchestration`** holds the Airflow 3 DAGs that run the pipeline on Google Cloud.
-- **`croissant`** generates the release's Croissant descriptor.
+- **`pos`** (Platform Output Support) publishes the release (GCS, FTP, AWS, tarballs) and
+  generates its Croissant descriptor (`pos.croissant`).
 - **`datamodels`** holds the dataset models (`ot_datamodels`). It is a library with no image; a change
-  there bumps and tests pts and croissant too.
+  there bumps and tests pts and pos too.
 
 Before changing a package, read its own `AGENTS.md` (`pis/`, `pts/`, `orchestration/`,
-`croissant/`, `datamodels/`).
+`pos/`, `datamodels/`).
 
 ## Commands
 

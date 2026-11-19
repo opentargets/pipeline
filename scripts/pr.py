@@ -18,7 +18,7 @@ import sys
 from packaging.version import Version
 from tag import PACKAGES, bail, get_package_version, get_release_tags, subprocess_run
 
-DEPENDANTS: dict[str, tuple[str, ...]] = {'datamodels': ('pts', 'croissant')}
+DEPENDANTS: dict[str, tuple[str, ...]] = {'datamodels': ('pts', 'pos')}
 
 
 def has_changed(package: str, versions: list[Version]) -> bool:

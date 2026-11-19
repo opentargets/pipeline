@@ -15,8 +15,8 @@ The Open Targets Data Pipeline is made up of four parts, each being a python pac
 - [pts](pts/README.md) — Pipeline Transformation Stage: transforms input data
     into the output files.
 - [orchestration](orchestration/README.md) — Airflow DAGs that run the full pipeline.
-- [croissant](croissant/README.md) — generates a Croissant-compliant dataset for
-    the output data.
+- [pos](pos/README.md) — Platform Output Support: publishes the release and
+    generates a Croissant-compliant dataset for the output data.
 
 
 ## Running
@@ -102,7 +102,7 @@ the usual `v<version>` format:
     `<package>@v<version>`
 
     `pts@v26.9.0rc7`</br>
-    `croissant@v26.9.0`
+    `pos@v26.9.0`
 
 
 ## Copyright

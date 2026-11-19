@@ -83,11 +83,11 @@
       additionalBranchPrefix: 'orchestration-',
     },
     {
-      matchFileNames: ['croissant/**'],
-      commitMessagePrefix: 'croissant:',
-      additionalBranchPrefix: 'croissant-',
+      matchFileNames: ['pos/**'],
+      commitMessagePrefix: 'pos:',
+      additionalBranchPrefix: 'pos-',
     },
-    // pts and croissant lock ot-datamodels' requirements: relock them on these PRs
+    // pts and pos lock ot-datamodels' requirements: relock them on these PRs
     {
       matchFileNames: ['datamodels/**'],
       commitMessagePrefix: 'datamodels:',
