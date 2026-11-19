@@ -42,9 +42,9 @@ changes need a `pts_version` bump.
   succeeds, the step goes green, and the release is missing the file.
 - **An output column added, renamed or removed changes croissant curation in the
   same PR.** Nothing fails without it; `croissant/AGENTS.md` says what to edit.
-- Shared schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes) go in the
-  `src/pts/schemas/` folder, one module per step (follow `drug_molecule.py`), not
-  in the transformer.
-- Output models live in `datamodels/` (`ot_datamodels.outputs`). A transformer's
-  `validate` imports its model from there; `datamodels/AGENTS.md` says how to declare one.
+- Output datasets are declared once, as models in `datamodels/` (`ot_datamodels.outputs`);
+  a transformer's `validate` imports its model from there (`datamodels/AGENTS.md`).
+- Input and intermediate schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes)
+  go in `src/pts/schemas/`, one module per step (follow `drug_molecule.py`), not in
+  the transformer.
 - Read spreadsheets with `pts.transformers.utils.dataset.read_spreadsheet`.
