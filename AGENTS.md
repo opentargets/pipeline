@@ -29,6 +29,7 @@ cd pts && uv run --frozen pytest tests/test_foo.py::test_bar -rxs
 ```
 
 - Pass `--frozen` to every lint and test command: the lockfile is authoritative.
+  In a fresh worktree, run `make dev-<package>` first (`uv sync --frozen --all-groups --all-extras`): pytest is in the `test` group, which `uv sync` leaves out.
 - Relock with the uv version pinned in the Dockerfiles (`uvx uv@<pin> lock`). Older
   uv rewrites `uv.lock` from `revision = 5` to `revision = 3` with no package change,
   and CI does not catch it.
@@ -57,6 +58,8 @@ same folder):
 
 - `unified-pipeline-run`: running the unified pipeline on Google Cloud.
 - `port-pyspark-to-polars`: moving a pts step from Spark to polars.
+- `staging-dag-run`: test-running a staging DAG (datasource ingestion, fine-mapping)
+  on Dataproc from a laptop.
 
 ## Style
 
