@@ -33,7 +33,7 @@
 #
 #    <package>@v<version>
 #    pts@v26.9.0rc7
-#    croissant@v26.9.0
+#    pos@v26.12.0
 #
 
 import re
@@ -45,7 +45,7 @@ from typing import NoReturn
 import tomllib
 from packaging.version import Version
 
-PACKAGES = ['orchestration', 'pis', 'pts', 'croissant', 'datamodels']
+PACKAGES = ['orchestration', 'pis', 'pts', 'pos', 'datamodels']
 
 
 def list_to_str(lst, sep: str = '|') -> str:

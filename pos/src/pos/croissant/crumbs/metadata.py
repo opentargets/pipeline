@@ -1,0 +1,61 @@
+"""Classes for overall OT Platform metadata."""
+
+from datetime import datetime
+
+from loguru import logger
+from mlcroissant import Context, Metadata
+
+from pos.croissant.crumbs.distribution import PlatformOutputDistribution
+from pos.croissant.crumbs.record_sets import PlatformOutputRecordSets
+from pos.croissant.curation import InstanceCuration
+
+
+class PlatformOutputMetadata(Metadata):
+    """Extends the MLCroissant Metadata class to define the OT Platform metadata."""
+
+    CITE_AS = r"@article{PMID:39657122, author = {Buniello, Annalisa and Suveges, Daniel and Cruz-Castillo, Carlos and  Llinares, Manuel Bernal and Cornu, Helena and Lopez, Irene and Tsukanov, Kirill and Rold{'a}n-Romero, Juan Mar{'\i}a and Mehta, Chintan and Fumis, Luca and McNeill, Graham and Hayhurst, James D and Martinez Osorio, Ricardo Esteban and Barkhordari, Ehsan and Ferrer, Javier and Carmona, Miguel and Uniyal, Prashant and Falaguera, Maria J and Rusina, Polina and Smit, Ines and Schwartzentruber, Jeremy and Alegbe, Tobi and Ho, Vivien W and Considine, Daniel and Ge, Xiangyu and Szyszkowski, Szymon and Tsepilov, Yakov and Ghoussaini, Maya and Dunham, Ian and Hulcoop, David G and McDonagh, Ellen M and Ochoa, David}, title = {{Open Targets Platform: facilitating therapeutic hypotheses building in drug discovery.}}, journal = {Nucleic Acids Res}, year = {2025}, volume = {53}, number = {D1}, pages = {D1467--D1475}, month = jan, affiliation = {Open Targets, Wellcome Genome Campus, Hinxton, Cambridgeshire CB10 1SD, UK.}, doi = {10.1093/nar/gkae1128}, pmid = {39657122}, pmcid = {PMC11701534}, date-added = {2024-12-16T14:58:07GMT}, date-modified = {2025-02-13T11:33:43GMT}, abstract = {The Open Targets Platform (https://platform.opentargets.org) is a unique, open-source, publicly-available knowledge base providing data and tooling for systematic drug target identification, annotation, and prioritisation. Since our last report, we have expanded the scope of the Platform through a number of significant enhancements and data updates, with the aim to enable our users to formulate more flexible and impactful therapeutic hypotheses. In this context, we have completely revamped our target-disease associations page with more interactive facets and built-in functionalities to empower users with additional control over their experience using the Platform, and added a new Target Prioritisation view. This enables users to prioritise targets based upon clinical precedence, tractability, doability and safety attributes. We have also implemented a direction of effect assessment for eight sources of target-disease association evidence, showing the effect of genetic variation on the function of a target is associated with risk or protection for a trait to inform on potential mechanisms of modulation suitable for disease treatment. These enhancements and the introduction of new back and front-end technologies to support them have increased the impact and usability of our resource within the drug discovery community.},}"  # noqa: E501
+
+    def __init__(
+        self,
+        datasets: list[str],
+        ftp_location: str | None,
+        gcp_location: str,
+        aws_location: str | None,
+        version: str,
+        date_published: datetime,
+        data_integrity_hash: str | None = None,
+        instance: str | None = None,
+    ) -> None:
+        """Initialize the metadata.
+
+        Without a `data_integrity_hash`, the dataset is declared live and the
+        location `FileObject`s carry no `sha256`.
+        """
+        # Managing instance:
+        if instance != 'ppp':
+            instance = 'public'
+
+        logger.info(f'Generating metadata for the {instance} Platform instance.')
+        ann = InstanceCuration().get(instance)
+
+        ctx = Context(is_live_dataset=True) if data_integrity_hash is None else Context()
+
+        super().__init__(
+            ctx=ctx,
+            name=ann.name if ann else '',
+            description=ann.description if ann else '',
+            cite_as=self.CITE_AS,
+            url=ann.url if ann else None,
+            license=[ann.license] if ann else [],
+            version=version,
+            date_published=date_published,
+            distribution=(
+                PlatformOutputDistribution(ctx)
+                .add_ftp_location(ftp_location, data_integrity_hash)
+                .add_gcp_location(gcp_location, data_integrity_hash)
+                .add_aws_location(aws_location, data_integrity_hash)
+                .add_assets_from_paths(paths=datasets)
+                .get_metadata()
+            ),
+            record_sets=PlatformOutputRecordSets().add_assets_from_paths(paths=datasets).get_metadata(),
+        )

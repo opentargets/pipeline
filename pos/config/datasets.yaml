@@ -1,0 +1,409 @@
+---
+opensearch:
+  croissant:
+    index: downloads
+    id_value: croissant
+    input_dir: output/croissant
+    mappings: config/opensearch/default.json
+    output_dir: croissant
+  facet_search_disease:
+    index: facet_search_disease
+    input_dir: view/search_facet_disease
+    mappings: config/opensearch/facet_search.json
+    output_dir: search_facet_disease
+  facet_search_target:
+    index: facet_search_target
+    input_dir: view/search_facet_target
+    mappings: config/opensearch/facet_search.json
+    output_dir: search_facet_target
+  indication:
+    index: indication
+    input_dir: output/drug_indication
+    mappings: config/opensearch/default.json
+    output_dir: drug_indication
+  search_disease:
+    index: search_disease
+    input_dir: view/search_disease
+    mappings: config/opensearch/search.json
+    output_dir: search_disease
+  search_drug:
+    index: search_drug
+    input_dir: view/search_drug
+    mappings: config/opensearch/search.json
+    output_dir: search_drug
+  search_study:
+    index: search_study
+    input_dir: view/search_study
+    mappings: config/opensearch/search.json
+    output_dir: search_study
+  search_target:
+    index: search_target
+    input_dir: view/search_target
+    mappings: config/opensearch/search.json
+    output_dir: search_target
+  search_variant:
+    index: search_variant
+    input_dir: view/search_variant
+    mappings: config/opensearch/search.json
+    output_dir: search_variant
+clickhouse:
+  aotf:
+    table: associations_otf_log
+    input_dir: view/association_otf
+    preload_script: config/clickhouse/schema/aotf.sql
+    postload_script: config/clickhouse/scripts/aotf.sql
+  baseline_expression:
+    table: baseline_expression_log
+    input_dir: output/baseline_expression
+    preload_script: config/clickhouse/schema/baseline_expression.sql
+    postload_script: config/clickhouse/scripts/baseline_expression.sql
+  biosample:
+    table: biosample_log
+    input_dir: output/biosample
+    preload_script: config/clickhouse/schema/biosample.sql
+    postload_script: config/clickhouse/scripts/biosample.sql
+  colocalisation:
+    table: colocalisation_log
+    input_dir: output/colocalisation
+    preload_script: config/clickhouse/schema/colocalisation.sql
+    postload_script: config/clickhouse/scripts/colocalisation.sql
+  credible_sets:
+    table: credible_sets_log
+    input_dir: output/credible_set
+    preload_script: config/clickhouse/schema/credible_sets.sql
+    postload_script: config/clickhouse/scripts/credible_sets.sql
+  disease:
+    table: disease_log
+    input_dir: output/disease
+    preload_script: config/clickhouse/schema/disease.sql
+    postload_script: config/clickhouse/scripts/disease.sql
+  disease_hpo:
+    table: disease_hpo_log
+    input_dir: output/disease_phenotype
+    preload_script: config/clickhouse/schema/disease_hpo.sql
+    postload_script: config/clickhouse/scripts/disease_hpo.sql
+  drug:
+    table: drug_log
+    input_dir: output/drug_molecule
+    preload_script: config/clickhouse/schema/drug.sql
+    postload_script: config/clickhouse/scripts/drug.sql
+  drug_warnings:
+    table: drug_warnings_log
+    input_dir: output/drug_warning
+    preload_script: config/clickhouse/schema/drug_warnings.sql
+    postload_script: config/clickhouse/scripts/drug_warnings.sql
+  enhancer_to_gene:
+    table: enhancer_to_gene_log
+    input_dir: output/enhancer_to_gene
+    preload_script: config/clickhouse/schema/enhancer_to_gene.sql
+    postload_script: config/clickhouse/scripts/enhancer_to_gene.sql
+  evidence:
+    table: evidence_log
+    input_dir: output
+    preload_script: config/clickhouse/schema/evidence.sql
+    postload_script: config/clickhouse/scripts/evidence.sql
+    glob_pattern: 'evidence_*/*.parquet'
+  expression:
+    table: expression_log
+    input_dir: output/expression
+    preload_script: config/clickhouse/schema/expression.sql
+    postload_script: config/clickhouse/scripts/expression.sql
+  go:
+    table: gene_ontology_log
+    input_dir: output/go
+    preload_script: config/clickhouse/schema/go.sql
+    postload_script: config/clickhouse/scripts/go.sql
+  interaction:
+    table: interaction_log
+    input_dir: output/interaction
+    preload_script: config/clickhouse/schema/interaction.sql
+    postload_script: config/clickhouse/scripts/interaction.sql
+  interaction_evidence:
+    table: interaction_evidence_log
+    input_dir: output/interaction_evidence
+    preload_script: config/clickhouse/schema/interaction_evidence.sql
+    postload_script: config/clickhouse/scripts/interaction_evidence.sql
+  hpo:
+    table: hpo_log
+    input_dir: output/disease_hpo
+    preload_script: config/clickhouse/schema/hpo.sql
+    postload_script: config/clickhouse/scripts/hpo.sql
+  l2g_predictions:
+    table: l2g_predictions_log
+    input_dir: output/l2g_prediction
+    preload_script: config/clickhouse/schema/l2g_predictions.sql
+    postload_script: config/clickhouse/scripts/l2g_predictions.sql
+  literature_entity_lut:
+    table: literature_entity_lut_log
+    input_dir: output/literature_entity_lut
+    preload_script: config/clickhouse/schema/literature_entity_lut.sql
+    postload_script: config/clickhouse/scripts/literature_entity_lut.sql
+  mechanism_of_action:
+    table: mechanism_of_action_log
+    input_dir: output/drug_mechanism_of_action
+    preload_script: config/clickhouse/schema/mechanism_of_action.sql
+    postload_script: config/clickhouse/scripts/mechanism_of_action.sql
+  mouse_phenotypes:
+    table: mouse_phenotypes_log
+    input_dir: output/mouse_phenotype
+    preload_script: config/clickhouse/schema/mouse_phenotypes.sql
+    postload_script: config/clickhouse/scripts/mouse_phenotypes.sql
+  association_time_series:
+    table: association_time_series_log
+    input_dir: view/association_timeseries
+    preload_script: config/clickhouse/schema/association_time_series.sql
+    postload_script: config/clickhouse/scripts/association_time_series.sql
+  openfda_faers:
+    table: openfda_faers_log
+    input_dir: output/openfda_significant_adverse_drug_reactions
+    preload_script: config/clickhouse/schema/openfda_faers.sql
+    postload_script: config/clickhouse/scripts/openfda_faers.sql
+  otar_projects:
+    table: otar_projects_log
+    input_dir: output/otar
+    preload_script: config/clickhouse/schema/otar_projects.sql
+    postload_script: config/clickhouse/scripts/otar_projects.sql
+  pharmacogenomics:
+    table: pharmacogenomics_log
+    input_dir: output/pharmacogenomics
+    preload_script: config/clickhouse/schema/pharmacogenomics.sql
+    postload_script: config/clickhouse/scripts/pharmacogenomics.sql
+  protein_coding_coords:
+    table: protein_coding_coords_log
+    input_dir: view/coding_variant
+    preload_script: config/clickhouse/schema/protein_coding_coords.sql
+    postload_script: config/clickhouse/scripts/protein_coding_coords.sql
+  w2v:
+    table: ml_w2v_log
+    input_dir: output/literature_vector
+    preload_script: config/clickhouse/schema/w2v.sql
+    postload_script: config/clickhouse/scripts/w2v.sql
+  studies:
+    table: studies_log
+    input_dir: output/study
+    preload_script: config/clickhouse/schema/studies.sql
+    postload_script: config/clickhouse/scripts/studies.sql
+  so:
+    table: sequence_ontology_log
+    input_dir: output/so
+    preload_script: config/clickhouse/schema/so.sql
+    postload_script: config/clickhouse/scripts/so.sql
+  target_essentiality:
+    table: target_essentiality_log
+    input_dir: output/target_essentiality
+    preload_script: config/clickhouse/schema/target_essentiality.sql
+    postload_script: config/clickhouse/scripts/target_essentiality.sql
+  target_prioritisation:
+    table: target_prioritisation_log
+    input_dir: output/target_prioritisation
+    preload_script: config/clickhouse/schema/target_prioritisation.sql
+    postload_script: config/clickhouse/scripts/target_prioritisation.sql
+  targets:
+    table: targets_log
+    input_dir: view/target_view
+    preload_script: config/clickhouse/schema/targets.sql
+    postload_script: config/clickhouse/scripts/targets.sql
+  transcript:
+    table: transcript_log
+    input_dir: output/transcript
+    preload_script: config/clickhouse/schema/transcript.sql
+    postload_script: config/clickhouse/scripts/transcript.sql
+  variants:
+    table: variants_log
+    input_dir: output/variant
+    preload_script: config/clickhouse/schema/variants.sql
+    postload_script: config/clickhouse/scripts/variants.sql
+  clinical_indication:
+    table: clinical_indication_log
+    input_dir: output/clinical_indication
+    preload_script: config/clickhouse/schema/clinical_indication.sql
+    postload_script: config/clickhouse/scripts/clinical_indication.sql
+  clinical_report:
+    table: clinical_report_log
+    input_dir: output/clinical_report
+    preload_script: config/clickhouse/schema/clinical_report.sql
+    postload_script: config/clickhouse/scripts/clinical_report.sql
+  clinical_target:
+    table: clinical_target_log
+    input_dir: output/clinical_target
+    preload_script: config/clickhouse/schema/clinical_target.sql
+    postload_script: config/clickhouse/scripts/clinical_target.sql
+bigquery:
+  association_by_datasource_direct:
+    index: association_by_datasource_direct
+    input_dir: output/association_by_datasource_direct
+  association_by_datasource_indirect:
+    index: association_by_datasource_indirect
+    input_dir: output/association_by_datasource_indirect
+  association_by_datatype_direct:
+    index: association_by_datatype_direct
+    input_dir: output/association_by_datatype_direct
+  association_by_datatype_indirect:
+    index: association_by_datatype_indirect
+    input_dir: output/association_by_datatype_indirect
+  association_by_overall_indirect:
+    index: association_by_overall_indirect
+    input_dir: output/association_by_overall_indirect
+  association_overall_direct:
+    index: association_overall_direct
+    input_dir: output/association_overall_direct
+  biosample:
+    index: biosample
+    input_dir: output/biosample
+  colocalisation:
+    index: colocalisation
+    input_dir: output/colocalisation
+  credible_set:
+    index: credible_set
+    input_dir: output/credible_set
+  disease:
+    index: disease
+    input_dir: output/disease
+  disease_hpo:
+    index: disease_hpo
+    input_dir: output/disease_hpo
+  disease_phenotype:
+    index: disease_phenotype
+    input_dir: output/disease_phenotype
+  drug_indication:
+    index: drug_indication
+    input_dir: output/drug_indication
+  drug_mechanism_of_action:
+    index: drug_mechanism_of_action
+    input_dir: output/drug_mechanism_of_action
+  drug_molecule:
+    index: drug_molecule
+    input_dir: output/drug_molecule
+  drug_warning:
+    index: drug_warning
+    input_dir: output/drug_warning
+  evidence_cancer_biomarkers:
+    index: evidence_cancer_biomarkers
+    input_dir: output/evidence_cancer_biomarkers
+  evidence_cancer_gene_census:
+    index: evidence_cancer_gene_census
+    input_dir: output/evidence_cancer_gene_census
+  evidence_clinical_precedence:
+    index: evidence_clinical_precedence
+    input_dir: output/evidence_clinical_precedence
+  evidence_clingen:
+    index: evidence_clingen
+    input_dir: output/evidence_clingen
+  evidence_crispr:
+    index: evidence_crispr
+    input_dir: output/evidence_crispr
+  evidence_crispr_screen:
+    index: evidence_crispr_screen
+    input_dir: output/evidence_crispr_screen
+  evidence_encore:
+    index: evidence_encore
+    input_dir: output/evidence_encore
+  evidence_europepmc:
+    index: evidence_europepmc
+    input_dir: output/evidence_europepmc
+  evidence_eva:
+    index: evidence_eva
+    input_dir: output/evidence_eva
+  evidence_eva_somatic:
+    index: evidence_eva_somatic
+    input_dir: output/evidence_eva_somatic
+  evidence_expression_atlas:
+    index: evidence_expression_atlas
+    input_dir: output/evidence_expression_atlas
+  evidence_gene2phenotype:
+    index: evidence_gene2phenotype
+    input_dir: output/evidence_gene2phenotype
+  evidence_gene_burden:
+    index: evidence_gene_burden
+    input_dir: output/evidence_gene_burden
+  evidence_genomics_england:
+    index: evidence_genomics_england
+    input_dir: output/evidence_genomics_england
+  evidence_gwas_credible_sets:
+    index: evidence_gwas_credible_sets
+    input_dir: output/evidence_gwas_credible_sets
+  evidence_impc:
+    index: evidence_impc
+    input_dir: output/evidence_impc
+  evidence_intogen:
+    index: evidence_intogen
+    input_dir: output/evidence_intogen
+  evidence_orphanet:
+    index: evidence_orphanet
+    input_dir: output/evidence_orphanet
+  evidence_reactome:
+    index: evidence_reactome
+    input_dir: output/evidence_reactome
+  evidence_uniprot_literature:
+    index: evidence_uniprot_literature
+    input_dir: output/evidence_uniprot_literature
+  evidence_uniprot_variants:
+    index: evidence_uniprot_variants
+    input_dir: output/evidence_uniprot_variants
+  expression:
+    index: expression
+    input_dir: output/expression
+  go:
+    index: go
+    input_dir: output/go
+  interaction:
+    index: interaction
+    input_dir: output/interaction
+  interaction_evidence:
+    index: interaction_evidence
+    input_dir: output/interaction_evidence
+  enhancer_to_gene:
+    index: enhancer_to_gene
+    input_dir: output/enhancer_to_gene
+  known_drug:
+    index: known_drug
+    input_dir: output/known_drug
+  l2g_prediction:
+    index: l2g_prediction
+    input_dir: output/l2g_prediction
+  literature_entity_lut:
+    index: literature_entity_lut
+    input_dir: output/literature_entity_lut
+  literature_vector:
+    index: literature_vector
+    input_dir: output/literature_vector
+  mouse_phenotypes:
+    index: mouse_phenotype
+    input_dir: output/mouse_phenotype
+  openfda_significant_adverse_drug_reactions:
+    index: openfda_significant_adverse_drug_reactions
+    input_dir: output/openfda_significant_adverse_drug_reactions
+  openfda_significant_adverse_target_reactions:
+    index: openfda_significant_adverse_target_reactions
+    input_dir: output/openfda_significant_adverse_target_reactions
+  pharmacogenomics:
+    index: pharmacogenomics
+    input_dir: output/pharmacogenomics
+  so:
+    index: so
+    input_dir: output/so
+  study:
+    index: study
+    input_dir: output/study
+  target:
+    index: target
+    input_dir: view/target_view
+  target_essentiality:
+    index: target_essentiality
+    input_dir: output/target_essentiality
+  target_prioritisation:
+    index: target_prioritisation
+    input_dir: output/target_prioritisation
+  variant:
+    index: variant
+    input_dir: output/variant
+  protein_coding_coords:
+    index: protein_coding_coords
+    input_dir: view/coding_variant
+export:
+  search_ebi_associations:
+    input_dir: view/search_ebi_associations
+    output_dir: search_ebi_associations
+  epmc_cooccurrence:
+    input_dir: intermediate/epmc_cooccurrence
+    output_dir: epmc_cooccurrence

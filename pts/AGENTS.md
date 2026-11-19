@@ -41,7 +41,7 @@ changes need a `pts_version` bump.
   `gs://` URI; `pathlib` collapses it to a local `gs:/bucket/...` path, the write
   succeeds, the step goes green, and the release is missing the file.
 - **An output column added, renamed or removed changes croissant curation in the
-  same PR.** Nothing fails without it; `croissant/AGENTS.md` says what to edit.
+  same PR.** Nothing fails without it; `pos/AGENTS.md` says what to edit under `pos/src/pos/croissant/assets/`.
 - Output datasets are declared once, as models in `datamodels/` (`ot_datamodels.outputs`);
   a transformer's `validate` imports its model from there (`datamodels/AGENTS.md`).
 - Input and intermediate schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes)

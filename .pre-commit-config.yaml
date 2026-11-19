@@ -24,9 +24,9 @@ repos:
         files: ^pts/
         always_run: false
       - id: ty
-        name: ty croissant
-        args: [--directory, croissant]
-        files: ^croissant/
+        name: ty pos
+        args: [--directory, pos]
+        files: ^pos/
         always_run: false
       - id: ty
         name: ty datamodels
@@ -39,10 +39,11 @@ repos:
     hooks:
       - id: yamlfmt
         args: [-conf, '.yamlfmt', '-lint']
+        exclude: ^pos/(config|deployment)/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: pretty-format-json
         args: [--no-sort-keys]
-        files: ^croissant/src/
+        files: ^pos/src/pos/croissant/assets/

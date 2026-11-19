@@ -53,7 +53,7 @@ No generator exists; write the model by hand.
 2. Declare each column as a field with a `description`; struct columns are
    `StructModel` subclasses. Reuse `outputs/patterns.py` and `outputs/common.py`.
 3. `discover_datasets()` finds it; nothing is registered.
-4. Run the tests here, then pts's and croissant's.
+4. Run the tests here, then pts's and pos's.
 
 ## Validation
 
@@ -61,8 +61,8 @@ Validation lives in pts: a model's pandera schema (`to_pandera`) and
 `validate_dataset` (`pts.schemas.dataset.validate`) run there, and each pts transformer
 validates what it writes against its model.
 
-A change here also needs the pts and croissant tests: pts checks every output task
-against its model and the models against its enums, and croissant needs a record set
+A change here also needs the pts and pos tests: pts checks every output task
+against its model and the models against its enums, and pos needs a croissant record set
 entry for every new column.
 
 Run `uv run --frozen pytest`, `ruff check` and `ty check` from this directory.

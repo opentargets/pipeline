@@ -14,8 +14,8 @@
 			"path": "pts"
 		},
 		{
-			"name": "croissant",
-			"path": "croissant"
+			"name": "pos",
+			"path": "pos"
 		},
 		{
 			"name": "pipeline (root)",
@@ -32,7 +32,7 @@
 			"pis": true,
 			"pts": true,
 			"orchestration": true,
-			"croissant": true
+			"pos": true
 		},
 		"json.schemas": [
 			{
