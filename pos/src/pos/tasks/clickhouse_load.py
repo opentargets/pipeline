@@ -36,7 +36,8 @@ class ClickhouseLoad(Task):
         try:
             self._config = get_config(self.spec.dataset_config_path).clickhouse
             self._table_name = self._config[self.spec.dataset]['table']
-            self._input_dir = self._config[self.spec.dataset]['input_dir']
+            self._derived = bool(self._config[self.spec.dataset].get('derived', False))
+            self._input_dir = self._config[self.spec.dataset].get('input_dir')
             self._pre_load_sql = self._config[self.spec.dataset].get('preload_script')
             self._post_load_sql = self._config[self.spec.dataset].get('postload_script')
             self._glob_pattern = self._config[self.spec.dataset].get('glob_pattern', '*.parquet')
@@ -45,8 +46,8 @@ class ClickhouseLoad(Task):
 
     @report
     def run(self) -> Task:
-        files = list(self._get_parquet_path().glob(self._glob_pattern))
-        if not files:
+        files = [] if self._derived else list(self._get_parquet_path().glob(self._glob_pattern))
+        if not self._derived and not files:
             raise ClickhouseLoadError(
                 f'no parquet files for dataset {self.spec.dataset} in {self._get_parquet_path()}/{self._glob_pattern}'
             )

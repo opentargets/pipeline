@@ -201,19 +201,18 @@ clickhouse:
     input_dir: output/variant
     preload_script: config/clickhouse/schema/variants.sql
     postload_script: config/clickhouse/scripts/variants.sql
-  # Derived table built from already loaded tables, nothing is ingested:
-  # input_dir does not exist so no files are inserted and table is never used.
+  # Built by its preload script from loaded tables.
   variant_credible_sets:
     table: variant_credible_sets
-    input_dir: derived/variant_credible_sets
+    derived: true
     preload_script: config/clickhouse/scripts/variant_credible_sets.sql
   study_credible_sets:
     table: study_credible_sets
-    input_dir: derived/study_credible_sets
+    derived: true
     preload_script: config/clickhouse/scripts/study_credible_sets.sql
   target_credible_sets:
     table: target_credible_sets
-    input_dir: derived/target_credible_sets
+    derived: true
     preload_script: config/clickhouse/scripts/target_credible_sets.sql
   clinical_indication:
     table: clinical_indication_log

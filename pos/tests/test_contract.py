@@ -9,8 +9,8 @@ import yaml
 ROOT = Path(__file__).parents[1]
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
 PTS_PREFIXES = ('output', 'view', 'export')
-# written by pos itself: the croissant doc by ot_croissant, derived tables from loaded ones
-POS_WRITTEN = ('croissant', 'derived/')
+# written by pos itself: the croissant doc by ot_croissant
+POS_WRITTEN = ('croissant',)
 
 
 def _repo_root() -> Path:
@@ -48,6 +48,8 @@ def _inputs(*prefixes: str) -> list[tuple[str, str]]:
     pairs = []
     for section in ('opensearch', 'clickhouse'):
         for name, entry in DATASETS[section].items():
+            if entry.get('derived'):
+                continue
             path = entry['input_dir']
             if path in PTS_PREFIXES:
                 path = f'{path}/{entry["glob_pattern"].rsplit("/", 1)[0]}'
@@ -88,5 +90,8 @@ def test_search_indices_read_export():
 def test_every_input_is_accounted_for():
     for section in ('opensearch', 'clickhouse'):
         for name, entry in DATASETS[section].items():
+            if entry.get('derived'):
+                assert 'input_dir' not in entry, f'{section}/{name}: derived with an input_dir'
+                continue
             path = entry['input_dir']
             assert path.split('/')[0] in PTS_PREFIXES or path.startswith(POS_WRITTEN), f'{section}/{name}: {path}'

@@ -57,3 +57,29 @@ def test_clickhouse_load_runs_split_statements(tmp_path, monkeypatch):
         'DROP TABLE t_log SYNC',
     ]
     assert inserted == [('t_log', str(data / 'part-0.parquet'))]
+
+
+def test_clickhouse_load_derived_runs_scripts_without_input(tmp_path, monkeypatch):
+    pre = tmp_path / 'pre.sql'
+    pre.write_text('CREATE TABLE d ENGINE = Log AS SELECT 1;\n')
+    post = tmp_path / 'post.sql'
+    post.write_text('OPTIMIZE TABLE d;\n')
+    datasets = tmp_path / 'datasets.yaml'
+    datasets.write_text(
+        f'clickhouse:\n  d:\n    table: d\n    derived: true\n    preload_script: {pre}\n    postload_script: {post}\n'
+    )
+    client = MagicMock()
+    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
+    inserted = []
+    monkeypatch.setattr(clickhouse_load, 'insert_file', lambda *a, **kw: inserted.append(a))
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load d', dataset='d', data_dir_parent='release_data', dataset_config_path=str(datasets)
+    )
+    task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+    ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
+
+    assert [c.args[0] for c in client.query.call_args_list] == [
+        'CREATE TABLE d ENGINE = Log AS SELECT 1',
+        'OPTIMIZE TABLE d',
+    ]
+    assert inserted == []
