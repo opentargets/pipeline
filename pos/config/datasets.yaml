@@ -146,9 +146,11 @@ clickhouse:
     input_dir: output/pharmacovigilance
     preload_script: config/clickhouse/schema/pharmacovigilance.sql
     postload_script: config/clickhouse/scripts/pharmacovigilance.sql
+  # pts writes output/otar for ppp only; platform gets the empty tables
   otar_projects:
     table: otar_projects_log
     input_dir: output/otar
+    optional: true
     preload_script: config/clickhouse/schema/otar_projects.sql
     postload_script: config/clickhouse/scripts/otar_projects.sql
   pharmacogenomics:

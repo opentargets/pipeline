@@ -37,6 +37,7 @@ class ClickhouseLoad(Task):
             self._config = get_config(self.spec.dataset_config_path).clickhouse
             self._table_name = self._config[self.spec.dataset]['table']
             self._derived = bool(self._config[self.spec.dataset].get('derived', False))
+            self._optional = bool(self._config[self.spec.dataset].get('optional', False))
             self._input_dir = self._config[self.spec.dataset].get('input_dir')
             self._pre_load_sql = self._config[self.spec.dataset].get('preload_script')
             self._post_load_sql = self._config[self.spec.dataset].get('postload_script')
@@ -48,9 +49,10 @@ class ClickhouseLoad(Task):
     def run(self) -> Task:
         files = [] if self._derived else list(self._get_parquet_path().glob(self._glob_pattern))
         if not self._derived and not files:
-            raise ClickhouseLoadError(
-                f'no parquet files for dataset {self.spec.dataset} in {self._get_parquet_path()}/{self._glob_pattern}'
-            )
+            where = f'{self._get_parquet_path()}/{self._glob_pattern}'
+            if not self._optional:
+                raise ClickhouseLoadError(f'no parquet files for dataset {self.spec.dataset} in {where}')
+            logger.warning(f'no parquet files for optional dataset {self.spec.dataset} in {where}, loading none')
         client = connect(
             host=self.spec.clickhouse_host,
             port=self.spec.clickhouse_port,
