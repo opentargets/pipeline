@@ -175,7 +175,8 @@ DAG `release_candidate`, param `release_uri` (e.g.
 `gs://open-targets-pipeline-runs/do/platform-2612-3`). It starts a VM with ClickHouse
 and OpenSearch on their own disks, runs `backend` and stops the servers. ClickHouse
 builds on a 300 GB disk (`pos-<prefix>-<run>-ch-build`) and, if `backend` succeeded, is
-copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and verified; OpenSearch builds on
+copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and compared with it (`cp -a`, then
+`diff -r`, in a container of the pos image); OpenSearch builds on
 an 80 GB disk (`pos-<prefix>-<run>-os`). It snapshots the 170 GB and 80 GB disks and
 deletes the VM and all three disks. Sizes are in `dags/config/release.yaml`. Outputs:
 

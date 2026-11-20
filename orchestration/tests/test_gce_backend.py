@@ -3,12 +3,13 @@
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from orchestration.operators.gce import OUTPUT_FILTER
-from orchestration.operators.gce_backend import ComputeEngineRunBackendSensor
+from orchestration.operators.gce_backend import COMPACT_COPY, ComputeEngineRunBackendSensor
 
 CLICKHOUSE_IMAGE = 'clickhouse/clickhouse-server:26.8.2.7'
 OPENSEARCH_IMAGE = 'opensearchproject/opensearch:3.5.0'
@@ -263,9 +264,7 @@ def test_servers_need_exactly_the_server_disks(disks: dict[str, str]) -> None:
 
 COMPACT_DISKS = {'clickhouse': 'ch-build', 'clickhouse-compact': 'ch-disk', 'opensearch': 'os-disk'}
 COMPACT = {'clickhouse': 'clickhouse-compact'}
-SRC_DST = '/mnt/disks/clickhouse/ /mnt/disks/clickhouse-compact/'
-COPY = f'rsync -aHAX --numeric-ids --delete {SRC_DST}'
-VERIFY = f'rsync -aHAX --numeric-ids --delete --dry-run --itemize-changes {SRC_DST}'
+COPY_MOUNTS = '-v /mnt/disks/clickhouse:/src:ro -v /mnt/disks/clickhouse-compact:/dst'
 UMOUNT_ALL = 'umount /mnt/disks/clickhouse /mnt/disks/clickhouse-compact /mnt/disks/opensearch'
 
 
@@ -274,14 +273,16 @@ def compact() -> str:
     return _sensor(data_disks=COMPACT_DISKS, compact=COMPACT).startup_script()
 
 
-def test_compact_copies_and_verifies_between_stop_and_umount(compact: str) -> None:
+def test_compact_copies_in_the_pos_image_between_stop_and_umount(compact: str) -> None:
     stop = compact.index('docker stop -t 300 opensearch clickhouse')
-    copy = compact.index(COPY)
-    verify = compact.index(VERIFY)
-    sync = compact.index('sync', verify + len(VERIFY))
+    copy = compact.index('docker run --rm --network none --entrypoint sh')
+    sync = compact.index('sync', copy)
     umount = compact.index(UMOUNT_ALL)
-    assert _pos_run(compact) < stop < copy < verify < sync < umount < compact.rindex('exit "$rc"')
+    assert _pos_run(compact) < stop < copy < sync < umount < compact.rindex('exit "$rc"')
     assert compact.rstrip().endswith('exit "$rc"')
+    assert COPY_MOUNTS in compact[copy:sync]
+    assert f"{POS_IMAGE} -c '{COMPACT_COPY}'" in compact[copy:sync]
+    assert 'rsync' not in compact
     for device in COMPACT_DISKS:
         assert f'mkfs.ext4 -F /dev/disk/by-id/google-{device}' in compact
         assert f'mount -o discard,defaults /dev/disk/by-id/google-{device} /mnt/disks/{device}' in compact
@@ -291,54 +292,91 @@ def test_compact_copies_and_verifies_between_stop_and_umount(compact: str) -> No
 
 
 def test_without_compact_the_script_has_no_copy(backend: str) -> None:
-    assert 'rsync' not in backend
+    assert '--entrypoint' not in backend
+    assert '/src' not in backend
 
 
-def _run_tail(script: str, pos_rc: int, rsync: str) -> subprocess.CompletedProcess[str]:
-    """Run the script from the pos run on, with docker, sudo, sync, umount and rsync stubbed."""
+def _run_tail(script: str, pos_rc: int, copy: str) -> subprocess.CompletedProcess[str]:
+    """Run the script from the pos run on, with docker, sudo, sync and umount stubbed; `copy` is the copy container."""
     tail = script[script.index('set +e') :]
     stubs = f"""
 sudo() {{ shift 2; "$@"; }}
-docker() {{ if [ "$1" = run ]; then echo pos; return {pos_rc}; fi; echo "docker $1"; }}
+docker() {{
+    case "$*" in
+        *--entrypoint*) echo "copy $*" >&2; {copy}
+            ;;
+        run*) echo pos; return {pos_rc};;
+        *) echo "docker $1";;
+    esac
+}}
 sync() {{ echo sync; }}
 umount() {{ echo "umount $*"; }}
-rsync() {{ {rsync}
-}}
 """
     return subprocess.run(
         ['bash', '-c', f'set -euo pipefail\n{stubs}\n{tail}'], capture_output=True, text=True, timeout=10
     )
 
 
-def test_compact_copy_and_clean_verify_keep_pos_exit_code(compact: str) -> None:
-    result = _run_tail(compact, 0, 'echo "rsync $*" >&2')
+def test_compact_copy_that_succeeds_keeps_pos_exit_code(compact: str) -> None:
+    result = _run_tail(compact, 0, 'return 0')
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-2:] == ['sync', UMOUNT_ALL]
-    assert 'docker stop' in result.stdout
-    assert result.stderr.splitlines() == [COPY, VERIFY]
+    assert result.stdout.splitlines() == ['pos', 'pos exited with 0', 'docker stop', 'sync', UMOUNT_ALL]
+    [call] = result.stderr.splitlines()
+    assert COPY_MOUNTS in call
+    assert POS_IMAGE in call
 
 
-def test_compact_verify_with_changes_fails(compact: str) -> None:
-    result = _run_tail(compact, 0, """case "$*" in *--dry-run*) echo '>f+++++++++ data/store/a.bin';; esac""")
-    assert result.returncode != 0
-    assert 'data/store/a.bin' in result.stdout
-    assert 'differs' in result.stdout
-    assert result.stdout.splitlines()[-2:] == ['sync', UMOUNT_ALL]
-
-
-@pytest.mark.parametrize('failing', ['*--dry-run*', '*'])
-def test_compact_rsync_failure_fails(compact: str, failing: str) -> None:
-    result = _run_tail(compact, 0, f'case "$*" in {failing}) return 23;; esac')
-    assert result.returncode == 23
-    assert 'failed' in result.stdout
+@pytest.mark.parametrize('code', [1, 2])
+def test_compact_copy_or_verify_failure_fails(compact: str, code: int) -> None:
+    result = _run_tail(compact, 0, f'echo "/dst differs from /src after the copy"; return {code}')
+    assert result.returncode == code
+    assert f'copying clickhouse onto clickhouse-compact failed with {code}' in result.stdout
     assert result.stdout.splitlines()[-2:] == ['sync', UMOUNT_ALL]
 
 
 def test_compact_is_skipped_when_pos_fails(compact: str) -> None:
-    result = _run_tail(compact, 3, 'echo called >&2')
+    result = _run_tail(compact, 3, 'return 0')
     assert result.returncode == 3
-    assert 'called' not in result.stderr
+    assert result.stderr == ''
     assert result.stdout.splitlines() == ['pos', 'pos exited with 3', 'docker stop', 'sync', UMOUNT_ALL]
+
+
+def _copy_locally(tmp_path: Path, prepare_dst: str = '') -> subprocess.CompletedProcess[str]:
+    """Run the copy command with /src and /dst under `tmp_path`."""
+    src, dst = tmp_path / 'src', tmp_path / 'dst'
+    (src / 'data/store').mkdir(parents=True)
+    (src / 'data/store/a.bin').write_text('a')
+    (src / 'data/store/b.bin').hardlink_to(src / 'data/store/a.bin')
+    (src / 'data/link').symlink_to('store/a.bin')
+    dst.mkdir()
+    if prepare_dst:
+        (dst / prepare_dst).write_text('stale')
+    command = COMPACT_COPY.replace('/src', str(src)).replace('/dst', str(dst))
+    return subprocess.run(['sh', '-c', command], capture_output=True, text=True, timeout=10)
+
+
+def test_compact_copy_command_copies_and_verifies(tmp_path: Path) -> None:
+    result = _copy_locally(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / 'dst/data/link').is_symlink()
+    assert (tmp_path / 'dst/data/store/b.bin').read_text() == 'a'
+
+
+def _gnu_cp() -> bool:
+    return subprocess.run(['cp', '--version'], capture_output=True, check=False).returncode == 0
+
+
+@pytest.mark.skipif(not _gnu_cp(), reason="the pos image's GNU cp keeps hard links; BSD cp -a does not")
+def test_compact_copy_command_keeps_hard_links(tmp_path: Path) -> None:
+    assert _copy_locally(tmp_path).returncode == 0
+    dst = tmp_path / 'dst/data/store'
+    assert (dst / 'a.bin').stat().st_ino == (dst / 'b.bin').stat().st_ino
+
+
+def test_compact_copy_command_fails_when_the_destination_differs(tmp_path: Path) -> None:
+    result = _copy_locally(tmp_path, prepare_dst='stale.bin')
+    assert result.returncode == 1
+    assert 'differs' in result.stdout
 
 
 def test_compact_attaches_the_destination_disk() -> None:

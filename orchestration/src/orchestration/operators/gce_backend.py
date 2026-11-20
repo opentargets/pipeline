@@ -10,6 +10,11 @@ from orchestration.operators.gce import CONTAINER_NAME, OUTPUT_FILTER, ComputeEn
 
 HEALTH_POLL_S = 5
 SERVER_DEVICES = {'clickhouse', 'opensearch'}
+# run in the pos image with the source at /src (read-only) and the destination at /dst
+COMPACT_COPY = (
+    'cp -a /src/. /dst/ || { e=$?; echo "cp failed"; exit $e; }; '
+    'diff -rq --no-dereference /src /dst || { echo "/dst differs from /src after the copy"; exit 1; }'
+)
 
 
 class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor):
@@ -30,7 +35,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             script exits 1 with the servers still running, so the disks are unfit to snapshot.
         compact: Source device to destination device, both in `data_disks`. If pos exits 0,
             each source is copied onto its destination after the servers stop, and the copy is
-            verified; a failed copy or verify fails the script.
+            verified, in a container of `container_image`; a failed copy or verify fails the script.
         **kwargs: Passed to `ComputeEngineRunContainerizedWorkloadSensor`.
     """
 
@@ -141,23 +146,15 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
 """
 
     def compact_lines(self) -> str:
-        """Copy each compact source onto its destination and verify it, only while `rc` is 0."""
+        """Copy each compact source onto its destination in the pos image and verify it, only while `rc` is 0."""
         lines = ''
         for src, dst in self.compact.items():
-            paths = f'/mnt/disks/{src}/ /mnt/disks/{dst}/'
             lines += f"""\
             if [ "$rc" -eq 0 ]; then
-                rsync -aHAX --numeric-ids --delete {paths} \\
-                    || {{ rc=$?; echo "copying {src} to {dst} failed with $rc"; }}
-            fi
-            if [ "$rc" -eq 0 ]; then
-                changes=$(rsync -aHAX --numeric-ids --delete --dry-run --itemize-changes {paths}) \\
-                    || {{ rc=$?; echo "verifying {dst} failed with $rc"; }}
-                if [ "$rc" -eq 0 ] && [ -n "$changes" ]; then
-                    printf '%s\\n' "$changes"
-                    echo "{dst} differs from {src} after the copy"
-                    rc=1
-                fi
+                docker run --rm --network none --entrypoint sh \\
+                    -v /mnt/disks/{src}:/src:ro -v /mnt/disks/{dst}:/dst \\
+                    {self.container_image} -c '{COMPACT_COPY}' \\
+                    || {{ rc=$?; echo "copying {src} onto {dst} failed with $rc"; }}
             fi
 """
         return lines
