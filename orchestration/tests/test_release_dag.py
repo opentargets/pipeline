@@ -139,7 +139,15 @@ def test_order(dag) -> None:
     assert up['run_aws_sync'] == {'read_hand_off', 'gate_aws_sync', 'run_gcs_sync'}
     assert up['run_bigquery'] == {'read_hand_off', 'gate_bigquery'}
     assert up['run_publish_manifest'] == {'read_hand_off', 'run_gcs_sync', 'run_aws_sync', 'run_bigquery'}
-    assert up['run_scratch_cleanup'] == {'read_hand_off', 'gate_scratch_cleanup', 'run_publish_manifest'}
+    assert up['run_scratch_cleanup'] == {
+        'read_hand_off',
+        'gate_scratch_cleanup',
+        'run_tarballs',
+        'run_gcs_sync',
+        'run_bigquery',
+        'run_publish_manifest',
+    }
+    assert dag.get_task('run_scratch_cleanup').trigger_rule == TriggerRule.ALL_DONE_MIN_ONE_SUCCESS
     for s in GATED:
         assert up[f'gate_{s}'] == {'read_hand_off'}
         # a skipped gate skips the run and its VM delete, nothing further
@@ -150,7 +158,7 @@ def test_order(dag) -> None:
         delete = dag.get_task(f'delete_vm_{s}')
         assert isinstance(delete, DeleteInstanceOperator)
         assert delete.trigger_rule == TriggerRule.ALL_DONE
-    for s in ('tarballs', 'gcs_sync', 'aws_sync', 'bigquery', 'scratch_cleanup'):
+    for s in ('tarballs', 'gcs_sync', 'aws_sync', 'bigquery'):
         assert dag.get_task(f'run_{s}').trigger_rule == TriggerRule.ALL_SUCCESS
     # skipped aws_sync and bigquery must not skip the manifest
     assert dag.get_task('run_publish_manifest').trigger_rule == TriggerRule.NONE_FAILED
@@ -211,7 +219,10 @@ def test_read_hand_off_refuses_a_non_boolean_scratch() -> None:
         release.load_hand_off(URI, cast(bool, 'false'))
 
 
-@pytest.mark.parametrize('version', ['26.12.0rc4', '26.12.0.dev3.pos-phase3.abc', '26.12.0', 'captured', '25.12.0rc9'])
+@pytest.mark.parametrize(
+    'version',
+    ['26.12.0rc4', '26.12.0.dev3.pos-phase3.abc', '26.12.0+local', 'captured', '25.12.0rc9', '25.12.0', '26.12'],
+)
 def test_scratch_refuses_old_or_unparsable_pos_versions(version: str) -> None:
     assert ReleaseConfig().scratch_min_pos_version == '26.12.0rc5'
     with pytest.raises(ValueError, match='scratch'):
@@ -219,7 +230,7 @@ def test_scratch_refuses_old_or_unparsable_pos_versions(version: str) -> None:
     assert _load(False, pos_version=version)['env'] == {}
 
 
-@pytest.mark.parametrize('version', ['26.12.0rc5', '26.12.0rc10', '26.12.1rc1', '27.1.0rc1'])
+@pytest.mark.parametrize('version', ['26.12.0rc5', '26.12.0rc10', '26.12.0', '26.12.1rc1', '27.1.0rc1'])
 def test_scratch_accepts_new_pos_versions(version: str) -> None:
     assert _load(True, pos_version=version)['env'] == {'POS_SCRATCH': '1'}
 
@@ -367,3 +378,105 @@ def test_restored_disk_deletes_remove_only_disks_this_try_created(states, delete
         for d in DEVICES:
             release.cleanup_restored_disk(_TI(RESTORED, states), d)
     assert [c.args[2] for c in delete.call_args_list] == deleted
+
+
+def test_a_final_version_sorts_after_its_rcs() -> None:
+    from orchestration.dags import release
+
+    keys = [release.pos_version_key(v) for v in ('26.12.0rc99', '26.12.0', '26.12.1rc1')]
+    assert None not in keys
+    assert keys == sorted(cast(list[tuple[int, ...]], keys))
+    assert len(set(keys)) == 3
+    assert release.pos_version_key('26.12.0.dev3.pos-phase3.abc') is None
+
+
+def _simulate(dag, gates: dict[str, bool], failed: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
+    """Final task states, by the trigger-rule outcomes of `trigger_rule_dep` once every upstream is done.
+
+    Tasks in `failed` fail when they run; every other task succeeds. A closed gate skips its direct
+    downstream, as `ShortCircuitOperator(ignore_downstream_trigger_rules=False)`.
+    """
+    states: dict[str, str] = {}
+    gate_skipped: set[str] = set()
+    for t in dag.topological_sort():
+        up = [states[u] for u in t.upstream_task_ids]
+        bad = any(s in {'failed', 'upstream_failed'} for s in up)
+        rule = t.trigger_rule
+        if t.task_id in gate_skipped:
+            state = 'skipped'
+        elif rule == TriggerRule.ALL_SUCCESS and bad:
+            state = 'upstream_failed'
+        elif rule == TriggerRule.ALL_SUCCESS and 'skipped' in up:
+            state = 'skipped'
+        elif rule == TriggerRule.NONE_FAILED and bad:
+            state = 'upstream_failed'
+        elif rule == TriggerRule.ALL_DONE_MIN_ONE_SUCCESS and 'skipped' in up:
+            state = 'skipped'
+        elif rule == TriggerRule.ALL_DONE_MIN_ONE_SUCCESS and 'success' not in up:
+            state = 'upstream_failed'
+        else:
+            assert rule in {
+                TriggerRule.ALL_SUCCESS, TriggerRule.ALL_DONE, TriggerRule.NONE_FAILED,
+                TriggerRule.ALL_DONE_MIN_ONE_SUCCESS,
+            }  # fmt: skip
+            state = 'failed' if t.task_id in failed else 'success'
+            if state == 'success' and t.task_id.startswith('gate_') and not gates[t.task_id.removeprefix('gate_')]:
+                gate_skipped |= t.downstream_task_ids
+        states[t.task_id] = state
+    return states
+
+
+def _ran(states: dict[str, str]) -> set[str]:
+    return {t.removeprefix('run_') for t, s in states.items() if t.startswith('run_') and s in {'success', 'failed'}}
+
+
+@pytest.mark.parametrize(
+    ('uri', 'scratch', 'runs'),
+    [
+        (URI, False, {'tarballs', 'gcs_sync', 'aws_sync', 'bigquery', 'publish_manifest'}),
+        (URI, True, {'tarballs', 'gcs_sync', 'bigquery', 'publish_manifest', 'scratch_cleanup'}),
+        (PPP_URI, False, {'tarballs', 'gcs_sync', 'publish_manifest'}),
+        (PPP_URI, True, {'tarballs', 'gcs_sync', 'publish_manifest'}),
+    ],
+)
+def test_a_successful_run_runs_its_steps_and_succeeds(dag, uri: str, scratch: bool, runs: set[str]) -> None:
+    states = _simulate(dag, _load(scratch, uri)['gates'])
+    assert _ran(states) == runs
+    assert states['done'] == 'success'
+    assert {s for s in GATED if states[f'run_{s}'] == 'skipped'} == set(GATED) - runs
+    assert all(states[f'delete_vm_{s}'] == ('success' if s in runs else 'skipped') for s in SMALL_STEPS)
+    if 'scratch_cleanup' in runs:
+        assert 'run_publish_manifest' in dag.get_task('run_scratch_cleanup').upstream_task_ids
+
+
+@pytest.mark.parametrize('uri', [URI, PPP_URI])
+@pytest.mark.parametrize('scratch', [False, True])
+@pytest.mark.parametrize('step', ['run_tarballs', 'restore_disk_opensearch', 'run_gcs_sync', 'run_publish_manifest'])
+def test_any_failure_fails_the_run(dag, uri: str, scratch: bool, step: str) -> None:
+    states = _simulate(dag, _load(scratch, uri)['gates'], {step})
+    assert states['done'] == 'upstream_failed'
+    assert states['delete_vm_tarballs'] == 'success'
+    assert states['delete_restored_disk_clickhouse'] == 'success'
+
+
+def test_a_failed_scratch_run_still_drops_its_datasets(dag) -> None:
+    states = _simulate(dag, _load(True)['gates'], {'run_gcs_sync'})
+    assert states['run_publish_manifest'] == 'upstream_failed'
+    assert states['run_scratch_cleanup'] == 'success'
+    assert states['delete_vm_scratch_cleanup'] == 'success'
+    assert states['done'] == 'upstream_failed'
+
+
+@pytest.mark.parametrize('step', ['run_bigquery', 'run_aws_sync'])
+def test_a_failed_platform_step_fails_the_run(dag, step: str) -> None:
+    states = _simulate(dag, _load(False)['gates'], {step})
+    assert states['run_publish_manifest'] == 'upstream_failed'
+    assert states['run_scratch_cleanup'] == 'skipped'
+    assert states['done'] == 'upstream_failed'
+
+
+def test_no_cleanup_without_a_hand_off(dag) -> None:
+    states = _simulate(dag, {}, {'read_hand_off'})
+    assert states['run_scratch_cleanup'] == 'upstream_failed'
+    assert _ran(states) == set()
+    assert states['done'] == 'upstream_failed'

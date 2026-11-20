@@ -28,7 +28,7 @@ WORK_DIR = '/mnt/disks/work'
 TARBALLS_POOL = 16
 SMALL_STEP_POOL = 8
 GATED = ('aws_sync', 'bigquery', 'scratch_cleanup')
-_RC_RE = re.compile(r'^(\d+)\.(\d+)\.(\d+)rc(\d+)$')
+_VERSION_RE = re.compile(r'^(\d+)\.(\d+)\.(\d+)(?:rc(\d+))?$')
 logger = logging.getLogger(__name__)
 
 
@@ -40,17 +40,21 @@ def pos_args(step: str, pool: int) -> list[str]:
     return ['-s', step, '-r', '{{ params.release_uri }}', '-w', WORK_DIR, '-p', str(pool)]
 
 
-def rc_version(version: str) -> tuple[int, ...] | None:
-    """`26.12.0rc5` as a tuple; None for any other form."""
-    match = _RC_RE.fullmatch(version)
-    return tuple(int(g) for g in match.groups()) if match else None
+def pos_version_key(version: str) -> tuple[int, ...] | None:
+    """`26.12.0rc5` or `26.12.0` as a sortable tuple, a final after its rcs; None for any other form."""
+    match = _VERSION_RE.fullmatch(version)
+    if match is None:
+        return None
+    major, minor, patch, rc = match.groups()
+    final = (1, 0) if rc is None else (0, int(rc))
+    return (int(major), int(minor), int(patch), *final)
 
 
 def check_scratch(pos_version: str, minimum: str) -> None:
-    """Raise unless `pos_version` is an rc at least `minimum`."""
-    have, need = rc_version(pos_version), rc_version(minimum)
+    """Raise unless `pos_version` is a release or rc at least `minimum`."""
+    have, need = pos_version_key(pos_version), pos_version_key(minimum)
     if have is None or need is None:
-        raise ValueError(f"scratch needs a pos rc version, got '{pos_version}' (minimum '{minimum}')")
+        raise ValueError(f"scratch needs a pos release or rc version, got '{pos_version}' (minimum '{minimum}')")
     if have < need:
         raise ValueError(f'scratch needs pos {minimum} or later, the candidate has {pos_version}')
 
@@ -243,7 +247,11 @@ with DAG(
     publish, delete_vm_publish = small_step(
         'publish_manifest', r['aws_env'], aws_secret, trigger_rule=TriggerRule.NONE_FAILED
     )
-    cleanup, delete_vm_cleanup = small_step('scratch_cleanup', r['env'])
+    # after every other step whatever its outcome, so a failed scratch run drops its datasets;
+    # min one success keeps it off when read_hand_off failed
+    cleanup, delete_vm_cleanup = small_step(
+        'scratch_cleanup', r['env'], trigger_rule=TriggerRule.ALL_DONE_MIN_ONE_SUCCESS
+    )
 
     # the only leaf: ALL_SUCCESS would skip it as soon as a gated step is skipped, and a skipped
     # leaf lets the run succeed whatever fails after
@@ -254,7 +262,9 @@ with DAG(
     for restore, delete in zip(restores, deletes, strict=True):
         [restore, delete_vm_tarballs] >> delete
     run_tarballs >> gcs_sync >> aws_sync
-    [gcs_sync, aws_sync, bigquery] >> publish >> cleanup
+    [gcs_sync, aws_sync, bigquery] >> publish
+    # not aws_sync: skipped whenever cleanup runs, and a skipped upstream skips this rule
+    [run_tarballs, gcs_sync, bigquery, publish] >> cleanup
     [
         run_tarballs,
         delete_vm_tarballs,
