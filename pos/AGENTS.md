@@ -61,7 +61,22 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 - **Secrets:** `AWS_SHARED_CREDENTIALS_FILE` for `aws_sync`, as a file mount from
   Secret Manager.
 - **Exit code:** non-zero on failure.
-- **Outputs:** all under `release_uri`, plus the manifest.
+- **Outputs:**
+  - `backend`: the data disks, plus `croissant.json` under `release_uri`.
+  - `tarballs`: `<release_uri>/disk_images/`.
+  - `gcs_sync`: the release bucket.
+  - `aws_sync`: S3.
+  - `bigquery`: BigQuery.
+  - Every step: the manifest.
+- **Retries:** `backend` cannot be retried in place. A retry needs fresh or wiped disks;
+  the rerun guard refuses otherwise.
+- **Concurrency:** never run two `bigquery` steps at once; they share
+  `platform_staging`.
+- **Ordering:** `tarballs` must finish before `gcs_sync`. The public tarballs reach the
+  release bucket only through `gcs_sync`.
+- **Service account:** read `open-targets-pipeline-runs`; write the release buckets
+  (`open-targets-data-releases`, `open-targets-ppp-data-releases`); create datasets and
+  write tables in BigQuery `open-targets-prod` (EU).
 - **Labels:** `tool=pos`, `step=<step>`.
 
 ## Interim (until phase 4)
