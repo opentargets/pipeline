@@ -99,6 +99,8 @@ destinations, for test runs that must not touch the public release:
   - Every step: the manifest, except a PPP `scratch_cleanup`, a no-op that writes none.
 - **Retries:** `backend` cannot be retried in place. A retry needs fresh or wiped disks;
   the rerun guard refuses otherwise.
+- **BigQuery datasets:** created only if missing (`get_dataset` first), so the prod account
+  needs no project-level dataset create; an existing dataset is never deleted or recreated.
 - **Concurrency:** never run two `bigquery` steps at once; they share
   `platform_staging`.
 - **Ordering:** `tarballs` must finish before `gcs_sync`; `publish_manifest` last. The
