@@ -190,11 +190,12 @@ with DAG(
         for device, short in DEVICES.items()
     ]
 
+    # Airflow fills `run_id` from the context
     @task(task_id='write_hand_off')
-    def write_hand_off(names: Any, run_id: str) -> str:
+    def write_hand_off(names: Any, run_id: Any = None) -> str:
         return upload_hand_off(names, run_id)
 
-    hand_off = write_hand_off(n, '{{ run_id }}')
+    hand_off = write_hand_off(n)
 
     def delete_disk_task(device: str) -> Any:
         @task(task_id=f'delete_disk_{device}', trigger_rule=TriggerRule.ALL_DONE)
