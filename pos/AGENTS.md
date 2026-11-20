@@ -119,15 +119,18 @@ destinations, for test runs that must not touch the public release:
   release from a run; setup and operation are in `orchestration/docs/pos_release.md`.
 - Fallback by hand, on an `n2d-highmem-96` (256 GB runs ClickHouse out of memory) with
   400 GB pd-ssd disks at `/mnt/clickhouse` and `/mnt/opensearch` and a work disk at
-  `/mnt/disks/work`:
+  `/mnt/disks/work`. The exact server command lines are `server_lines` in
+  `orchestration/src/orchestration/operators/gce_backend.py`:
   1. Copy `config.d` and `users.d` from `/app/config/clickhouse/` in the image
      (`docker create` + `docker cp`) into `/mnt/clickhouse`; make `data/` on both disks
      and `chown 1000:1000 /mnt/opensearch/data`.
   2. Start the stock servers (`clickhouse/clickhouse-server:26.8.2.7`,
-     `opensearchproject/opensearch:3.5.0`) on the host network, data on the disks. For
-     OpenSearch set `OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g'`, `discovery.type=single-node`,
-     `DISABLE_SECURITY_PLUGIN=true`, `bootstrap.memory_lock=true`,
-     `thread_pool.write.queue_size=-1` and the three
+     `opensearchproject/opensearch:3.5.0`) on the host network, data on the disks.
+     ClickHouse takes `--ulimit nofile=262144:262144`. For OpenSearch run
+     `sysctl -w vm.max_map_count=262144` first, pass `--ulimit memlock=-1:-1
+     --ulimit nofile=65536:65536`, and set `OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g'`,
+     `discovery.type=single-node`, `DISABLE_SECURITY_PLUGIN=true`,
+     `bootstrap.memory_lock=true`, `thread_pool.write.queue_size=-1` and the three
      `search.insights.top_queries.{latency,cpu,memory}.enabled=false`.
   3. Run `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work <pos-image>
      -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`, then stop the
