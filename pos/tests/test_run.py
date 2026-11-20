@@ -90,6 +90,28 @@ def test_main_rejects_bad_run_name(tmp_path, monkeypatch, mocker):
     assert e.value.code != 0
 
 
+def test_main_reads_the_package_config_without_c(tmp_path, monkeypatch):
+    """The image command has no -c: the config comes from config/config.yaml under the cwd."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    monkeypatch.chdir(root)
+    for var in [v for v in os.environ if v.startswith('POS_')]:
+        monkeypatch.delenv(var)
+    argv = ['pos', '-s', 'gcs_sync', '-r', 'gs://x/do/platform-2612-3', '-w', str(tmp_path / 'work')]
+    monkeypatch.setattr(sys, 'argv', argv)
+    seen = {}
+
+    def stop(self):
+        seen['config_path'] = self.config.config_path
+        seen['steps'] = [s.name for s in self.specs]
+        raise SystemExit(0)
+
+    monkeypatch.setattr(core.Runner, 'start', stop)
+    with pytest.raises(SystemExit):
+        core.main()
+    assert str(seen['config_path']) == os.path.join(root, 'config', 'config.yaml')
+    assert seen['steps']
+
+
 def test_croissant_addresses():
     platform = parse_release_uri('gs://x/do/platform-2612-3').scratchpad()
     assert platform['croissant_ftp_address'] == 'https://ftp.ebi.ac.uk/pub/databases/opentargets/platform/26.12/output/'

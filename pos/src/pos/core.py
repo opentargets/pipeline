@@ -2,6 +2,7 @@
 
 import asyncio
 import errno
+import os
 
 from loguru import logger
 from otter import Runner
@@ -9,8 +10,12 @@ from otter.manifest.model import Result
 
 from pos.run import for_product, parse_release_uri
 
+# cwd-relative, like the other config paths; the image's WORKDIR is the package root
+CONFIG_PATH = 'config/config.yaml'
+
 
 def main() -> None:
+    os.environ.setdefault('POS_CONFIG_PATH', CONFIG_PATH)
     runner = Runner('pos')
     try:
         run = parse_release_uri(runner.config.release_uri or '')
