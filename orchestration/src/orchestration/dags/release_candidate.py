@@ -25,7 +25,7 @@ from orchestration.operators.gce_disks import (
 )
 from orchestration.utils import GCSPath, resource_name, strhash
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, shared_dag_args
-from orchestration.utils.labels import Labels
+from orchestration.utils.labels import TemplatedLabels
 from orchestration.utils.release import candidate_names
 
 BACKEND_ARGS = ['-w', '/mnt/disks/work', '-p', '8']
@@ -41,10 +41,23 @@ def snapshot_path(name: str) -> str:
     return f'projects/{GCP_PROJECT_PLATFORM}/global/snapshots/{name}'
 
 
-def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = None) -> str:
-    """Write the hand-off to `<release_uri>/release_candidate.json`; fail if it exists."""
+def candidate(release_uri: str) -> dict[str, Any]:
+    """The run's names plus the images and disk sizes the build uses, read once."""
     rc = ReleaseConfig()
     up = UnifiedPipelineConfig()
+    return {
+        **asdict(candidate_names(release_uri)),
+        'pos_image': up.pos_image,
+        'pos_version': up.pos_version,
+        'clickhouse_image': rc.clickhouse_image,
+        'opensearch_image': rc.opensearch_image,
+        'clickhouse_disk_gb': rc.clickhouse_disk_gb,
+        'opensearch_disk_gb': rc.opensearch_disk_gb,
+    }
+
+
+def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = None) -> str:
+    """Write the hand-off to `<release_uri>/release_candidate.json`; fail if it exists."""
     hand_off = HandOff(
         release_uri=names['release_uri'],
         run=f'{names["prefix"]}/{names["run"]}',
@@ -54,11 +67,11 @@ def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = N
             'clickhouse': snapshot_path(names['ch_snapshot']),
             'opensearch': snapshot_path(names['os_snapshot']),
         },
-        disk_size_gb={'clickhouse': rc.clickhouse_disk_gb, 'opensearch': rc.opensearch_disk_gb},
-        pos_image=up.pos_image,
-        pos_version=up.pos_version,
-        clickhouse_image=rc.clickhouse_image,
-        opensearch_image=rc.opensearch_image,
+        disk_size_gb={'clickhouse': names['clickhouse_disk_gb'], 'opensearch': names['opensearch_disk_gb']},
+        pos_image=names['pos_image'],
+        pos_version=names['pos_version'],
+        clickhouse_image=names['clickhouse_image'],
+        opensearch_image=names['opensearch_image'],
         created=now or datetime.now(tz=UTC),
         airflow_run_id=run_id,
     )
@@ -96,19 +109,21 @@ with DAG(
 ) as dag:
     rc = ReleaseConfig()
     up = UnifiedPipelineConfig()
-    labels = Labels({'tool': 'pos', 'step': 'backend'})
     vm_name = resource_name('release_candidate_backend')
-    sizes = {'clickhouse': rc.clickhouse_disk_gb, 'opensearch': rc.opensearch_disk_gb}
+
+    def labels(**templated: str) -> TemplatedLabels:
+        return TemplatedLabels({'tool': 'pos', 'step': 'backend'}, templated={'product': _name('product'), **templated})
 
     @task(task_id='names')
     def names(release_uri: str) -> dict[str, Any]:
-        return asdict(candidate_names(release_uri))
+        return candidate(release_uri)
 
     n = names('{{ params.release_uri }}')
 
     guard = SnapshotGuardOperator(
         task_id='guard',
         snapshot_names=[_name('ch_snapshot'), _name('os_snapshot')],
+        disk_names=[_name('ch_disk'), _name('os_disk')],
         blob_uri=HandOff.uri('{{ params.release_uri }}'),
     )
 
@@ -116,8 +131,8 @@ with DAG(
         CreateDiskOperator(
             task_id=f'create_disk_{device}',
             disk_name=_name(f'{short}_disk'),
-            size_gb=sizes[device],
-            labels=labels,
+            size_gb=_name(f'{device}_disk_gb'),
+            labels=labels(),
         )
         for device, short in DEVICES.items()
     ]
@@ -125,14 +140,14 @@ with DAG(
     run = ComputeEngineRunBackendSensor(
         task_id='run_backend',
         instance_name=vm_name,
-        labels=labels,
-        container_image=up.pos_image,
+        labels=labels(),
+        container_image=_name('pos_image'),
         container_args=['-s', 'backend', '-r', '{{ params.release_uri }}', *BACKEND_ARGS],
         data_disks={device: _name(f'{short}_disk') for device, short in DEVICES.items()},
         servers=True,
         read_only=False,
-        clickhouse_image=rc.clickhouse_image,
-        opensearch_image=rc.opensearch_image,
+        clickhouse_image=_name('clickhouse_image'),
+        opensearch_image=_name('opensearch_image'),
         machine_type=rc.backend_machine_type,
         work_disk_size_gb=rc.work_disk_gb,
         boot_disk_size_gb=rc.boot_disk_gb,
@@ -153,7 +168,7 @@ with DAG(
             task_id=f'snapshot_{device}',
             disk_name=_name(f'{short}_disk'),
             snapshot_name=_name(f'{short}_snapshot'),
-            labels={**labels, 'run': '{{ run_id }}', 'release': _name('yymm')},
+            labels=labels(run='{{ run_id }}', release=_name('yymm')),
         )
         for device, short in DEVICES.items()
     ]
@@ -167,7 +182,8 @@ with DAG(
     deletes = [
         DeleteDiskOperator(
             task_id=f'delete_disk_{device}',
-            disk_name=_name(f'{short}_disk'),
+            # empty unless this run's create inserted the disk
+            disk_name=f"{{{{ ti.xcom_pull(task_ids='create_disk_{device}', key='disk') or '' }}}}",
             trigger_rule=TriggerRule.ALL_DONE,
         )
         for device, short in DEVICES.items()

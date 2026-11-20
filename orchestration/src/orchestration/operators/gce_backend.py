@@ -31,7 +31,12 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         **kwargs: Passed to `ComputeEngineRunContainerizedWorkloadSensor`.
     """
 
-    template_fields: Sequence[str] = (*ComputeEngineRunContainerizedWorkloadSensor.template_fields, 'data_disks')
+    template_fields: Sequence[str] = (
+        *ComputeEngineRunContainerizedWorkloadSensor.template_fields,
+        'data_disks',
+        'clickhouse_image',
+        'opensearch_image',
+    )
 
     def __init__(
         self,

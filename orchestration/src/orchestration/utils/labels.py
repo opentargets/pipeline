@@ -74,3 +74,22 @@ class Labels(UserDict[str, str]):
             default_run_label = dag_run.run_id
         run_label = context.get('params', {}).get('run_label') or default_run_label
         self['run'] = run_label
+
+
+class TemplatedLabels(Labels):
+    """Labels whose Jinja values Airflow renders when they sit in an operator's template fields.
+
+    Args:
+        extra: Extra labels, cleaned as in `Labels`.
+        templated: Labels whose values are templates, kept raw until rendered. They must
+            render to valid label values.
+        **kwargs: Passed to `Labels`.
+    """
+
+    template_fields = ('data',)
+
+    def __init__(
+        self, extra: dict[str, str] | None = None, templated: dict[str, str] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(extra, **kwargs)
+        self.data.update(templated or {})

@@ -15,7 +15,7 @@ from orchestration.operators.gce_disks import (
     DeleteSnapshotOperator,
     SnapshotGuardOperator,
 )
-from orchestration.utils.labels import Labels
+from orchestration.utils.labels import Labels, TemplatedLabels
 
 DISK = 'pos-do-platform-2612-3-ch'
 SNAP = 'do-platform-2612-3-ch'
@@ -178,3 +178,75 @@ def test_snapshot_labels_are_templated_and_cleaned(snapshots) -> None:
     assert labels['release'] == '2612'
     assert labels['run'] == 'manual__2026-11-20t10-00-00-00-00'
     assert labels['step'] == 'x'
+
+
+def _disks_exist(disks, existing) -> None:
+    def get(**kw):
+        if kw['disk'] in existing:
+            return MagicMock()
+        raise NotFound('x')
+
+    disks.get.side_effect = get
+
+
+def test_guard_names_existing_disk(snapshots, disks) -> None:
+    _disks_exist(disks, {DISK})
+    with _guard(snapshots), pytest.raises(AirflowException, match=f'disk {DISK}'):
+        SnapshotGuardOperator(
+            task_id='t', snapshot_names=[SNAP], disk_names=[DISK, 'other'], blob_uri='gs://b/h.json'
+        ).execute({})
+    assert {c.kwargs['zone'] for c in disks.get.call_args_list} == {gce_disks.GCP_ZONE}
+
+
+def test_guard_passes_when_no_disk_exists(snapshots, disks) -> None:
+    _disks_exist(disks, set())
+    with _guard(snapshots):
+        SnapshotGuardOperator(
+            task_id='t', snapshot_names=[SNAP], disk_names=[DISK], blob_uri='gs://b/h.json'
+        ).execute({})
+    assert 'disk_names' in SnapshotGuardOperator.template_fields
+
+
+def test_create_disk_records_the_disk_once_inserted(disks, waits) -> None:
+    disks.get.side_effect = NotFound('x')
+    ti = MagicMock()
+    op = CreateDiskOperator(task_id='t', disk_name=DISK, size_gb=1, labels=Labels())
+    assert op.execute(cast(Any, {'ti': ti})) == DISK
+    ti.xcom_push.assert_called_once_with(key='disk', value=DISK)
+
+    # a failed wait still records the disk, so the delete removes it
+    ti.reset_mock()
+    waits.side_effect = RuntimeError('boom')
+    with pytest.raises(RuntimeError):
+        op.execute(cast(Any, {'ti': ti}))
+    ti.xcom_push.assert_called_once_with(key='disk', value=DISK)
+
+
+def test_create_disk_that_exists_records_nothing(disks) -> None:
+    ti = MagicMock()
+    with pytest.raises(AirflowException):
+        CreateDiskOperator(task_id='t', disk_name=DISK, size_gb=1, labels=Labels()).execute(cast(Any, {'ti': ti}))
+    ti.xcom_push.assert_not_called()
+
+
+def test_delete_disk_without_a_name_deletes_nothing(disks) -> None:
+    DeleteDiskOperator(task_id='t', disk_name='').execute({})
+    disks.delete.assert_not_called()
+
+
+def test_disk_labels_are_cleaned(disks) -> None:
+    disks.get.side_effect = NotFound('x')
+    CreateDiskOperator(
+        task_id='t', disk_name=DISK, size_gb=1, labels=cast(Any, {'run': 'manual__2026-11-20T10:00'})
+    ).execute({})
+    labels = dict(disks.insert.call_args.kwargs['request'].disk_resource.labels)
+    assert labels == {'run': 'manual__2026-11-20t10-00'}
+
+
+def test_templated_labels_render_from_the_context() -> None:
+    labels = TemplatedLabels({'tool': 'pos'}, templated={'product': '{{ product }}'})
+    assert labels['product'] == '{{ product }}'
+    op = DeleteDiskOperator(task_id='t', disk_name='')
+    rendered = op.render_template(labels, cast(Any, {'product': 'ppp'}))
+    assert rendered['product'] == 'ppp'
+    assert rendered['tool'] == 'pos'

@@ -39,14 +39,14 @@ class _ComputeOperator(BaseOperator):
 class CreateDiskOperator(_ComputeOperator):
     """Create a persistent disk, optionally from a snapshot. Fails if it exists."""
 
-    template_fields: Sequence[str] = ('disk_name', 'size_gb', 'source_snapshot', 'disk_type')
+    template_fields: Sequence[str] = ('disk_name', 'size_gb', 'source_snapshot', 'disk_type', 'labels')
 
     def __init__(
         self,
         *args: Any,
         disk_name: str,
         size_gb: int | str,
-        labels: Labels,
+        labels: Labels | dict[str, str],
         source_snapshot: str | None = None,
         disk_type: str = 'pd-ssd',
         **kwargs: Any,
@@ -58,7 +58,8 @@ class CreateDiskOperator(_ComputeOperator):
         self.source_snapshot = source_snapshot
         self.disk_type = disk_type
 
-    def execute(self, context: Any) -> None:
+    def execute(self, context: Any) -> str:
+        """Return the disk name; XCom key `disk` records it as soon as the insert is accepted."""
         client = compute_v1.DisksClient()
         try:
             client.get(project=self.project_id, zone=self.zone, disk=self.disk_name)
@@ -71,7 +72,7 @@ class CreateDiskOperator(_ComputeOperator):
             name=self.disk_name,
             size_gb=int(self.size_gb),
             type_=f'zones/{self.zone}/diskTypes/{self.disk_type}',
-            labels=dict(self.labels),
+            labels=_clean(self.labels),
         )
         if self.source_snapshot:
             disk.source_snapshot = f'projects/{self.project_id}/global/snapshots/{self.source_snapshot}'
@@ -80,7 +81,14 @@ class CreateDiskOperator(_ComputeOperator):
                 project=self.project_id, zone=self.zone, disk_resource=disk
             )
         )
+        if ti := context.get('ti'):
+            ti.xcom_push(key='disk', value=self.disk_name)
         wait_for_extended_operation(op, f'create disk {self.disk_name}', DISK_TIMEOUT, self.log)
+        return self.disk_name
+
+
+def _clean(labels: Labels | dict[str, str]) -> dict[str, str]:
+    return {k: Labels.clean_label(str(v)) for k, v in labels.items()}
 
 
 def _delete_snapshot(project_id: str, name: str, log: Any) -> None:
@@ -93,7 +101,7 @@ def _delete_snapshot(project_id: str, name: str, log: Any) -> None:
 
 
 class DeleteDiskOperator(_ComputeOperator):
-    """Delete a persistent disk. A missing disk is success."""
+    """Delete a persistent disk. A missing disk, or an empty name, is success."""
 
     template_fields: Sequence[str] = ('disk_name',)
 
@@ -102,6 +110,9 @@ class DeleteDiskOperator(_ComputeOperator):
         self.disk_name = disk_name
 
     def execute(self, context: Any) -> None:
+        if not self.disk_name:
+            self.log.info('no disk name, nothing to delete')
+            return
         client = compute_v1.DisksClient()
         try:
             op = client.delete(project=self.project_id, zone=self.zone, disk=self.disk_name)
@@ -124,15 +135,21 @@ class DeleteSnapshotOperator(_ComputeOperator):
 
 
 class SnapshotGuardOperator(_ComputeOperator):
-    """Fail if any snapshot or the hand-off blob already exists."""
+    """Fail if any snapshot, disk or the hand-off blob already exists."""
 
-    template_fields: Sequence[str] = ('snapshot_names', 'blob_uri')
+    template_fields: Sequence[str] = ('snapshot_names', 'disk_names', 'blob_uri')
 
     def __init__(
-        self, *args: Any, snapshot_names: list[str], blob_uri: str, **kwargs: Any
+        self,
+        *args: Any,
+        snapshot_names: list[str],
+        blob_uri: str,
+        disk_names: list[str] | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.snapshot_names = snapshot_names
+        self.disk_names = disk_names or []
         self.blob_uri = blob_uri
 
     def execute(self, context: Any) -> None:
@@ -144,6 +161,14 @@ class SnapshotGuardOperator(_ComputeOperator):
             except NotFound:
                 continue
             found.append(f'snapshot {name}')
+
+        disks = compute_v1.DisksClient()
+        for name in self.disk_names:
+            try:
+                disks.get(project=self.project_id, zone=self.zone, disk=name)
+            except NotFound:
+                continue
+            found.append(f'disk {name}')
 
         bucket, path = GCSPath(self.blob_uri).split()
         if Client(project=self.project_id).bucket(bucket).blob(path).exists():
@@ -178,7 +203,7 @@ class CreateSnapshotOperator(_ComputeOperator):
             name=self.snapshot_name,
             source_disk=f'projects/{self.project_id}/zones/{self.zone}/disks/{self.disk_name}',
             storage_locations=[SNAPSHOT_LOCATION],
-            labels={k: Labels.clean_label(str(v)) for k, v in self.labels.items()},
+            labels=_clean(self.labels),
         )
         op = client.insert(
             request=compute_v1.InsertSnapshotRequest(
