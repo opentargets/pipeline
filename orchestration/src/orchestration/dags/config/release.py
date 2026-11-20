@@ -17,7 +17,10 @@ class ReleaseConfig(BaseModel):
 
     backend_machine_type: str
     backend_max_run_hours: int
+    clickhouse_build_disk_gb: int
+    """The disk ClickHouse runs on during the build."""
     clickhouse_disk_gb: int
+    """The disk ClickHouse is copied onto, snapshotted and restored for serving."""
     opensearch_disk_gb: int
     work_disk_gb: int
     boot_disk_gb: int

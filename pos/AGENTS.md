@@ -140,6 +140,9 @@ destinations, for test runs that must not touch the public release:
   4. Run `tarballs` (disks also mounted into the pos container), `bigquery`, `gcs_sync`
      and `aws_sync`; delete the VM and disks.
 
+  The DAG builds ClickHouse on 300 GB and copies it onto 170 GB before snapshotting; a
+  manual build may snapshot the build disk.
+
 ## Tests
 
 `tests/test_contract.py` checks that every dataset `config/datasets.yaml` loads from

@@ -173,16 +173,21 @@ done
 
 DAG `release_candidate`, param `release_uri` (e.g.
 `gs://open-targets-pipeline-runs/do/platform-2612-3`). It starts a VM with ClickHouse
-and OpenSearch on two disks, runs `backend`, stops the servers, snapshots the disks and
-deletes the VM and disks. Outputs:
+and OpenSearch on their own disks, runs `backend` and stops the servers. ClickHouse
+builds on a 300 GB disk (`pos-<prefix>-<run>-ch-build`) and, if `backend` succeeded, is
+copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and verified; OpenSearch builds on
+an 80 GB disk (`pos-<prefix>-<run>-os`). It snapshots the 170 GB and 80 GB disks and
+deletes the VM and all three disks. Sizes are in `dags/config/release.yaml`. Outputs:
 
 - snapshots `<prefix>-<run>-ch` and `<prefix>-<run>-os` in `open-targets-eu-dev`;
 - `<release_uri>/release_candidate.json`, the hand-off: the pos image and version, the
-  product, the snapshots and the disk sizes. Read it to see what a candidate is.
+  product, the snapshots and their disk sizes (170 and 80 GB, the sizes `release`
+  restores). Read it to see what a candidate is.
 
-The guard refuses to start if either snapshot, either working disk
-(`pos-<prefix>-<run>-ch|os`) or the hand-off exists. **To rebuild, delete both snapshots
-and the hand-off first.**
+The guard refuses to start if either snapshot, any working disk
+(`pos-<prefix>-<run>-ch-build|ch|os`) or the hand-off exists. **To rebuild, delete both
+snapshots and the hand-off first**, and any of the three disks a failed run left behind
+(a stray `-ch-build` disk included).
 
 **Never clear only the clean-up tasks of an old `release_candidate` run.** They reuse
 that run's old task states and XComs and could delete another run's same-named disks.

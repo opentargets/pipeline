@@ -2,7 +2,8 @@
 # Release-candidate build and publish: machines, disks and pins.
 backend_machine_type: n2d-highmem-96
 backend_max_run_hours: 4
-clickhouse_disk_gb: 200
+clickhouse_build_disk_gb: 300
+clickhouse_disk_gb: 170
 opensearch_disk_gb: 80
 work_disk_gb: 200
 boot_disk_gb: 50

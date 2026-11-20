@@ -28,6 +28,9 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         opensearch_image: OpenSearch image, needed with `servers`.
         health_timeout_s: How long to wait for both servers to be healthy. On timeout the
             script exits 1 with the servers still running, so the disks are unfit to snapshot.
+        compact: Source device to destination device, both in `data_disks`. If pos exits 0,
+            each source is copied onto its destination after the servers stop, and the copy is
+            verified; a failed copy or verify fails the script.
         **kwargs: Passed to `ComputeEngineRunContainerizedWorkloadSensor`.
     """
 
@@ -47,6 +50,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         clickhouse_image: str = '',
         opensearch_image: str = '',
         health_timeout_s: int = 600,
+        compact: dict[str, str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -54,14 +58,22 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             raise ValueError('servers need clickhouse_image and opensearch_image')
         if servers and read_only:
             raise ValueError('servers cannot run on read-only disks')
-        if servers and set(data_disks) != SERVER_DEVICES:
-            raise ValueError(f'servers need data_disks for exactly {sorted(SERVER_DEVICES)}')
+        compact = compact or {}
+        if compact and read_only:
+            raise ValueError('compact cannot copy onto read-only disks')
+        if not set(compact) | set(compact.values()) <= set(data_disks):
+            raise ValueError('compact devices must be in data_disks')
+        if set(compact.values()) & (set(compact) | SERVER_DEVICES) or len(set(compact.values())) < len(compact):
+            raise ValueError('compact destinations must be distinct, and neither sources nor server devices')
+        if servers and set(data_disks) != SERVER_DEVICES | set(compact.values()):
+            raise ValueError(f'servers need data_disks for exactly {sorted(SERVER_DEVICES)} plus compact destinations')
         self.data_disks = data_disks
         self.servers = servers
         self.read_only = read_only
         self.clickhouse_image = clickhouse_image
         self.opensearch_image = opensearch_image
         self.health_timeout_s = health_timeout_s
+        self.compact = compact
 
     def build_volume_params(self) -> str:
         """Add the data disks, read-only, to the parent's volumes when `read_only`."""
@@ -128,12 +140,35 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             wait_for_servers
 """
 
+    def compact_lines(self) -> str:
+        """Copy each compact source onto its destination and verify it, only while `rc` is 0."""
+        lines = ''
+        for src, dst in self.compact.items():
+            paths = f'/mnt/disks/{src}/ /mnt/disks/{dst}/'
+            lines += f"""\
+            if [ "$rc" -eq 0 ]; then
+                rsync -aHAX --numeric-ids --delete {paths} \\
+                    || {{ rc=$?; echo "copying {src} to {dst} failed with $rc"; }}
+            fi
+            if [ "$rc" -eq 0 ]; then
+                changes=$(rsync -aHAX --numeric-ids --delete --dry-run --itemize-changes {paths}) \\
+                    || {{ rc=$?; echo "verifying {dst} failed with $rc"; }}
+                if [ "$rc" -eq 0 ] && [ -n "$changes" ]; then
+                    printf '%s\\n' "$changes"
+                    echo "{dst} differs from {src} after the copy"
+                    rc=1
+                fi
+            fi
+"""
+        return lines
+
     def workload_lines(self) -> str:
         """Run pos on the host network, keep its exit code, then stop the servers."""
         arg = ' '.join(self.container_args or [])
         stop = ''
         if self.servers:
             stop += '            docker stop -t 300 opensearch clickhouse\n'
+        stop += self.compact_lines()
         if not self.read_only:
             # umount leaves a clean filesystem to snapshot
             mounts = ' '.join(f'/mnt/disks/{d}' for d in self.data_disks)
