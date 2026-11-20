@@ -8,7 +8,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.opensearch import connect
+from pos.services.opensearch import connect, create_body
 from pos.utils import get_config
 
 ALREADY_EXISTS = 'resource_already_exists_exception'
@@ -43,7 +43,7 @@ class OpenSearchCreateIndex(Task):
     def run(self) -> Task:
         opensearch = connect(self.spec.es_host, self.spec.es_port)
         try:
-            opensearch.indices.create(index=self._index_name, body=self._mappings.read_text())
+            opensearch.indices.create(index=self._index_name, body=create_body(self._mappings))
         except RequestError as e:
             if e.error != ALREADY_EXISTS:
                 raise

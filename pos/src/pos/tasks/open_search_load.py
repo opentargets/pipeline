@@ -12,7 +12,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.opensearch import connect
+from pos.services.opensearch import connect, refresh_interval
 from pos.utils import get_config
 
 
@@ -41,6 +41,7 @@ class OpenSearchLoad(Task):
             self._id_field = self._config[self.spec.dataset].get('id_field')
             self._id_value = self._config[self.spec.dataset].get('id_value')
             self._input_dir = self._config[self.spec.dataset]['input_dir']
+            self._mappings = Path(self._config[self.spec.dataset]['mappings'])
         except AttributeError:
             raise OpenSearchLoadError(f'Unable to load config for {self.spec.dataset}')
 
@@ -63,9 +64,13 @@ class OpenSearchLoad(Task):
             if not success:
                 failed += 1
                 logger.error(f'Failed to index document into {self._index_name}: {info}')
-        opensearch.indices.refresh(index=self._index_name)
         if failed:
             raise OpenSearchLoadError(f'{failed} documents failed to index into {self._index_name}')
+        # create_index turned refresh off for the load
+        interval = refresh_interval(self._mappings)
+        opensearch.indices.put_settings(index=self._index_name, body={'index': {'refresh_interval': interval}})
+        opensearch.indices.refresh(index=self._index_name)
+        logger.info(f'index {self._index_name} loaded, refresh_interval {interval or "default"}')
         return self
 
     def _generate_data(self, json_file: str | Path) -> Generator[dict[str, Any]] | Generator[str]:

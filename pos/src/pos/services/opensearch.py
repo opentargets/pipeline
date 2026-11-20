@@ -1,5 +1,9 @@
 """OpenSearch client for the running server."""
 
+import json
+from pathlib import Path
+from typing import Any
+
 from opensearchpy import OpenSearch
 
 from pos.readiness import wait_until_ready
@@ -17,6 +21,24 @@ def connect(host: str = 'localhost', port: int = 9200) -> OpenSearch:
     """A client for the server at host:port, once the cluster is at least yellow."""
     wait_until_ready(f'http://{host}:{port}/_cluster/health?wait_for_status=yellow&timeout=5s')
     return OpenSearch([{'host': host, 'port': port}], use_ssl=False, timeout=7200)
+
+
+def refresh_interval(mappings: Path) -> Any:
+    """The index's served refresh_interval in its mapping file, or None (the server default)."""
+    settings = json.loads(mappings.read_text()).get('settings', {})
+    if 'index.refresh_interval' in settings:
+        return settings['index.refresh_interval']
+    return settings.get('index', {}).get('refresh_interval', settings.get('refresh_interval'))
+
+
+def create_body(mappings: Path) -> dict[str, Any]:
+    """The mapping file's body, with refresh off for the load."""
+    body = json.loads(mappings.read_text())
+    settings = body.setdefault('settings', {})
+    settings.pop('index.refresh_interval', None)
+    settings.pop('refresh_interval', None)
+    settings.setdefault('index', {})['refresh_interval'] = -1
+    return body
 
 
 def disable_query_insights(client: OpenSearch) -> None:

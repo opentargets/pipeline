@@ -1,5 +1,6 @@
 """open_search_create_index treats an existing index as success and raises on any other error."""
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -17,11 +18,13 @@ class FakeIndices:
     def __init__(self, error: Exception | None) -> None:
         self.error = error
         self.created: list[str] = []
+        self.bodies: list[dict] = []
 
     def create(self, index, body):
         if self.error:
             raise self.error
         self.created.append(index)
+        self.bodies.append(body)
 
 
 @pytest.fixture
@@ -59,6 +62,10 @@ def test_create_index_created(make_task, messages):
     _run(task)
     assert client.indices.created == ['platform2612_search_disease']
     assert any('created' in m for m in messages)
+    (body,) = client.indices.bodies
+    mappings = json.loads((ROOT / 'config' / 'opensearch' / 'search.json').read_text())
+    assert body['settings']['index']['refresh_interval'] == -1
+    assert body['mappings'] == mappings['mappings']
 
 
 def test_create_index_exists_ok(make_task, messages):
