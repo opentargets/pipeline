@@ -195,7 +195,7 @@ output datasets and read the log.
 
 ## Cut-over
 
-- 26.12 is built from the monorepo `pos/`, by the VM procedure above until phase 4.
+- 26.12 is built from the monorepo `pos/`, by the DAGs (`orchestration/docs/pos_release.md`), or the VM fallback above.
 - pos is not ruff-formatted tree-wide: never run `ruff format` over it. Only
   `ruff check` and `ty check` are enforced.
 

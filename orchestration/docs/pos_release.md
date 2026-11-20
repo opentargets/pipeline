@@ -3,7 +3,7 @@
 The `release_candidate` and `release` DAGs build and publish a release from a run's
 output. **Nothing here is run by an agent**: David applies it. Each command is marked:
 
-- **scratch-side (apply now):** touches only `open-targets-eu-dev` and the scratch bucket.
+- **scratch-side (apply now):** needed for scratch runs; grants nothing on public destinations.
 - **prod (apply only when David approves publishing):** touches `open-targets-prod`, the
   release buckets or S3. Nothing public is written before 26.12 is approved.
 
@@ -120,16 +120,21 @@ PPP, which has no BigQuery grant.
 
 ## Trim (prod)
 
-In this order, each only after its precondition.
+In this order; step 2 only after its precondition.
 
 1. **Remove `up-airflow-dev`'s project-wide `roles/storage.admin` on
-   `open-targets-prod`.** Precondition: a unified-pipeline run (or a staging DAG reading
-   `open-targets-data-releases`) passes without it. Test first, then remove:
+   `open-targets-prod`, then verify** with a unified-pipeline run (or a staging DAG reading
+   `open-targets-data-releases`). If the run fails, re-grant it (rollback):
 
    ```sh
    gcloud projects remove-iam-policy-binding open-targets-prod \
      --member serviceAccount:up-airflow-dev@open-targets-eu-dev.iam.gserviceaccount.com \
      --role roles/storage.admin
+
+   # rollback
+   gcloud projects add-iam-policy-binding open-targets-prod \
+     --member serviceAccount:up-airflow-dev@open-targets-eu-dev.iam.gserviceaccount.com \
+     --role roles/storage.admin --condition=None
    ```
 
 2. **Trim the default compute account** (`<project-number>-compute@developer.gserviceaccount.com`
