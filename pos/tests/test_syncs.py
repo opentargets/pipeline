@@ -1,5 +1,6 @@
 """rclone bucket syncs and the packaged FTP script."""
 
+import configparser
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -95,3 +96,12 @@ def test_aws_sync_refuses_ppp():
 def test_strip_scheme_keeps_the_rclone_remote():
     assert strip_scheme('gcs:gs://b/x/') == 'gcs:b/x/'
     assert strip_scheme('aws:s3://b/x/') == 'aws:b/x/'
+
+
+def test_gcs_remote_sets_no_acl_or_class():
+    """A predefined ACL fails on UBLA buckets and overrides the default ACL on the others."""
+    conf = configparser.ConfigParser()
+    conf.read(Path(__file__).parents[1] / 'config' / 'rclone.conf')
+    gcs = conf['gcs']
+    assert gcs.getboolean('bucket_policy_only')
+    assert not {'object_acl', 'bucket_acl', 'storage_class', 'location'} & set(gcs)
