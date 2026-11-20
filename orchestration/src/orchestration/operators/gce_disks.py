@@ -174,16 +174,19 @@ class CreateSnapshotOperator(_ComputeOperator):
             storage_locations=[SNAPSHOT_LOCATION],
             labels=dict(self.labels),
         )
-        try:
-            op = client.insert(
-                request=compute_v1.InsertSnapshotRequest(
-                    project=self.project_id, snapshot_resource=snapshot
-                )
+        op = client.insert(
+            request=compute_v1.InsertSnapshotRequest(
+                project=self.project_id, snapshot_resource=snapshot
             )
+        )
+        try:
             wait_for_extended_operation(
                 op, f'create snapshot {self.snapshot_name}', SNAPSHOT_TIMEOUT, self.log
             )
         except Exception:
             self.log.exception('snapshot %s failed, deleting it', self.snapshot_name)
-            _delete_snapshot(self.project_id, self.snapshot_name, self.log)
+            try:
+                _delete_snapshot(self.project_id, self.snapshot_name, self.log)
+            except Exception:
+                self.log.exception('could not delete snapshot %s', self.snapshot_name)
             raise

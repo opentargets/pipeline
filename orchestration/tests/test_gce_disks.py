@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from airflow.sdk.exceptions import AirflowException
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import Conflict, NotFound
 
 from orchestration.operators import gce_disks
 from orchestration.operators.gce_disks import (
@@ -142,3 +142,21 @@ def test_template_fields_cover_names_and_sizes() -> None:
     assert {'disk_name', 'size_gb', 'source_snapshot'} <= set(CreateDiskOperator.template_fields)
     assert {'snapshot_names', 'blob_uri'} <= set(SnapshotGuardOperator.template_fields)
     assert {'disk_name', 'snapshot_name'} <= set(CreateSnapshotOperator.template_fields)
+
+
+def test_rejected_insert_does_not_delete_existing_snapshot(snapshots) -> None:
+    snapshots.insert.side_effect = Conflict('exists')
+    with pytest.raises(Conflict):
+        CreateSnapshotOperator(
+            task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels()
+        ).execute({})
+    snapshots.delete.assert_not_called()
+
+
+def test_cleanup_failure_does_not_mask_the_original_error(snapshots, waits) -> None:
+    waits.side_effect = [RuntimeError('boom'), None]
+    snapshots.delete.side_effect = PermissionError('denied')
+    with pytest.raises(RuntimeError, match='boom'):
+        CreateSnapshotOperator(
+            task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels()
+        ).execute({})
