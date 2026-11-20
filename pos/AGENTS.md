@@ -21,7 +21,8 @@ cd pos && uv run --frozen ruff check . && uv run --frozen ty check
 ```
 
 `release_uri` names the run: its last segment must be `<product>-YYMM-N[-suffix]`
-(`gs://.../platform-2612-3`; a local path works for tests). `pos.run` derives product,
+(`gs://.../platform-2612-3`; `parse_release_uri` also takes a local path, for tests,
+but otter's `-r` needs a scheme and host). `pos.run` derives product,
 release, `database_namespace` and the product's fixed values (buckets, BigQuery
 datasets) from it. A task with `products: [...]` runs only for those products.
 
@@ -34,7 +35,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket | |
 | `aws_sync` | rclone to S3 (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
-| `ftp_sync` | manual; over SSH to the EBI cluster (Platform only) | SSH, `gcloud` |
+| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
 
 - `backend` writes nothing to the release buckets besides `croissant.json`.
 - `bigquery` tables are `ot_datamodels` datasets present under `<release_uri>/output/`;

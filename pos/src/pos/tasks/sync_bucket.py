@@ -8,10 +8,6 @@ from otter.util.fs import check_dir
 from pos.rclone.sync import RCLONE_CONFIG, STATS_FLAGS, remote, run_rclone
 
 
-class SyncBucketError(Exception):
-    """Base class for exceptions in this module."""
-
-
 class SyncBucketSpec(Spec):
     """Configuration fields for the sync bucket task.
 

@@ -5,11 +5,14 @@ from pathlib import Path
 
 import yaml
 
+from pos.run import PRODUCTS, parse_release_uri
+
 ROOT = Path(__file__).parents[1]
 CONFIG = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
 RELEASE_NUMBER = re.compile(r'(?<![\d.])\d{2}\.?\d{2}(?![\d.])')
 # derived from release_uri by pos.run
-DERIVED = {'release', 'data_source', 'database_namespace', 'product', 'release_gcs_bucket', 'aws_address'}
+DERIVED = set(parse_release_uri('gs://b/platform-2612-1').scratchpad()).union(*PRODUCTS.values())
+BACKEND_GUARDS = {'open_search_prepare cluster settings', 'clickhouse_create_database release database'}
 
 
 def _specs(tasks: list[dict]) -> list[dict]:
@@ -72,3 +75,15 @@ def test_croissant_lands_where_opensearch_loads_it():
     croissant = _task('backend', 'ot_croissant')
     load = _task('backend', 'open_search_load')
     assert croissant['prepared_data_parent'] == load['json_parent']
+
+
+def test_derived_fields_cover_the_run():
+    assert {'release', 'data_source', 'bigquery_project', 'ftp_address', 'croissant_ftp_address'} <= DERIVED
+
+
+def test_backend_syncs_wait_for_the_rerun_guards():
+    top = {s['name'] for s in CONFIG['steps']['backend']}
+    assert top >= BACKEND_GUARDS
+    syncs = [s for s in CONFIG['steps']['backend'] if s['name'].startswith('sync_bucket ')]
+    assert len(syncs) == 3
+    assert all(set(s['requires']) == BACKEND_GUARDS for s in syncs)

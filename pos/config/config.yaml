@@ -14,12 +14,21 @@ steps:
   ##################################################################################################
   backend:
     - name: sync_bucket etl output files
+      requires:
+        - open_search_prepare cluster settings
+        - clickhouse_create_database release database
       source: ${data_source}/output
       destination: ${local_data}/output
     - name: sync_bucket etl view files
+      requires:
+        - open_search_prepare cluster settings
+        - clickhouse_create_database release database
       source: ${data_source}/view
       destination: ${local_data}/view
     - name: sync_bucket etl export files
+      requires:
+        - open_search_prepare cluster settings
+        - clickhouse_create_database release database
       source: ${data_source}/export
       destination: ${local_data}/export
     # ot croissant
