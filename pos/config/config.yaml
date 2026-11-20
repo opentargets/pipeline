@@ -279,12 +279,33 @@ steps:
   aws_sync:
     - name: rclone_sync aws release data
       products: [platform]
+      scratch: skip
       source: gcs:${data_source}/
       destination: aws:${aws_address}/${release}/
   # manual
   ftp_sync:
     - name: ftp_sync release data to ftp server
       products: [platform]
+      scratch: skip
       source_data: ${data_source}
       release_id: ${release}
       gcs_credentials_file_remote: ${ftp_sync_path_gcs_credentials_file}
+  # last, after every other step
+  publish_manifest:
+    - name: rclone_copyto manifest to gcs
+      source: ${run_location}/manifest.json
+      destination: ${release_gcs_bucket}/${release}/manifest.json
+    - name: rclone_copyto manifest to aws
+      products: [platform]
+      scratch: skip
+      source: ${run_location}/manifest.json
+      destination: ${aws_address}/${release}/manifest.json
+  # scratch mode only, Platform only
+  scratch_cleanup:
+    - name: bigquery_drop_datasets scratch datasets
+      products: [platform]
+      scratch: only
+      project_id: ${bigquery_project}
+      dataset_ids:
+        - ${bigquery_dataset}
+        - ${bigquery_staging_dataset}

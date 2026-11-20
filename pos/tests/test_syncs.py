@@ -11,8 +11,9 @@ import yaml
 from loguru import logger
 from otter.task.model import Spec
 
-from pos.rclone.sync import RcloneError, Sync, strip_scheme
+from pos.rclone.sync import RCLONE_CONFIG, RcloneError, Sync, remote, strip_scheme
 from pos.run import for_product
+from pos.tasks.rclone_copyto import RcloneCopyto, RcloneCopytoSpec
 from pos.tasks.sync_bucket import SyncBucket, SyncBucketSpec
 
 STATS = ['--stats', '1m', '--stats-one-line', '--stats-log-level', 'NOTICE']
@@ -105,3 +106,19 @@ def test_gcs_remote_sets_no_acl_or_class():
     gcs = conf['gcs']
     assert gcs.getboolean('bucket_policy_only')
     assert not {'object_acl', 'bucket_acl', 'storage_class', 'location'} & set(gcs)
+
+
+def test_remote_maps_s3_to_aws():
+    assert remote('s3://c/d/manifest.json') == 'aws:c/d/manifest.json'
+    assert remote('gs://a/b') == 'gcs:a/b'
+    assert remote('release_data/output') == 'release_data/output'
+
+
+def test_rclone_copyto_command(mocker):
+    run = mocker.patch('pos.tasks.rclone_copyto.run_rclone')
+    spec = RcloneCopytoSpec(name='rclone_copyto x', source='gs://a/b/manifest.json', destination='s3://c/d/manifest.json')
+    task = RcloneCopyto(spec, SimpleNamespace())  # ty: ignore[invalid-argument-type]
+    task.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
+    argv = run.call_args.args[0]
+    assert argv[:6] == ['rclone', '--config', RCLONE_CONFIG, 'copyto', 'gcs:a/b/manifest.json', 'aws:c/d/manifest.json']
+    assert argv[6:] == STATS

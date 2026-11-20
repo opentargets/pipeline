@@ -2,13 +2,16 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from otter.task.model import Spec
+from otter.util.errors import OtterError
 
 from pos.gcp.bigquery import BigQueryError, BigQueryRelease, published_tables
 from pos.run import for_product
+from pos.tasks.bigquery_drop_datasets import BigqueryDropDatasets, BigqueryDropDatasetsSpec
 
 CONFIG = yaml.safe_load((Path(__file__).parents[1] / 'config' / 'config.yaml').read_text())
 PROJECT, PROD, STAGING = 'p', 'platform', 'platform_staging'
@@ -211,3 +214,35 @@ def test_bigquery_step_fields():
         'staging_dataset_id': '${bigquery_staging_dataset}',
         'location': '${bigquery_location}',
     }
+
+
+def _drop(mocker, project_id, dataset_ids):
+    client = mocker.patch('pos.tasks.bigquery_drop_datasets.bigquery.Client')
+    spec = BigqueryDropDatasetsSpec(name='bigquery_drop_datasets x', project_id=project_id, dataset_ids=dataset_ids)
+    task = BigqueryDropDatasets(spec, SimpleNamespace())  # ty: ignore[invalid-argument-type]
+    task.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
+    return client
+
+
+def test_drop_refuses_prod(mocker):
+    client = mocker.patch('pos.tasks.bigquery_drop_datasets.bigquery.Client')
+    with pytest.raises(OtterError, match='open-targets-prod'):
+        _drop(mocker, 'open-targets-prod', ['platform_scratch'])
+    client.assert_not_called()
+
+
+def test_drop_refuses_non_scratch_names(mocker):
+    client = mocker.patch('pos.tasks.bigquery_drop_datasets.bigquery.Client')
+    with pytest.raises(OtterError, match='platform'):
+        _drop(mocker, 'open-targets-eu-dev', ['platform_scratch', 'platform'])
+    client.assert_not_called()
+
+
+def test_drop_deletes_both(mocker):
+    client = _drop(mocker, 'open-targets-eu-dev', ['platform_scratch', 'platform_scratch_staging'])
+    client.assert_called_once_with(project='open-targets-eu-dev')
+    delete = client.return_value.delete_dataset
+    assert delete.call_args_list == [
+        mocker.call('open-targets-eu-dev.platform_scratch', delete_contents=True, not_found_ok=True),
+        mocker.call('open-targets-eu-dev.platform_scratch_staging', delete_contents=True, not_found_ok=True),
+    ]

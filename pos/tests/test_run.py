@@ -9,7 +9,7 @@ from otter.task.model import Spec
 from otter.task.task_registry import TaskRegistry
 
 from pos import core
-from pos.run import PRODUCTS, Run, for_product, parse_release_uri
+from pos.run import PRODUCTS, SCRATCH_PRODUCTS, Run, for_mode, for_product, parse_release_uri, scratch_enabled
 
 
 def test_parse_platform():
@@ -64,8 +64,6 @@ ECHO = [
 def _run_main(tmp_path, monkeypatch, mocker, release_uri, tasks=ECHO):
     config = tmp_path / 'config.yaml'
     config.write_text(yaml.safe_dump({'scratchpad': {'release': 'stale'}, 'steps': {'echo': tasks}}))
-    for var in [v for v in os.environ if v.startswith('POS_')]:
-        monkeypatch.delenv(var)
     argv = ['pos', '-s', 'echo', '-c', str(config), '-w', str(tmp_path / 'work'), '-r', release_uri]
     monkeypatch.setattr(sys, 'argv', argv)
     # the manifest is the only remote write
@@ -94,8 +92,6 @@ def test_main_reads_the_package_config_without_c(tmp_path, monkeypatch):
     """The image command has no -c: the config comes from config/config.yaml under the cwd."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     monkeypatch.chdir(root)
-    for var in [v for v in os.environ if v.startswith('POS_')]:
-        monkeypatch.delenv(var)
     argv = ['pos', '-s', 'gcs_sync', '-r', 'gs://x/do/platform-2612-3', '-w', str(tmp_path / 'work')]
     monkeypatch.setattr(sys, 'argv', argv)
     seen = {}
@@ -163,3 +159,98 @@ def test_for_product_rejects_products_on_a_do_child():
     spec = Spec(name='explode x', foreach=['a'], do=[{'name': 'hello_world ${each}', 'products': ['ppp']}])
     with pytest.raises(ValueError, match='only top-level tasks'):
         for_product([spec], 'platform', 'x')
+
+
+def test_prefix_and_name():
+    run = parse_release_uri('gs://open-targets-pipeline-runs/do/platform-2612-3')
+    assert (run.prefix, run.name) == ('do', 'platform-2612-3')
+    run = parse_release_uri('gs://b/platform-2612-3')
+    assert (run.prefix, run.name) == ('', 'platform-2612-3')
+
+
+def test_scratch_scratchpad_platform():
+    run = parse_release_uri('gs://open-targets-pipeline-runs/do/platform-2612-3')
+    pad = run.scratchpad(scratch=True)
+    assert pad['release_gcs_bucket'] == 'gs://open-targets-pos-scratch/platform'
+    assert pad['bigquery_project'] == 'open-targets-eu-dev'
+    assert pad['bigquery_dataset'] == 'platform_scratch'
+    assert pad['bigquery_staging_dataset'] == 'platform_scratch_staging'
+    assert pad['bigquery_location'] == 'eu'
+    assert 'aws_address' not in pad
+    assert 'ftp_address' not in pad
+    assert pad['data_source'] == 'gs://open-targets-pipeline-runs/do/platform-2612-3'
+    assert pad['croissant_aws_address'] == 's3://open-targets-public-data-releases/platform/26.12/output/'
+    assert pad['croissant_ftp_address'] == run.scratchpad()['croissant_ftp_address']
+
+
+def test_scratch_scratchpad_ppp():
+    pad = parse_release_uri('gs://x/vh/ppp-2609-1').scratchpad(scratch=True)
+    assert pad['release_gcs_bucket'] == 'gs://open-targets-pos-scratch/ppp'
+
+
+def test_scratch_products_mirror_products():
+    for product, fixed in PRODUCTS.items():
+        assert set(SCRATCH_PRODUCTS[product]) == set(fixed) - {'aws_address', 'ftp_address'}
+
+
+def test_scratch_release_uri():
+    run = parse_release_uri('gs://open-targets-pipeline-runs/do/platform-2612-3')
+    assert run.scratch_release_uri() == 'gs://open-targets-pos-scratch/runs/do-platform-2612-3'
+    run = parse_release_uri('gs://b/platform-2612-3')
+    assert run.scratch_release_uri() == 'gs://open-targets-pos-scratch/runs/platform-2612-3'
+
+
+def test_scratch_enabled(monkeypatch):
+    monkeypatch.delenv('POS_SCRATCH', raising=False)
+    assert scratch_enabled() is False
+    monkeypatch.setenv('POS_SCRATCH', '')
+    assert scratch_enabled() is False
+    monkeypatch.setenv('POS_SCRATCH', '1')
+    assert scratch_enabled() is True
+    monkeypatch.setenv('POS_SCRATCH', 'true')
+    with pytest.raises(ValueError, match='POS_SCRATCH'):
+        scratch_enabled()
+
+
+MODE_SPECS = [
+    Spec(name='hello_world both'),
+    Spec(name='hello_world skip', scratch='skip'),
+    Spec(name='hello_world only', scratch='only'),
+]
+
+
+def test_for_mode_normal():
+    assert [s.name for s in for_mode(MODE_SPECS, False, 'x')] == ['hello_world both', 'hello_world skip']
+
+
+def test_for_mode_scratch():
+    assert [s.name for s in for_mode(MODE_SPECS, True, 'x')] == ['hello_world both', 'hello_world only']
+
+
+def test_for_mode_refuses_an_empty_step():
+    with pytest.raises(ValueError, match='step aws_sync does not run in scratch mode'):
+        for_mode([Spec(name='hello_world a', scratch='skip')], True, 'aws_sync')
+    with pytest.raises(ValueError, match='step scratch_cleanup does not run in normal mode'):
+        for_mode([Spec(name='hello_world a', scratch='only')], False, 'scratch_cleanup')
+
+
+def test_for_mode_refuses_a_dropped_requirement():
+    specs = [Spec(name='hello_world a', scratch='skip'), Spec(name='hello_world b', requires=['hello_world a'])]
+    with pytest.raises(ValueError, match='hello_world b requires hello_world a'):
+        for_mode(specs, True, 'x')
+
+
+def test_for_mode_rejects_unknown_value():
+    with pytest.raises(ValueError, match='unknown scratch: yes'):
+        for_mode([Spec(name='hello_world a', scratch='yes')], False, 'x')
+
+
+@pytest.mark.parametrize('key', [{'scratch': 'skip'}, {'products': ['ppp']}])
+def test_for_mode_rejects_gating_on_a_do_child(key):
+    spec = Spec(name='explode x', foreach=['a'], do=[{'name': 'hello_world ${each}', **key}])
+    with pytest.raises(ValueError, match='only top-level tasks'):
+        for_mode([spec], False, 'x')
+
+
+def test_for_product_leaves_an_optional_step_empty():
+    assert for_product([Spec(name='hello_world a', products=['platform'])], 'ppp', 'scratch_cleanup') == []
