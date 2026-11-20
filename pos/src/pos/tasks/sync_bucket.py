@@ -1,15 +1,11 @@
 # Sync bucket
 
-import subprocess
-
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.fs import check_dir
 
-from pos.rclone.sync import strip_scheme
-
-RCLONE_CONFIG = 'config/rclone.conf'
+from pos.rclone.sync import RCLONE_CONFIG, STATS_FLAGS, remote, run_rclone
 
 
 class SyncBucketError(Exception):
@@ -53,16 +49,13 @@ class SyncBucket(Task):
             '--config',
             RCLONE_CONFIG,
             'copy',
-            _remote(self.spec.source),
-            _remote(str(destination_folder)),
+            remote(self.spec.source),
+            remote(str(destination_folder)),
             '--transfers',
             pool,
             '--checkers',
             pool,
+            *STATS_FLAGS,
         ]
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        run_rclone(command, f'copy {self.spec.source} {destination_folder}')
         return self
-
-
-def _remote(path: str) -> str:
-    return f'gcs:{strip_scheme(path)}' if path.startswith('gs://') else path
