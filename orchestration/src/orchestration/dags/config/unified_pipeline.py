@@ -138,6 +138,14 @@ class UnifiedPipelineConfig:
         self.pts_boot_disk_size = 30
         """The boot disk size for PTS vms, in GB. Docker stores the pts image there."""
 
+        # POS-specific settings.
+        self.pos_version: str = str(up.get('pos_version'))
+        """The pos version the release-candidate DAGs run."""
+        self.pos_image = f'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline/pos:{self.pos_version}'
+        """The image and tag used to run POS steps."""
+        self.release_candidate: bool = bool(up.get('release_candidate', False))
+        """Whether the run goes on to build a release candidate."""
+
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'
         self.gentropy_cluster_init_script_uri = (

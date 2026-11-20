@@ -1,0 +1,18 @@
+---
+# Release-candidate build and publish: machines, disks and pins.
+backend_machine_type: n2d-highmem-96
+backend_max_run_hours: 4
+clickhouse_disk_gb: 200
+opensearch_disk_gb: 80
+work_disk_gb: 200
+boot_disk_gb: 50
+tarballs_machine_type: n2d-standard-16
+small_step_machine_type: e2-standard-4
+small_step_work_disk_gb: 20
+clickhouse_image: clickhouse/clickhouse-server:26.8.2.7
+opensearch_image: opensearchproject/opensearch:3.5.0
+pos_release_service_account: pos-release@open-targets-eu-dev.iam.gserviceaccount.com
+aws_secret: pos-aws-credentials
+aws_credentials_path: /secrets/aws/credentials
+# First pos version that supports scratch mode.
+scratch_min_pos_version: 26.12.0rc6

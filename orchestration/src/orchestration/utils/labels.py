@@ -49,7 +49,8 @@ class Labels(UserDict[str, str]):
         self.label_dict.update({k: self.clean_label(v) for k, v in self.extra.items()})
         super().__init__(self.label_dict)
 
-    def clean_label(self, label: str) -> str:
+    @staticmethod
+    def clean_label(label: str) -> str:
         """Clean a label for use in google cloud.
 
         According to the docs: The value can only contain lowercase letters, numeric
@@ -73,3 +74,30 @@ class Labels(UserDict[str, str]):
             default_run_label = dag_run.run_id
         run_label = context.get('params', {}).get('run_label') or default_run_label
         self['run'] = run_label
+
+
+class TemplatedLabels(Labels):
+    """Labels whose Jinja values Airflow renders when they sit in an operator's template fields.
+
+    Args:
+        extra: Extra labels, cleaned as in `Labels`.
+        templated: Labels whose values are templates, kept raw until rendered, then cleaned.
+        **kwargs: Passed to `Labels`.
+    """
+
+    template_fields = ('data',)
+
+    def __init__(
+        self, extra: dict[str, str] | None = None, templated: dict[str, str] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(extra, **kwargs)
+        self._data.update(templated or {})
+
+    @property
+    def data(self) -> dict[str, str]:
+        return self._data
+
+    @data.setter
+    def data(self, value: dict[str, str]) -> None:
+        # rendering assigns the rendered dict here
+        self._data = {k: self.clean_label(str(v)) for k, v in value.items()}

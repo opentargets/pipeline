@@ -36,6 +36,12 @@ objects", "0 matches"), run a control query that should return something.
 | Dataproc cluster specs | `orchestration/src/orchestration/dags/config/clusters.yaml` |
 | Airflow VM | `up-airflow-dev-<suffix>`, `europe-west1-d`, project `open-targets-eu-dev` |
 
+With `release_candidate: true` in `unified_pipeline.yaml` the run ends by triggering the
+`release_candidate` DAG: don't `make clean-vm` until the triggered run has finished.
+That DAG ships paused and a triggered run stays queued while the VM's 8 h cap runs:
+unpause it (as `unified_pipeline` in `references/full-run.md` step 4) before the run.
+Publishing is `orchestration/docs/pos_release.md`.
+
 A config change reaches a live VM only after a pull and a DAG re-parse; see
 `references/vm-and-config.md`.
 

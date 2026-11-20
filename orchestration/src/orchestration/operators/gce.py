@@ -467,8 +467,10 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
         3. Configure docker to use the GCR credentials.
         4. Run the containerized workload with the specified image, command, and arguments.
         """
-        arg = (' ').join(self.container_args or [])
+        return dedent(self.setup_lines() + self.workload_lines())
 
+    def setup_lines(self) -> str:
+        """Script lines up to and including the registry login, indented as `workload_lines`."""
         gcs_files = (' ').join([f'"{w}"' for w in self.container_files])
         dest_paths = (' ').join([f'"{w}"' for w in self.container_files.values()])
         secret_names = (' ').join([f'"{w}"' for w in self.container_secret_files])
@@ -485,7 +487,7 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
             else ''
         )
 
-        return dedent(f"""
+        return f"""
             #!/bin/bash
             set -euo pipefail
             set -v
@@ -538,14 +540,19 @@ class ComputeEngineRunContainerizedWorkloadSensor(BaseSensorOperator):
                 done
             fi
             sudo -u app docker-credential-gcr configure-docker --registries europe-west1-docker.pkg.dev
-            sudo -u app docker run \\
+"""
+
+    def workload_lines(self) -> str:
+        """Script lines that run the workload container, indented by 12 spaces."""
+        arg = (' ').join(self.container_args or [])
+        return f"""            sudo -u app docker run \\
                 --name {CONTAINER_NAME} \\
                 {self.build_env_params()}
                 {self.build_volume_params()}
                 --log-driver="gcplogs" \\
                 {self.container_image} \\
                 {self.container_command} {arg} 2>&1 | {OUTPUT_FILTER}
-        """)
+        """
 
     def declare_instance(self) -> compute_v1.Instance:
         """Declare the instance to be created.

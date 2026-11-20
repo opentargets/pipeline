@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import DAG, Param, chain, task_group
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.task.trigger_rule import TriggerRule
@@ -415,6 +416,16 @@ with DAG(
         if config.is_ppp:
             for ppp_dep in step_definition.get('depends_on_ppp', []):
                 step_tasks['start'].set_upstream(steps[ppp_dep]['end'])
+
+    if config.release_candidate:
+        trigger = TriggerDagRunOperator(
+            task_id='trigger_release_candidate',
+            trigger_dag_id='release_candidate',
+            conf={'release_uri': config.release_uri},
+            wait_for_completion=False,
+            trigger_rule=TriggerRule.ALL_SUCCESS,
+        )
+        trigger.set_upstream([step_tasks['end'] for step_tasks in steps.values()])
 
 if __name__ == '__main__':
     dag.test()

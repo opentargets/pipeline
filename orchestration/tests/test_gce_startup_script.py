@@ -2,6 +2,8 @@
 
 import re
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -55,3 +57,30 @@ def test_output_filter_splits_progress_bars_and_keeps_the_exit_code() -> None:
 def test_startup_script_is_valid_bash(script: str) -> None:
     """The script is assembled from string fragments, so check bash can parse it."""
     subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+
+
+FIXTURES = Path(__file__).parent / 'fixtures' / 'startup_scripts'
+RENDER_CASES: dict[str, dict[str, Any]] = {
+    'bare': {},
+    'full': {
+        'container_command': 'pts',
+        'container_args': ['--step', 'a_step'],
+        'container_env': {'A': '1', 'B': 'two'},
+        'container_files': {'gs://a-bucket/a/config.yaml': '/config.yaml'},
+        'container_secret_files': {'a-secret': '/secrets/a-secret'},
+        'work_disk_size_gb': 100,
+    },
+}
+
+
+@pytest.mark.parametrize('case', RENDER_CASES)
+def test_startup_script_is_unchanged(case: str) -> None:
+    """Fixtures were rendered before the script was split into overridable pieces."""
+    # full.sh is whitespace-sensitive: do not reformat or strip it.
+    rendered = ComputeEngineRunContainerizedWorkloadSensor(
+        task_id='a_step',
+        instance_name='a-machine',
+        container_image='an-image',
+        **RENDER_CASES[case],
+    ).startup_script()
+    assert rendered == (FIXTURES / f'{case}.sh').read_text()
