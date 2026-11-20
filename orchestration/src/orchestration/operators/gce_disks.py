@@ -37,7 +37,7 @@ class _ComputeOperator(BaseOperator):
 
 
 class CreateDiskOperator(_ComputeOperator):
-    """Create a persistent disk, optionally from a snapshot. Fails if it exists."""
+    """Create a persistent disk, optionally from a snapshot (a name or a path). Fails if it exists."""
 
     template_fields: Sequence[str] = ('disk_name', 'size_gb', 'source_snapshot', 'disk_type', 'labels')
 
@@ -75,7 +75,12 @@ class CreateDiskOperator(_ComputeOperator):
             labels=_clean(self.labels),
         )
         if self.source_snapshot:
-            disk.source_snapshot = f'projects/{self.project_id}/global/snapshots/{self.source_snapshot}'
+            # a bare name is in this project; a path is used as is
+            disk.source_snapshot = (
+                self.source_snapshot
+                if '/' in self.source_snapshot
+                else f'projects/{self.project_id}/global/snapshots/{self.source_snapshot}'
+            )
         op = client.insert(
             request=compute_v1.InsertDiskRequest(
                 project=self.project_id, zone=self.zone, disk_resource=disk

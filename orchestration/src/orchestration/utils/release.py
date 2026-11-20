@@ -1,14 +1,17 @@
-"""Names of the release-candidate resources derived from a run's release URI."""
+"""Release-candidate resource names from a run's release URI, and clean-up helpers for the release DAGs."""
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 _RUN_RE = re.compile(r'^(platform|ppp)-(\d{2})(\d{2})-(\d+)(-[a-z0-9]+)*$')
 _PREFIX_RE = re.compile(r'^[a-z][a-z0-9]*$')
 _NAME_RE = re.compile(r'^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$')
+# states in which a task ran in this try, so any XCom it holds is from this try
+RAN = {'success', 'failed'}
 
 
 @dataclass(frozen=True)
@@ -71,3 +74,26 @@ def candidate_names(release_uri: str) -> CandidateNames:
         yymm=f'{match.group(2)}{match.group(3)}',
         **names,
     )
+
+
+def task_states(ti: Any, task_ids: list[str]) -> dict[str, str | None]:
+    """States of `task_ids` in this DAG run."""
+    states = ti.get_task_states(dag_id=ti.dag_id, task_ids=task_ids, run_ids=[ti.run_id])
+    return states.get(ti.run_id, {})
+
+
+def created_this_try(
+    ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None], guard: str = 'guard'
+) -> list[str]:
+    """Resource names this try created, from the producers' XComs (task id to XCom key).
+
+    Nothing unless `guard` passed. A producer's XCom counts only if it ran in this try: a cleared
+    run keeps the XComs of tasks that never started again.
+    """
+    if states.get(guard) != 'success':
+        return []
+    names = []
+    for task_id, key in producers.items():
+        if states.get(task_id) in RAN and (name := ti.xcom_pull(task_ids=task_id, key=key)):
+            names.append(name)
+    return names

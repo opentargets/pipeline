@@ -55,6 +55,13 @@ def test_create_disk_passes_size_snapshot_type_and_labels(disks) -> None:
     assert req.zone == gce_disks.GCP_ZONE
 
 
+def test_create_disk_takes_a_snapshot_path_as_is(disks) -> None:
+    disks.get.side_effect = NotFound('x')
+    path = f'projects/other-project/global/snapshots/{SNAP}'
+    CreateDiskOperator(task_id='t', disk_name=DISK, size_gb=1, labels=Labels(), source_snapshot=path).execute({})
+    assert disks.insert.call_args.kwargs['request'].disk_resource.source_snapshot == path
+
+
 def test_create_disk_fails_if_it_exists(disks) -> None:
     with pytest.raises(AirflowException, match=DISK):
         CreateDiskOperator(task_id='t', disk_name=DISK, size_gb=1, labels=Labels()).execute({})

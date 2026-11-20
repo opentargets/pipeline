@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -28,13 +27,11 @@ from orchestration.operators.gce_disks import (
 from orchestration.utils import GCSPath, resource_name, strhash
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
 from orchestration.utils.labels import TemplatedLabels
-from orchestration.utils.release import candidate_names
+from orchestration.utils.release import candidate_names, created_this_try, task_states
 
 BACKEND_ARGS = ['-w', '/mnt/disks/work', '-p', '8']
 DEVICES = {'clickhouse': 'ch', 'opensearch': 'os'}
 SNAPSHOT_TASKS = {f'snapshot_{device}': 'return_value' for device in DEVICES}
-# states in which a task ran in this try, so any XCom it holds is from this try
-RAN = {'success', 'failed'}
 logger = logging.getLogger(__name__)
 
 
@@ -87,27 +84,6 @@ def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = N
         hand_off.model_dump_json(indent=2), content_type='application/json', if_generation_match=0
     )
     return uri
-
-
-def task_states(ti: Any, task_ids: list[str]) -> dict[str, str | None]:
-    """States of `task_ids` in this DAG run."""
-    states = ti.get_task_states(dag_id=ti.dag_id, task_ids=task_ids, run_ids=[ti.run_id])
-    return states.get(ti.run_id, {})
-
-
-def created_this_try(ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None]) -> list[str]:
-    """Resource names this try created, from the producers' XComs (task id to XCom key).
-
-    Nothing unless `guard` passed. A producer's XCom counts only if it ran in this try: a cleared
-    run keeps the XComs of tasks that never started again.
-    """
-    if states.get('guard') != 'success':
-        return []
-    names = []
-    for task_id, key in producers.items():
-        if states.get(task_id) in RAN and (name := ti.xcom_pull(task_ids=task_id, key=key)):
-            names.append(name)
-    return names
 
 
 def cleanup_disk(ti: Any, device: str) -> None:
