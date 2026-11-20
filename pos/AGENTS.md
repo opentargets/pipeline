@@ -110,60 +110,30 @@ destinations, for test runs that must not touch the public release:
   `open-targets-eu-dev`.
 - **Labels:** `tool=pos`, `step=<step>`.
 
-## Interim (until phase 4)
+## Building a release
 
 - `pos@v26.12.0rc3`, the last tag with `pos remote` and Terraform, cannot build 26.12:
-  its `backend` tasks `require:` names that exist only as explode children (10 in
-  `config/config.yaml`, 2 in `deployment/pos_config.tftpl`), and otter 26.9.1
-  `load_specs` exits with EINVAL on them.
-- Until phase 4, build the release by hand on a VM:
-  1. Use an `n2d-highmem-96`: on 256 GB ClickHouse runs out of memory (the
-     colocalisation table alone peaks at about 340 GiB). Attach two disks and mount
-     them at `/mnt/clickhouse` and `/mnt/opensearch`, and a work disk at
-     `/mnt/disks/work`; 400 GB pd-ssd each, as the old Terraform had.
-  2. Copy the server config out of the image into the ClickHouse disk root, and make
-     the data directories. The disk root holds `data/`, `config.d/` and `users.d/`, the
-     layout `tarballs` ships; OpenSearch runs as uid 1000:
-
-     ```sh
-     docker create --name pos <pos-image>
-     docker cp pos:/app/config/clickhouse/config.d /mnt/clickhouse/
-     docker cp pos:/app/config/clickhouse/users.d /mnt/clickhouse/
-     docker rm pos
-     mkdir -p /mnt/clickhouse/data /mnt/opensearch/data
-     chown 1000:1000 /mnt/opensearch/data
-     ```
-
-  3. Start the stock servers on the host network, data on the disks. Without
-     `OPENSEARCH_JAVA_OPTS` OpenSearch gets the image's 1 GB heap; 31g keeps
-     compressed pointers. The `search.insights` settings stop the query-insights
-     plugin writing `top_queries-*` indices; `backend` also sets them and deletes any
-     such index at the end:
-
-     ```sh
-     docker run -d --name ch --network host --ulimit nofile=262144:262144 \
-       -v /mnt/clickhouse/data:/var/lib/clickhouse \
-       -v /mnt/clickhouse/config.d:/etc/clickhouse-server/config.d \
-       -v /mnt/clickhouse/users.d:/etc/clickhouse-server/users.d \
-       clickhouse/clickhouse-server:26.8.2.7
-     docker run -d --name os --network host \
-       --ulimit memlock=-1:-1 --ulimit nofile=65536:65536 \
-       -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true \
-       -e OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g' -e bootstrap.memory_lock=true \
-       -e thread_pool.write.queue_size=-1 \
-       -e search.insights.top_queries.latency.enabled=false \
-       -e search.insights.top_queries.cpu.enabled=false \
-       -e search.insights.top_queries.memory.enabled=false \
-       -v /mnt/opensearch/data:/usr/share/opensearch/data \
-       opensearchproject/opensearch:3.5.0
-     ```
-
-  4. Run the step: `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work
-     <pos-image> -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`.
-     Stop the servers (`docker stop ch os`) before snapshotting the disks.
-  5. Then `tarballs` (with the disks mounted at `/mnt/clickhouse` and `/mnt/opensearch`,
-     also into the pos container), `bigquery`, `gcs_sync` and `aws_sync`.
-  6. Delete the VM and disks.
+  its `backend` tasks `require:` names that exist only as explode children, and otter
+  26.9.1 `load_specs` exits with EINVAL on them.
+- The `release_candidate` and `release` DAGs (`orchestration/`) build and publish a
+  release from a run; setup and operation are in `orchestration/docs/pos_release.md`.
+- Fallback by hand, on an `n2d-highmem-96` (256 GB runs ClickHouse out of memory) with
+  400 GB pd-ssd disks at `/mnt/clickhouse` and `/mnt/opensearch` and a work disk at
+  `/mnt/disks/work`:
+  1. Copy `config.d` and `users.d` from `/app/config/clickhouse/` in the image
+     (`docker create` + `docker cp`) into `/mnt/clickhouse`; make `data/` on both disks
+     and `chown 1000:1000 /mnt/opensearch/data`.
+  2. Start the stock servers (`clickhouse/clickhouse-server:26.8.2.7`,
+     `opensearchproject/opensearch:3.5.0`) on the host network, data on the disks. For
+     OpenSearch set `OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g'`, `discovery.type=single-node`,
+     `DISABLE_SECURITY_PLUGIN=true`, `bootstrap.memory_lock=true`,
+     `thread_pool.write.queue_size=-1` and the three
+     `search.insights.top_queries.{latency,cpu,memory}.enabled=false`.
+  3. Run `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work <pos-image>
+     -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`, then stop the
+     servers before snapshotting the disks.
+  4. Run `tarballs` (disks also mounted into the pos container), `bigquery`, `gcs_sync`
+     and `aws_sync`; delete the VM and disks.
 
 ## Tests
 

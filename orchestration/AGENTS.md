@@ -26,6 +26,10 @@ Local dev spins Airflow via Docker Compose (`make local-airflow` from this
 directory, UI at `localhost:8080`, creds `airflow`/`airflow`). New DAGs under
 `dags/` are only picked up on the ~300s filesystem scan.
 
+`release_candidate.py` builds a POS release candidate (disk snapshots and a hand-off
+JSON) from a run; `release.py` publishes it (`scratch` for test runs). One-time setup and
+operation: `docs/pos_release.md`.
+
 Operating a run (the Airflow VM, triggering, re-running steps, checking output) is
 the `unified-pipeline-run` skill.
 Test-running a staging DAG (a package with its own `config.yaml`, read by
