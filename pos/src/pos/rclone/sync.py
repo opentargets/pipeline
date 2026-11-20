@@ -22,8 +22,11 @@ def strip_scheme(uri: str) -> str:
 
 
 def remote(path: str) -> str:
-    """A `gs://` URI as an rclone `gcs:` remote; anything else unchanged."""
-    return f'gcs:{strip_scheme(path)}' if path.startswith('gs://') else path
+    """A `gs://` URI as an rclone `gcs:` remote, an `s3://` URI as `aws:`; anything else unchanged."""
+    for scheme, name in (('gs://', 'gcs'), ('s3://', 'aws')):
+        if path.startswith(scheme):
+            return f'{name}:{path.removeprefix(scheme)}'
+    return path
 
 
 def tail(text: str, lines: int = TAIL_LINES) -> str:

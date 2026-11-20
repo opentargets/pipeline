@@ -254,3 +254,7 @@ def test_for_mode_rejects_gating_on_a_do_child(key):
     spec = Spec(name='explode x', foreach=['a'], do=[{'name': 'hello_world ${each}', **key}])
     with pytest.raises(ValueError, match='only top-level tasks'):
         for_mode([spec], False, 'x')
+
+
+def test_for_product_leaves_an_optional_step_empty():
+    assert for_product([Spec(name='hello_world a', products=['platform'])], 'ppp', 'scratch_cleanup') == []

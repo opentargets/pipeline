@@ -43,6 +43,9 @@ SCRATCH_PRODUCTS: dict[str, dict[str, str]] = {
 
 SCRATCH_VALUES = ('skip', 'only')
 
+# steps that succeed doing nothing when no task runs for the product
+OPTIONAL_STEPS = {'scratch_cleanup'}
+
 
 @dataclass(frozen=True)
 class Run:
@@ -112,14 +115,17 @@ def scratch_enabled() -> bool:
 
 
 def for_product(specs: Sequence[Spec], product: str, step: str) -> list[Spec]:
-    """The step's specs that run for the product: those without `products:`, or listing it."""
+    """The step's specs that run for the product: those without `products:`, or listing it.
+
+    None for a step in OPTIONAL_STEPS is no error.
+    """
     for s in specs:
         extra = s.model_extra or {}
         if unknown := set(extra.get('products', [])) - set(PRODUCTS):
             raise ValueError(f'{s.name}: unknown product {", ".join(sorted(unknown))}, products are {sorted(PRODUCTS)}')
         _refuse_gated_children(s)
     kept = [s for s in specs if product in (s.model_extra or {}).get('products', [product])]
-    if specs and not kept:
+    if specs and not kept and step not in OPTIONAL_STEPS:
         raise ValueError(f'step {step} does not run for {product}')
     _refuse_dropped_requirements(specs, kept, f'does not run for {product}')
     return kept

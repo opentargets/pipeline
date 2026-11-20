@@ -36,6 +36,8 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `gcs_sync` | `<release_uri>` to the public release bucket | |
 | `aws_sync` | rclone to S3 (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
 | `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
+| `publish_manifest` | last, after every other step: copies `<release_uri>/manifest.json` to the release bucket and S3 (S3 Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
+| `scratch_cleanup` | scratch mode only: drops the scratch BigQuery datasets (Platform only; for PPP it does nothing and exits 0) | BigQuery access |
 
 - `backend` writes nothing to the release buckets besides `croissant.json`.
 - `bigquery` tables are `ot_datamodels` datasets present under `<release_uri>/output/`;
@@ -44,6 +46,29 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
   `config/clickhouse/` holds the SQL, schemas and server config (`config.d/`,
   `users.d/`); `config/opensearch/` the index settings.
+
+## Scratch mode
+
+`POS_SCRATCH=1` (unset otherwise; any other value fails) runs a step against scratch
+destinations, for test runs that must not touch the public release:
+
+- The run location moves from `release_uri` to
+  `gs://open-targets-pos-scratch/runs/<prefix>-<run>`, so the manifest and every
+  `release_uri` output go there. Inputs (`data_source`) are still read from
+  `release_uri`. The scratchpad key `run_location` holds the effective location in
+  both modes.
+- `release_gcs_bucket` becomes `gs://open-targets-pos-scratch/<product>`; BigQuery
+  goes to `open-targets-eu-dev`, datasets `platform_scratch` and
+  `platform_scratch_staging` (`SCRATCH_PRODUCTS` in `src/pos/run.py`).
+- There is no FTP or AWS address: `aws_sync`, `ftp_sync` and the S3 copy in
+  `publish_manifest` are `scratch: skip`, and `aws_sync` and `ftp_sync` refuse to run.
+- `scratch_cleanup` (`scratch: only`) drops the scratch datasets; it refuses any
+  project but `open-targets-eu-dev` and any dataset not ending in `_scratch` or
+  `_scratch_staging`.
+- The log opens with a `SCRATCH MODE` line listing the swapped values.
+- A task gated with `scratch: skip|only` runs only outside or only in scratch mode.
+- An image without scratch mode ignores the variable: orchestration refuses scratch on
+  older images.
 
 ## Image contract (phase 4)
 
@@ -73,7 +98,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   the rerun guard refuses otherwise.
 - **Concurrency:** never run two `bigquery` steps at once; they share
   `platform_staging`.
-- **Ordering:** `tarballs` must finish before `gcs_sync`. The public tarballs reach the
+- **Ordering:** `tarballs` must finish before `gcs_sync`; `publish_manifest` last. The public tarballs reach the
   release bucket only through `gcs_sync`.
 - **Service account:** read `open-targets-pipeline-runs`; write the release buckets
   (`open-targets-data-releases`, `open-targets-ppp-data-releases`); create datasets and
