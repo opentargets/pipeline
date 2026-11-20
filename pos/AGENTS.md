@@ -66,9 +66,11 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 
 ## Interim (until phase 4)
 
-- `pos@v26.12.0rc3` is the last tag with `pos remote` and Terraform. Build 26.12 with it
-  if phase 4 is not ready.
-- Otherwise run `backend` by hand on a VM:
+- `pos@v26.12.0rc3`, the last tag with `pos remote` and Terraform, cannot build 26.12:
+  its `backend` tasks `require:` names that exist only as explode children (10 in
+  `config/config.yaml`, 2 in `deployment/pos_config.tftpl`), and otter 26.9.1
+  `load_specs` exits with EINVAL on them.
+- Until phase 4, build the release by hand on a VM:
   1. Use an `n2d-highmem-96`: on 256 GB ClickHouse runs out of memory (the
      colocalisation table alone peaks at about 340 GiB). Attach two disks and mount
      them at `/mnt/clickhouse` and `/mnt/opensearch`, and a work disk at
@@ -177,8 +179,7 @@ output datasets and read the log.
 
 ## Cut-over
 
-- 26.12 may still be built from `opentargets/pos`, which stays live until cut-over.
-  Change `pos/` here only with a plan for getting the change into the 26.12 run.
+- 26.12 is built from the monorepo `pos/`, by the VM procedure above until phase 4.
 - pos is not ruff-formatted tree-wide: never run `ruff format` over it. Only
   `ruff check` and `ty check` are enforced.
 
