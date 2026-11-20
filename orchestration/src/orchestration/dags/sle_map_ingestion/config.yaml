@@ -5,12 +5,12 @@ env: prod
 environments:
   prod:
     input:
-      # the SuSiE results of the new SLE-map fine-mapping run, uploaded on 2026-11-17
+      # the SuSiE results of the new SLE-map fine-mapping run, uploaded on 2026-11-17; donor counts by cell type and ancestry added on 2026-11-20
       sle_map: gs://sle_map_data/raw_results/SLEmap_finemap_cond
-    output: gs://sle_map_data/prod/20261117T133750
+    output: gs://sle_map_data/prod/20261120T134808
     scratchpad:
       # the head of opentargets/gentropy#1354 (sle_map_ingestion step); set to its tag before merge
-      gentropy_ref: f8719e6814116cb4936495aa3ca21eb96c51dcaa
+      gentropy_ref: ccc0841003be719a1ff74f8fe39227ee721e0e24
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/gentropy/{{gentropy_ref}}/utils/install_dependencies_on_cluster.sh
@@ -52,6 +52,7 @@ steps:
           step.memberships_path={{input.sle_map}}/all_memberships.tsv \
           step.components_path={{input.sle_map}}/all_components.tsv \
           step.diagnostics_path={{input.sle_map}}/all_diagnostics.tsv \
+          step.donor_counts_path={{input.sle_map}}/donor_counts_by_cell_type_and_ancestry.tsv \
           step.study_index_output_path={{output}}/output/study \
           step.credible_set_output_path={{output}}/output/credible_set \
           step.credible_set_variant_output_path={{output}}/output/credible_set_variant \
