@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 from loguru import logger
 from ot_datamodels.discovery import discover_datasets
@@ -54,9 +55,7 @@ class BigQueryRelease:
 
     def load_staging(self, tables: Iterable[str], release_uri: str, release: str) -> None:
         """Load each table's parquet, and the `ot_release` row, into staging, replacing them."""
-        staging = bigquery.Dataset(f'{self._project}.{self._staging}')
-        staging.location = self._location
-        self._client.create_dataset(staging, exists_ok=True)
+        self._ensure_dataset(self._staging)
         config = bigquery.LoadJobConfig(
             source_format=bigquery.SourceFormat.PARQUET,
             autodetect=True,
@@ -97,6 +96,7 @@ class BigQueryRelease:
 
     def swap(self, tables: list[str]) -> None:
         """Copy every staged table over prod, then drop prod tables not in `tables`."""
+        self._ensure_dataset(self._dataset)
         config = bigquery.CopyJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE)
         self._await_all(
             'copy',
@@ -115,6 +115,17 @@ class BigQueryRelease:
             if table.table_type == 'TABLE' and table.table_id not in keep:
                 logger.info(f'dropping {self._dataset}.{table.table_id}, no longer published')
                 self._client.delete_table(self._id(self._dataset, table.table_id), not_found_ok=True)
+
+    def _ensure_dataset(self, dataset: str) -> None:
+        """Create `dataset` only if `get_dataset` says it is missing; never delete or recreate one."""
+        ref = f'{self._project}.{dataset}'
+        try:
+            self._client.get_dataset(ref)
+        except NotFound:
+            logger.info(f'creating dataset {ref}')
+            new = bigquery.Dataset(ref)
+            new.location = self._location
+            self._client.create_dataset(new)
 
     def _await_all(self, kind: str, start: dict[str, Callable[[], Any]]) -> None:
         """Start every job, then wait on each; raise naming every table that failed."""

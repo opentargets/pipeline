@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from google.api_core.exceptions import NotFound
 from otter.task.model import Spec
 from otter.util.errors import OtterError
 
@@ -38,14 +39,23 @@ class _Job:
 class FakeClient:
     """Tables by full id; jobs apply on `result()`, failing for the scripted table names."""
 
-    def __init__(self, prod=(), rows=None, fail_load=(), fail_copy=()):
+    def __init__(self, prod=(), rows=None, fail_load=(), fail_copy=(), datasets=(PROD, STAGING), get_error=None):
+        self.datasets, self.get_error = set(datasets), get_error
         self.tables = {f'{PROJECT}.{PROD}.{t}': _Table(t, 1) for t in prod}
         self.rows = rows or {}
         self.fail_load, self.fail_copy = set(fail_load), set(fail_copy)
         self.calls: list[tuple] = []
 
+    def get_dataset(self, ref):
+        self.calls.append(('get_dataset', ref))
+        if self.get_error:
+            raise self.get_error
+        if ref.rsplit('.', 1)[-1] not in self.datasets:
+            raise NotFound('missing')
+
     def create_dataset(self, dataset, exists_ok=False):
-        self.calls.append(('create_dataset', dataset.dataset_id))
+        self.calls.append(('create_dataset', dataset.dataset_id, dataset.location))
+        self.datasets.add(dataset.dataset_id)
 
     def load_table_from_uri(self, uri, destination, job_config, location=None):
         self.calls.append(('load', uri, destination, job_config.write_disposition, job_config.source_format))
@@ -186,6 +196,41 @@ def test_swap_rerun_idempotent():
     assert [c for c in client.calls if c[0] in ('load', 'copy')] == first
     assert client.made('delete') == [('delete', f'{PROJECT}.{PROD}.known_drug')]
     assert client.prod() == {*tables, 'ot_release'}
+
+
+def test_existing_datasets_are_not_created():
+    client = FakeClient(prod=['disease'])
+    _release(client).publish(['disease'], 'gs://b/r', '26.12')
+    assert {c[1] for c in client.made('get_dataset')} == {f'{PROJECT}.{PROD}', f'{PROJECT}.{STAGING}'}
+    assert client.made('create_dataset') == []
+
+
+def test_missing_datasets_created_in_location():
+    client = FakeClient(datasets=())
+    _release(client).publish(['disease'], 'gs://b/r', '26.12')
+    assert client.made('create_dataset') == [('create_dataset', STAGING, 'eu'), ('create_dataset', PROD, 'eu')]
+    assert client.prod() == {'disease', 'ot_release'}
+
+
+def test_scratch_run_ensures_both_datasets_before_swap():
+    project, target, staging = 'open-targets-eu-dev', 'platform_scratch', 'platform_scratch_staging'
+    client = FakeClient(datasets=())
+    client.tables = {}
+    BigQueryRelease(client, project=project, dataset=target, staging=staging, location='eu').publish(
+        ['disease'], 'gs://b/r', '26.12'
+    )
+    assert [c[1:] for c in client.made('create_dataset')] == [(staging, 'eu'), (target, 'eu')]
+    kinds = [c[0] for c in client.calls]
+    assert kinds.index('create_dataset') < kinds.index('load')
+    assert max(i for i, k in enumerate(kinds) if k == 'create_dataset') < kinds.index('copy')
+    assert f'{project}.{target}.disease' in client.tables
+
+
+def test_dataset_lookup_errors_propagate():
+    client = FakeClient(get_error=PermissionError('403'))
+    with pytest.raises(PermissionError):
+        _release(client).publish(['disease'], 'gs://b/r', '26.12')
+    assert client.made('create_dataset') == []
 
 
 def test_no_tables_refused():
