@@ -99,21 +99,21 @@ def _guard(snapshots, existing=(), blob_exists=False):
     return patch.object(gce_disks, 'Client', return_value=client)
 
 
-def test_guard_passes_when_nothing_exists(snapshots) -> None:
+def test_guard_passes_when_nothing_exists(snapshots, disks) -> None:
     with _guard(snapshots):
         SnapshotGuardOperator(
             task_id='t', snapshot_names=[SNAP], blob_uri='gs://b/handoff.json'
         ).execute({})
 
 
-def test_guard_names_existing_snapshot(snapshots) -> None:
+def test_guard_names_existing_snapshot(snapshots, disks) -> None:
     with _guard(snapshots, existing={SNAP}), pytest.raises(AirflowException, match=SNAP):
         SnapshotGuardOperator(
             task_id='t', snapshot_names=[SNAP, 'other'], blob_uri='gs://b/h.json'
         ).execute({})
 
 
-def test_guard_names_existing_blob(snapshots) -> None:
+def test_guard_names_existing_blob(snapshots, disks) -> None:
     with _guard(snapshots, blob_exists=True), pytest.raises(AirflowException, match=r'gs://b/h\.json'):
         SnapshotGuardOperator(
             task_id='t', snapshot_names=[SNAP], blob_uri='gs://b/h.json'
