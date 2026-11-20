@@ -69,8 +69,10 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 - `pos@v26.12.0rc3` is the last tag with `pos remote` and Terraform. Build 26.12 with it
   if phase 4 is not ready.
 - Otherwise run `backend` by hand on a VM:
-  1. Attach two disks and mount them at `/mnt/clickhouse` and `/mnt/opensearch`, and a
-     work disk at `/mnt/disks/work`. 400 GB pd-ssd each is what the old Terraform used.
+  1. Use an `n2d-highmem-96`: on 256 GB ClickHouse runs out of memory (the
+     colocalisation table alone peaks at about 340 GiB). Attach two disks and mount
+     them at `/mnt/clickhouse` and `/mnt/opensearch`, and a work disk at
+     `/mnt/disks/work`; 400 GB pd-ssd each, as the old Terraform had.
   2. Copy the server config out of the image into the ClickHouse disk root, and make
      the data directories. The disk root holds `data/`, `config.d/` and `users.d/`, the
      layout `tarballs` ships; OpenSearch runs as uid 1000:
