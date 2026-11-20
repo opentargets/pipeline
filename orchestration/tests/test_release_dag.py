@@ -25,7 +25,7 @@ GATED = ('aws_sync', 'bigquery', 'scratch_cleanup')
 DEVICES = ('clickhouse', 'opensearch')
 
 
-def _hand_off(uri: str = URI, pos_version: str = '26.12.0rc5', **over: Any) -> dict[str, Any]:
+def _hand_off(uri: str = URI, pos_version: str = '26.12.0rc6', **over: Any) -> dict[str, Any]:
     run = '/'.join(uri.split('/')[-2:])
     base = run.replace('/', '-')
     body = {
@@ -221,16 +221,25 @@ def test_read_hand_off_refuses_a_non_boolean_scratch() -> None:
 
 @pytest.mark.parametrize(
     'version',
-    ['26.12.0rc4', '26.12.0.dev3.pos-phase3.abc', '26.12.0+local', 'captured', '25.12.0rc9', '25.12.0', '26.12'],
+    [
+        '26.12.0rc4',
+        '26.12.0rc5',
+        '26.12.0.dev3.pos-phase3.abc',
+        '26.12.0+local',
+        'captured',
+        '25.12.0rc9',
+        '25.12.0',
+        '26.12',
+    ],
 )
 def test_scratch_refuses_old_or_unparsable_pos_versions(version: str) -> None:
-    assert ReleaseConfig().scratch_min_pos_version == '26.12.0rc5'
+    assert ReleaseConfig().scratch_min_pos_version == '26.12.0rc6'
     with pytest.raises(ValueError, match='scratch'):
         _load(True, pos_version=version)
     assert _load(False, pos_version=version)['env'] == {}
 
 
-@pytest.mark.parametrize('version', ['26.12.0rc5', '26.12.0rc10', '26.12.0', '26.12.1rc1', '27.1.0rc1'])
+@pytest.mark.parametrize('version', ['26.12.0rc6', '26.12.0rc10', '26.12.0', '26.12.1rc1', '27.1.0rc1'])
 def test_scratch_accepts_new_pos_versions(version: str) -> None:
     assert _load(True, pos_version=version)['env'] == {'POS_SCRATCH': '1'}
 

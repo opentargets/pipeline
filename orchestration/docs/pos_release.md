@@ -198,7 +198,7 @@ hand-off, restores the disks from the snapshots and runs the hand-off's own pos 
 `tarballs`, `gcs_sync`, `aws_sync`, `bigquery`, then the manifest last. `aws_sync` is
 skipped in scratch mode and for PPP; `bigquery` is skipped for PPP.
 
-`scratch=true` requires the candidate's `pos_version` >= `26.12.0rc5` and writes only to:
+`scratch=true` requires the candidate's `pos_version` >= `26.12.0rc6` and writes only to:
 
 - `gs://open-targets-pos-scratch/<product>`;
 - `gs://open-targets-pos-scratch/runs/<prefix>-<run>` (manifest, run outputs);

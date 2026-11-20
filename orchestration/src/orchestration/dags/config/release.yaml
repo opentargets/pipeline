@@ -15,4 +15,4 @@ pos_release_service_account: pos-release@open-targets-eu-dev.iam.gserviceaccount
 aws_secret: pos-aws-credentials
 aws_credentials_path: /secrets/aws/credentials
 # First pos version that supports scratch mode.
-scratch_min_pos_version: 26.12.0rc5
+scratch_min_pos_version: 26.12.0rc6

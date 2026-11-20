@@ -35,7 +35,7 @@ def test_release_config_loads_yaml():
     assert (config.clickhouse_disk_gb, config.opensearch_disk_gb, config.work_disk_gb) == (200, 80, 200)
     assert config.pos_release_service_account == 'pos-release@open-targets-eu-dev.iam.gserviceaccount.com'
     assert config.aws_secret == 'pos-aws-credentials'  # noqa: S105
-    assert config.scratch_min_pos_version == '26.12.0rc5'
+    assert config.scratch_min_pos_version == '26.12.0rc6'
 
 
 def test_hand_off_round_trips():
