@@ -17,6 +17,20 @@ def test_image_refs_expands_pts_to_both_images():
     assert images.image_refs({'pis': '1.0', 'pts': '2.0'}, 'r') == ['r/pis:1.0', 'r/pts:2.0', 'r/pts-nlp:2.0']
 
 
+def test_image_refs_includes_pos():
+    assert images.image_refs({'pos': '26.12.0rc5'}, 'r') == ['r/pos:26.12.0rc5']
+
+
+def test_unified_pipeline_pins_pos_image():
+    from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
+
+    config = UnifiedPipelineConfig()
+
+    assert config.pos_version == '26.12.0rc5'
+    assert config.pos_image == f'{images.REGISTRY}/pos:26.12.0rc5'
+    assert config.release_candidate is False
+
+
 def test_main_reports_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     monkeypatch.setattr(images, 'resolve', lambda ref: None if ref.endswith('/pts-nlp:2.0') else 'sha256:abc')
 

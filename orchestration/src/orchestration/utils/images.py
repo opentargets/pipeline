@@ -11,7 +11,7 @@ import yaml
 
 REGISTRY = 'europe-west1-docker.pkg.dev/open-targets-eu-dev/pipeline'
 
-IMAGES = {'pis': ['pis'], 'pts': ['pts', 'pts-nlp']}
+IMAGES = {'pis': ['pis'], 'pts': ['pts', 'pts-nlp'], 'pos': ['pos']}
 """The images each package publishes under one version."""
 
 
