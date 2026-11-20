@@ -33,8 +33,10 @@ steps:
       output: croissant.json
       prepared_data_parent: ${local_data}
     # opensearch
+    - name: open_search_prepare cluster settings
     - name: explode load all opensearch datasets
       requires:
+        - open_search_prepare cluster settings
         - sync_bucket etl export files
         - ot_croissant generate release metadata
       foreach:
@@ -56,6 +58,9 @@ steps:
           dataset: ${each}
           prefix: ${database_namespace}
           json_parent: ${local_data}
+    - name: open_search_finish no query-insights indices
+      requires:
+        - explode load all opensearch datasets
     # clickhouse
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}

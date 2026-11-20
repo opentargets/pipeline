@@ -88,7 +88,9 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 
   3. Start the stock servers on the host network, data on the disks. Without
      `OPENSEARCH_JAVA_OPTS` OpenSearch gets the image's 1 GB heap; 31g keeps
-     compressed pointers:
+     compressed pointers. The `search.insights` settings stop the query-insights
+     plugin writing `top_queries-*` indices; `backend` also sets them and deletes any
+     such index at the end:
 
      ```sh
      docker run -d --name ch --network host --ulimit nofile=262144:262144 \
@@ -101,6 +103,9 @@ datasets) from it. A task with `products: [...]` runs only for those products.
        -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true \
        -e OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g' -e bootstrap.memory_lock=true \
        -e thread_pool.write.queue_size=-1 \
+       -e search.insights.top_queries.latency.enabled=false \
+       -e search.insights.top_queries.cpu.enabled=false \
+       -e search.insights.top_queries.memory.enabled=false \
        -v /mnt/opensearch/data:/usr/share/opensearch/data \
        opensearchproject/opensearch:3.5.0
      ```
