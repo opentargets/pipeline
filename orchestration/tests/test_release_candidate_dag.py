@@ -2,6 +2,7 @@
 
 import copy
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,7 +19,6 @@ from orchestration.dags.config.release import HandOff, ReleaseConfig
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 from orchestration.operators.gce import DeleteInstanceOperator
 from orchestration.operators.gce_backend import ComputeEngineRunBackendSensor
-from orchestration.operators.gce_disks import DeleteDiskOperator
 from orchestration.utils.release import candidate_names
 
 URI = 'gs://open-targets-pipeline-runs/do/platform-2612-3'
@@ -39,10 +39,18 @@ DAGS = Path('src/orchestration/dags')
 
 
 class _TI:
-    """XComs keyed by task id (return value) or by `<task id>:<key>`."""
+    """XComs keyed by task id (return value) or by `<task id>:<key>`, and this run's task states."""
 
-    def __init__(self, xcoms: dict[str, Any]) -> None:
+    dag_id = 'release_candidate'
+    run_id = RUN_ID
+
+    def __init__(self, xcoms: dict[str, Any], states: Mapping[str, str | None] | None = None) -> None:
         self.xcoms = xcoms
+        self.states = states or {}
+
+    def get_task_states(self, dag_id: str, task_ids: list[str], run_ids: list[str]) -> dict[str, Any]:
+        assert (dag_id, run_ids) == (self.dag_id, [self.run_id])
+        return {self.run_id: {t: self.states[t] for t in task_ids if t in self.states}}
 
     def xcom_pull(self, task_ids: str, key: str = 'return_value', **_: Any) -> Any:
         return self.xcoms.get(task_ids if key == 'return_value' else f'{task_ids}:{key}')
@@ -95,11 +103,23 @@ def test_order(dag) -> None:
     for d in ('delete_disk_clickhouse', 'delete_disk_opensearch'):
         assert {'delete_vm_backend', 'snapshot_clickhouse', 'snapshot_opensearch'} <= up[d]
         assert dag.get_task(d).trigger_rule == TriggerRule.ALL_DONE
-        assert isinstance(dag.get_task(d), DeleteDiskOperator)
     assert dag.get_task('delete_vm_backend').trigger_rule == TriggerRule.ALL_DONE
     assert isinstance(dag.get_task('delete_vm_backend'), DeleteInstanceOperator)
     assert dag.get_task('write_hand_off').trigger_rule == TriggerRule.ALL_SUCCESS
     dag.topological_sort()
+
+
+def test_done_is_the_only_leaf_and_fails_on_any_failure(dag) -> None:
+    assert [t.task_id for t in dag.leaves] == ['done']
+    done = dag.get_task('done')
+    assert done.trigger_rule == TriggerRule.ALL_SUCCESS
+    assert done.upstream_task_ids == {
+        'write_hand_off',
+        'delete_vm_backend',
+        'delete_disk_clickhouse',
+        'delete_disk_opensearch',
+        'fail_cleanup_snapshots',
+    }
 
 
 def test_names_captures_the_images_and_sizes() -> None:
@@ -134,17 +154,35 @@ def test_disks_are_sized_from_the_names_task(dag) -> None:
     assert str(_render(dag, 'create_disk_opensearch', 'size_gb')) == '45'
 
 
-def test_disk_deletes_remove_only_disks_this_run_created(dag) -> None:
-    disks = {'delete_disk_clickhouse': NAMES['ch_disk'], 'delete_disk_opensearch': NAMES['os_disk']}
-    for task_id, disk in disks.items():
-        assert _render(dag, task_id, 'disk_name', xcoms=CREATED) == disk
-        # a refused guard, or a create that found the disk already there, records no disk
-        assert _render(dag, task_id, 'disk_name') == ''
-        with patch('orchestration.operators.gce_disks.compute_v1.DisksClient') as client:
-            op = cast(DeleteDiskOperator, copy.deepcopy(dag.get_task(task_id)))
-            op.disk_name = _render(dag, task_id, 'disk_name')
-            op.execute({})
-        client.return_value.delete.assert_not_called()
+CREATED_OK = {'guard': 'success', 'create_disk_clickhouse': 'success', 'create_disk_opensearch': 'failed'}
+
+
+@pytest.mark.parametrize(
+    ('states', 'deleted'),
+    [
+        # created this try, and a create whose wait failed after the insert
+        (CREATED_OK, [NAMES['ch_disk'], NAMES['os_disk']]),
+        # a refused guard after a clear: the creates never started, their old XComs remain
+        ({'guard': 'failed', 'create_disk_clickhouse': None, 'create_disk_opensearch': None}, []),
+        ({'guard': 'upstream_failed'}, []),
+        # guard passed, but a create was skipped or cleared and kept an old XCom
+        ({'guard': 'success', 'create_disk_clickhouse': 'upstream_failed', 'create_disk_opensearch': None}, []),
+    ],
+)
+def test_disk_deletes_remove_only_disks_this_try_created(states, deleted) -> None:
+    calls = []
+    with patch.object(release_candidate, 'delete_disk') as delete:
+        for device in ('clickhouse', 'opensearch'):
+            release_candidate.cleanup_disk(_TI(CREATED, states), device)
+        calls = [c.args[2] for c in delete.call_args_list]
+    assert calls == deleted
+
+
+def test_a_create_that_found_the_disk_pushed_nothing_and_deletes_nothing() -> None:
+    states = {'guard': 'success', 'create_disk_clickhouse': 'failed'}
+    with patch.object(release_candidate, 'delete_disk') as delete:
+        release_candidate.cleanup_disk(_TI({}, states), 'clickhouse')
+    delete.assert_not_called()
 
 
 def test_run_backend(dag) -> None:
@@ -188,34 +226,70 @@ def test_labels_carry_the_product(dag, names: dict[str, Any], product: str) -> N
     vm = _render(dag, 'run_backend', 'labels', names)
     assert vm['product'] == product
     assert (vm['tool'], vm['step']) == ('pos', 'backend')
+    run = 'manual__2026-11-20t10-00-00-00-00'
     for task_id in ('create_disk_clickhouse', 'create_disk_opensearch'):
-        assert dict(_render(dag, task_id, 'labels', names)) == dict(vm)
+        assert dict(_render(dag, task_id, 'labels', names)) == {**vm, 'run': run}
     for task_id in ('snapshot_clickhouse', 'snapshot_opensearch'):
         labels = dict(_render(dag, task_id, 'labels', names))
-        assert labels['release'] == '2612'
-        assert labels['run'] == RUN_ID
-        assert {k: v for k, v in labels.items() if k not in ('release', 'run')} == dict(vm)
+        assert labels == {**vm, 'run': run, 'release': '2612'}
         assert dag.get_task(task_id).trigger_rule == TriggerRule.ALL_SUCCESS
 
 
-def test_fail_cleanup_runs_only_on_failure_after_the_snapshots(dag) -> None:
+def test_vm_labels_are_cleaned_after_rendering(dag) -> None:
+    vm = _render(dag, 'run_backend', 'labels', {**NAMES, 'product': 'Not Clean'})
+    assert vm['product'] == 'not-clean'
+
+
+def test_snapshot_cleanup_waits_for_both_snapshots_and_the_hand_off(dag) -> None:
     task = dag.get_task('fail_cleanup_snapshots')
-    assert task.trigger_rule == TriggerRule.ONE_FAILED
+    assert task.trigger_rule == TriggerRule.ALL_DONE
     assert {'snapshot_clickhouse', 'snapshot_opensearch', 'write_hand_off'} <= task.upstream_task_ids
-    assert not task.downstream_task_ids
+    assert task.downstream_task_ids == {'done'}
 
 
-def test_fail_cleanup_deletes_only_snapshots_this_run_created() -> None:
-    with patch.object(release_candidate, '_delete_snapshot') as delete:
-        release_candidate.cleanup_snapshots(
-            _TI({'snapshot_clickhouse': NAMES['ch_snapshot'], 'snapshot_opensearch': NAMES['os_snapshot']})
-        )
-    assert [c.args[1] for c in delete.call_args_list] == [NAMES['ch_snapshot'], NAMES['os_snapshot']]
+SNAPPED = {'snapshot_clickhouse': NAMES['ch_snapshot'], 'snapshot_opensearch': NAMES['os_snapshot']}
 
-    # a refused guard leaves the snapshot tasks upstream_failed, with no XCom: an existing candidate stays
-    with patch.object(release_candidate, '_delete_snapshot') as delete:
-        release_candidate.cleanup_snapshots(_TI({}))
-    delete.assert_not_called()
+
+@pytest.mark.parametrize(
+    ('states', 'deleted'),
+    [
+        # one snapshot failed while the other was running: ALL_DONE waits, the finished one goes
+        (
+            {'guard': 'success', 'snapshot_clickhouse': 'success', 'snapshot_opensearch': 'failed',
+             'write_hand_off': 'upstream_failed'},
+            [NAMES['ch_snapshot']],
+        ),
+        # both made, the hand-off failed
+        (
+            {'guard': 'success', 'snapshot_clickhouse': 'success', 'snapshot_opensearch': 'success',
+             'write_hand_off': 'failed'},
+            [NAMES['ch_snapshot'], NAMES['os_snapshot']],
+        ),
+        # a finished candidate
+        (
+            {'guard': 'success', 'snapshot_clickhouse': 'success', 'snapshot_opensearch': 'success',
+             'write_hand_off': 'success'},
+            [],
+        ),
+        # a cleared run whose guard refused: the old XComs of the published candidate remain
+        (
+            {'guard': 'failed', 'snapshot_clickhouse': 'upstream_failed', 'snapshot_opensearch': 'upstream_failed',
+             'write_hand_off': 'upstream_failed'},
+            [],
+        ),
+        # the guard passed but the snapshots never ran this try: their old XComs are ignored
+        (
+            {'guard': 'success', 'snapshot_clickhouse': 'upstream_failed', 'snapshot_opensearch': None,
+             'write_hand_off': 'upstream_failed'},
+            [],
+        ),
+    ],
+)  # fmt: skip
+def test_snapshot_cleanup_deletes_only_what_this_try_created(states, deleted) -> None:
+    ti = _TI({k: v for k, v in SNAPPED.items() if states.get(k) == 'success' or states['guard'] == 'failed'}, states)
+    with patch.object(release_candidate, 'delete_snapshot') as delete:
+        release_candidate.cleanup_snapshots(ti)
+    assert [c.args[1] for c in delete.call_args_list] == deleted
 
 
 def _upload(names: dict[str, Any]) -> dict[str, Any]:

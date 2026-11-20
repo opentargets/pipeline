@@ -91,13 +91,24 @@ def _clean(labels: Labels | dict[str, str]) -> dict[str, str]:
     return {k: Labels.clean_label(str(v)) for k, v in labels.items()}
 
 
-def _delete_snapshot(project_id: str, name: str, log: Any) -> None:
+def delete_snapshot(project_id: str, name: str, log: Any) -> None:
+    """Delete a snapshot; a missing one is success."""
     client = compute_v1.SnapshotsClient()
     try:
         op = client.delete(project=project_id, snapshot=name)
         wait_for_extended_operation(op, f'delete snapshot {name}', DISK_TIMEOUT, log)
     except NotFound:
         log.info('snapshot %s not found, nothing to delete', name)
+
+
+def delete_disk(project_id: str, zone: str, name: str, log: Any) -> None:
+    """Delete a disk; a missing one is success."""
+    client = compute_v1.DisksClient()
+    try:
+        op = client.delete(project=project_id, zone=zone, disk=name)
+        wait_for_extended_operation(op, f'delete disk {name}', DISK_TIMEOUT, log)
+    except NotFound:
+        log.info('disk %s not found, nothing to delete', name)
 
 
 class DeleteDiskOperator(_ComputeOperator):
@@ -113,12 +124,7 @@ class DeleteDiskOperator(_ComputeOperator):
         if not self.disk_name:
             self.log.info('no disk name, nothing to delete')
             return
-        client = compute_v1.DisksClient()
-        try:
-            op = client.delete(project=self.project_id, zone=self.zone, disk=self.disk_name)
-            wait_for_extended_operation(op, f'delete disk {self.disk_name}', DISK_TIMEOUT, self.log)
-        except NotFound:
-            self.log.info('disk %s not found, nothing to delete', self.disk_name)
+        delete_disk(self.project_id, self.zone, self.disk_name, self.log)
 
 
 class DeleteSnapshotOperator(_ComputeOperator):
@@ -131,7 +137,7 @@ class DeleteSnapshotOperator(_ComputeOperator):
         self.snapshot_name = snapshot_name
 
     def execute(self, context: Any) -> None:
-        _delete_snapshot(self.project_id, self.snapshot_name, self.log)
+        delete_snapshot(self.project_id, self.snapshot_name, self.log)
 
 
 class SnapshotGuardOperator(_ComputeOperator):
@@ -217,7 +223,7 @@ class CreateSnapshotOperator(_ComputeOperator):
         except Exception:
             self.log.exception('snapshot %s failed, deleting it', self.snapshot_name)
             try:
-                _delete_snapshot(self.project_id, self.snapshot_name, self.log)
+                delete_snapshot(self.project_id, self.snapshot_name, self.log)
             except Exception:
                 self.log.exception('could not delete snapshot %s', self.snapshot_name)
             raise

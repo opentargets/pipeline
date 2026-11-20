@@ -81,8 +81,7 @@ class TemplatedLabels(Labels):
 
     Args:
         extra: Extra labels, cleaned as in `Labels`.
-        templated: Labels whose values are templates, kept raw until rendered. They must
-            render to valid label values.
+        templated: Labels whose values are templates, kept raw until rendered, then cleaned.
         **kwargs: Passed to `Labels`.
     """
 
@@ -92,4 +91,13 @@ class TemplatedLabels(Labels):
         self, extra: dict[str, str] | None = None, templated: dict[str, str] | None = None, **kwargs: Any
     ) -> None:
         super().__init__(extra, **kwargs)
-        self.data.update(templated or {})
+        self._data.update(templated or {})
+
+    @property
+    def data(self) -> dict[str, str]:
+        return self._data
+
+    @data.setter
+    def data(self, value: dict[str, str]) -> None:
+        # rendering assigns the rendered dict here
+        self._data = {k: self.clean_label(str(v)) for k, v in value.items()}

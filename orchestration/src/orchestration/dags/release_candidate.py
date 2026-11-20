@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import DAG, Param, chain, task
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.task.trigger_rule import TriggerRule
@@ -19,17 +21,20 @@ from orchestration.operators.gce_backend import ComputeEngineRunBackendSensor
 from orchestration.operators.gce_disks import (
     CreateDiskOperator,
     CreateSnapshotOperator,
-    DeleteDiskOperator,
     SnapshotGuardOperator,
-    _delete_snapshot,
+    delete_disk,
+    delete_snapshot,
 )
 from orchestration.utils import GCSPath, resource_name, strhash
-from orchestration.utils.common import GCP_PROJECT_PLATFORM, shared_dag_args
+from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE, shared_dag_args
 from orchestration.utils.labels import TemplatedLabels
 from orchestration.utils.release import candidate_names
 
 BACKEND_ARGS = ['-w', '/mnt/disks/work', '-p', '8']
 DEVICES = {'clickhouse': 'ch', 'opensearch': 'os'}
+SNAPSHOT_TASKS = {f'snapshot_{device}': 'return_value' for device in DEVICES}
+# states in which a task ran in this try, so any XCom it holds is from this try
+RAN = {'success', 'failed'}
 logger = logging.getLogger(__name__)
 
 
@@ -84,12 +89,42 @@ def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = N
     return uri
 
 
+def task_states(ti: Any, task_ids: list[str]) -> dict[str, str | None]:
+    """States of `task_ids` in this DAG run."""
+    states = ti.get_task_states(dag_id=ti.dag_id, task_ids=task_ids, run_ids=[ti.run_id])
+    return states.get(ti.run_id, {})
+
+
+def created_this_try(ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None]) -> list[str]:
+    """Resource names this try created, from the producers' XComs (task id to XCom key).
+
+    Nothing unless `guard` passed. A producer's XCom counts only if it ran in this try: a cleared
+    run keeps the XComs of tasks that never started again.
+    """
+    if states.get('guard') != 'success':
+        return []
+    names = []
+    for task_id, key in producers.items():
+        if states.get(task_id) in RAN and (name := ti.xcom_pull(task_ids=task_id, key=key)):
+            names.append(name)
+    return names
+
+
+def cleanup_disk(ti: Any, device: str) -> None:
+    """Delete the working disk if this try created it."""
+    producer = {f'create_disk_{device}': 'disk'}
+    states = task_states(ti, ['guard', *producer])
+    for name in created_this_try(ti, producer, states):
+        delete_disk(GCP_PROJECT_PLATFORM, GCP_ZONE, name, logger)
+
+
 def cleanup_snapshots(ti: Any) -> None:
-    """Delete the snapshots this run created; a snapshot task that did not succeed pushed no name."""
-    for task_id in ('snapshot_clickhouse', 'snapshot_opensearch'):
-        name = ti.xcom_pull(task_ids=task_id)
-        if name:
-            _delete_snapshot(GCP_PROJECT_PLATFORM, name, logger)
+    """Delete the snapshots this try created, unless the hand-off was written."""
+    states = task_states(ti, ['guard', 'write_hand_off', *SNAPSHOT_TASKS])
+    if states.get('write_hand_off') == 'success':
+        return
+    for name in created_this_try(ti, SNAPSHOT_TASKS, states):
+        delete_snapshot(GCP_PROJECT_PLATFORM, name, logger)
 
 
 with DAG(
@@ -132,7 +167,7 @@ with DAG(
             task_id=f'create_disk_{device}',
             disk_name=_name(f'{short}_disk'),
             size_gb=_name(f'{device}_disk_gb'),
-            labels=labels(),
+            labels=labels(run='{{ run_id }}'),
         )
         for device, short in DEVICES.items()
     ]
@@ -179,21 +214,23 @@ with DAG(
 
     hand_off = write_hand_off(n, '{{ run_id }}')
 
-    deletes = [
-        DeleteDiskOperator(
-            task_id=f'delete_disk_{device}',
-            # empty unless this run's create inserted the disk
-            disk_name=f"{{{{ ti.xcom_pull(task_ids='create_disk_{device}', key='disk') or '' }}}}",
-            trigger_rule=TriggerRule.ALL_DONE,
-        )
-        for device, short in DEVICES.items()
-    ]
+    def delete_disk_task(device: str) -> Any:
+        @task(task_id=f'delete_disk_{device}', trigger_rule=TriggerRule.ALL_DONE)
+        def delete_disk_(ti: Any = None) -> None:
+            cleanup_disk(ti, device)
 
-    @task(task_id='fail_cleanup_snapshots', trigger_rule=TriggerRule.ONE_FAILED)
+        return delete_disk_()
+
+    deletes = [delete_disk_task(device) for device in DEVICES]
+
+    @task(task_id='fail_cleanup_snapshots', trigger_rule=TriggerRule.ALL_DONE)
     def fail_cleanup_snapshots(ti: Any = None) -> None:
         cleanup_snapshots(ti)
 
     cleanup = fail_cleanup_snapshots()
+
+    # the only leaf: the run fails unless the hand-off and every clean-up succeeded
+    done = EmptyOperator(task_id='done', trigger_rule=TriggerRule.ALL_SUCCESS)
 
     chain(n, guard, creates, run, delete_vm)
     for s in snapshots:
@@ -204,3 +241,4 @@ with DAG(
         s >> cleanup
     delete_vm >> deletes
     hand_off >> cleanup
+    [hand_off, delete_vm, cleanup, *deletes] >> done
