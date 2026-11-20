@@ -31,7 +31,7 @@ class FtpSync(Task):
         super().__init__(spec, context)
         self.spec: FtpSyncSpec
         self.context: TaskContext
-        self.ftp_sync_script = files('scripts').joinpath('ftp_sync.sh').read_text()
+        self.ftp_sync_script = files('pos.scripts').joinpath('ftp_sync.sh').read_text()
         self.remote_credentials_path = f'{self.spec.remote_working_dir}/credentials/gcp_credentials.json'
 
     @report

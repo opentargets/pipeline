@@ -1,24 +1,24 @@
-"""Smoke tests: the CLI loads, tasks register and the configs name registered tasks."""
+"""Smoke tests: the entry point loads, tasks register and the configs name registered tasks."""
 
 import importlib
 import pkgutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
-from click.testing import CliRunner
+from otter.task import load_specs
 from otter.task.task_registry import TaskRegistry
 
 import pos.tasks as pos_tasks
-from pos.core import pos as pos_cli
 
 ROOT = Path(__file__).parents[1]
-CONFIGS = [ROOT / 'config' / 'config.yaml', ROOT / 'config' / 'config_ppp.yaml']
+CONFIGS = [ROOT / 'config' / 'config.yaml']
 
 
 def _registered() -> set[str]:
-    # the registration `core.pos_runner` does through `Runner.register_tasks`, without a Runner
+    # the registration `core.main` does through `Runner.register_tasks`, without a Runner
     registry = TaskRegistry(MagicMock(), MagicMock())
     registry.register('otter.tasks')
     registry.register('pos.tasks')
@@ -38,11 +38,10 @@ def _config_task_types(config: Path) -> set[str]:
     return {name.split(' ')[0] for tasks in steps.values() for name in _task_names(tasks)}
 
 
-def test_cli_help():
-    result = CliRunner().invoke(pos_cli, ['--help'])
-    assert result.exit_code == 0
-    for command in ('local', 'remote', 'ftp-sync'):
-        assert command in result.output
+def test_entrypoint_help():
+    result = subprocess.run(['uv', 'run', '--frozen', 'pos', '--help'], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert '--release-uri' in result.stdout
 
 
 def test_tasks_register():
@@ -59,3 +58,9 @@ def test_configs_parse(config):
     types = _config_task_types(config)
     assert types
     assert types <= _registered()
+
+
+@pytest.mark.parametrize('step', yaml.safe_load(CONFIGS[0].read_text())['steps'])
+def test_steps_load_in_otter(step):
+    """otter's load_specs exits on a requires: naming no top-level task, such as an explode child."""
+    assert load_specs(CONFIGS[0], step)

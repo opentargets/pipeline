@@ -1,65 +1,146 @@
 ## pos
 
 `pos` (Platform Output Support, the Pipeline Output Stage) loads the release datasets
-the pipeline wrote into the Platform's backends (OpenSearch, ClickHouse, BigQuery),
-snapshots them, and publishes the release (GCS, FTP, AWS, tarballs, Croissant). It is
-an [Otter](https://opentargets.github.io/otter) application, like `pis` and `pts`:
-`src/pos/core.py` builds a `Runner` and registers `pos.tasks`; each step in
-`config/config.yaml` (Platform) or `config/config_ppp.yaml` (PPP) is a list of tasks.
+the pipeline wrote into the Platform's backends (OpenSearch, ClickHouse, BigQuery) and
+publishes the release (GCS, FTP, AWS, tarballs, Croissant). It is a bare
+[Otter](https://opentargets.github.io/otter) application, like `pis` and `pts`:
+`src/pos/core.py` builds a `Runner` and registers `pos.tasks`; `config/config.yaml`
+declares the steps.
 
-Its code was imported with full history from `opentargets/pos`. It is not built into
-an image yet; the root `Makefile` covers it for `dev`, `lint`, `test` and `clean`.
+It runs from an image (`pos/Dockerfile`, built from the repo root) and talks to
+ClickHouse and OpenSearch over `localhost`. It starts no servers and creates no
+infrastructure.
 
 ## Running
 
-Run from inside `pos/`: config and Terraform paths are relative to it.
-
 ```sh
-cd pos && uv sync --frozen --all-groups
-cd pos && uv run pos -s <step>            # `local` is the default command
+pos -s <step> -r <release_uri> -w <work> -p <pool>   # -l <level> optional
+cd pos && uv run pos -s <step> -r <release_uri> -w ../work
 cd pos && uv run --frozen pytest -rxs
 cd pos && uv run --frozen ruff check . && uv run --frozen ty check
 ```
 
-Before a run, set the `scratchpad:` values at the top of the config (`release`,
-`data_source`, `database_namespace`, the disk and snapshot names). Steps work in
-`work_path` (`./work`, git-ignored).
+`release_uri` names the run: its last segment must be `<product>-YYMM-N[-suffix]`
+(`gs://.../platform-2612-3`; `parse_release_uri` also takes a local path, for tests,
+but otter's `-r` needs a scheme and host). `pos.run` derives product,
+release, `database_namespace` and the product's fixed values (buckets, BigQuery
+datasets) from it. A task with `products: [...]` runs only for those products.
 
-## Commands
+## Steps
 
-All are `uv run pos <command>`; the default is `local`.
-
-| Command | Does | Runs |
+| Step | Does | Needs |
 | --- | --- | --- |
-| `local -s <step>` | any config step | here |
-| `remote -s <step>` | any config step on a VM from `deployment/` | Terraform |
-| `backend --product` | the `backend` step: disk snapshots, OpenSearch snapshot, ClickHouse backup | Terraform |
-| `tarballs --product` | OpenSearch and ClickHouse tarballs from the disk snapshots | Terraform |
-| `clean-remote` | destroys the Terraform VM and workspace | here |
-| `bigquery --instance dev\|prod` | the `bigquery_{dev,prod}_load_all` step | here |
-| `gcs-sync --product` | the `gcs_sync` step | here |
-| `aws-sync` | the `aws_sync` step (Platform only) | here |
-| `ftp-sync` | the `ftp_sync` step, over SSH to the EBI cluster (Platform only) | here |
-| `restore-clickhouse`, `restore-opensearch` | restore a running instance from its backup, over an SSH tunnel | here |
+| `backend` | syncs `output/`, `view/`, `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices and the ClickHouse database | ClickHouse `:8123`, OpenSearch `:9200`, on empty disks: it fails if the database has tables or an index exists |
+| `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
+| `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
+| `gcs_sync` | `<release_uri>` to the public release bucket | |
+| `aws_sync` | rclone to S3 (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
+| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
 
-`p2j` converts parquet to NDJSON (`pos.parquet2json`).
+- `backend` writes nothing to the release buckets besides `croissant.json`.
+- `bigquery` tables are `ot_datamodels` datasets present under `<release_uri>/output/`;
+  `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
+  Rerun it after a failed swap: staging stays complete.
+- `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
+  `config/clickhouse/` holds the SQL, schemas and server config (`config.d/`,
+  `users.d/`); `config/opensearch/` the index settings.
 
-Release commands (`bigquery --instance prod`, `*-sync`) ask for confirmation. `backend`
-refuses to run when its snapshots or backups already exist.
+## Image contract (phase 4)
 
-## Infrastructure
+- **Command:** `pos -s <step> -r <release_uri> -w /mnt/disks/work -p <pool>`, with
+  `-l <level>` optional.
+- **Network:** ClickHouse on `localhost:8123` and OpenSearch on `localhost:9200`, so the
+  pos container needs host networking or an equivalent.
+- **Mounts:**
+  - `backend`: the work disk, plus the ClickHouse and OpenSearch data disks mounted
+    into their containers. pos itself only talks to them over HTTP.
+  - `tarballs`: `/mnt/clickhouse` and `/mnt/opensearch` from disks restored from
+    snapshots.
+- **ClickHouse config:** the image ships `config.d/` and `users.d/` at
+  `/app/config/clickhouse/`. Extract them and write them to the ClickHouse data disk
+  root before starting ClickHouse, so `tarballs` contains them.
+- **Secrets:** `AWS_SHARED_CREDENTIALS_FILE` for `aws_sync`, as a file mount from
+  Secret Manager.
+- **Exit code:** non-zero on failure.
+- **Outputs:**
+  - `backend`: the data disks, plus `croissant.json` under `release_uri`.
+  - `tarballs`: `<release_uri>/disk_images/`.
+  - `gcs_sync`: the release bucket.
+  - `aws_sync`: S3.
+  - `bigquery`: BigQuery.
+  - Every step: the manifest.
+- **Retries:** `backend` cannot be retried in place. A retry needs fresh or wiped disks;
+  the rerun guard refuses otherwise.
+- **Concurrency:** never run two `bigquery` steps at once; they share
+  `platform_staging`.
+- **Ordering:** `tarballs` must finish before `gcs_sync`. The public tarballs reach the
+  release bucket only through `gcs_sync`.
+- **Service account:** read `open-targets-pipeline-runs`; write the release buckets
+  (`open-targets-data-releases`, `open-targets-ppp-data-releases`); create datasets and
+  write tables in BigQuery `open-targets-prod` (EU).
+- **Labels:** `tool=pos`, `step=<step>`.
 
-Until phase 3, `pos` runs on a VM that Terraform creates from `deployment/` (state in
-`gs://open-targets-ops/terraform/platform-pos-v2`). Its startup script
-(`deployment/startup.sh`) sparse-clones `https://github.com/opentargets/pipeline` at
-`--pos-branch` into `/opt/pipeline`, checking out only `pos/`, and runs `uv sync --frozen` and the
-step from `/opt/pipeline/pos`. The branch must be pushed before `pos remote`.
+## Interim (until phase 4)
 
-`config/clickhouse/` and `config/opensearch/` hold the database Dockerfiles, schemas
-and settings; `config/datasets.yaml` maps datasets to tables and indices;
-`config/aws_sync.txt` and `config/rclone.conf` drive the rclone sync.
-`.credentials/` and `config/clickhouse/config.d/s3_config.xml` are git-ignored; the VM
-fetches `s3_config.xml` from instance metadata.
+- `pos@v26.12.0rc3`, the last tag with `pos remote` and Terraform, cannot build 26.12:
+  its `backend` tasks `require:` names that exist only as explode children (10 in
+  `config/config.yaml`, 2 in `deployment/pos_config.tftpl`), and otter 26.9.1
+  `load_specs` exits with EINVAL on them.
+- Until phase 4, build the release by hand on a VM:
+  1. Use an `n2d-highmem-96`: on 256 GB ClickHouse runs out of memory (the
+     colocalisation table alone peaks at about 340 GiB). Attach two disks and mount
+     them at `/mnt/clickhouse` and `/mnt/opensearch`, and a work disk at
+     `/mnt/disks/work`; 400 GB pd-ssd each, as the old Terraform had.
+  2. Copy the server config out of the image into the ClickHouse disk root, and make
+     the data directories. The disk root holds `data/`, `config.d/` and `users.d/`, the
+     layout `tarballs` ships; OpenSearch runs as uid 1000:
+
+     ```sh
+     docker create --name pos <pos-image>
+     docker cp pos:/app/config/clickhouse/config.d /mnt/clickhouse/
+     docker cp pos:/app/config/clickhouse/users.d /mnt/clickhouse/
+     docker rm pos
+     mkdir -p /mnt/clickhouse/data /mnt/opensearch/data
+     chown 1000:1000 /mnt/opensearch/data
+     ```
+
+  3. Start the stock servers on the host network, data on the disks. Without
+     `OPENSEARCH_JAVA_OPTS` OpenSearch gets the image's 1 GB heap; 31g keeps
+     compressed pointers. The `search.insights` settings stop the query-insights
+     plugin writing `top_queries-*` indices; `backend` also sets them and deletes any
+     such index at the end:
+
+     ```sh
+     docker run -d --name ch --network host --ulimit nofile=262144:262144 \
+       -v /mnt/clickhouse/data:/var/lib/clickhouse \
+       -v /mnt/clickhouse/config.d:/etc/clickhouse-server/config.d \
+       -v /mnt/clickhouse/users.d:/etc/clickhouse-server/users.d \
+       clickhouse/clickhouse-server:26.8.2.7
+     docker run -d --name os --network host \
+       --ulimit memlock=-1:-1 --ulimit nofile=65536:65536 \
+       -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true \
+       -e OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g' -e bootstrap.memory_lock=true \
+       -e thread_pool.write.queue_size=-1 \
+       -e search.insights.top_queries.latency.enabled=false \
+       -e search.insights.top_queries.cpu.enabled=false \
+       -e search.insights.top_queries.memory.enabled=false \
+       -v /mnt/opensearch/data:/usr/share/opensearch/data \
+       opensearchproject/opensearch:3.5.0
+     ```
+
+  4. Run the step: `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work
+     <pos-image> -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`.
+     Stop the servers (`docker stop ch os`) before snapshotting the disks.
+  5. Then `tarballs` (with the disks mounted at `/mnt/clickhouse` and `/mnt/opensearch`,
+     also into the pos container), `bigquery`, `gcs_sync` and `aws_sync`.
+  6. Delete the VM and disks.
+
+## Tests
+
+`tests/test_contract.py` checks that every dataset `config/datasets.yaml` loads from
+`output/`, `view/` or `export/` is a `destination:` of a step in `pts/config.yaml`. A
+dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
+in the same PR.
 
 ## Croissant
 
@@ -69,7 +150,7 @@ fetches `s3_config.xml` from instance metadata.
 set describing its fields. It reads the parquet schemas of the output datasets and
 fills in descriptions, keys and foreign keys from curated JSON in
 `src/pos/croissant/assets/`. The `ot_croissant` task (`pos/tasks/ot_croissant.py`)
-runs it when publishing a release.
+runs in `backend`.
 
 Curation assets:
 
@@ -112,10 +193,9 @@ field, and that the assets ship in the wheel. They do not check curation against
 real output schemas: to see the warnings for a release, run `ot_croissant` on its
 output datasets and read the log.
 
-## Interim rules
+## Cut-over
 
-- 26.12 may still be built from `opentargets/pos`, which stays live until cut-over.
-  Change `pos/` here only with a plan for getting the change into the 26.12 run.
+- 26.12 is built from the monorepo `pos/`, by the VM procedure above until phase 4.
 - pos is not ruff-formatted tree-wide: never run `ruff format` over it. Only
   `ruff check` and `ty check` are enforced.
 
@@ -170,6 +250,3 @@ Then, in a monorepo worktree:
 
 The import used git-filter-repo a40bce548d2c. The same SHAs need the same
 filter-repo version and options.
-
-To pin an interim release, pass `--pos-branch pos@v26.12.0rcN` (a tag): `main` moves
-with every bump.

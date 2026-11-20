@@ -1,142 +1,52 @@
-"""OpenSearch service module."""
+"""OpenSearch client for the running server."""
 
-from dataclasses import dataclass
+import json
 from pathlib import Path
+from typing import Any
 
-from docker.types import Ulimit
-from loguru import logger
 from opensearchpy import OpenSearch
 
-from pos.services.containerized_service import ContainerizedService, ContainerizedServiceError, reset_timeout
+from pos.readiness import wait_until_ready
+
+# the query-insights plugin in the stock image writes top_queries-* indices
+QUERY_INSIGHTS_OFF = {
+    'search.insights.top_queries.latency.enabled': False,
+    'search.insights.top_queries.cpu.enabled': False,
+    'search.insights.top_queries.memory.enabled': False,
+}
+TOP_QUERIES_PATTERN = 'top_queries-*'
 
 
-@dataclass
-class SnapshotRepository:
-    """Snapshot repository configuration fields.
-
-    Args:
-        name: Repository name
-        type: Repository type (default: '')
-        bucket: Bucket name (default: '')
-        base_path: Base path (default: '')
-        client: Client name (default: 'default')
-    """
-
-    name: str
-    type: str = ''
-    bucket: str = ''
-    base_path: str = ''
-    client: str = 'default'
-
-    def body(self) -> dict:
-        """Return the snapshot repository body."""
-        return {
-            'type': self.type,
-            'settings': {
-                'bucket': self.bucket,
-                'base_path': self.base_path,
-                'client': self.client,
-                'shard_path_type': 'FIXED',
-                'max_snapshot_bytes_per_sec': '0mb',
-            },
-        }
+def connect(host: str = 'localhost', port: int = 9200) -> OpenSearch:
+    """A client for the server at host:port, once the cluster is at least yellow."""
+    wait_until_ready(f'http://{host}:{port}/_cluster/health?wait_for_status=yellow&timeout=5s')
+    return OpenSearch([{'host': host, 'port': port}], use_ssl=False, timeout=7200)
 
 
-class OpenSearchInstanceManagerError(Exception):
-    """Base class for exceptions in this module."""
+def refresh_interval(mappings: Path) -> Any:
+    """The index's served refresh_interval in its mapping file, or None (the server default)."""
+    settings = json.loads(mappings.read_text()).get('settings', {})
+    if 'index.refresh_interval' in settings:
+        return settings['index.refresh_interval']
+    return settings.get('index', {}).get('refresh_interval', settings.get('refresh_interval'))
 
 
-class OpenSearchInstanceManager(ContainerizedService):
-    """OpenSearch instance manager.
+def create_body(mappings: Path) -> dict[str, Any]:
+    """The mapping file's body, with refresh off for the load."""
+    body = json.loads(mappings.read_text())
+    settings = body.setdefault('settings', {})
+    settings.pop('index.refresh_interval', None)
+    settings.pop('refresh_interval', None)
+    settings.setdefault('index', {})['refresh_interval'] = -1
+    return body
 
-    Args:
-        name: Container name
-        dockerfile: Path to Dockerfile (default: 'config/opensearch/Dockerfile')
-        opensearch_version: OpenSearch version (default: '2.19.0')
-        init_timeout: Initialization timeout in seconds (default: 30)
 
-    Raises:
-        OpenSearchInstanceManagerError: If OpenSearch instance manager fails to start
-    """
+def disable_query_insights(client: OpenSearch) -> None:
+    """Turn off top-N query collection, so no top_queries-* index is written."""
+    client.cluster.put_settings(body={'persistent': QUERY_INSIGHTS_OFF})
 
-    def __init__(
-        self,
-        name: str,
-        dockerfile: Path = Path('config/opensearch/Dockerfile'),
-        opensearch_version: str = '2.19.0',
-        init_timeout: int = 30,
-    ) -> None:
-        super().__init__(name, dockerfile, opensearch_version, init_timeout)
-        self.name = name
 
-    def start(
-        self,
-        volume_data: str,
-        volume_logs: str,
-        opensearch_java_opts: str = '-Xms2g -Xmx4g',
-    ) -> None:
-        """Start OpenSearch instance.
-
-        Args:
-            volume_data: Data volume
-            volume_logs: Logs volume
-            opensearch_java_opts: Java options (default: '-Xms2g -Xmx4g')
-
-        Raises:
-            OpenSearchInstanceManagerError: If OpenSearch failed to start
-        """
-        ports: dict[str, int | list[int] | tuple[str, int] | None] = {'9200': 9200, '9300': 9300}
-        environment: dict[str, str] | list[str] | None = {
-            'path.data': '/usr/share/opensearch/data',
-            'path.logs': '/usr/share/opensearch/logs',
-            'network.host': '0.0.0.0',  # noqa: S104
-            'discovery.type': 'single-node',
-            'discovery.seed_hosts': '[]',
-            'bootstrap.memory_lock': 'true',
-            'search.max_open_scroll_context': '5000',
-            'DISABLE_SECURITY_PLUGIN': 'true',
-            'OPENSEARCH_JAVA_OPTS': opensearch_java_opts,
-            'thread_pool.write.queue_size': '-1',
-            'indices.recovery.max_bytes_per_sec': '0mb',
-        }
-        volumes = {
-            volume_data: {'bind': '/usr/share/opensearch/data', 'mode': 'rw'},
-            volume_logs: {'bind': '/usr/share/opensearch/logs', 'mode': 'rw'},
-        }
-        ulimits = [
-            Ulimit(name='memlock', soft=-1, hard=-1),
-            Ulimit(name='nofile', soft=65536, hard=65536),
-        ]
-        try:
-            self._run_container(
-                ports=ports,
-                env=environment,
-                volumes=volumes,
-                ulimits=ulimits,
-            )
-        except ContainerizedServiceError:
-            raise OpenSearchInstanceManagerError('opensearch instance failed to start')
-
-    def client(self) -> OpenSearch:
-        return OpenSearch([{'host': 'localhost', 'port': 9200}], use_ssl=False, timeout=7200)
-
-    @reset_timeout
-    def is_healthy(self) -> bool:
-        """Health check for OpenSearch.
-
-        Args:
-            timeout: Timeout in seconds (default: {10})
-
-        Returns:
-            bool: True if OpenSearch is healthy, False otherwise
-        """
-        logger.debug('waiting for opensearch container to become healthy')
-        healthy = False
-        while self._init_timeout > 0:
-            if self.client().ping():
-                self.client().cluster.health(wait_for_status='green', cluster_manager_timeout=f'{self._init_timeout}s')  # type: ignore[reportCallIssue]
-                healthy = True
-                logger.debug('opensearch is healthy')
-                break
-            self._wait(1)
-        return healthy
+def top_queries_indices(client: OpenSearch) -> list[str]:
+    """The query-insights indices on the cluster, hidden ones included."""
+    found = client.indices.get(index=TOP_QUERIES_PATTERN, expand_wildcards='all', ignore_unavailable=True)
+    return sorted(found)

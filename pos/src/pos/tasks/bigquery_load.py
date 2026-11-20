@@ -1,57 +1,45 @@
-# Big query load task
+# Load every modelled output into BigQuery staging, check it, then swap it into prod
 
-from pathlib import Path
-
-from loguru import logger
+from google.cloud import bigquery
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import OtterError
 
-from pos.gcp.bigquery import BigQuery
-from pos.utils import get_config
-
-
-class BigqueryLoadError(OtterError):
-    """Base class for exceptions in this module."""
+from pos.gcp.bigquery import BigQueryRelease, published_tables
 
 
 class BigqueryLoadSpec(Spec):
-    """Configuration fields for the BigQuery task."""
+    """Configuration fields for the BigQuery task.
 
-    dataset_id: str = 'platform_dev'
-    project_id: str = 'open-targets-eu-dev'
-    location: str = 'eu'
-    table: str
-    base_uri: str
-    file_pattern: str = '*.parquet'
-    format: str = 'PARQUET'
+    release_uri: the run whose `output/` is published
+    release: the release version written to `ot_release`
+    project_id: project holding both datasets
+    dataset_id: prod dataset, never deleted
+    staging_dataset_id: dataset loaded and checked before the swap
+    location: BigQuery location of both datasets
+    """
+
+    release_uri: str
+    release: str
+    project_id: str
+    dataset_id: str
+    staging_dataset_id: str
+    location: str
 
 
 class BigqueryLoad(Task):
     def __init__(self, spec: BigqueryLoadSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
         self.spec: BigqueryLoadSpec
-        try:
-            self._config = get_config('config/datasets.yaml').bigquery
-            self._table_name = self._config[self.spec.table].index
-            self._input_dir = self._config[self.spec.table].input_dir
-            self._path = f'{self.spec.base_uri}/{self._input_dir}/{self.spec.file_pattern}'
-            self._hive_partition = bool(self._config[self.spec.table].get('hive_partition'))
-        except AttributeError:
-            raise BigqueryLoadError(f'unable to load config for {self.spec.table}')
 
     @report
     def run(self) -> Task:
-        bigquery = BigQuery(project=self.spec.project_id, location=self.spec.location, dataset=self.spec.dataset_id)
-        if self._hive_partition:
-            logger.debug(f'loading {self._path} into {self._table_name} with hive partition')
-            hive_partition_source = Path(f'{self.spec.base_uri}/{self._input_dir}').parent
-            bigquery.load_from_uri(
-                self._path,
-                self._table_name,
-                self.spec.format,
-                hive_partition_source=hive_partition_source,
-            )
-        else:
-            bigquery.load_from_uri(self._path, self._table_name, self.spec.format)
+        client = bigquery.Client(project=self.spec.project_id, location=self.spec.location)
+        release = BigQueryRelease(
+            client,
+            project=self.spec.project_id,
+            dataset=self.spec.dataset_id,
+            staging=self.spec.staging_dataset_id,
+            location=self.spec.location,
+        )
+        release.publish(published_tables(self.spec.release_uri), self.spec.release_uri, self.spec.release)
         return self

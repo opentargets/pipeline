@@ -1,15 +1,17 @@
-# Data prep task
+# OpenSearch create index task
 
 from pathlib import Path
 
 from loguru import logger
-from opensearchpy import OpenSearch, RequestError
+from opensearchpy import RequestError
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.opensearch import OpenSearchInstanceManager
-from pos.utils import get_config
+from pos.services.opensearch import connect, create_body
+from pos.utils import WIPE_DISKS, get_config
+
+ALREADY_EXISTS = 'resource_already_exists_exception'
 
 
 class OpenSearchCreateIndexError(OtterError):
@@ -19,10 +21,8 @@ class OpenSearchCreateIndexError(OtterError):
 class OpenSearchCreateIndexSpec(Spec):
     """Configuration fields for the create index OpenSearch task."""
 
-    service_name: str = 'os-pos'
     dataset: str
     prefix: str
-    external_opensearch: bool = False
     es_host: str = 'localhost'
     es_port: int = 9200
     dataset_config_path: str = 'config/datasets.yaml'
@@ -41,23 +41,14 @@ class OpenSearchCreateIndex(Task):
 
     @report
     def run(self) -> Task:
-        logger.debug(f'creating index {self._index_name}')
-        if not self.spec.external_opensearch:
-            opensearch = OpenSearchInstanceManager(self.spec.service_name).client()
-        else:
-            opensearch = OpenSearch(
-                [{'host': self.spec.es_host, 'port': self.spec.es_port}], use_ssl=False, timeout=7200
-            )
-        if not opensearch.indices.exists(index=self._index_name):
-            try:
-                opensearch.indices.create(
-                    index=self._index_name,
-                    body=self._mappings.read_text(),
-                )
-            except RequestError as e:
-                logger.debug(f'index: {e} already exists')
-            logger.debug(f'created index {self._index_name}')
-        logger.debug(f'index {self._index_name} already exists')
+        opensearch = connect(self.spec.es_host, self.spec.es_port)
+        try:
+            opensearch.indices.create(index=self._index_name, body=create_body(self._mappings))
+        except RequestError as e:
+            if e.error != ALREADY_EXISTS:
+                raise
+            raise OpenSearchCreateIndexError(f'index {self._index_name} already exists. {WIPE_DISKS}') from e
+        logger.info(f'index {self._index_name} created')
         return self
 
     def _get_index_name(self) -> str:

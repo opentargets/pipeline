@@ -2,7 +2,7 @@
 -- (one row per variant in each credible set), so the credible_set_variant load must run first.
 -- credible_set_variant_log is dropped at the end of this script. credible_sets_log is kept
 -- for targets.sql, which drops it.
--- NB: the load task splits on semicolons, so do not use them inside comments or strings.
+-- NB: the load task splits statements on semicolons outside quotes and comments.
 
 -- One row per credible set, with the lead variant statistics from credible_set_variant
 -- (every lead variant has a row there) and the number of variants in the credible set.

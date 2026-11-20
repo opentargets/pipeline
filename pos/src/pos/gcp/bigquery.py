@@ -1,115 +1,138 @@
-from collections.abc import Iterable, Sequence
-from pathlib import Path
+"""Load the release's modelled outputs into a staging dataset, then swap them into prod."""
+
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from google.cloud import bigquery
-from google.cloud.bigquery import external_config
-from google.cloud.bigquery.schema import SchemaField
 from loguru import logger
+from ot_datamodels.discovery import discover_datasets
+from otter.storage.synchronous.handle import StorageHandle
+from otter.util.errors import OtterError
 
 
-class BigQuery:
-    """BigQuery client wrapper.
+class BigQueryError(OtterError):
+    """A BigQuery load, check or swap failed."""
 
-    Attributes:
-        _client: BigQuery client
-        _dataset: Dataset name
 
-    Args:
-        project: GCP project ID
-        location: GCP location
-        dataset: Dataset name (a bq dataset is a container for tables)
+#: One-row table holding the release version, swapped with the outputs.
+RELEASE_TABLE = 'ot_release'
+RELEASE_SCHEMA = [bigquery.SchemaField('release', 'STRING')]
 
-    """
 
-    def __init__(self, project: str, location: str, dataset: str) -> None:
-        self._client = bigquery.Client(project=project, location=location)
+def published_tables(release_uri: str) -> list[str]:
+    """Modelled datasets with at least one `*.parquet` in `<release_uri>/output/<name>/`."""
+    found = StorageHandle(f'{release_uri.rstrip("/")}/output').glob('*/*.parquet')
+    folders = {path.rstrip('/').rsplit('/', 2)[-2] for path in found}
+    models = set(discover_datasets())
+    for name in sorted(models - folders):
+        logger.warning(f'{name} has a model but no output, skipped')
+    for name in sorted(folders - models):
+        logger.warning(f'output/{name} has no model, not published')
+    return sorted(models & folders)
+
+
+class BigQueryRelease:
+    """Staging and prod datasets of one project; `client` is a `bigquery.Client` or a stand-in."""
+
+    def __init__(self, client: Any, project: str, dataset: str, staging: str, location: str) -> None:
+        self._client = client
+        self._project = project
         self._dataset = dataset
+        self._staging = staging
+        self._location = location
 
-    def load_from_uri(self, path: str, table: str, format: str, hive_partition_source: Path | None = None) -> None:
-        """Load data from a URI into a table.
+    def publish(self, tables: list[str], release_uri: str, release: str) -> None:
+        """Load and check staging, then swap. Prod is untouched unless every table staged."""
+        if not tables:
+            raise BigQueryError('no tables to publish')
+        if RELEASE_TABLE in tables:
+            raise BigQueryError(f'{RELEASE_TABLE} is reserved for the release version')
+        swapped = [*tables, RELEASE_TABLE]
+        self.load_staging(tables, release_uri, release)
+        self.check_staging(swapped)
+        self.swap(swapped)
 
-        Args:
-            path (str): URI of the data
-            table (str): Table name
-            format (str): Data format
-            hive_partition_source (Path|None): Optional source URI for Hive partitioning
-        """
-        logger.debug(f'loading {path} into {self.table_name(table)}')
-        if hive_partition_source:
-            hive_partioning_options = external_config.HivePartitioningOptions()
-            hive_partioning_options.mode = 'STRINGS'
-            hive_partioning_options.source_uri_prefix = str(hive_partition_source)
-            self._client.load_table_from_uri(
-                path,
-                self.table_name(table),
-                job_config=bigquery.LoadJobConfig(
-                    autodetect=True,
-                    source_format=format,
-                    hive_partitioning=hive_partioning_options,
-                ),
-            )
-        self._client.load_table_from_uri(
-            path, self.table_name(table), job_config=bigquery.LoadJobConfig(autodetect=True, source_format=format)
+    def load_staging(self, tables: Iterable[str], release_uri: str, release: str) -> None:
+        """Load each table's parquet, and the `ot_release` row, into staging, replacing them."""
+        staging = bigquery.Dataset(f'{self._project}.{self._staging}')
+        staging.location = self._location
+        self._client.create_dataset(staging, exists_ok=True)
+        config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.PARQUET,
+            autodetect=True,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        )
+        release_uri = release_uri.rstrip('/')
+        self._await_all(
+            'load',
+            {
+                t: lambda t=t: self._client.load_table_from_uri(
+                    f'{release_uri}/output/{t}/*.parquet',
+                    self._id(self._staging, t),
+                    job_config=config,
+                    location=self._location,
+                )
+                for t in tables
+            }
+            | {RELEASE_TABLE: lambda: self._load_release(release)},
         )
 
-    def load_from_json(self, data: Iterable[dict[str, Any]], table: str, schema: Sequence[SchemaField]) -> None:
-        """Load data from a JSON object into a table.
-
-        Args:
-            data (Iterable[dict[str, Any]]): JSON object
-            table (str): Table name
-            schema (Sequence[SchemaField]): Table schema
-        """
-        self._client.load_table_from_json(
-            data, self.table_name(table), job_config=bigquery.LoadJobConfig(schema=schema)
+    def _load_release(self, release: str) -> Any:
+        config = bigquery.LoadJobConfig(
+            schema=RELEASE_SCHEMA,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        )
+        return self._client.load_table_from_json(
+            [{'release': release}],
+            self._id(self._staging, RELEASE_TABLE),
+            job_config=config,
+            location=self._location,
         )
 
-    def delete_dataset(self) -> None:
-        """Delete the dataset and its contents."""
-        self._client.delete_dataset(self._dataset, delete_contents=True, not_found_ok=True)
+    def check_staging(self, tables: Iterable[str]) -> None:
+        """Raise if any staged table is empty."""
+        empty = [t for t in tables if not self._client.get_table(self._id(self._staging, t)).num_rows]
+        if empty:
+            raise BigQueryError(f'empty staging tables: {", ".join(empty)}')
 
-    def create_dataset(self) -> None:
-        """Create the dataset (container for tables).
-
-        If the dataset exists already, it will delete it and then recreate it.
-        """
-        self.delete_dataset()
-        self._client.create_dataset(self._dataset, exists_ok=True)
-
-    def create_table(self, table: str) -> None:
-        """Create a table.
-
-        Args:
-            table: Table name
-        """
-        self._client.create_table(self.table_name(table))
-
-    def table_name(self, table: str) -> str:
-        """Return the fully qualified table name.
-
-        Args:
-            table: Table name
-
-        Returns:
-            Fully qualified table name
-        """
-        return f'{self._dataset}.{table}'
-
-    def make_dataset_access_public(self) -> None:
-        """Make the dataset public.
-
-        Sets the dataset access to allAuthenticatedUsers with READ and metadataViewer roles.
-        """
-        dataset = self._client.get_dataset(self._dataset)
-        access_entries = dataset.access_entries
-        access_entries.append(
-            bigquery.AccessEntry(
-                role='roles/bigquery.metadataViewer', entity_type='specialGroup', entity_id='allAuthenticatedUsers'
-            )
+    def swap(self, tables: list[str]) -> None:
+        """Copy every staged table over prod, then drop prod tables not in `tables`."""
+        config = bigquery.CopyJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE)
+        self._await_all(
+            'copy',
+            {
+                t: lambda t=t: self._client.copy_table(
+                    self._id(self._staging, t),
+                    self._id(self._dataset, t),
+                    job_config=config,
+                    location=self._location,
+                )
+                for t in tables
+            },
         )
-        access_entries.append(
-            bigquery.AccessEntry(role='READER', entity_type='specialGroup', entity_id='allAuthenticatedUsers')
-        )
-        dataset.access_entries = access_entries
-        self._client.update_dataset(dataset, ['access_entries'])
+        keep = set(tables)
+        for table in self._client.list_tables(f'{self._project}.{self._dataset}'):
+            if table.table_type == 'TABLE' and table.table_id not in keep:
+                logger.info(f'dropping {self._dataset}.{table.table_id}, no longer published')
+                self._client.delete_table(self._id(self._dataset, table.table_id), not_found_ok=True)
+
+    def _await_all(self, kind: str, start: dict[str, Callable[[], Any]]) -> None:
+        """Start every job, then wait on each; raise naming every table that failed."""
+        jobs, errors = {}, {}
+        for table, begin in start.items():
+            try:
+                jobs[table] = begin()
+            except Exception as e:
+                errors[table] = e
+        for table, job in jobs.items():
+            try:
+                job.result()
+                logger.debug(f'{kind} {table} done')
+            except Exception as e:
+                errors[table] = e
+        if errors:
+            detail = '; '.join(f'{t}: {e}' for t, e in sorted(errors.items()))
+            raise BigQueryError(f'{kind} failed for {", ".join(sorted(errors))} ({detail})')
+
+    def _id(self, dataset: str, table: str) -> str:
+        return f'{self._project}.{dataset}.{table}'

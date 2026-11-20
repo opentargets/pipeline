@@ -1,14 +1,14 @@
 # Clickhouse load task
 from pathlib import Path
 
-import clickhouse_connect
 from clickhouse_connect.driver.tools import insert_file
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.services.clickhouse import ClickhouseInstanceManager
+from pos.services.clickhouse import connect
+from pos.sql import split_statements
 from pos.utils import get_config
 
 
@@ -19,9 +19,7 @@ class ClickhouseLoadError(OtterError):
 class ClickhouseLoadSpec(Spec):
     """Configuration fields for the Load Clickhouse task."""
 
-    service_name: str = 'ch-pos'
     dataset: str
-    external_clickhouse: bool = False
     clickhouse_host: str = 'localhost'
     clickhouse_username: str = 'default'
     clickhouse_password: str = ''
@@ -38,7 +36,9 @@ class ClickhouseLoad(Task):
         try:
             self._config = get_config(self.spec.dataset_config_path).clickhouse
             self._table_name = self._config[self.spec.dataset]['table']
-            self._input_dir = self._config[self.spec.dataset]['input_dir']
+            self._derived = bool(self._config[self.spec.dataset].get('derived', False))
+            self._optional = bool(self._config[self.spec.dataset].get('optional', False))
+            self._input_dir = self._config[self.spec.dataset].get('input_dir')
             self._pre_load_sql = self._config[self.spec.dataset].get('preload_script')
             self._post_load_sql = self._config[self.spec.dataset].get('postload_script')
             self._glob_pattern = self._config[self.spec.dataset].get('glob_pattern', '*.parquet')
@@ -47,44 +47,30 @@ class ClickhouseLoad(Task):
 
     @report
     def run(self) -> Task:
-        logger.debug('loading clickhouse service')
-        if not self.spec.external_clickhouse:
-            clickhouse_client = ClickhouseInstanceManager(
-                name=self.spec.service_name,
-                host=self.spec.clickhouse_host,
-                username=self.spec.clickhouse_username,
-                password=self.spec.clickhouse_password,
-                database=self.spec.clickhouse_database,
-                port=self.spec.clickhouse_port
-            ).client()
-        else:
-            clickhouse_client = clickhouse_connect.get_client(
-                host=self.spec.clickhouse_host,
-                port=self.spec.clickhouse_port,
-                username=self.spec.clickhouse_username,
-                password=self.spec.clickhouse_password,
-                database=self.spec.clickhouse_database
-            )
-        if not clickhouse_client:
-            raise ClickhouseLoadError(f'Clickhouse service {self.spec.service_name} failed to start')
-        # create table tables
-        pre_load_statements = Path(self._pre_load_sql).read_text().split(';')
-        self._execute_statements(clickhouse_client, pre_load_statements)
-        # load data
-        files = self._get_parquet_path().glob(self._glob_pattern)
+        files = [] if self._derived else list(self._get_parquet_path().glob(self._glob_pattern))
+        if not self._derived and not files:
+            where = f'{self._get_parquet_path()}/{self._glob_pattern}'
+            if not self._optional:
+                raise ClickhouseLoadError(f'no parquet files for dataset {self.spec.dataset} in {where}')
+            logger.warning(f'no parquet files for optional dataset {self.spec.dataset} in {where}, loading none')
+        client = connect(
+            host=self.spec.clickhouse_host,
+            port=self.spec.clickhouse_port,
+            username=self.spec.clickhouse_username,
+            password=self.spec.clickhouse_password,
+            database=self.spec.clickhouse_database,
+        )
+        self._execute_script(client, self._pre_load_sql)
         for file in files:
             logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
-            insert_file(clickhouse_client, self._table_name, str(file), fmt='Parquet')
+            insert_file(client, self._table_name, str(file), fmt='Parquet')
         if self._post_load_sql is not None:
-            # run post load sql
-            post_load_statements = Path(self._post_load_sql).read_text().split(';')
-            self._execute_statements(clickhouse_client, post_load_statements)
+            self._execute_script(client, self._post_load_sql)
         return self
 
     def _get_parquet_path(self) -> Path:
         return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')
 
-    def _execute_statements(self, client, statements: list[str]) -> None:
-        for sql in statements:
-            if sql.strip():
-                client.query(sql)
+    def _execute_script(self, client, script: str) -> None:
+        for sql in split_statements(Path(script).read_text()):
+            client.query(sql)
