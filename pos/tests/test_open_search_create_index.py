@@ -1,4 +1,4 @@
-"""open_search_create_index treats an existing index as success and raises on any other error."""
+"""open_search_create_index creates the index with refresh off and fails if it exists."""
 
 import json
 from pathlib import Path
@@ -9,7 +9,11 @@ from loguru import logger
 from opensearchpy import RequestError
 
 from pos.tasks import open_search_create_index as module
-from pos.tasks.open_search_create_index import OpenSearchCreateIndex, OpenSearchCreateIndexSpec
+from pos.tasks.open_search_create_index import (
+    OpenSearchCreateIndex,
+    OpenSearchCreateIndexError,
+    OpenSearchCreateIndexSpec,
+)
 
 ROOT = Path(__file__).parents[1]
 
@@ -68,10 +72,11 @@ def test_create_index_created(make_task, messages):
     assert body['mappings'] == mappings['mappings']
 
 
-def test_create_index_exists_ok(make_task, messages):
+def test_create_index_exists_fails(make_task, messages):
+    # a rerun into used disks would double every auto-id document
     task, _ = make_task(RequestError(400, 'resource_already_exists_exception'))
-    _run(task)
-    assert any('exists' in m for m in messages)
+    with pytest.raises(OpenSearchCreateIndexError, match=r'platform2612_search_disease already exists.*wipe'):
+        _run(task)
     assert not any('created' in m for m in messages)
 
 

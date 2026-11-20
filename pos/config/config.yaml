@@ -34,6 +34,7 @@ steps:
       prepared_data_parent: ${local_data}
     # opensearch
     - name: open_search_prepare cluster settings
+      prefix: ${database_namespace}
     - name: explode load all opensearch datasets
       requires:
         - open_search_prepare cluster settings

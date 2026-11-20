@@ -9,7 +9,7 @@ from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
 from pos.services.opensearch import connect, create_body
-from pos.utils import get_config
+from pos.utils import WIPE_DISKS, get_config
 
 ALREADY_EXISTS = 'resource_already_exists_exception'
 
@@ -47,8 +47,7 @@ class OpenSearchCreateIndex(Task):
         except RequestError as e:
             if e.error != ALREADY_EXISTS:
                 raise
-            logger.info(f'index {self._index_name} exists')
-            return self
+            raise OpenSearchCreateIndexError(f'index {self._index_name} already exists. {WIPE_DISKS}') from e
         logger.info(f'index {self._index_name} created')
         return self
 

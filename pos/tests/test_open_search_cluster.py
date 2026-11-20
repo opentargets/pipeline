@@ -1,4 +1,4 @@
-"""backend turns query insights off before any index and leaves no top_queries-* index."""
+"""backend refuses a used cluster, turns query insights off before any index and leaves no top_queries-* index."""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -9,7 +9,7 @@ import yaml
 from pos.services import opensearch as service
 from pos.tasks import open_search_finish, open_search_prepare
 from pos.tasks.open_search_finish import OpenSearchFinish, OpenSearchFinishError, OpenSearchFinishSpec
-from pos.tasks.open_search_prepare import OpenSearchPrepare, OpenSearchPrepareSpec
+from pos.tasks.open_search_prepare import OpenSearchPrepare, OpenSearchPrepareError, OpenSearchPrepareSpec
 
 ROOT = Path(__file__).parents[1]
 BACKEND = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend']
@@ -38,15 +38,23 @@ class FakeIndices:
         if not self.undeletable:
             self.names -= set(index.split(','))
 
+    def exists(self, index):
+        return index in self.names
+
 
 def _client(names: list[str] | None = None, undeletable: bool = False) -> MagicMock:
     return MagicMock(cluster=FakeCluster(), indices=FakeIndices(names or [], undeletable))
 
 
-def _run(cls, spec_cls, client, monkeypatch, module):
+def _run(cls, spec_cls, client, monkeypatch, module, **fields):
     monkeypatch.setattr(module, 'connect', lambda host, port: client)
-    task = cls(spec_cls(name=f'{module.__name__.rsplit(".", 1)[1]} x'), MagicMock())
+    task = cls(spec_cls(name=f'{module.__name__.rsplit(".", 1)[1]} x', **fields), MagicMock())
     return cls.run.__wrapped__(task)
+
+
+def _prepare(client, monkeypatch):
+    fields = {'prefix': 'platform2612', 'dataset_config_path': str(ROOT / 'config' / 'datasets.yaml')}
+    return _run(OpenSearchPrepare, OpenSearchPrepareSpec, client, monkeypatch, open_search_prepare, **fields)
 
 
 def _names(tasks: list[dict]) -> list[str]:
@@ -61,9 +69,32 @@ def test_setting_names():
 
 
 def test_prepare_turns_query_insights_off(monkeypatch):
-    client = _client()
-    _run(OpenSearchPrepare, OpenSearchPrepareSpec, client, monkeypatch, open_search_prepare)
+    client = _client(['platform2512_search_disease', 'top_queries-2026.11.20-00001'])
+    _prepare(client, monkeypatch)
     assert client.cluster.settings == service.QUERY_INSIGHTS_OFF
+
+
+@pytest.mark.parametrize('index', ['platform2612_downloads', 'platform2612_search_variant'])
+def test_prepare_refuses_a_used_cluster(monkeypatch, index):
+    client = _client([index])
+    with pytest.raises(OpenSearchPrepareError, match=rf'{index}\. .*wipe the ClickHouse and OpenSearch data disks'):
+        _prepare(client, monkeypatch)
+    assert client.cluster.settings == {}
+
+
+def test_prepare_checks_every_index_in_datasets_yaml(monkeypatch):
+    datasets = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['opensearch']
+    task = OpenSearchPrepare(
+        OpenSearchPrepareSpec(
+            name='open_search_prepare x',
+            prefix='platform2612',
+            dataset_config_path=str(ROOT / 'config' / 'datasets.yaml'),
+        ),
+        MagicMock(),
+    )
+    assert task._indices == sorted(f'platform2612_{d["index"]}' for d in datasets.values())
+    (explode,) = [t for t in BACKEND if t['name'] == 'explode load all opensearch datasets']
+    assert set(explode['foreach']) <= set(datasets)
 
 
 def test_finish_without_top_queries(monkeypatch):

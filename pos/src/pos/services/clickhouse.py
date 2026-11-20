@@ -33,3 +33,9 @@ def create_database(client: Client, database: str, exists_ok: bool = True) -> No
     else:
         query = 'CREATE DATABASE {database:Identifier}'
     client.query(query=query, parameters={'database': database})
+
+
+def tables(client: Client, database: str) -> list[str]:
+    """The tables in `database`."""
+    query = 'SELECT name FROM system.tables WHERE database = {database:String} ORDER BY name'
+    return [row[0] for row in client.query(query=query, parameters={'database': database}).result_rows]

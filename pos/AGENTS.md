@@ -29,7 +29,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 
 | Step | Does | Needs |
 | --- | --- | --- |
-| `backend` | syncs `output/`, `view/`, `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices and the ClickHouse database | ClickHouse `:8123`, OpenSearch `:9200` |
+| `backend` | syncs `output/`, `view/`, `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices and the ClickHouse database | ClickHouse `:8123`, OpenSearch `:9200`, on empty disks: it fails if the database has tables or an index exists |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket | |
