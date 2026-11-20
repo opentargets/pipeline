@@ -1,6 +1,5 @@
 """Scratch mode in the entry point: the run location and the destinations are swapped."""
 
-import os
 import sys
 
 import pytest
@@ -18,8 +17,6 @@ SCRATCH_URI = 'gs://open-targets-pos-scratch/runs/do-platform-2612-3'
 def setup(tmp_path, monkeypatch):
     config = tmp_path / 'config.yaml'
     config.write_text(yaml.safe_dump({'steps': {'echo': [{'name': 'hello_world a', 'who': '${data_source}'}]}}))
-    for var in [v for v in os.environ if v.startswith('POS_')]:
-        monkeypatch.delenv(var)
     argv = ['pos', '-s', 'echo', '-c', str(config), '-w', str(tmp_path / 'work'), '-r', RELEASE_URI]
     monkeypatch.setattr(sys, 'argv', argv)
     # keep otter from replacing the test's sink

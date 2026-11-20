@@ -84,8 +84,8 @@ destinations, for test runs that must not touch the public release:
 - **ClickHouse config:** the image ships `config.d/` and `users.d/` at
   `/app/config/clickhouse/`. Extract them and write them to the ClickHouse data disk
   root before starting ClickHouse, so `tarballs` contains them.
-- **Secrets:** `AWS_SHARED_CREDENTIALS_FILE` for `aws_sync`, as a file mount from
-  Secret Manager.
+- **Secrets:** `AWS_SHARED_CREDENTIALS_FILE` for `aws_sync` and `publish_manifest`, as a
+  file mount from Secret Manager; the service account reads the secret for the mount.
 - **Exit code:** non-zero on failure.
 - **Outputs:**
   - `backend`: the data disks, plus `croissant.json` under `release_uri`.
@@ -93,16 +93,21 @@ destinations, for test runs that must not touch the public release:
   - `gcs_sync`: the release bucket.
   - `aws_sync`: S3.
   - `bigquery`: BigQuery.
-  - Every step: the manifest.
+  - `publish_manifest`: the manifest in the release bucket and S3; in scratch mode, the
+    scratch bucket only.
+  - `scratch_cleanup`: drops the scratch BigQuery datasets.
+  - Every step: the manifest, except a PPP `scratch_cleanup`, a no-op that writes none.
 - **Retries:** `backend` cannot be retried in place. A retry needs fresh or wiped disks;
   the rerun guard refuses otherwise.
 - **Concurrency:** never run two `bigquery` steps at once; they share
   `platform_staging`.
-- **Ordering:** `tarballs` must finish before `gcs_sync`; `publish_manifest` last. The public tarballs reach the
-  release bucket only through `gcs_sync`.
+- **Ordering:** `tarballs` must finish before `gcs_sync`; `publish_manifest` last. The
+  public tarballs reach the release bucket only through `gcs_sync`.
 - **Service account:** read `open-targets-pipeline-runs`; write the release buckets
   (`open-targets-data-releases`, `open-targets-ppp-data-releases`); create datasets and
-  write tables in BigQuery `open-targets-prod` (EU).
+  write tables in BigQuery `open-targets-prod` (EU). Scratch mode: write
+  `gs://open-targets-pos-scratch`; create, write and delete datasets in BigQuery
+  `open-targets-eu-dev`.
 - **Labels:** `tool=pos`, `step=<step>`.
 
 ## Interim (until phase 4)

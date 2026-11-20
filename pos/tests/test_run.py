@@ -64,8 +64,6 @@ ECHO = [
 def _run_main(tmp_path, monkeypatch, mocker, release_uri, tasks=ECHO):
     config = tmp_path / 'config.yaml'
     config.write_text(yaml.safe_dump({'scratchpad': {'release': 'stale'}, 'steps': {'echo': tasks}}))
-    for var in [v for v in os.environ if v.startswith('POS_')]:
-        monkeypatch.delenv(var)
     argv = ['pos', '-s', 'echo', '-c', str(config), '-w', str(tmp_path / 'work'), '-r', release_uri]
     monkeypatch.setattr(sys, 'argv', argv)
     # the manifest is the only remote write
@@ -94,8 +92,6 @@ def test_main_reads_the_package_config_without_c(tmp_path, monkeypatch):
     """The image command has no -c: the config comes from config/config.yaml under the cwd."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     monkeypatch.chdir(root)
-    for var in [v for v in os.environ if v.startswith('POS_')]:
-        monkeypatch.delenv(var)
     argv = ['pos', '-s', 'gcs_sync', '-r', 'gs://x/do/platform-2612-3', '-w', str(tmp_path / 'work')]
     monkeypatch.setattr(sys, 'argv', argv)
     seen = {}

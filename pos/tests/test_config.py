@@ -1,6 +1,5 @@
 """The one config: its steps, no per-release values, and the paths its tasks share."""
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -105,10 +104,10 @@ def load(tmp_path, monkeypatch):
     sink = logger.add(lambda m: lines.append(str(m)), level='INFO')
 
     def _load(step: str, run: str = 'platform-2612-3', scratch: bool = False):
-        for var in [v for v in os.environ if v.startswith('POS_')]:
-            monkeypatch.delenv(var)
         if scratch:
             monkeypatch.setenv('POS_SCRATCH', '1')
+        else:
+            monkeypatch.delenv('POS_SCRATCH', raising=False)
         config = str(ROOT / 'config' / 'config.yaml')
         uri = f'gs://open-targets-pipeline-runs/do/{run}'
         argv = ['pos', '-s', step, '-c', config, '-w', str(tmp_path / 'work'), '-r', uri]
