@@ -69,26 +69,43 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 - `pos@v26.12.0rc3` is the last tag with `pos remote` and Terraform. Build 26.12 with it
   if phase 4 is not ready.
 - Otherwise run `backend` by hand on a VM:
-  1. Attach two disks and mount them, e.g. `/mnt/clickhouse`, `/mnt/opensearch`, and a
-     work disk at `/mnt/disks/work`.
-  2. Copy the server config out of the image into the ClickHouse disk root:
-     `docker create --name pos <pos-image>`, then
-     `docker cp pos:/app/config/clickhouse/config.d /mnt/clickhouse/` and the same for
-     `users.d`, then `docker rm pos`.
-  3. Start the stock servers on the host network, data on the disks:
+  1. Attach two disks and mount them at `/mnt/clickhouse` and `/mnt/opensearch`, and a
+     work disk at `/mnt/disks/work`. 400 GB pd-ssd each is what the old Terraform used.
+  2. Copy the server config out of the image into the ClickHouse disk root, and make
+     the data directories. The disk root holds `data/`, `config.d/` and `users.d/`, the
+     layout `tarballs` ships; OpenSearch runs as uid 1000:
 
      ```sh
-     docker run -d --network host -v /mnt/clickhouse:/var/lib/clickhouse \
+     docker create --name pos <pos-image>
+     docker cp pos:/app/config/clickhouse/config.d /mnt/clickhouse/
+     docker cp pos:/app/config/clickhouse/users.d /mnt/clickhouse/
+     docker rm pos
+     mkdir -p /mnt/clickhouse/data /mnt/opensearch/data
+     chown 1000:1000 /mnt/opensearch/data
+     ```
+
+  3. Start the stock servers on the host network, data on the disks. Without
+     `OPENSEARCH_JAVA_OPTS` OpenSearch gets the image's 1 GB heap; 31g keeps
+     compressed pointers:
+
+     ```sh
+     docker run -d --name ch --network host --ulimit nofile=262144:262144 \
+       -v /mnt/clickhouse/data:/var/lib/clickhouse \
        -v /mnt/clickhouse/config.d:/etc/clickhouse-server/config.d \
        -v /mnt/clickhouse/users.d:/etc/clickhouse-server/users.d \
        clickhouse/clickhouse-server:26.8.2.7
-     docker run -d --network host -e discovery.type=single-node \
-       -e DISABLE_SECURITY_PLUGIN=true -v /mnt/opensearch:/usr/share/opensearch/data \
+     docker run -d --name os --network host \
+       --ulimit memlock=-1:-1 --ulimit nofile=65536:65536 \
+       -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true \
+       -e OPENSEARCH_JAVA_OPTS='-Xms31g -Xmx31g' -e bootstrap.memory_lock=true \
+       -e thread_pool.write.queue_size=-1 \
+       -v /mnt/opensearch/data:/usr/share/opensearch/data \
        opensearchproject/opensearch:3.5.0
      ```
 
   4. Run the step: `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work
      <pos-image> -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`.
+     Stop the servers (`docker stop ch os`) before snapshotting the disks.
   5. Then `tarballs` (with the disks mounted at `/mnt/clickhouse` and `/mnt/opensearch`,
      also into the pos container), `bigquery`, `gcs_sync` and `aws_sync`.
   6. Delete the VM and disks.
