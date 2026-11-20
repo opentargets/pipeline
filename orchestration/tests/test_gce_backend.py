@@ -90,6 +90,13 @@ def test_backend_script_starts_servers_before_pos(backend: str) -> None:
         assert f'/dev/disk/by-id/google-{device} /mnt/disks/{device}' in backend
 
 
+def test_servers_raise_max_map_count_before_opensearch(backend: str, tarballs: str) -> None:
+    sysctl = backend.index('sysctl -w vm.max_map_count=262144')
+    assert sysctl < backend.index('docker run -d --name opensearch')
+    assert 'max_map_count' not in tarballs
+    subprocess.run(['bash', '-n'], input=backend, text=True, check=True)
+
+
 def test_pos_runs_on_the_host_network_with_work_disk_and_secrets(backend: str) -> None:
     pos = backend[_pos_run(backend) :]
     assert '--network host' in pos

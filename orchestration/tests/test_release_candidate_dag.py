@@ -13,6 +13,7 @@ import pytest
 from airflow.models import DagBag
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.task.trigger_rule import TriggerRule
+from google.api_core.exceptions import PreconditionFailed
 
 from orchestration.dags import release_candidate
 from orchestration.dags.config.release import HandOff, ReleaseConfig
@@ -147,6 +148,15 @@ def test_names_are_templated_from_the_names_task(dag) -> None:
     assert _render(dag, 'guard', 'disk_names') == [NAMES['ch_disk'], NAMES['os_disk']]
     assert _render(dag, 'guard', 'blob_uri') == HandOff.uri(URI)
     assert _render(dag, 'run_backend', 'data_disks') == {'clickhouse': NAMES['ch_disk'], 'opensearch': NAMES['os_disk']}
+
+
+def test_trailing_slash_release_uri_finds_the_hand_off(dag) -> None:
+    names = release_candidate.candidate(f'{URI}/')
+    assert names['release_uri'] == URI
+    context = {'params': {'release_uri': f'{URI}/'}, 'run_id': RUN_ID, 'ti': _TI({'names': names})}
+    task = dag.get_task('guard')
+    blob_uri = task.render_template(copy.deepcopy(task.blob_uri), context, dag.get_template_env())
+    assert blob_uri == f'{URI}/release_candidate.json'
 
 
 def test_disks_are_sized_from_the_names_task(dag) -> None:
@@ -354,3 +364,22 @@ def test_unified_pipeline_triggers_the_release_candidate(monkeypatch: pytest.Mon
     ends = {t.task_id for t in dag.tasks if t.task_id.split('.')[-1].startswith('end_')}
     assert ends
     assert task.upstream_task_ids == ends
+
+
+def test_hand_off_upload_uses_the_stripped_release_uri() -> None:
+    names = {**NAMES, **release_candidate.candidate(f'{URI}/'), **CAPTURED}
+    assert _upload(names)['release_uri'] == URI
+
+
+@pytest.mark.parametrize('writer', ['manual__run', 'manual__other'])
+def test_hand_off_already_written(writer: str) -> None:
+    existing = HandOff.model_validate({**_upload(NAMES), 'airflow_run_id': writer}).model_dump_json()
+    with patch.object(release_candidate, 'Client') as client:
+        blob = client.return_value.bucket.return_value.blob.return_value
+        blob.upload_from_string.side_effect = PreconditionFailed('exists')
+        blob.download_as_text.return_value = existing
+        if writer == 'manual__run':
+            assert release_candidate.upload_hand_off(NAMES, 'manual__run') == HandOff.uri(URI)
+        else:
+            with pytest.raises(PreconditionFailed):
+                release_candidate.upload_hand_off(NAMES, 'manual__run')

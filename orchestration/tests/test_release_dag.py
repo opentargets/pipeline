@@ -305,10 +305,26 @@ def test_small_steps(dag) -> None:
 def test_aws_credentials(dag, step: str, scratch: bool) -> None:
     out = _load(scratch)
     t = dag.get_task(f'run_{step}')
-    assert t.container_secret_files == {'pos-aws-credentials': '/secrets/aws/credentials'}
+    secrets = _render(dag, t.task_id, 'container_secret_files', out, scratch)
     env = _render(dag, t.task_id, 'container_env', out, scratch)
-    assert env['AWS_SHARED_CREDENTIALS_FILE'] == '/secrets/aws/credentials'
+    if scratch:
+        assert secrets == {}
+        assert 'AWS_SHARED_CREDENTIALS_FILE' not in env
+    else:
+        assert secrets == {'pos-aws-credentials': '/secrets/aws/credentials'}
+        assert env['AWS_SHARED_CREDENTIALS_FILE'] == '/secrets/aws/credentials'
     assert ('POS_SCRATCH' in env) is scratch
+
+
+@pytest.mark.parametrize('scratch', [False, True])
+def test_scratch_manifest_vm_fetches_no_secret(dag, scratch: bool) -> None:
+    out = _load(scratch)
+    t = copy.deepcopy(dag.get_task('run_publish_manifest'))
+    t.render_template_fields(
+        {'params': {'release_uri': URI, 'scratch': scratch}, 'run_id': RUN_ID, 'ti': _TI(_xcoms(out))},
+        dag.get_template_env(),
+    )
+    assert ('"pos-aws-credentials"' in t.startup_script()) is not scratch
 
 
 def test_other_steps_have_no_aws_credentials(dag) -> None:

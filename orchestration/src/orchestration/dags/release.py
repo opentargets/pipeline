@@ -103,6 +103,8 @@ def load_hand_off(release_uri: str, scratch: bool) -> dict[str, Any]:
         check_scratch(hand_off.pos_version, rc.scratch_min_pos_version)
 
     env = {'POS_SCRATCH': '1'} if scratch else {}
+    # scratch writes nothing to S3 and has no AWS secret
+    aws = {} if scratch else {'AWS_SHARED_CREDENTIALS_FILE': rc.aws_credentials_path}
     disks = {'clickhouse': names.ch_disk, 'opensearch': names.os_disk}
     return {
         'hand_off': hand_off.model_dump(mode='json'),
@@ -115,7 +117,8 @@ def load_hand_off(release_uri: str, scratch: bool) -> dict[str, Any]:
             **{f'{d}_disk': restored_disk(disks[d]) for d in DEVICES},
         },
         'env': env,
-        'aws_env': {**env, 'AWS_SHARED_CREDENTIALS_FILE': rc.aws_credentials_path},
+        'aws_env': {**env, **aws},
+        'aws_secrets': {} if scratch else {rc.aws_secret: rc.aws_credentials_path},
         'gates': {step: step_runs(step, hand_off.product, scratch) for step in GATED},
     }
 
@@ -151,7 +154,6 @@ with DAG(
 ) as dag:
     rc = ReleaseConfig()
     up = UnifiedPipelineConfig()
-    aws_secret = {rc.aws_secret: rc.aws_credentials_path}
 
     def labels(step: str, **templated: str) -> TemplatedLabels:
         return TemplatedLabels({'tool': 'pos', 'step': step}, templated={'product': _value('product'), **templated})
@@ -207,7 +209,7 @@ with DAG(
     deletes = [delete_restored_disk_task(device) for device in DEVICES]
 
     def small_step(
-        step: str, env: Any, secrets: dict[str, str] | None = None, trigger_rule: str = TriggerRule.ALL_SUCCESS
+        step: str, env: Any, secrets: Any = None, trigger_rule: str = TriggerRule.ALL_SUCCESS
     ) -> tuple[ComputeEngineRunContainerizedWorkloadSensor, DeleteInstanceOperator]:
         vm = resource_name(f'release_{step}')
         run = ComputeEngineRunContainerizedWorkloadSensor(
@@ -242,10 +244,10 @@ with DAG(
         return run, delete
 
     gcs_sync, delete_vm_gcs_sync = small_step('gcs_sync', r['env'])
-    aws_sync, delete_vm_aws_sync = small_step('aws_sync', r['aws_env'], aws_secret)
+    aws_sync, delete_vm_aws_sync = small_step('aws_sync', r['aws_env'], r['aws_secrets'])
     bigquery, delete_vm_bigquery = small_step('bigquery', r['env'])
     publish, delete_vm_publish = small_step(
-        'publish_manifest', r['aws_env'], aws_secret, trigger_rule=TriggerRule.NONE_FAILED
+        'publish_manifest', r['aws_env'], r['aws_secrets'], trigger_rule=TriggerRule.NONE_FAILED
     )
     # after every other step whatever its outcome, so a failed scratch run drops its datasets;
     # min one success keeps it off when read_hand_off failed

@@ -11,6 +11,7 @@ from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.sdk import DAG, Param, chain, task
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.task.trigger_rule import TriggerRule
+from google.api_core.exceptions import PreconditionFailed
 from google.cloud.storage import Client
 
 from orchestration.dags.config.release import HandOff, ReleaseConfig
@@ -48,7 +49,7 @@ def candidate(release_uri: str) -> dict[str, Any]:
     rc = ReleaseConfig()
     up = UnifiedPipelineConfig()
     return {
-        **asdict(candidate_names(release_uri)),
+        **asdict(candidate_names(release_uri.rstrip('/'))),
         'pos_image': up.pos_image,
         'pos_version': up.pos_version,
         'clickhouse_image': rc.clickhouse_image,
@@ -59,7 +60,7 @@ def candidate(release_uri: str) -> dict[str, Any]:
 
 
 def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = None) -> str:
-    """Write the hand-off to `<release_uri>/release_candidate.json`; fail if it exists."""
+    """Write the hand-off to `<release_uri>/release_candidate.json`; fail if another run wrote it."""
     hand_off = HandOff(
         release_uri=names['release_uri'],
         run=f'{names["prefix"]}/{names["run"]}',
@@ -80,9 +81,14 @@ def upload_hand_off(names: dict[str, Any], run_id: str, now: datetime | None = N
     uri = HandOff.uri(names['release_uri'])
     bucket, path = GCSPath(uri).split()
     blob = Client(project=GCP_PROJECT_PLATFORM).bucket(bucket).blob(path)
-    blob.upload_from_string(
-        hand_off.model_dump_json(indent=2), content_type='application/json', if_generation_match=0
-    )
+    try:
+        blob.upload_from_string(
+            hand_off.model_dump_json(indent=2), content_type='application/json', if_generation_match=0
+        )
+    except PreconditionFailed:
+        # a retry after an upload that succeeded
+        if HandOff.model_validate_json(blob.download_as_text()).airflow_run_id != run_id:
+            raise
     return uri
 
 
@@ -135,7 +141,7 @@ with DAG(
         task_id='guard',
         snapshot_names=[_name('ch_snapshot'), _name('os_snapshot')],
         disk_names=[_name('ch_disk'), _name('os_disk')],
-        blob_uri=HandOff.uri('{{ params.release_uri }}'),
+        blob_uri=HandOff.uri(_name('release_uri')),
     )
 
     creates = [

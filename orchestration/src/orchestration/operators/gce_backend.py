@@ -101,6 +101,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
                 -v {ch}/config.d:/etc/clickhouse-server/config.d \\
                 -v {ch}/users.d:/etc/clickhouse-server/users.d \\
                 {self.clickhouse_image}
+            sysctl -w vm.max_map_count=262144
             docker run -d --name opensearch --network host \\
                 --ulimit memlock=-1:-1 --ulimit nofile=65536:65536 \\
                 --log-driver="gcplogs" \\

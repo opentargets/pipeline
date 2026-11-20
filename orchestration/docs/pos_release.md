@@ -66,13 +66,13 @@ for role in roles/bigquery.dataEditor roles/bigquery.jobUser; do
 done
 ```
 
-The candidate reads the run and writes `disk_images/` and `release_candidate.json`
-under `release_uri`. The hand-off is overwritten on rebuild, so create alone is not
-enough. The bucket keeps its object ACLs; this is an IAM grant only (never enable UBLA):
+A scratch run only reads the run under `release_uri`; its tarballs and step records go
+to the scratch bucket. The bucket keeps its object ACLs; these are IAM grants only
+(never enable UBLA):
 
 ```sh
 gcloud storage buckets add-iam-policy-binding gs://open-targets-pipeline-runs \
-  --member serviceAccount:$SA --role roles/storage.objectUser
+  --member serviceAccount:$SA --role roles/storage.objectViewer
 ```
 
 ### AWS secret (prod, apply when publishing is approved)
@@ -87,6 +87,17 @@ gcloud secrets versions add pos-aws-credentials --project open-targets-eu-dev \
   --data-file <path-to-aws-credentials-file>
 gcloud secrets add-iam-policy-binding pos-aws-credentials --project open-targets-eu-dev \
   --member serviceAccount:$SA --role roles/secretmanager.secretAccessor
+```
+
+### Pipeline-runs writes (prod, apply when publishing is approved)
+
+A release writes `disk_images/` and overwrites `manifest.json` under `release_uri`, so
+create alone is not enough. (`release_candidate.json` is written by Airflow's own
+account, not this one.)
+
+```sh
+gcloud storage buckets add-iam-policy-binding gs://open-targets-pipeline-runs \
+  --member serviceAccount:$SA --role roles/storage.objectUser
 ```
 
 ### Release buckets and BigQuery (prod, apply when publishing is approved)
@@ -144,6 +155,19 @@ In this order; step 2 only after its precondition.
    (`gcloud compute instances list --format='value(name,serviceAccounts[].email)'`).
 
 ## Operating
+
+Both DAGs ship paused, and a run triggered while paused stays queued (the Airflow VM's
+8 h cap keeps running). Unpause `release_candidate` before a unified-pipeline run with
+`release_candidate: true` or before triggering it by hand, and unpause `release` before
+triggering it (API setup in the `unified-pipeline-run` skill, `vm-and-config.md`):
+
+```sh
+for dag in release_candidate release; do
+  curl -s -X PATCH "$B/api/v2/dags/$dag?update_mask=is_paused" \
+    -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+    -d '{"is_paused": false}'
+done
+```
 
 ### Release candidate
 
