@@ -1,6 +1,6 @@
 # SLE-map single-cell eQTLs
 
-This document was updated on 2026-11-03.
+This document was updated on 2026-11-20.
 
 SLE-map ([preprint](https://doi.org/10.64898/2026.09.18.752560)) maps cis-eQTLs in 16 peripheral blood cell types of 281 donors of a systemic lupus erythematosus cohort, and fine-maps them with SuSiE-RSS and in-sample LD. The data is part of the OTAR2064 project and is read by the Partner Preview Platform (PPP) only.
 
@@ -62,7 +62,62 @@ The run manifest: 10,075 credible sets before the quality controls, 9,768 accept
 
 16 cell types: peripheral blood mononuclear cells (`CL_2000001`, all cells, 2,556 studies) and 15 cell types of `config/SLEmap_ontology_mapping.tsv`. Every credible set is `sceqtl`, in-sample LD, not trans, with no quality control flag, and with posterior probabilities summing to 0.95–1.0.
 
+## v4 ingestion (`sle_map_ingestion`)
+
+The staging DAG `sle_map_ingestion` runs the gentropy step `sle_map_ingestion` (opentargets/gentropy#1354) on the SuSiE results of the new SLE-map fine-mapping run (`SLEmap_finemap_cond`), and writes the study index, `CredibleSet` and `CredibleSetVariant` to a new run folder. It replaces the one-off conversion of the earlier release (#272).
+
+![sle_map_ingestion](sle_map_ingestion.svg)
+
+```sh
+gs://sle_map_data/raw_results/SLEmap_finemap_cond/
+├── all_memberships.tsv         # read: one row per credible set member, marginal and conditional effects
+├── all_components.tsv          # read: one row per credible set, purity, region log Bayes factor
+├── all_diagnostics.tsv         # read: one row per cell type and gene fitted, sample size
+├── donor_counts_by_cell_type_and_ancestry.tsv  # read: donors of each cell type by ancestry
+├── all_credible_sets.tsv       # not read: every variant tested (28.6 GB)
+├── all_variant_statistics.tsv  # not read (10.8 GB)
+├── all_manifests.tsv
+├── fits/                       # SuSiE fits per cell type and batch
+└── pipeline_info/
+```
+
+```sh
+gs://sle_map_data/prod/20261120T134808/
+├── bin/      cli.py, install_dependencies_on_cluster.sh of the gentropy ref
+├── config/   config.yaml of the DAG
+├── docs/     README.md, sle_map_ingestion.svg
+└── output/
+    ├── study/
+    ├── credible_set/
+    └── credible_set_variant/
+```
+
+- Filters: purity min r² ≥ 0.25 and lead p-value ≤ 0.001 (step defaults). MHC is left to validation.
+- Conditional effects are SuSiE's own, per standard deviation of genotype and expression.
+- Each study takes the donors of its cell type by ancestry (`discoverySamples`, `ldPopulationStructure`). Every gene was fitted on all donors of its cell type.
+
+Run `20261120T134808` on 2026-11-20 (gentropy `ccc0841`): 6.5 min in all, 1.5 min of Spark on 2 workers.
+
+| | Count |
+|---|---:|
+| studies | 10,097 |
+| credible sets | 11,221 |
+| members | 147,984 |
+| distinct variants | 83,476 |
+
+16 cell types, every study with a biosample and an LD population structure. Every credible set has a study, members and a log Bayes factor, its lead among the members, purity min r² ≥ 0.25, and posterior probabilities summing to 0.95–1.0. Every member has `reportedBeta`, `conditionalBeta`, `effectAlleleFrequency` and `sampleSize`. Ids are unique.
+
+Against the run `20261117T133750`, the credible sets and members are identical. The studies differ only in `discoverySamples`, `ldPopulationStructure` (5,281 studies) and `initialSampleSize`, which earlier split every study over the ancestries of the whole cohort. The LD population with the largest share changes in 3 cell types: CD56Bright NK cells and cytotoxic CD4 T cells to `eas`, CM CD8 T cells to `nfe`.
+
 ## Changelog
+
+### 2026-11-20
+
+* The step reads the donors of each cell type by ancestry; run folder `gs://sle_map_data/prod/20261120T134808/`. `pis` reads it. The run `20261117T133750` is kept.
+
+### 2026-11-17
+
+* Added the staging DAG `sle_map_ingestion`; run folder `gs://sle_map_data/prod/20261117T133750/`. `pis` reads it.
 
 ### 2026-11-03
 
