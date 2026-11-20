@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import yaml
+from otter.task import load_specs
 from otter.task.task_registry import TaskRegistry
 
 import pos.tasks as pos_tasks
@@ -57,3 +58,9 @@ def test_configs_parse(config):
     types = _config_task_types(config)
     assert types
     assert types <= _registered()
+
+
+@pytest.mark.parametrize('step', yaml.safe_load(CONFIGS[0].read_text())['steps'])
+def test_steps_load_in_otter(step):
+    """otter's load_specs exits on a requires: naming no top-level task, such as an explode child."""
+    assert load_specs(CONFIGS[0], step)

@@ -67,8 +67,6 @@ steps:
         - clickhouse_create_database release database
       foreach:
         - baseline_expression
-        - biosample
-        - credible_set_variant
         - colocalisation
         - disease_hpo
         - drug_warnings
@@ -76,17 +74,13 @@ steps:
         - evidence
         - go
         - hpo
-        - interaction_evidence
-        - l2g_predictions
         - literature_entity_lut
         - mechanism_of_action
         - mouse_phenotypes
         - pharmacovigilance
         - otar_projects
-        - pharmacogenomics
         - protein_coding_coords
         - so
-        - target_essentiality
         - transcript
         - w2v
         - clinical_indication
@@ -97,6 +91,55 @@ steps:
           dataset: ${each}
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
+    # top level, not in the explode: later tasks require them by name
+    - name: clickhouse_load clickhouse load biosample
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: biosample
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load credible_set_variant
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: credible_set_variant
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load interaction_evidence
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: interaction_evidence
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load l2g_predictions
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: l2g_predictions
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load pharmacogenomics
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: pharmacogenomics
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse load target_essentiality
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: target_essentiality
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
     - name: clickhouse_load clickhouse load association_time_series
       products: [ppp]
       requires:
