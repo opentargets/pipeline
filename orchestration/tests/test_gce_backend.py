@@ -98,7 +98,7 @@ def test_pos_runs_on_the_host_network_with_work_disk_and_secrets(backend: str) -
     assert '-e A=1' in pos
     assert f'{POS_IMAGE} \\' in pos
     assert f'2>&1 | {OUTPUT_FILTER}' in pos
-    assert '/mnt/disks/clickhouse' not in pos
+    assert '/mnt/disks/clickhouse' not in pos[: pos.index('rc=')]
 
 
 def _wait_function(script: str) -> str:
@@ -156,10 +156,34 @@ def test_backend_script_quiesces_and_keeps_exit_code(backend: str) -> None:
     pos = _pos_run(backend)
     stop = backend.index('docker stop -t 300 opensearch clickhouse')
     sync = backend.index('sync', stop)
-    assert pos < stop < sync
+    umount = backend.index('umount /mnt/disks/clickhouse /mnt/disks/opensearch', sync)
+    assert pos < stop < sync < umount < backend.rindex('exit "$rc"')
     assert 'rc=${PIPESTATUS[0]}' in backend[pos:stop]
     assert backend.rstrip().endswith('exit "$rc"')
     subprocess.run(['bash', '-n'], input=backend, text=True, check=True)
+
+
+@pytest.mark.parametrize('pos_rc', [0, 3])
+def test_backend_script_quiesces_whatever_pos_returns(backend: str, pos_rc: int) -> None:
+    """Run the script from the pos run on, with docker, sudo, sync and umount stubbed."""
+    tail = backend[backend.index('set +e') :]
+    stubs = f"""
+sudo() {{ shift 2; "$@"; }}
+docker() {{ if [ "$1" = run ]; then echo pos; return {pos_rc}; fi; echo "docker $1"; }}
+sync() {{ echo sync; }}
+umount() {{ echo "umount $*"; }}
+"""
+    result = subprocess.run(
+        ['bash', '-c', f'set -euo pipefail\n{stubs}\n{tail}'], capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == pos_rc, result.stderr
+    assert result.stdout.splitlines() == [
+        'pos',
+        f'pos exited with {pos_rc}',
+        'docker stop',
+        'sync',
+        'umount /mnt/disks/clickhouse /mnt/disks/opensearch',
+    ]
 
 
 def test_pos_exit_code_survives_set_e_and_the_filter() -> None:
@@ -178,7 +202,9 @@ def test_tarballs_script_mounts_read_only(tarballs: str) -> None:
     assert 'mkfs.ext4 -F /dev/disk/by-id/google-clickhouse' not in tarballs
     assert 'mkfs.ext4 -F /dev/disk/by-id/google-opensearch' not in tarballs
     for device in DISKS:
-        assert f'mount -o ro,noload /dev/disk/by-id/google-{device} /mnt/disks/{device}' in tarballs
+        assert f'mount -o ro /dev/disk/by-id/google-{device} /mnt/disks/{device}' in tarballs
+    assert 'noload' not in tarballs
+    assert 'umount' not in tarballs
     assert 'clickhouse-server' not in tarballs
     assert 'opensearchproject' not in tarballs
     assert 'wait_for_servers' not in tarballs
@@ -217,3 +243,12 @@ def test_servers_need_both_images() -> None:
 def test_servers_cannot_run_on_read_only_disks() -> None:
     with pytest.raises(ValueError, match='read'):
         _sensor(read_only=True)
+
+
+@pytest.mark.parametrize(
+    'disks',
+    [{'clickhouse': 'ch-disk'}, {**DISKS, 'extra': 'x-disk'}, {'ch': 'ch-disk', 'opensearch': 'os-disk'}],
+)
+def test_servers_need_exactly_the_server_disks(disks: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match='data_disks'):
+        _sensor(data_disks=disks)

@@ -76,6 +76,7 @@ RENDER_CASES: dict[str, dict[str, Any]] = {
 @pytest.mark.parametrize('case', RENDER_CASES)
 def test_startup_script_is_unchanged(case: str) -> None:
     """Fixtures were rendered before the script was split into overridable pieces."""
+    # full.sh is whitespace-sensitive: do not reformat or strip it.
     rendered = ComputeEngineRunContainerizedWorkloadSensor(
         task_id='a_step',
         instance_name='a-machine',

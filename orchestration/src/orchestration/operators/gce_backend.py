@@ -9,6 +9,7 @@ from google.cloud import compute_v1
 from orchestration.operators.gce import CONTAINER_NAME, OUTPUT_FILTER, ComputeEngineRunContainerizedWorkloadSensor
 
 HEALTH_POLL_S = 5
+SERVER_DEVICES = {'clickhouse', 'opensearch'}
 
 
 class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor):
@@ -25,7 +26,8 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             Otherwise they are formatted.
         clickhouse_image: ClickHouse server image, needed with `servers`.
         opensearch_image: OpenSearch image, needed with `servers`.
-        health_timeout_s: How long to wait for both servers to be healthy.
+        health_timeout_s: How long to wait for both servers to be healthy. On timeout the
+            script exits 1 with the servers still running, so the disks are unfit to snapshot.
         **kwargs: Passed to `ComputeEngineRunContainerizedWorkloadSensor`.
     """
 
@@ -47,6 +49,8 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             raise ValueError('servers need clickhouse_image and opensearch_image')
         if servers and read_only:
             raise ValueError('servers cannot run on read-only disks')
+        if servers and set(data_disks) != SERVER_DEVICES:
+            raise ValueError(f'servers need data_disks for exactly {sorted(SERVER_DEVICES)}')
         self.data_disks = data_disks
         self.servers = servers
         self.read_only = read_only
@@ -68,8 +72,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             dev = f'/dev/disk/by-id/google-{d}'
             lines.append(f'            mkdir -p /mnt/disks/{d}')
             if self.read_only:
-                # noload: the snapshot was taken from a mounted filesystem
-                lines.append(f'            mount -o ro,noload {dev} /mnt/disks/{d}')
+                lines.append(f'            mount -o ro {dev} /mnt/disks/{d}')
             else:
                 lines.append(f'            mkfs.ext4 -F {dev}')
                 lines.append(f'            mount -o discard,defaults {dev} /mnt/disks/{d}')
@@ -122,7 +125,13 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
     def workload_lines(self) -> str:
         """Run pos on the host network, keep its exit code, then stop the servers."""
         arg = ' '.join(self.container_args or [])
-        stop = '            docker stop -t 300 opensearch clickhouse\n            sync\n' if self.servers else ''
+        stop = ''
+        if self.servers:
+            stop += '            docker stop -t 300 opensearch clickhouse\n'
+        if not self.read_only:
+            # umount leaves a clean filesystem to snapshot
+            mounts = ' '.join(f'/mnt/disks/{d}' for d in self.data_disks)
+            stop += f'            sync\n            umount {mounts}\n'
         return f"""\
             set +e
             sudo -u app docker run \\
