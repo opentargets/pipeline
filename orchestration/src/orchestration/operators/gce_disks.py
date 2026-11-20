@@ -156,23 +156,29 @@ class SnapshotGuardOperator(_ComputeOperator):
 class CreateSnapshotOperator(_ComputeOperator):
     """Snapshot a disk; delete the partial snapshot if creation fails."""
 
-    template_fields: Sequence[str] = ('disk_name', 'snapshot_name')
+    template_fields: Sequence[str] = ('disk_name', 'snapshot_name', 'labels')
 
     def __init__(
-        self, *args: Any, disk_name: str, snapshot_name: str, labels: Labels, **kwargs: Any
+        self,
+        *args: Any,
+        disk_name: str,
+        snapshot_name: str,
+        labels: Labels | dict[str, str],
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.disk_name = disk_name
         self.snapshot_name = snapshot_name
         self.labels = labels
 
-    def execute(self, context: Any) -> None:
+    def execute(self, context: Any) -> str:
+        """Return the snapshot name, so XCom records the snapshots this run created."""
         client = compute_v1.SnapshotsClient()
         snapshot = compute_v1.Snapshot(
             name=self.snapshot_name,
             source_disk=f'projects/{self.project_id}/zones/{self.zone}/disks/{self.disk_name}',
             storage_locations=[SNAPSHOT_LOCATION],
-            labels=dict(self.labels),
+            labels={k: Labels.clean_label(str(v)) for k, v in self.labels.items()},
         )
         op = client.insert(
             request=compute_v1.InsertSnapshotRequest(
@@ -190,3 +196,4 @@ class CreateSnapshotOperator(_ComputeOperator):
             except Exception:
                 self.log.exception('could not delete snapshot %s', self.snapshot_name)
             raise
+        return self.snapshot_name

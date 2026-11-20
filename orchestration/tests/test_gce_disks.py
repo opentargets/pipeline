@@ -1,5 +1,6 @@
 """Tests for the disk and snapshot operators."""
 
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -160,3 +161,20 @@ def test_cleanup_failure_does_not_mask_the_original_error(snapshots, waits) -> N
         CreateSnapshotOperator(
             task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels()
         ).execute({})
+
+
+def test_snapshot_labels_are_templated_and_cleaned(snapshots) -> None:
+    op = CreateSnapshotOperator(
+        task_id='t',
+        disk_name=DISK,
+        snapshot_name=SNAP,
+        labels={**Labels({'step': 'x'}), 'release': '{{ yymm }}', 'run': '{{ run_id }}'},
+    )
+    assert 'labels' in CreateSnapshotOperator.template_fields
+    context = cast(Any, {'yymm': '2612', 'run_id': 'manual__2026-11-20T10:00:00+00:00'})
+    op.labels = op.render_template(op.labels, context)
+    assert op.execute({}) == SNAP
+    labels = dict(snapshots.insert.call_args.kwargs['request'].snapshot_resource.labels)
+    assert labels['release'] == '2612'
+    assert labels['run'] == 'manual__2026-11-20t10-00-00-00-00'
+    assert labels['step'] == 'x'

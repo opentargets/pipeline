@@ -49,7 +49,8 @@ class Labels(UserDict[str, str]):
         self.label_dict.update({k: self.clean_label(v) for k, v in self.extra.items()})
         super().__init__(self.label_dict)
 
-    def clean_label(self, label: str) -> str:
+    @staticmethod
+    def clean_label(label: str) -> str:
         """Clean a label for use in google cloud.
 
         According to the docs: The value can only contain lowercase letters, numeric

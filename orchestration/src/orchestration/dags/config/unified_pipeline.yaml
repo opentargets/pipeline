@@ -27,8 +27,7 @@ run_name: "do/platform-2612-3"
 pis_version: "26.12.0rc40"
 pts_version: "26.12.0rc76"
 pos_version: "26.12.0rc5"
-# Whether the run goes on to build a release candidate. Read by the release DAGs;
-# the unified pipeline itself ignores it.
+# Whether the run ends by triggering the release_candidate DAG on its release_uri.
 release_candidate: false
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
 # `v{{gentropy_version}}` for the ref the Dataproc init action installs.
