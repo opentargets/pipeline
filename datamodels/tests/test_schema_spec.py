@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, computed_field, create_model, field_vali
 from pydantic.fields import FieldInfo
 
 from ot_datamodels import (
+    ClickHouseType,
     DatasetModel,
     Note,
     PolarsDtype,
@@ -286,3 +287,47 @@ def test_rejects_a_dataset_without_title_description_or_example() -> None:
 def test_constraints_as_dict_lists_only_what_is_set() -> None:
     assert Constraints(ge=0, allowed=('a', 'b')).as_dict() == {'ge': 0, 'allowed': ['a', 'b']}
     assert _node(_Plain).constraints.as_dict() == {}
+
+
+def test_clickhouse_type_on_primitive() -> None:
+    node = _node(Annotated[int, ClickHouseType('UInt32')])
+
+    assert node.clickhouse == 'UInt32'
+    assert node.dtype == pl.Int64()
+    assert _node(int).clickhouse is None
+
+
+def test_clickhouse_type_on_a_literal() -> None:
+    node = _node(Annotated[Literal[-1, 0, 1], ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")])
+
+    assert node.clickhouse == "Enum8('-1' = -1, '0' = 0, '1' = 1)"
+
+
+def test_clickhouse_type_on_list_element() -> None:
+    node = _node(list[Annotated[str, ClickHouseType('LowCardinality(String)')]])
+
+    assert node.clickhouse is None
+    assert node.element is not None
+    assert node.element.clickhouse == 'LowCardinality(String)'
+
+
+def test_clickhouse_type_on_list_rejected() -> None:
+    with pytest.raises(SchemaDefinitionError, match='on the list element type'):
+        _node(Annotated[list[str], ClickHouseType('Array(String)')])
+
+
+def test_clickhouse_type_on_struct_rejected() -> None:
+    with pytest.raises(SchemaDefinitionError, match='do not apply to a struct'):
+        _node(Annotated[_Pair, ClickHouseType('Tuple(String, Int32)')])
+
+
+def test_clickhouse_type_twice_rejected() -> None:
+    with pytest.raises(SchemaDefinitionError, match='ClickHouseType given more than once'):
+        _node(Annotated[int, ClickHouseType('UInt32'), ClickHouseType('UInt64')])
+
+
+def test_clickhouse_type_with_polars_dtype() -> None:
+    node = _node(Annotated[int, PolarsDtype(pl.UInt32), ClickHouseType('UInt32')])
+
+    assert node.dtype == pl.UInt32()
+    assert node.clickhouse == 'UInt32'
