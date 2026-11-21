@@ -34,6 +34,38 @@ repos:
         files: ^datamodels/
         always_run: false
 
+  # vulture warns about dead code but never fails: the entry swallows its exit code
+  - repo: local
+    hooks:
+      - id: vulture
+        name: vulture orchestration
+        entry: bash -c 'cd orchestration && uv run --frozen vulture || true'
+        language: system
+        files: ^orchestration/.*\.(py|toml)$
+        pass_filenames: false
+        verbose: true
+      - id: vulture
+        name: vulture pis
+        entry: bash -c 'cd pis && uv run --frozen vulture || true'
+        language: system
+        files: ^pis/.*\.(py|toml)$
+        pass_filenames: false
+        verbose: true
+      - id: vulture
+        name: vulture pts
+        entry: bash -c 'cd pts && uv run --frozen vulture || true'
+        language: system
+        files: ^pts/.*\.(py|toml)$
+        pass_filenames: false
+        verbose: true
+      - id: vulture
+        name: vulture pos
+        entry: bash -c 'cd pos && uv run --frozen vulture || true'
+        language: system
+        files: ^pos/.*\.(py|toml)$
+        pass_filenames: false
+        verbose: true
+
   - repo: https://github.com/google/yamlfmt
     rev: v0.21.0
     hooks:
