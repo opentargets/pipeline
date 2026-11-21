@@ -7,7 +7,7 @@ BigQuery) and publishes the release (GCS, AWS, FTP, tarballs, Croissant descript
 > the pipeline monorepo. Contributor and agent guidance is in [AGENTS.md](AGENTS.md).
 
 pos is an [Otter](https://opentargets.github.io/otter) application. The steps are in
-[config/config.yaml](config/config.yaml): `backend`, `tarballs`, `bigquery`,
+[config/config.yaml](config/config.yaml): `backend_clickhouse`, `backend_opensearch`, `tarballs`, `bigquery`,
 `gcs_sync`, `aws_sync` and `ftp_sync`.
 
 ```sh
@@ -17,9 +17,10 @@ pos -s <step> -r <release_uri> -w <work> -p <pool>
 `release_uri` ends in the run name, `<product>-YYMM-N` (`platform` or `ppp`), which sets
 the release, the database namespace and the product's buckets and datasets. Run it
 from the image (`pos/Dockerfile`, built from the repo root) or with `uv run pos` inside
-`pos/`. `backend` needs ClickHouse on `localhost:8123` and OpenSearch on
-`localhost:9200`; pos does not start them. See [AGENTS.md](AGENTS.md) for each step,
-the contract with the orchestration and how to run `backend` by hand.
+`pos/`. `backend_clickhouse` needs ClickHouse on `localhost:8123` and `backend_opensearch`
+needs OpenSearch on `localhost:9200`, each only its own server; pos does not start
+them. See [AGENTS.md](AGENTS.md) for each step, the contract with the orchestration and
+how to run the backend steps by hand.
 
 ## Configuration
 

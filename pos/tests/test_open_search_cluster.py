@@ -1,4 +1,4 @@
-"""backend refuses a used cluster, turns query insights off before any index and leaves no top_queries-* index."""
+"""The step refuses a used cluster, turns query insights off before any index and leaves no top_queries-* index."""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -12,7 +12,7 @@ from pos.tasks.open_search_finish import OpenSearchFinish, OpenSearchFinishError
 from pos.tasks.open_search_prepare import OpenSearchPrepare, OpenSearchPrepareError, OpenSearchPrepareSpec
 
 ROOT = Path(__file__).parents[1]
-BACKEND = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend']
+BACKEND = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_opensearch']
 
 
 class FakeCluster:
@@ -77,7 +77,7 @@ def test_prepare_turns_query_insights_off(monkeypatch):
 @pytest.mark.parametrize('index', ['platform2612_downloads', 'platform2612_search_variant'])
 def test_prepare_refuses_a_used_cluster(monkeypatch, index):
     client = _client([index])
-    with pytest.raises(OpenSearchPrepareError, match=rf'{index}\. .*wipe the ClickHouse and OpenSearch data disks'):
+    with pytest.raises(OpenSearchPrepareError, match=rf'{index}\. .*wipe that server.s data disk'):
         _prepare(client, monkeypatch)
     assert client.cluster.settings == {}
 

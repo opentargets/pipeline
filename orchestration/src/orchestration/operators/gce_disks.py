@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -9,10 +10,8 @@ from airflow.sdk import BaseOperator
 from airflow.sdk.exceptions import AirflowException
 from google.api_core.exceptions import NotFound
 from google.cloud import compute_v1
-from google.cloud.storage import Client
 
 from orchestration.operators.gce import wait_for_extended_operation
-from orchestration.utils import GCSPath
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.labels import Labels
 
@@ -145,54 +144,10 @@ class DeleteSnapshotOperator(_ComputeOperator):
         delete_snapshot(self.project_id, self.snapshot_name, self.log)
 
 
-class SnapshotGuardOperator(_ComputeOperator):
-    """Fail if any snapshot, disk or the hand-off blob already exists."""
-
-    template_fields: Sequence[str] = ('snapshot_names', 'disk_names', 'blob_uri')
-
-    def __init__(
-        self,
-        *args: Any,
-        snapshot_names: list[str],
-        blob_uri: str,
-        disk_names: list[str] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.snapshot_names = snapshot_names
-        self.disk_names = disk_names or []
-        self.blob_uri = blob_uri
-
-    def execute(self, context: Any) -> None:
-        client = compute_v1.SnapshotsClient()
-        found: list[str] = []
-        for name in self.snapshot_names:
-            try:
-                client.get(project=self.project_id, snapshot=name)
-            except NotFound:
-                continue
-            found.append(f'snapshot {name}')
-
-        disks = compute_v1.DisksClient()
-        for name in self.disk_names:
-            try:
-                disks.get(project=self.project_id, zone=self.zone, disk=name)
-            except NotFound:
-                continue
-            found.append(f'disk {name}')
-
-        bucket, path = GCSPath(self.blob_uri).split()
-        if Client(project=self.project_id).bucket(bucket).blob(path).exists():
-            found.append(f'blob {self.blob_uri}')
-
-        if found:
-            raise AirflowException(f'already exists: {", ".join(found)}')
-
-
 class CreateSnapshotOperator(_ComputeOperator):
     """Snapshot a disk; delete the partial snapshot if creation fails."""
 
-    template_fields: Sequence[str] = ('disk_name', 'snapshot_name', 'labels')
+    template_fields: Sequence[str] = ('disk_name', 'snapshot_name', 'labels', 'provenance')
 
     def __init__(
         self,
@@ -200,12 +155,31 @@ class CreateSnapshotOperator(_ComputeOperator):
         disk_name: str,
         snapshot_name: str,
         labels: Labels | dict[str, str],
+        provenance: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.disk_name = disk_name
         self.snapshot_name = snapshot_name
         self.labels = labels
+        self.provenance = provenance
+
+    def _is_ours(self, client: Any) -> bool:
+        """False if the snapshot records another run, which must keep it."""
+        if self.provenance is None:
+            return True
+        try:
+            existing = client.get(project=self.project_id, snapshot=self.snapshot_name)
+        except NotFound:
+            return True
+        try:
+            recorded = json.loads(existing.description).get('airflow_run_id')
+        except (ValueError, AttributeError):
+            recorded = None
+        if recorded != self.provenance.get('airflow_run_id'):
+            self.log.warning('snapshot %s belongs to run %s, leaving it', self.snapshot_name, recorded)
+            return False
+        return True
 
     def execute(self, context: Any) -> str:
         """Return the snapshot name, so XCom records the snapshots this run created."""
@@ -216,6 +190,8 @@ class CreateSnapshotOperator(_ComputeOperator):
             storage_locations=[SNAPSHOT_LOCATION],
             labels=_clean(self.labels),
         )
+        if self.provenance is not None:
+            snapshot.description = json.dumps(self.provenance, sort_keys=True)
         op = client.insert(
             request=compute_v1.InsertSnapshotRequest(
                 project=self.project_id, snapshot_resource=snapshot
@@ -228,7 +204,8 @@ class CreateSnapshotOperator(_ComputeOperator):
         except Exception:
             self.log.exception('snapshot %s failed, deleting it', self.snapshot_name)
             try:
-                delete_snapshot(self.project_id, self.snapshot_name, self.log)
+                if self._is_ours(client):
+                    delete_snapshot(self.project_id, self.snapshot_name, self.log)
             except Exception:
                 self.log.exception('could not delete snapshot %s', self.snapshot_name)
             raise

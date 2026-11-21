@@ -10,7 +10,8 @@ from pos.sql import split_statements
 POS = Path(__file__).parents[1]
 SCRIPTS = POS / 'config/clickhouse/scripts'
 DATASETS = yaml.safe_load((POS / 'config/datasets.yaml').read_text())['clickhouse']
-BACKEND = {t['name']: t for t in yaml.safe_load((POS / 'config/config.yaml').read_text())['steps']['backend']}
+STEP = yaml.safe_load((POS / 'config/config.yaml').read_text())['steps']['backend_clickhouse']
+BACKEND = {t['name']: t for t in STEP}
 READ_MODELS = ('study_credible_sets', 'target_credible_sets', 'variant_credible_sets')
 CLEANUP = 'clickhouse_load clickhouse credible_sets_build_cleanup'
 

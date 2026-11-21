@@ -30,7 +30,8 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 
 | Step | Does | Needs |
 | --- | --- | --- |
-| `backend` | syncs `output/`, `view/`, `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices and the ClickHouse database | ClickHouse `:8123`, OpenSearch `:9200`, on empty disks: it fails if the database has tables or an index exists |
+| `backend_clickhouse` | syncs `output/` and `view/` to the work dir, creates and loads the ClickHouse database | ClickHouse `:8123` on an empty disk: it fails if the database has tables |
+| `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket | |
@@ -39,7 +40,8 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `publish_manifest` | last, after every other step: copies `<release_uri>/manifest.json` to the release bucket and S3 (S3 Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
 | `scratch_cleanup` | scratch mode only: drops the scratch BigQuery datasets (Platform only; for PPP it does nothing and exits 0) | BigQuery access |
 
-- `backend` writes nothing to the release buckets besides `croissant.json`.
+- `backend_opensearch` writes nothing to the release buckets besides `croissant.json`.
+- The two backend steps are independent, each needs only its own server: run them on separate VMs or one after the other on one.
 - `bigquery` tables are `ot_datamodels` datasets present under `<release_uri>/output/`;
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
@@ -77,8 +79,8 @@ destinations, for test runs that must not touch the public release:
 - **Network:** ClickHouse on `localhost:8123` and OpenSearch on `localhost:9200`, so the
   pos container needs host networking or an equivalent.
 - **Mounts:**
-  - `backend`: the work disk, plus the ClickHouse and OpenSearch data disks mounted
-    into their containers. pos itself only talks to them over HTTP.
+  - `backend_clickhouse` and `backend_opensearch`: the work disk, plus the step's data disk
+    mounted into its server container. pos itself only talks to the server over HTTP.
   - `tarballs`: `/mnt/clickhouse` and `/mnt/opensearch` from disks restored from
     snapshots.
 - **ClickHouse config:** the image ships `config.d/` and `users.d/` at
@@ -88,7 +90,8 @@ destinations, for test runs that must not touch the public release:
   file mount from Secret Manager; the service account reads the secret for the mount.
 - **Exit code:** non-zero on failure.
 - **Outputs:**
-  - `backend`: the data disks, plus `croissant.json` under `release_uri`.
+  - `backend_clickhouse`: the ClickHouse data disk.
+  - `backend_opensearch`: the OpenSearch data disk, plus `croissant.json` under `release_uri`.
   - `tarballs`: `<release_uri>/disk_images/`.
   - `gcs_sync`: the release bucket.
   - `aws_sync`: S3.
@@ -97,7 +100,7 @@ destinations, for test runs that must not touch the public release:
     scratch bucket only.
   - `scratch_cleanup`: drops the scratch BigQuery datasets.
   - Every step: the manifest, except a PPP `scratch_cleanup`, a no-op that writes none.
-- **Retries:** `backend` cannot be retried in place. A retry needs fresh or wiped disks;
+- **Retries:** a backend step cannot be retried in place. A retry needs fresh or wiped disks;
   the rerun guard refuses otherwise.
 - **BigQuery datasets:** created only if missing (`get_dataset` first), so the prod account
   needs no project-level dataset create; an existing dataset is never deleted or recreated.
@@ -135,8 +138,9 @@ destinations, for test runs that must not touch the public release:
      `bootstrap.memory_lock=true`, `thread_pool.write.queue_size=-1` and the three
      `search.insights.top_queries.{latency,cpu,memory}.enabled=false`.
   3. Run `docker run --rm --network host -v /mnt/disks/work:/mnt/disks/work <pos-image>
-     -s backend -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`, then stop the
-     servers before snapshotting the disks.
+     -s backend_clickhouse -r gs://<bucket>/platform-2612-N -w /mnt/disks/work -p 8`, and
+     the same with `-s backend_opensearch` (each step needs only its own server; one VM may
+     run both), then stop the servers before snapshotting the disks.
   4. Run `tarballs` (disks also mounted into the pos container), `bigquery`, `gcs_sync`
      and `aws_sync`; delete the VM and disks.
 
@@ -158,7 +162,7 @@ in the same PR.
 set describing its fields. It reads the parquet schemas of the output datasets and
 fills in descriptions, keys and foreign keys from curated JSON in
 `src/pos/croissant/assets/`. The `ot_croissant` task (`pos/tasks/ot_croissant.py`)
-runs in `backend`.
+runs in `backend_opensearch`.
 
 Curation assets:
 

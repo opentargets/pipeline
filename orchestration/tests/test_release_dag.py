@@ -349,7 +349,7 @@ def test_tarballs_reads_the_restored_disks(dag) -> None:
     out = _load(False)
     t = cast(ComputeEngineRunBackendSensor, dag.get_task('run_tarballs'))
     assert isinstance(t, ComputeEngineRunBackendSensor)
-    assert t.servers is False
+    assert not t.servers
     assert t.read_only is True
     assert t.machine_type == rc.tarballs_machine_type
     assert t.work_disk_size_gb == rc.small_step_work_disk_gb
@@ -415,42 +415,6 @@ def test_a_final_version_sorts_after_its_rcs() -> None:
     assert release.pos_version_key('26.12.0.dev3.pos-phase3.abc') is None
 
 
-def _simulate(dag, gates: dict[str, bool], failed: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
-    """Final task states, by the trigger-rule outcomes of `trigger_rule_dep` once every upstream is done.
-
-    Tasks in `failed` fail when they run; every other task succeeds. A closed gate skips its direct
-    downstream, as `ShortCircuitOperator(ignore_downstream_trigger_rules=False)`.
-    """
-    states: dict[str, str] = {}
-    gate_skipped: set[str] = set()
-    for t in dag.topological_sort():
-        up = [states[u] for u in t.upstream_task_ids]
-        bad = any(s in {'failed', 'upstream_failed'} for s in up)
-        rule = t.trigger_rule
-        if t.task_id in gate_skipped:
-            state = 'skipped'
-        elif rule == TriggerRule.ALL_SUCCESS and bad:
-            state = 'upstream_failed'
-        elif rule == TriggerRule.ALL_SUCCESS and 'skipped' in up:
-            state = 'skipped'
-        elif rule == TriggerRule.NONE_FAILED and bad:
-            state = 'upstream_failed'
-        elif rule == TriggerRule.ALL_DONE_MIN_ONE_SUCCESS and 'skipped' in up:
-            state = 'skipped'
-        elif rule == TriggerRule.ALL_DONE_MIN_ONE_SUCCESS and 'success' not in up:
-            state = 'upstream_failed'
-        else:
-            assert rule in {
-                TriggerRule.ALL_SUCCESS, TriggerRule.ALL_DONE, TriggerRule.NONE_FAILED,
-                TriggerRule.ALL_DONE_MIN_ONE_SUCCESS,
-            }  # fmt: skip
-            state = 'failed' if t.task_id in failed else 'success'
-            if state == 'success' and t.task_id.startswith('gate_') and not gates[t.task_id.removeprefix('gate_')]:
-                gate_skipped |= t.downstream_task_ids
-        states[t.task_id] = state
-    return states
-
-
 def _ran(states: dict[str, str]) -> set[str]:
     return {t.removeprefix('run_') for t, s in states.items() if t.startswith('run_') and s in {'success', 'failed'}}
 
@@ -464,8 +428,8 @@ def _ran(states: dict[str, str]) -> set[str]:
         (PPP_URI, True, {'tarballs', 'gcs_sync', 'publish_manifest'}),
     ],
 )
-def test_a_successful_run_runs_its_steps_and_succeeds(dag, uri: str, scratch: bool, runs: set[str]) -> None:
-    states = _simulate(dag, _load(scratch, uri)['gates'])
+def test_a_successful_run_runs_its_steps_and_succeeds(dag, simulate, uri: str, scratch: bool, runs: set[str]) -> None:
+    states = simulate(dag, _load(scratch, uri)['gates'])
     assert _ran(states) == runs
     assert states['done'] == 'success'
     assert {s for s in GATED if states[f'run_{s}'] == 'skipped'} == set(GATED) - runs
@@ -477,15 +441,15 @@ def test_a_successful_run_runs_its_steps_and_succeeds(dag, uri: str, scratch: bo
 @pytest.mark.parametrize('uri', [URI, PPP_URI])
 @pytest.mark.parametrize('scratch', [False, True])
 @pytest.mark.parametrize('step', ['run_tarballs', 'restore_disk_opensearch', 'run_gcs_sync', 'run_publish_manifest'])
-def test_any_failure_fails_the_run(dag, uri: str, scratch: bool, step: str) -> None:
-    states = _simulate(dag, _load(scratch, uri)['gates'], {step})
+def test_any_failure_fails_the_run(dag, simulate, uri: str, scratch: bool, step: str) -> None:
+    states = simulate(dag, _load(scratch, uri)['gates'], {step})
     assert states['done'] == 'upstream_failed'
     assert states['delete_vm_tarballs'] == 'success'
     assert states['delete_restored_disk_clickhouse'] == 'success'
 
 
-def test_a_failed_scratch_run_still_drops_its_datasets(dag) -> None:
-    states = _simulate(dag, _load(True)['gates'], {'run_gcs_sync'})
+def test_a_failed_scratch_run_still_drops_its_datasets(dag, simulate) -> None:
+    states = simulate(dag, _load(True)['gates'], {'run_gcs_sync'})
     assert states['run_publish_manifest'] == 'upstream_failed'
     assert states['run_scratch_cleanup'] == 'success'
     assert states['delete_vm_scratch_cleanup'] == 'success'
@@ -493,15 +457,15 @@ def test_a_failed_scratch_run_still_drops_its_datasets(dag) -> None:
 
 
 @pytest.mark.parametrize('step', ['run_bigquery', 'run_aws_sync'])
-def test_a_failed_platform_step_fails_the_run(dag, step: str) -> None:
-    states = _simulate(dag, _load(False)['gates'], {step})
+def test_a_failed_platform_step_fails_the_run(dag, simulate, step: str) -> None:
+    states = simulate(dag, _load(False)['gates'], {step})
     assert states['run_publish_manifest'] == 'upstream_failed'
     assert states['run_scratch_cleanup'] == 'skipped'
     assert states['done'] == 'upstream_failed'
 
 
-def test_no_cleanup_without_a_hand_off(dag) -> None:
-    states = _simulate(dag, {}, {'read_hand_off'})
+def test_no_cleanup_without_a_hand_off(dag, simulate) -> None:
+    states = simulate(dag, {}, {'read_hand_off'})
     assert states['run_scratch_cleanup'] == 'upstream_failed'
     assert _ran(states) == set()
     assert states['done'] == 'upstream_failed'

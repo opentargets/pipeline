@@ -23,12 +23,12 @@ def _sensor(**kwargs) -> ComputeEngineRunBackendSensor:
         'instance_name': 'a-machine',
         'zone': 'a-zone',
         'container_image': POS_IMAGE,
-        'container_args': ['-s', 'backend'],
+        'container_args': ['-s', 'backend_clickhouse'],
         'container_env': {'A': '1'},
         'container_secret_files': {'a-secret': '/secrets/a-secret'},
         'work_disk_size_gb': 100,
         'data_disks': DISKS,
-        'servers': True,
+        'servers': {'clickhouse', 'opensearch'},
         'read_only': False,
         'clickhouse_image': CLICKHOUSE_IMAGE,
         'opensearch_image': OPENSEARCH_IMAGE,
@@ -44,7 +44,7 @@ def backend() -> str:
 @pytest.fixture
 def tarballs() -> str:
     return _sensor(
-        servers=False,
+        servers=(),
         read_only=True,
         clickhouse_image='',
         opensearch_image='',
@@ -80,7 +80,8 @@ def test_backend_script_starts_servers_before_pos(backend: str) -> None:
         '--name clickhouse',
         '--name opensearch',
         'chown 1000:1000 /mnt/disks/opensearch/data',
-        'mkdir -p /mnt/disks/clickhouse/data /mnt/disks/opensearch/data',
+        'mkdir -p /mnt/disks/clickhouse/data',
+        'mkdir -p /mnt/disks/opensearch/data',
         'docker cp pos:/app/config/clickhouse/config.d /mnt/disks/clickhouse/',
         'docker cp pos:/app/config/clickhouse/users.d /mnt/disks/clickhouse/',
     ):
@@ -235,7 +236,7 @@ def test_declare_instance_attaches_named_disks() -> None:
         assert data[device].auto_delete is False
         assert data[device].mode == 'READ_WRITE'
 
-    ro = _sensor(servers=False, read_only=True).declare_instance().disks
+    ro = _sensor(servers=(), read_only=True).declare_instance().disks
     assert [d.mode for d in ro[2:]] == ['READ_ONLY', 'READ_ONLY']
 
 
@@ -408,4 +409,65 @@ def test_compact_devices_must_be_data_disks(disks: dict[str, str], compact: dict
 
 def test_compact_needs_writable_disks() -> None:
     with pytest.raises(ValueError, match='compact'):
-        _sensor(servers=False, read_only=True, data_disks=COMPACT_DISKS, compact=COMPACT)
+        _sensor(servers=(), read_only=True, data_disks=COMPACT_DISKS, compact=COMPACT)
+
+
+def test_servers_must_be_known() -> None:
+    with pytest.raises(ValueError, match='redis'):
+        _sensor(servers={'redis'})
+
+
+def test_server_needs_its_image() -> None:
+    with pytest.raises(ValueError, match='image'):
+        _sensor(servers={'clickhouse'}, data_disks={'clickhouse': 'a'}, opensearch_image='', clickhouse_image='')
+    _sensor(servers={'opensearch'}, data_disks={'opensearch': 'd'}, clickhouse_image='')
+
+
+def test_server_disks_match() -> None:
+    _sensor(servers={'opensearch'}, data_disks={'opensearch': 'd'})
+    with pytest.raises(ValueError, match='data_disks'):
+        _sensor(servers={'opensearch'}, data_disks={'opensearch': 'd', 'clickhouse': 'e'})
+    _sensor(
+        servers={'clickhouse'},
+        data_disks={'clickhouse': 'a', 'clickhouse-compact': 'b'},
+        compact={'clickhouse': 'clickhouse-compact'},
+    )
+
+
+def test_clickhouse_only_script() -> None:
+    script = _sensor(
+        servers={'clickhouse'},
+        data_disks={'clickhouse': 'a', 'clickhouse-compact': 'b'},
+        compact={'clickhouse': 'clickhouse-compact'},
+        opensearch_image='',
+    ).startup_script()
+    for text in (
+        'docker run -d --name clickhouse',
+        'docker cp pos:/app/config/clickhouse/config.d',
+        'localhost:8123/ping',
+        'docker stop -t 300 clickhouse',
+    ):
+        assert text in script, text
+    assert script.index('docker stop') < script.index('--entrypoint sh')
+    for text in ('opensearch', '9200', 'vm.max_map_count'):
+        assert text not in script, text
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+
+
+def test_opensearch_only_script() -> None:
+    script = _sensor(
+        servers={'opensearch'},
+        data_disks={'opensearch': 'd'},
+        clickhouse_image='',
+        container_args=['-s', 'backend_opensearch'],
+    ).startup_script()
+    for text in (
+        'vm.max_map_count=262144',
+        '-Xms31g -Xmx31g',
+        'localhost:9200/_cluster/health',
+        'docker stop -t 300 opensearch',
+    ):
+        assert text in script, text
+    for text in ('clickhouse', '8123', 'docker cp pos:'):
+        assert text not in script, text
+    subprocess.run(['bash', '-n'], input=script, text=True, check=True)

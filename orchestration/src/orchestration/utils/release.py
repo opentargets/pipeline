@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
+
+from airflow.sdk.exceptions import AirflowException
+from google.api_core.exceptions import NotFound
+from google.cloud import compute_v1
+from google.cloud.storage import Client
+
+from orchestration.dags.config.release import HandOff
+from orchestration.utils import GCSPath
+
+log = logging.getLogger(__name__)
 
 _RUN_RE = re.compile(r'^(platform|ppp)-(\d{2})(\d{2})-(\d+)(-[a-z0-9]+)*$')
 _PREFIX_RE = re.compile(r'^[a-z][a-z0-9]*$')
@@ -86,7 +98,7 @@ def task_states(ti: Any, task_ids: list[str]) -> dict[str, str | None]:
 
 
 def created_this_try(
-    ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None], guard: str = 'guard'
+    ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None], guard: str
 ) -> list[str]:
     """Resource names this try created, from the producers' XComs (task id to XCom key).
 
@@ -100,3 +112,91 @@ def created_this_try(
         if states.get(task_id) in RAN and (name := ti.xcom_pull(task_ids=task_id, key=key)):
             names.append(name)
     return names
+
+
+# side -> (snapshot short name, working-disk short names)
+SIDES = {'clickhouse': ('ch', ['ch_build', 'ch']), 'opensearch': ('os', ['os'])}
+
+
+def _provenance(description: str) -> dict[str, Any] | None:
+    """The snapshot's recorded images, or None if it records none."""
+    try:
+        provenance = json.loads(description)
+    except ValueError:
+        return None
+    if not isinstance(provenance, dict) or not {'pos_image', 'server_image'} <= provenance.keys():
+        return None
+    return provenance
+
+
+def plan_candidate(names: Mapping[str, Any], project_id: str, zone: str) -> dict[str, dict[str, Any]]:
+    """Decide per side whether to build the snapshot or reuse an existing one.
+
+    A snapshot is reused only if it is READY and was built by this run's pos and server images.
+
+    Returns:
+        ``{side: {'action': 'build' | 'reuse', 'disk_size_gb': int}}``; a reused side keeps the
+        snapshot's own size.
+
+    Raises:
+        AirflowException: if the hand-off exists, a snapshot is not READY or was built by other
+            images, or a side to build has a leftover disk. Nothing is deleted.
+    """
+    problems: list[str] = []
+    plan: dict[str, dict[str, Any]] = {}
+
+    handoff_uri = HandOff.uri(names['release_uri'])
+    bucket, path = GCSPath(handoff_uri).split()
+    if Client(project=project_id).bucket(bucket).blob(path).exists():
+        problems.append(f'blob {handoff_uri} already exists')
+
+    snapshots = compute_v1.SnapshotsClient()
+    disks = compute_v1.DisksClient()
+    for side, (short, disk_shorts) in SIDES.items():
+        snapshot_name = names[f'{short}_snapshot']
+        try:
+            snap = snapshots.get(project=project_id, snapshot=snapshot_name)
+        except NotFound:
+            snap = None
+
+        if snap is None:
+            plan[side] = {'action': 'build', 'disk_size_gb': names[f'{side}_disk_gb']}
+            for disk_short in disk_shorts:
+                disk_name = names[f'{disk_short}_disk']
+                try:
+                    disks.get(project=project_id, zone=zone, disk=disk_name)
+                except NotFound:
+                    continue
+                problems.append(
+                    f'disk {disk_name} already exists: another run may be building this side; '
+                    'if none is, delete it'
+                )
+        elif snap.status in ('CREATING', 'UPLOADING'):
+            problems.append(
+                f'snapshot {snapshot_name} is {snap.status}; another run may still be creating it, '
+                'wait for it to finish'
+            )
+        elif snap.status != 'READY':
+            problems.append(f'snapshot {snapshot_name} is {snap.status}, not READY; delete it to rebuild')
+        elif (provenance := _provenance(snap.description)) is None:
+            problems.append(f'snapshot {snapshot_name} has no provenance; delete it to rebuild')
+        elif (
+            provenance['pos_image'] != names['pos_image']
+            or provenance['server_image'] != names[f'{side}_image']
+        ):
+            problems.append(
+                f'snapshot {snapshot_name} was built by other images ({snap.description}); delete it to rebuild'
+            )
+        else:
+            plan[side] = {'action': 'reuse', 'disk_size_gb': snap.disk_size_gb}
+            for disk_short in disk_shorts:
+                disk_name = names[f'{disk_short}_disk']
+                try:
+                    disks.get(project=project_id, zone=zone, disk=disk_name)
+                except NotFound:
+                    continue
+                log.warning('disk %s exists on reused side %s; delete it if no run is active', disk_name, side)
+
+    if problems:
+        raise AirflowException('; '.join(problems))
+    return plan

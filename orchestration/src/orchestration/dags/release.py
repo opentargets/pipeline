@@ -185,7 +185,7 @@ with DAG(
         container_env=r['env'],
         vm_service_account=rc.pos_release_service_account,
         data_disks={device: _value(f'{device}_disk') for device in DEVICES},
-        servers=False,
+        servers=(),
         read_only=True,
         machine_type=rc.tarballs_machine_type,
         work_disk_size_gb=rc.small_step_work_disk_gb,

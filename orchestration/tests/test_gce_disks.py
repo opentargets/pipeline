@@ -13,7 +13,6 @@ from orchestration.operators.gce_disks import (
     CreateSnapshotOperator,
     DeleteDiskOperator,
     DeleteSnapshotOperator,
-    SnapshotGuardOperator,
 )
 from orchestration.utils.labels import Labels, TemplatedLabels
 
@@ -85,41 +84,6 @@ def test_delete_snapshot_treats_not_found_as_success(snapshots) -> None:
     DeleteSnapshotOperator(task_id='t', snapshot_name=SNAP).execute({})
 
 
-def _guard(snapshots, existing=(), blob_exists=False):
-    def get(**kw):
-        if kw['snapshot'] in existing:
-            return MagicMock()
-        raise NotFound('x')
-
-    snapshots.get.side_effect = get
-    blob = MagicMock()
-    blob.exists.return_value = blob_exists
-    client = MagicMock()
-    client.bucket.return_value.blob.return_value = blob
-    return patch.object(gce_disks, 'Client', return_value=client)
-
-
-def test_guard_passes_when_nothing_exists(snapshots, disks) -> None:
-    with _guard(snapshots):
-        SnapshotGuardOperator(
-            task_id='t', snapshot_names=[SNAP], blob_uri='gs://b/handoff.json'
-        ).execute({})
-
-
-def test_guard_names_existing_snapshot(snapshots, disks) -> None:
-    with _guard(snapshots, existing={SNAP}), pytest.raises(AirflowException, match=SNAP):
-        SnapshotGuardOperator(
-            task_id='t', snapshot_names=[SNAP, 'other'], blob_uri='gs://b/h.json'
-        ).execute({})
-
-
-def test_guard_names_existing_blob(snapshots, disks) -> None:
-    with _guard(snapshots, blob_exists=True), pytest.raises(AirflowException, match=r'gs://b/h\.json'):
-        SnapshotGuardOperator(
-            task_id='t', snapshot_names=[SNAP], blob_uri='gs://b/h.json'
-        ).execute({})
-
-
 def test_create_snapshot_sets_source_location_and_labels(snapshots) -> None:
     labels = Labels({'step': 'x'})
     CreateSnapshotOperator(
@@ -146,9 +110,28 @@ def test_failed_snapshot_is_deleted_and_error_reraised(snapshots, waits) -> None
     assert snapshots.delete.call_args.kwargs['snapshot'] == SNAP
 
 
+def _failing_snapshot(snapshots, waits, description: str) -> None:
+    waits.side_effect = [RuntimeError('boom'), None]
+    snapshots.get.return_value = MagicMock(description=description)
+    prov = {'pos_image': 'p', 'server_image': 's', 'airflow_run_id': 'mine'}
+    with pytest.raises(RuntimeError, match='boom'):
+        CreateSnapshotOperator(
+            task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels(), provenance=prov
+        ).execute({})
+
+
+def test_failed_snapshot_of_this_run_is_deleted(snapshots, waits) -> None:
+    _failing_snapshot(snapshots, waits, '{"airflow_run_id": "mine"}')
+    assert snapshots.delete.call_args.kwargs['snapshot'] == SNAP
+
+
+def test_failed_snapshot_of_another_run_is_left(snapshots, waits) -> None:
+    _failing_snapshot(snapshots, waits, '{"airflow_run_id": "other"}')
+    snapshots.delete.assert_not_called()
+
+
 def test_template_fields_cover_names_and_sizes() -> None:
     assert {'disk_name', 'size_gb', 'source_snapshot'} <= set(CreateDiskOperator.template_fields)
-    assert {'snapshot_names', 'blob_uri'} <= set(SnapshotGuardOperator.template_fields)
     assert {'disk_name', 'snapshot_name'} <= set(CreateSnapshotOperator.template_fields)
 
 
@@ -170,6 +153,21 @@ def test_cleanup_failure_does_not_mask_the_original_error(snapshots, waits) -> N
         ).execute({})
 
 
+def test_snapshot_records_provenance(snapshots) -> None:
+    prov = {'pos_image': 'p', 'server_image': 's', 'airflow_run_id': 'r'}
+    CreateSnapshotOperator(
+        task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels(), provenance=prov
+    ).execute({})
+    r = snapshots.insert.call_args.kwargs['request'].snapshot_resource
+    assert r.description == '{"airflow_run_id": "r", "pos_image": "p", "server_image": "s"}'
+    assert 'provenance' in CreateSnapshotOperator.template_fields
+
+
+def test_snapshot_without_provenance_has_no_description(snapshots) -> None:
+    CreateSnapshotOperator(task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels()).execute({})
+    assert not snapshots.insert.call_args.kwargs['request'].snapshot_resource.description
+
+
 def test_snapshot_labels_are_templated_and_cleaned(snapshots) -> None:
     op = CreateSnapshotOperator(
         task_id='t',
@@ -185,33 +183,6 @@ def test_snapshot_labels_are_templated_and_cleaned(snapshots) -> None:
     assert labels['release'] == '2612'
     assert labels['run'] == 'manual__2026-11-20t10-00-00-00-00'
     assert labels['step'] == 'x'
-
-
-def _disks_exist(disks, existing) -> None:
-    def get(**kw):
-        if kw['disk'] in existing:
-            return MagicMock()
-        raise NotFound('x')
-
-    disks.get.side_effect = get
-
-
-def test_guard_names_existing_disk(snapshots, disks) -> None:
-    _disks_exist(disks, {DISK})
-    with _guard(snapshots), pytest.raises(AirflowException, match=f'disk {DISK}'):
-        SnapshotGuardOperator(
-            task_id='t', snapshot_names=[SNAP], disk_names=[DISK, 'other'], blob_uri='gs://b/h.json'
-        ).execute({})
-    assert {c.kwargs['zone'] for c in disks.get.call_args_list} == {gce_disks.GCP_ZONE}
-
-
-def test_guard_passes_when_no_disk_exists(snapshots, disks) -> None:
-    _disks_exist(disks, set())
-    with _guard(snapshots):
-        SnapshotGuardOperator(
-            task_id='t', snapshot_names=[SNAP], disk_names=[DISK], blob_uri='gs://b/h.json'
-        ).execute({})
-    assert 'disk_names' in SnapshotGuardOperator.template_fields
 
 
 def test_create_disk_records_the_disk_once_inserted(disks, waits) -> None:
