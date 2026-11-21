@@ -236,6 +236,20 @@ def test_one_side_fails_other_snapshot_kept(dag, simulate) -> None:
     assert [c.args[2] for c in delete.call_args_list] == [NAMES['os_disk']]
 
 
+def test_plan_fails_nothing_is_created_or_deleted(dag, simulate) -> None:
+    states = _run(simulate, dag, failed={'plan'})
+    assert states['plan'] == 'failed'
+    for t in dag.tasks:
+        if t.task_id.startswith(('create_disk_', 'run_backend_', 'snapshot_')):
+            assert states[t.task_id] == 'upstream_failed', t.task_id
+    assert states['write_hand_off'] == states['done'] == 'upstream_failed'
+    with patch.object(release_candidate, 'delete_disk') as delete:
+        for d in DISK_TASKS:
+            assert states[f'delete_disk_{d}'] == 'success'
+            release_candidate.cleanup_disk(_TI(CREATED, states), d)
+    delete.assert_not_called()
+
+
 def test_plan_task_plans_in_the_platform_project(dag) -> None:
     func = _callable(dag, 'plan')
     plan = MagicMock(return_value=BUILD_BOTH)

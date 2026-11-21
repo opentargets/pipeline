@@ -23,7 +23,7 @@ def _sensor(**kwargs) -> ComputeEngineRunBackendSensor:
         'instance_name': 'a-machine',
         'zone': 'a-zone',
         'container_image': POS_IMAGE,
-        'container_args': ['-s', 'backend'],
+        'container_args': ['-s', 'backend_clickhouse'],
         'container_env': {'A': '1'},
         'container_secret_files': {'a-secret': '/secrets/a-secret'},
         'work_disk_size_gb': 100,
@@ -456,7 +456,10 @@ def test_clickhouse_only_script() -> None:
 
 def test_opensearch_only_script() -> None:
     script = _sensor(
-        servers={'opensearch'}, data_disks={'opensearch': 'd'}, clickhouse_image=''
+        servers={'opensearch'},
+        data_disks={'opensearch': 'd'},
+        clickhouse_image='',
+        container_args=['-s', 'backend_opensearch'],
     ).startup_script()
     for text in (
         'vm.max_map_count=262144',

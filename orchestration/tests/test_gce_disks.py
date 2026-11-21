@@ -110,6 +110,26 @@ def test_failed_snapshot_is_deleted_and_error_reraised(snapshots, waits) -> None
     assert snapshots.delete.call_args.kwargs['snapshot'] == SNAP
 
 
+def _failing_snapshot(snapshots, waits, description: str) -> None:
+    waits.side_effect = [RuntimeError('boom'), None]
+    snapshots.get.return_value = MagicMock(description=description)
+    prov = {'pos_image': 'p', 'server_image': 's', 'airflow_run_id': 'mine'}
+    with pytest.raises(RuntimeError, match='boom'):
+        CreateSnapshotOperator(
+            task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels(), provenance=prov
+        ).execute({})
+
+
+def test_failed_snapshot_of_this_run_is_deleted(snapshots, waits) -> None:
+    _failing_snapshot(snapshots, waits, '{"airflow_run_id": "mine"}')
+    assert snapshots.delete.call_args.kwargs['snapshot'] == SNAP
+
+
+def test_failed_snapshot_of_another_run_is_left(snapshots, waits) -> None:
+    _failing_snapshot(snapshots, waits, '{"airflow_run_id": "other"}')
+    snapshots.delete.assert_not_called()
+
+
 def test_template_fields_cover_names_and_sizes() -> None:
     assert {'disk_name', 'size_gb', 'source_snapshot'} <= set(CreateDiskOperator.template_fields)
     assert {'disk_name', 'snapshot_name'} <= set(CreateSnapshotOperator.template_fields)

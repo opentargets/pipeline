@@ -164,6 +164,23 @@ class CreateSnapshotOperator(_ComputeOperator):
         self.labels = labels
         self.provenance = provenance
 
+    def _is_ours(self, client: Any) -> bool:
+        """False if the snapshot records another run, which must keep it."""
+        if self.provenance is None:
+            return True
+        try:
+            existing = client.get(project=self.project_id, snapshot=self.snapshot_name)
+        except NotFound:
+            return True
+        try:
+            recorded = json.loads(existing.description).get('airflow_run_id')
+        except (ValueError, AttributeError):
+            recorded = None
+        if recorded != self.provenance.get('airflow_run_id'):
+            self.log.warning('snapshot %s belongs to run %s, leaving it', self.snapshot_name, recorded)
+            return False
+        return True
+
     def execute(self, context: Any) -> str:
         """Return the snapshot name, so XCom records the snapshots this run created."""
         client = compute_v1.SnapshotsClient()
@@ -187,7 +204,8 @@ class CreateSnapshotOperator(_ComputeOperator):
         except Exception:
             self.log.exception('snapshot %s failed, deleting it', self.snapshot_name)
             try:
-                delete_snapshot(self.project_id, self.snapshot_name, self.log)
+                if self._is_ours(client):
+                    delete_snapshot(self.project_id, self.snapshot_name, self.log)
             except Exception:
                 self.log.exception('could not delete snapshot %s', self.snapshot_name)
             raise

@@ -205,6 +205,9 @@ delete. A side whose snapshot is absent is built; a side whose snapshot is `READ
 built by this run's pos and server images is reused, and its branch is skipped. If both
 sides are reused, only the hand-off is written.
 
+A reused side whose working disk exists only logs a warning: delete that disk if no run
+is active.
+
 A side that fails leaves no VM, disks or partial snapshot. The other side's finished
 snapshot is kept, and no hand-off is written.
 

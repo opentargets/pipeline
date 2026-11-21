@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from google.cloud.storage import Client
 
 from orchestration.dags.config.release import HandOff
 from orchestration.utils import GCSPath
+
+log = logging.getLogger(__name__)
 
 _RUN_RE = re.compile(r'^(platform|ppp)-(\d{2})(\d{2})-(\d+)(-[a-z0-9]+)*$')
 _PREFIX_RE = re.compile(r'^[a-z][a-z0-9]*$')
@@ -95,7 +98,7 @@ def task_states(ti: Any, task_ids: list[str]) -> dict[str, str | None]:
 
 
 def created_this_try(
-    ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None], guard: str = 'guard'
+    ti: Any, producers: Mapping[str, str], states: Mapping[str, str | None], guard: str
 ) -> list[str]:
     """Resource names this try created, from the producers' XComs (task id to XCom key).
 
@@ -164,7 +167,10 @@ def plan_candidate(names: Mapping[str, Any], project_id: str, zone: str) -> dict
                     disks.get(project=project_id, zone=zone, disk=disk_name)
                 except NotFound:
                     continue
-                problems.append(f'disk {disk_name} already exists')
+                problems.append(
+                    f'disk {disk_name} already exists: another run may be building this side; '
+                    'if none is, delete it'
+                )
         elif snap.status in ('CREATING', 'UPLOADING'):
             problems.append(
                 f'snapshot {snapshot_name} is {snap.status}; another run may still be creating it, '
@@ -183,6 +189,13 @@ def plan_candidate(names: Mapping[str, Any], project_id: str, zone: str) -> dict
             )
         else:
             plan[side] = {'action': 'reuse', 'disk_size_gb': snap.disk_size_gb}
+            for disk_short in disk_shorts:
+                disk_name = names[f'{disk_short}_disk']
+                try:
+                    disks.get(project=project_id, zone=zone, disk=disk_name)
+                except NotFound:
+                    continue
+                log.warning('disk %s exists on reused side %s; delete it if no run is active', disk_name, side)
 
     if problems:
         raise AirflowException('; '.join(problems))

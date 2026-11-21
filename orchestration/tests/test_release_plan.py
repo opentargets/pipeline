@@ -138,15 +138,16 @@ def test_plan_fails_on_hand_off(env) -> None:
 
 def test_plan_fails_on_leftover_disk_of_a_side_to_build(env) -> None:
     env.disks.add(OS_DISK)
-    with pytest.raises(AirflowException, match=OS_DISK):
+    with pytest.raises(AirflowException, match=f'{OS_DISK} already exists: another run may be building this side'):
         _plan()
 
 
-def test_plan_ignores_disk_of_a_reused_side(env) -> None:
+def test_plan_ignores_disk_of_a_reused_side(env, caplog) -> None:
     env.disks.add(OS_DISK)
     env.snaps[CH] = _snap()
     env.snaps[OS] = _snap(description=json.dumps(OS_PROV), size=80)
     assert _plan()['opensearch']['action'] == 'reuse'
+    assert [r for r in caplog.records if r.levelname == 'WARNING' and OS_DISK in r.getMessage()]
 
 
 def test_plan_fails_on_leftover_clickhouse_build_disk(env) -> None:
