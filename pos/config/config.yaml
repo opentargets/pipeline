@@ -12,65 +12,17 @@ steps:
   ##################################################################################################
   # Release candidate: ClickHouse and OpenSearch data on their running servers
   ##################################################################################################
-  backend:
+  backend_clickhouse:
     - name: sync_bucket etl output files
       requires:
-        - open_search_prepare cluster settings
         - clickhouse_create_database release database
       source: ${data_source}/output
       destination: ${local_data}/output
     - name: sync_bucket etl view files
       requires:
-        - open_search_prepare cluster settings
         - clickhouse_create_database release database
       source: ${data_source}/view
       destination: ${local_data}/view
-    - name: sync_bucket etl export files
-      requires:
-        - open_search_prepare cluster settings
-        - clickhouse_create_database release database
-      source: ${data_source}/export
-      destination: ${local_data}/export
-    # ot croissant
-    - name: ot_croissant generate release metadata
-      requires:
-        - sync_bucket etl output files
-      ftp_address: ${croissant_ftp_address}
-      gcp_address: ${release_gcs_bucket}/${release}/output/
-      aws_address: ${croissant_aws_address}
-      dataset_path: ${local_data}/output
-      output: croissant.json
-      prepared_data_parent: ${local_data}
-    # opensearch
-    - name: open_search_prepare cluster settings
-      prefix: ${database_namespace}
-    - name: explode load all opensearch datasets
-      requires:
-        - open_search_prepare cluster settings
-        - sync_bucket etl export files
-        - ot_croissant generate release metadata
-      foreach:
-        - croissant
-        - facet_search_disease
-        - facet_search_target
-        - search_disease
-        - search_drug
-        - search_study
-        - search_target
-        - search_variant
-      do:
-        - name: open_search_create_index ${each}
-          dataset: ${each}
-          prefix: ${database_namespace}
-        - name: open_search_load dataset ${each}
-          requires:
-            - open_search_create_index ${each}
-          dataset: ${each}
-          prefix: ${database_namespace}
-          json_parent: ${local_data}
-    - name: open_search_finish no query-insights indices
-      requires:
-        - explode load all opensearch datasets
     # clickhouse
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
@@ -260,6 +212,58 @@ steps:
       dataset: credible_sets_build_cleanup
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+
+  backend_opensearch:
+    - name: sync_bucket etl output files
+      requires:
+        - open_search_prepare cluster settings
+      source: ${data_source}/output
+      destination: ${local_data}/output
+    - name: sync_bucket etl export files
+      requires:
+        - open_search_prepare cluster settings
+      source: ${data_source}/export
+      destination: ${local_data}/export
+    # ot croissant
+    - name: ot_croissant generate release metadata
+      requires:
+        - sync_bucket etl output files
+      ftp_address: ${croissant_ftp_address}
+      gcp_address: ${release_gcs_bucket}/${release}/output/
+      aws_address: ${croissant_aws_address}
+      dataset_path: ${local_data}/output
+      output: croissant.json
+      prepared_data_parent: ${local_data}
+    # opensearch
+    - name: open_search_prepare cluster settings
+      prefix: ${database_namespace}
+    - name: explode load all opensearch datasets
+      requires:
+        - open_search_prepare cluster settings
+        - sync_bucket etl export files
+        - ot_croissant generate release metadata
+      foreach:
+        - croissant
+        - facet_search_disease
+        - facet_search_target
+        - search_disease
+        - search_drug
+        - search_study
+        - search_target
+        - search_variant
+      do:
+        - name: open_search_create_index ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+        - name: open_search_load dataset ${each}
+          requires:
+            - open_search_create_index ${each}
+          dataset: ${each}
+          prefix: ${database_namespace}
+          json_parent: ${local_data}
+    - name: open_search_finish no query-insights indices
+      requires:
+        - explode load all opensearch datasets
 
   ##################################################################################################
   # Release

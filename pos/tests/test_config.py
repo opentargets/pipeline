@@ -16,7 +16,11 @@ CONFIG = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
 RELEASE_NUMBER = re.compile(r'(?<![\d.])\d{2}\.?\d{2}(?![\d.])')
 # derived from release_uri by pos.run
 DERIVED = set(parse_release_uri('gs://b/platform-2612-1').scratchpad()).union(*PRODUCTS.values())
-BACKEND_GUARDS = {'open_search_prepare cluster settings', 'clickhouse_create_database release database'}
+BACKEND_GUARDS = {
+    'backend_clickhouse': 'clickhouse_create_database release database',
+    'backend_opensearch': 'open_search_prepare cluster settings',
+}
+DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
 
 
 def _specs(tasks: list[dict]) -> list[dict]:
@@ -44,7 +48,8 @@ def _task(step: str, task_type: str) -> dict:
 
 def test_config_steps():
     assert set(CONFIG['steps']) == {
-        'backend', 'tarballs', 'bigquery', 'gcs_sync', 'aws_sync', 'ftp_sync', 'publish_manifest', 'scratch_cleanup',
+        'backend_clickhouse', 'backend_opensearch', 'tarballs', 'bigquery', 'gcs_sync', 'aws_sync', 'ftp_sync',
+        'publish_manifest', 'scratch_cleanup',
     }  # fmt: skip
 
 
@@ -68,18 +73,55 @@ def test_no_disk_or_snapshot_fields():
 def test_platform_only_steps():
     for step in ('bigquery', 'aws_sync', 'ftp_sync'):
         assert all(s.get('products') == ['platform'] for s in CONFIG['steps'][step]), step
-    for step in ('backend', 'tarballs', 'gcs_sync'):
+    for step in ('backend_clickhouse', 'backend_opensearch', 'tarballs', 'gcs_sync'):
         assert not any('products' in s and 'ppp' not in s['products'] for s in CONFIG['steps'][step]), step
 
 
-def test_backend_syncs_output_view_and_export():
-    sources = {s['source'] for s in _specs(CONFIG['steps']['backend']) if s['name'].startswith('sync_bucket ')}
-    assert sources == {'${data_source}/output', '${data_source}/view', '${data_source}/export'}
+def test_backend_steps():
+    assert 'backend' not in CONFIG['steps']
+    assert {'backend_clickhouse', 'backend_opensearch'} <= set(CONFIG['steps'])
+
+
+def test_backend_steps_use_one_server_each():
+    for s in _specs(CONFIG['steps']['backend_clickhouse']):
+        assert not s['name'].startswith(('open_search_', 'ot_croissant')), s['name']
+    for s in _specs(CONFIG['steps']['backend_opensearch']):
+        assert not s['name'].startswith('clickhouse_'), s['name']
+
+
+def _sync_sources(step: str) -> set[str]:
+    return {s['source'] for s in _specs(CONFIG['steps'][step]) if s['name'].startswith('sync_bucket ')}
+
+
+def test_backend_step_syncs():
+    assert _sync_sources('backend_clickhouse') == {'${data_source}/output', '${data_source}/view'}
+    assert _sync_sources('backend_opensearch') == {'${data_source}/output', '${data_source}/export'}
+
+
+def test_croissant_only_in_opensearch_step():
+    name = 'ot_croissant generate release metadata'
+    assert name in {s['name'] for s in CONFIG['steps']['backend_opensearch']}
+    assert name not in {s['name'] for s in _specs(CONFIG['steps']['backend_clickhouse'])}
+
+
+def _loaded(step: str, task_type: str) -> set[str]:
+    loaded = set()
+    for task in CONFIG['steps'][step]:
+        for spec in [task, *task.get('do', [])]:
+            if spec['name'].split(' ')[0] == task_type:
+                loaded |= set(task['foreach']) if spec['dataset'] == '${each}' else {spec['dataset']}
+    return loaded
+
+
+def test_every_dataset_loads_in_its_servers_step():
+    assert set(DATASETS['clickhouse']) <= _loaded('backend_clickhouse', 'clickhouse_load')
+    assert set(DATASETS['opensearch']) <= _loaded('backend_opensearch', 'open_search_load')
+    assert not set(DATASETS['clickhouse']) & _loaded('backend_opensearch', 'open_search_load')
 
 
 def test_croissant_lands_where_opensearch_loads_it():
-    croissant = _task('backend', 'ot_croissant')
-    load = _task('backend', 'open_search_load')
+    croissant = _task('backend_opensearch', 'ot_croissant')
+    load = _task('backend_opensearch', 'open_search_load')
     assert croissant['prepared_data_parent'] == load['json_parent']
 
 
@@ -88,11 +130,12 @@ def test_derived_fields_cover_the_run():
 
 
 def test_backend_syncs_wait_for_the_rerun_guards():
-    top = {s['name'] for s in CONFIG['steps']['backend']}
-    assert top >= BACKEND_GUARDS
-    syncs = [s for s in CONFIG['steps']['backend'] if s['name'].startswith('sync_bucket ')]
-    assert len(syncs) == 3
-    assert all(set(s['requires']) == BACKEND_GUARDS for s in syncs)
+    for step, guard in BACKEND_GUARDS.items():
+        top = {s['name'] for s in CONFIG['steps'][step]}
+        assert guard in top
+        syncs = [s for s in CONFIG['steps'][step] if s['name'].startswith('sync_bucket ')]
+        assert len(syncs) == 2
+        assert all(s['requires'] == [guard] for s in syncs), step
 
 
 @pytest.fixture

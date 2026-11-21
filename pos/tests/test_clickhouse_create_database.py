@@ -15,7 +15,7 @@ from pos.tasks.clickhouse_create_database import (
 )
 
 ROOT = Path(__file__).parents[1]
-BACKEND = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend']
+BACKEND = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_clickhouse']
 
 
 class FakeClient:
@@ -56,15 +56,13 @@ def test_database_with_tables_fails(monkeypatch):
 
 def test_guards_run_before_any_load():
     tasks = {t['name']: t for t in BACKEND}
-    guards = [n for n in tasks if n.split(' ')[0] in ('clickhouse_create_database', 'open_search_prepare')]
-    assert len(guards) == 2
-    assert all(not tasks[g].get('requires') for g in guards)
-    (create_db,) = [g for g in guards if g.startswith('clickhouse_create_database')]
-    (prepare,) = [g for g in guards if g.startswith('open_search_prepare')]
+    guards = [n for n in tasks if n.split(' ')[0] == 'clickhouse_create_database']
+    assert len(guards) == 1
+    (create_db,) = guards
+    assert not tasks[create_db].get('requires')
     for name, task in tasks.items():
         if name.startswith('clickhouse_load') or name == 'explode load all datasets':
             # top-level loads require the database task directly or through another load
             assert create_db in task.get('requires', []) or any(
                 r.startswith('clickhouse_load') for r in task.get('requires', [])
             ), name
-    assert prepare in tasks['explode load all opensearch datasets']['requires']
