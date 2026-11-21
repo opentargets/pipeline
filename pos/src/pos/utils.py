@@ -1,6 +1,9 @@
 from box import Box
 
-WIPE_DISKS = 'backend loads only into empty servers: wipe the ClickHouse and OpenSearch data disks, then rerun'
+WIPE_DISKS = (
+    "the backend steps load only into empty servers: wipe that server's data disk, "
+    'or in Airflow trigger release_candidate again on fresh disks'
+)
 
 
 def get_config(config_file: str) -> Box:

@@ -77,7 +77,7 @@ def test_prepare_turns_query_insights_off(monkeypatch):
 @pytest.mark.parametrize('index', ['platform2612_downloads', 'platform2612_search_variant'])
 def test_prepare_refuses_a_used_cluster(monkeypatch, index):
     client = _client([index])
-    with pytest.raises(OpenSearchPrepareError, match=rf'{index}\. .*wipe the ClickHouse and OpenSearch data disks'):
+    with pytest.raises(OpenSearchPrepareError, match=rf'{index}\. .*wipe that server.s data disk'):
         _prepare(client, monkeypatch)
     assert client.cluster.settings == {}
 

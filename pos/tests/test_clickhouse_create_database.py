@@ -51,7 +51,7 @@ def test_database_with_tables_fails(monkeypatch):
     tables = [f't{i:02}' for i in range(12)]
     with pytest.raises(ClickhouseCreateDatabaseError, match=r'12 tables \(t00, .*t09, \.\.\.\)') as e:
         _run(monkeypatch, tables)
-    assert 'wipe the ClickHouse and OpenSearch data disks' in str(e.value)
+    assert "wipe that server's data disk" in str(e.value)
 
 
 def test_guards_run_before_any_load():
