@@ -1,0 +1,133 @@
+"""Tests for profiling a run's outputs against the dataset models."""
+
+from pathlib import Path
+from typing import Annotated, ClassVar
+
+import polars as pl
+from ot_datamodels import DatasetModel, PrimaryKey
+from ot_datamodels.base import StructModel
+
+from pts.schemas.dataset.profile import field_profile, profile_run
+
+
+class _Item(StructModel):
+    v: float | None
+
+
+class _Toy(DatasetModel):
+    dataset_name: ClassVar[str] = '_toy'
+    dataset_title: ClassVar[str] = 'toy'
+    dataset_description: ClassVar[str] = 'toy'
+    example: ClassVar[dict] = {'id': 'a', 'n': 1, 'tags': ['x'], 'items': [{'v': 1.0}]}
+
+    id: Annotated[str, PrimaryKey()]
+    n: int | None
+    tags: list[str | None] | None
+    items: list[_Item]
+
+
+class _EvidenceA(DatasetModel):
+    dataset_name: ClassVar[str] = 'evidence_a'
+    dataset_title: ClassVar[str] = 'a'
+    dataset_description: ClassVar[str] = 'a'
+    example: ClassVar[dict] = {'id': 'a'}
+
+    id: Annotated[str, PrimaryKey()]
+
+
+class _EvidenceB(_EvidenceA):
+    dataset_name: ClassVar[str] = 'evidence_b'
+
+
+def _write(path: Path, frame: pl.DataFrame, parts: int = 1) -> str:
+    path.mkdir(parents=True)
+    for index in range(parts):
+        frame[index::parts].write_parquet(path / f'{index:08d}.parquet')
+    return str(path)
+
+
+def _toy_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            'id': ['a', 'b', 'c', 'd'],
+            'n': [1, 5, None, 3],
+            'tags': [['x', 'y'], None, [], [None, 'x']],
+            'items': [[{'v': 1.5}, {'v': None}], [], [{'v': 2.5}], [{'v': 0.5}]],
+        },
+        schema={
+            'id': pl.String,
+            'n': pl.Int64,
+            'tags': pl.List(pl.String),
+            'items': pl.List(pl.Struct({'v': pl.Float64})),
+        },
+    )
+
+
+def test_field_profile_counts(tmp_path: Path) -> None:
+    path = _write(tmp_path / '_toy', _toy_frame(), parts=2)
+
+    profile = field_profile(path, _Toy)
+    by_path = {row['path']: row for row in profile.iter_rows(named=True)}
+
+    assert list(by_path) == ['id', 'n', 'tags', 'tags[]', 'items', 'items[]', 'items[]/v']
+    assert {row['dataset'] for row in by_path.values()} == {'_toy'}
+
+    ident = by_path['id']
+    assert (ident['nulls'], ident['rows'], ident['list_nulls'], ident['null_elements']) == (0, 4, None, None)
+    assert (ident['min'], ident['max'], ident['distinct']) == (None, None, '["a", "b", "c", "d"]')
+    n = by_path['n']
+    assert (n['nulls'], n['rows'], n['min'], n['max'], n['distinct']) == (1, 4, '1', '5', '[1, 3, 5]')
+    assert (n['list_nulls'], n['null_elements']) == (None, None)
+    tags = by_path['tags']
+    assert (tags['rows'], tags['list_nulls'], tags['null_elements'], tags['distinct']) == (4, 1, 1, None)
+    element = by_path['tags[]']
+    assert (element['rows'], element['nulls'], element['distinct']) == (4, 1, '["x", "y"]')
+    assert (by_path['items']['list_nulls'], by_path['items']['null_elements']) == (0, 0)
+    assert by_path['items[]']['rows'] == 4
+    v = by_path['items[]/v']
+    assert (v['rows'], v['nulls'], v['min'], v['max'], v['distinct']) == (4, 1, '0.5', '2.5', None)
+
+
+def test_field_profile_distinct_capped(tmp_path: Path) -> None:
+    path = _write(tmp_path / 'e', pl.DataFrame({'id': [str(i) for i in range(51)]}), parts=3)
+
+    profile = field_profile(path, _EvidenceA)
+
+    assert profile['distinct'].to_list() == [None]
+    assert profile['rows'].to_list() == [51]
+
+
+def test_profile_run_maps_each_model_to_its_folder(tmp_path: Path, monkeypatch) -> None:
+    run = tmp_path / 'run'
+    _write(run / 'output' / 'evidence_a', pl.DataFrame({'id': ['a1', 'a2']}))
+    _write(run / 'output' / 'evidence_b', pl.DataFrame({'id': ['b1']}))
+    monkeypatch.setattr(
+        'pts.schemas.dataset.profile.discover_datasets',
+        lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
+    )
+
+    profile_run(str(run), str(tmp_path / 'out'))
+
+    profile = pl.read_parquet(tmp_path / 'out' / 'profile.parquet')
+    assert dict(zip(profile['dataset'], profile['rows'], strict=True)) == {'evidence_a': 2, 'evidence_b': 1}
+    assert pl.read_parquet(tmp_path / 'out' / 'validation.parquet').is_empty()
+
+
+def test_profile_run_reports_missing_outputs(tmp_path: Path, monkeypatch) -> None:
+    run = tmp_path / 'run'
+    (run / 'output' / 'evidence_b').mkdir(parents=True)
+    _write(run / 'output' / 'other', pl.DataFrame({'id': ['x']}))
+    monkeypatch.setattr(
+        'pts.schemas.dataset.profile.discover_datasets',
+        lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
+    )
+
+    profile_run(str(run), str(tmp_path / 'out'))
+
+    validation = pl.read_parquet(tmp_path / 'out' / 'validation.parquet')
+    assert sorted(validation.select('dataset', 'check').iter_rows()) == [
+        ('evidence_a', 'missing'),
+        ('evidence_b', 'missing'),
+    ]
+    assert validation['failures'].to_list() == [0, 0]
+    assert pl.read_parquet(tmp_path / 'out' / 'profile.parquet').is_empty()
