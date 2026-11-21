@@ -170,6 +170,21 @@ def test_cleanup_failure_does_not_mask_the_original_error(snapshots, waits) -> N
         ).execute({})
 
 
+def test_snapshot_records_provenance(snapshots) -> None:
+    prov = {'pos_image': 'p', 'server_image': 's', 'airflow_run_id': 'r'}
+    CreateSnapshotOperator(
+        task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels(), provenance=prov
+    ).execute({})
+    r = snapshots.insert.call_args.kwargs['request'].snapshot_resource
+    assert r.description == '{"airflow_run_id": "r", "pos_image": "p", "server_image": "s"}'
+    assert 'provenance' in CreateSnapshotOperator.template_fields
+
+
+def test_snapshot_without_provenance_has_no_description(snapshots) -> None:
+    CreateSnapshotOperator(task_id='t', disk_name=DISK, snapshot_name=SNAP, labels=Labels()).execute({})
+    assert not snapshots.insert.call_args.kwargs['request'].snapshot_resource.description
+
+
 def test_snapshot_labels_are_templated_and_cleaned(snapshots) -> None:
     op = CreateSnapshotOperator(
         task_id='t',

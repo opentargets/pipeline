@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -192,7 +193,7 @@ class SnapshotGuardOperator(_ComputeOperator):
 class CreateSnapshotOperator(_ComputeOperator):
     """Snapshot a disk; delete the partial snapshot if creation fails."""
 
-    template_fields: Sequence[str] = ('disk_name', 'snapshot_name', 'labels')
+    template_fields: Sequence[str] = ('disk_name', 'snapshot_name', 'labels', 'provenance')
 
     def __init__(
         self,
@@ -200,12 +201,14 @@ class CreateSnapshotOperator(_ComputeOperator):
         disk_name: str,
         snapshot_name: str,
         labels: Labels | dict[str, str],
+        provenance: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.disk_name = disk_name
         self.snapshot_name = snapshot_name
         self.labels = labels
+        self.provenance = provenance
 
     def execute(self, context: Any) -> str:
         """Return the snapshot name, so XCom records the snapshots this run created."""
@@ -216,6 +219,8 @@ class CreateSnapshotOperator(_ComputeOperator):
             storage_locations=[SNAPSHOT_LOCATION],
             labels=_clean(self.labels),
         )
+        if self.provenance is not None:
+            snapshot.description = json.dumps(self.provenance, sort_keys=True)
         op = client.insert(
             request=compute_v1.InsertSnapshotRequest(
                 project=self.project_id, snapshot_resource=snapshot
