@@ -1,6 +1,8 @@
 # Clickhouse load task
 from pathlib import Path
 
+from clickhouse_connect.driver.binding import quote_identifier
+from clickhouse_connect.driver.exceptions import ClickHouseError
 from clickhouse_connect.driver.tools import insert_file
 from loguru import logger
 from otter.task.model import Spec, Task, TaskContext
@@ -10,6 +12,9 @@ from otter.util.errors import OtterError
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.utils import get_config
+
+# synchronous, so an insert returns once its data is written
+INSERT_SETTINGS = {'async_insert': 0}
 
 
 class ClickhouseLoadError(OtterError):
@@ -61,12 +66,20 @@ class ClickhouseLoad(Task):
             database=self.spec.clickhouse_database,
         )
         self._execute_script(client, self._pre_load_sql)
-        for file in files:
-            logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
-            insert_file(client, self._table_name, str(file), fmt='Parquet')
+        try:
+            self._insert(client, files)
+        except ClickHouseError as e:
+            logger.warning(f'loading {self._table_name} failed ({e}); truncating it and loading every file again')
+            client.command(f'TRUNCATE TABLE {quote_identifier(self._table_name)}')
+            self._insert(client, files)
         if self._post_load_sql is not None:
             self._execute_script(client, self._post_load_sql)
         return self
+
+    def _insert(self, client, files: list[Path]) -> None:
+        for file in files:
+            logger.debug(f'Inserting file {file} into Clickhouse table {self._table_name}')
+            insert_file(client, self._table_name, str(file), fmt='Parquet', settings=INSERT_SETTINGS)
 
     def _get_parquet_path(self) -> Path:
         return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')

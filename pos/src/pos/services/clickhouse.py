@@ -22,6 +22,8 @@ def connect(
         username=username,
         password=password,
         database=database,
+        # urllib3 sends a request body under the connect timeout; a busy server stalls reading it
+        connect_timeout=1800,
         send_receive_timeout=1800,
     )
 
