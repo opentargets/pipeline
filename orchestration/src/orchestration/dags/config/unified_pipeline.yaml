@@ -26,7 +26,7 @@ run_name: "do/platform-2612-3"
 # billed. Every tag set here was confirmed present in Artifact Registry first.
 pis_version: "26.12.0rc40"
 pts_version: "26.12.0rc106"
-pos_version: "26.12.0rc10"
+pos_version: "26.12.0rc11"
 # Whether the run ends by triggering the release_candidate DAG on its release_uri.
 release_candidate: false
 # A gentropy git tag without its leading `v`: `clusters.yaml` adds it as
