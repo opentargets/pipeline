@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS l2g_predictions ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS (
+-- l2g_predictions_mergetree feeds the credible-set read models: EmbeddedRocksDB scans as one stream.
+-- credible_sets_build_cleanup drops it.
+CREATE TABLE IF NOT EXISTS l2g_predictions_mergetree ENGINE = MergeTree ORDER BY tuple() AS (
     SELECT credibleSetId, reverse(
             arraySort (
                 l -> l.score, groupArray (
@@ -14,5 +16,10 @@ CREATE TABLE IF NOT EXISTS l2g_predictions ENGINE = EmbeddedRocksDB () PRIMARY K
     GROUP BY
         credibleSetId
 );
+
+SELECT throwIf(count() != uniqExact(credibleSetId), 'duplicate credibleSetId in l2g_predictions_mergetree') FROM l2g_predictions_mergetree;
+
+CREATE TABLE IF NOT EXISTS l2g_predictions ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS
+SELECT * FROM l2g_predictions_mergetree;
 
 DROP TABLE IF EXISTS l2g_predictions_log SYNC;

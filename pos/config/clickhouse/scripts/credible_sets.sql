@@ -8,7 +8,9 @@
 -- (every lead variant has a row there) and the number of variants in the credible set.
 -- credible_set_variant_log is on the left so the hash tables are built from the
 -- 6M credible sets, not the 141M variant rows.
-CREATE TABLE IF NOT EXISTS credible_sets ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS (
+-- credible_sets_mergetree feeds the credible-set read models: EmbeddedRocksDB scans as one stream.
+-- credible_sets_build_cleanup drops it.
+CREATE TABLE IF NOT EXISTS credible_sets_mergetree ENGINE = MergeTree ORDER BY tuple() AS (
     SELECT
         cs.id AS credibleSetId,
         cs.studyId AS studyId,
@@ -50,8 +52,15 @@ CREATE TABLE IF NOT EXISTS credible_sets ENGINE = EmbeddedRocksDB () PRIMARY KEY
         optimize_aggregation_in_order = 1
 );
 
+SELECT throwIf(count() != uniqExact(credibleSetId), 'duplicate credibleSetId in credible_sets_mergetree') FROM credible_sets_mergetree;
+
+CREATE TABLE IF NOT EXISTS credible_sets ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS
+SELECT * FROM credible_sets_mergetree;
+
 -- The variants in each credible set, most probable first.
-CREATE TABLE IF NOT EXISTS credible_sets_locus ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS (
+-- credible_sets_locus_mergetree feeds the credible-set read models: EmbeddedRocksDB scans as one stream.
+-- credible_sets_build_cleanup drops it.
+CREATE TABLE IF NOT EXISTS credible_sets_locus_mergetree ENGINE = MergeTree ORDER BY tuple() AS (
     SELECT
         credibleSetId,
         arrayReverseSort (
@@ -104,6 +113,11 @@ CREATE TABLE IF NOT EXISTS credible_sets_locus ENGINE = EmbeddedRocksDB () PRIMA
     SETTINGS
         optimize_aggregation_in_order = 1
 );
+
+SELECT throwIf(count() != uniqExact(credibleSetId), 'duplicate credibleSetId in credible_sets_locus_mergetree') FROM credible_sets_locus_mergetree;
+
+CREATE TABLE IF NOT EXISTS credible_sets_locus ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS
+SELECT * FROM credible_sets_locus_mergetree;
 
 -- credibleSetIds for each study, joined onto studies by studies.sql (which drops this table).
 CREATE TABLE IF NOT EXISTS credible_sets_by_study ENGINE = EmbeddedRocksDB () PRIMARY KEY studyId AS (

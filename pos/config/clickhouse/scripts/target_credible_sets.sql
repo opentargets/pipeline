@@ -5,7 +5,7 @@
 -- geneId is the target) because credible_set has no gene column.
 -- Built from final tables only (the _log tables are dropped by earlier steps),
 -- so it must run after credible_sets, targets, variants, studies and biosample.
--- Every join is on the key of an EmbeddedRocksDB table, so they all run as direct joins.
+-- Reads the _mergetree copies of its inputs: their EmbeddedRocksDB tables scan as one stream.
 -- Unmatched joins give default values ('' and 0), the same as variant_credible_sets.
 -- NB: the load task splits on semicolons, so do not use them inside comments or strings.
 -- ORDER BY: targetId does the work for the lookup, the rest matches the
@@ -41,12 +41,12 @@ FROM
       id,
       credibleSetId
     FROM
-      targets
+      targets_mergetree
       ARRAY JOIN credibleSetIds AS credibleSetId
   ) AS tg
-  INNER JOIN credible_sets AS cs ON tg.credibleSetId = cs.credibleSetId
-  LEFT JOIN variants AS v ON cs.leadVariantId = v.variantId
-  LEFT JOIN studies AS s ON cs.studyId = s.studyId
-  LEFT JOIN biosample AS b ON ifNull(s.biosampleFromSourceId, '') = b.biosampleId;
+  INNER JOIN credible_sets_mergetree AS cs ON tg.credibleSetId = cs.credibleSetId
+  LEFT JOIN variants_mergetree AS v ON cs.leadVariantId = v.variantId
+  LEFT JOIN studies_mergetree AS s ON cs.studyId = s.studyId
+  LEFT JOIN biosample_mergetree AS b ON ifNull(s.biosampleFromSourceId, '') = b.biosampleId;
 
 OPTIMIZE TABLE target_credible_sets FINAL;
