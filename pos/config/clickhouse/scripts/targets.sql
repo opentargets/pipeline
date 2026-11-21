@@ -33,7 +33,9 @@ SETTINGS
 -- create the targets table indexed by id
 -- and join credible_sets_by_gene to get array(credibleSetIds) for each target
 -- and pharmacogenomics to get array(pharmacogenomicsIds) for each target
-CREATE TABLE if not exists targets engine = EmbeddedRocksDB () primary key id as (
+-- targets_mergetree feeds the credible-set read models: EmbeddedRocksDB scans as one stream.
+-- credible_sets_build_cleanup drops it.
+CREATE TABLE IF NOT EXISTS targets_mergetree ENGINE = MergeTree ORDER BY tuple() AS (
   select
     * except (geneId, pgxTargetId)
   from
@@ -51,6 +53,11 @@ CREATE TABLE if not exists targets engine = EmbeddedRocksDB () primary key id as
         pgxTargetId
     ) as pgx on targets_log.id = pgx.pgxTargetId
 );
+
+SELECT throwIf(count() != uniqExact(id), 'duplicate id in targets_mergetree') FROM targets_mergetree;
+
+CREATE TABLE IF NOT EXISTS targets ENGINE = EmbeddedRocksDB () PRIMARY KEY id AS
+SELECT * FROM targets_mergetree;
 
 CREATE TABLE if not exists targets_by_region engine = MergeTree
 order by

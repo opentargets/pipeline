@@ -30,7 +30,9 @@ FROM
 GROUP BY
   diseaseId;
 
-CREATE TABLE if not exists disease engine = EmbeddedRocksDB () primary key id as (
+-- disease_mergetree feeds the credible-set read models: EmbeddedRocksDB scans as one stream.
+-- credible_sets_build_cleanup drops it.
+CREATE TABLE IF NOT EXISTS disease_mergetree ENGINE = MergeTree ORDER BY tuple() AS (
   select
     id,
     name,
@@ -56,6 +58,11 @@ CREATE TABLE if not exists disease engine = EmbeddedRocksDB () primary key id as
     left outer join studies_by_disease on disease_log.id = studies_by_disease.diseaseId
     left outer join studies_by_disease_indirect as indirect_studies on disease_log.id = indirect_studies.diseaseId
 );
+
+SELECT throwIf(count() != uniqExact(id), 'duplicate id in disease_mergetree') FROM disease_mergetree;
+
+CREATE TABLE IF NOT EXISTS disease ENGINE = EmbeddedRocksDB () PRIMARY KEY id AS
+SELECT * FROM disease_mergetree;
 
 CREATE DICTIONARY IF NOT EXISTS disease_names (id String, name String) PRIMARY KEY id SOURCE (CLICKHOUSE (TABLE 'disease')) LAYOUT (COMPLEX_KEY_HASHED ()) LIFETIME (0);
 

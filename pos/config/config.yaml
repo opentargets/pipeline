@@ -252,6 +252,14 @@ steps:
       dataset: target_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+    - name: clickhouse_load clickhouse credible_sets_build_cleanup
+      requires:
+        - clickhouse_load clickhouse load variant_credible_sets
+        - clickhouse_load clickhouse load study_credible_sets
+        - clickhouse_load clickhouse load target_credible_sets
+      dataset: credible_sets_build_cleanup
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
 
   ##################################################################################################
   # Release

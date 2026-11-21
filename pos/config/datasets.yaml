@@ -216,6 +216,11 @@ clickhouse:
     table: target_credible_sets
     derived: true
     preload_script: config/clickhouse/scripts/target_credible_sets.sql
+  # Drops the _mergetree inputs of the three credible-set read models.
+  credible_sets_build_cleanup:
+    table: credible_sets_build_cleanup
+    derived: true
+    preload_script: config/clickhouse/scripts/credible_sets_build_cleanup.sql
   clinical_indication:
     table: clinical_indication_log
     input_dir: output/clinical_indication

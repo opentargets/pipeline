@@ -1,6 +1,7 @@
 -- Read model for the variant page credible sets tables (all study types).
 -- One fully denormalised row per (variant in locus, credible set) so the API can
 -- filter and sort on any column with a single table query.
+-- Reads the _mergetree copies of its inputs: their EmbeddedRocksDB tables scan as one stream.
 -- Built from final tables only (the _log tables are dropped by earlier steps),
 -- so it must run after credible_sets, studies, disease, targets, variants, biosample
 -- and l2g_predictions.
@@ -32,7 +33,7 @@ WITH
           name,
           taId
         FROM
-          disease
+          disease_mergetree
           LEFT ARRAY JOIN therapeuticAreas AS taId
       ) AS d
       LEFT JOIN (
@@ -40,7 +41,7 @@ WITH
           id,
           name
         FROM
-          disease
+          disease_mergetree
       ) AS ta ON d.taId = ta.id
     GROUP BY
       d.id
@@ -66,7 +67,7 @@ WITH
           biosampleFromSourceId,
           diseaseId
         FROM
-          studies
+          studies_mergetree
           LEFT ARRAY JOIN diseaseIds AS diseaseId
       ) AS sd
       LEFT JOIN disease_with_ta AS dt ON sd.diseaseId = dt.id
@@ -87,7 +88,7 @@ WITH
           tupleElement(l2g_predictions[1], 'geneId') AS geneId,
           tupleElement(l2g_predictions[1], 'score') AS score
         FROM
-          l2g_predictions
+          l2g_predictions_mergetree
         WHERE
           notEmpty(l2g_predictions)
       ) AS l
@@ -96,7 +97,7 @@ WITH
           id,
           approvedSymbol
         FROM
-          targets
+          targets_mergetree
       ) AS t ON l.geneId = t.id
   ),
   sets AS (
@@ -133,8 +134,8 @@ WITH
       csl.locus AS locus,
       cs.locusSize AS locusSize
     FROM
-      credible_sets AS cs
-      INNER JOIN credible_sets_locus AS csl ON cs.credibleSetId = csl.credibleSetId
+      credible_sets_mergetree AS cs
+      INNER JOIN credible_sets_locus_mergetree AS csl ON cs.credibleSetId = csl.credibleSetId
       LEFT JOIN study_info AS si ON cs.studyId = si.studyId
       LEFT JOIN top_l2g AS tl ON cs.credibleSetId = tl.credibleSetId
       LEFT JOIN (
@@ -143,21 +144,21 @@ WITH
           referenceAllele,
           alternateAllele
         FROM
-          variants
+          variants_mergetree
       ) AS v ON cs.leadVariantId = v.variantId
       LEFT JOIN (
         SELECT
           id,
           approvedSymbol
         FROM
-          targets
+          targets_mergetree
       ) AS st ON ifNull(si.studyTargetId, '') = st.id
       LEFT JOIN (
         SELECT
           biosampleId,
           biosampleName
         FROM
-          biosample
+          biosample_mergetree
       ) AS b ON ifNull(si.biosampleId, '') = b.biosampleId
   )
 SELECT
