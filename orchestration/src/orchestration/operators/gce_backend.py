@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from google.cloud import compute_v1
 
@@ -25,13 +25,13 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
 
     Args:
         data_disks: Device name (`clickhouse`, `opensearch`) to the name of an existing disk.
-        servers: Start ClickHouse and OpenSearch on the data disks before pos, and stop
-            them after it.
+        servers: Servers (`clickhouse`, `opensearch`) to start on their data disks before pos
+            and stop after it; empty starts none.
         read_only: Attach the data disks read-only and mount them into pos at `/mnt/<device>`.
             Otherwise they are formatted.
-        clickhouse_image: ClickHouse server image, needed with `servers`.
-        opensearch_image: OpenSearch image, needed with `servers`.
-        health_timeout_s: How long to wait for both servers to be healthy. On timeout the
+        clickhouse_image: ClickHouse server image, needed when started.
+        opensearch_image: OpenSearch image, needed when started.
+        health_timeout_s: How long to wait for the started servers to be healthy. On timeout the
             script exits 1 with the servers still running, so the disks are unfit to snapshot.
         compact: Source device to destination device, both in `data_disks`. If pos exits 0,
             each source is copied onto its destination after the servers stop, and the copy is
@@ -50,7 +50,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         self,
         *,
         data_disks: dict[str, str],
-        servers: bool,
+        servers: Collection[str],
         read_only: bool,
         clickhouse_image: str = '',
         opensearch_image: str = '',
@@ -59,8 +59,12 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        if servers and not (clickhouse_image and opensearch_image):
-            raise ValueError('servers need clickhouse_image and opensearch_image')
+        servers = frozenset(servers)
+        if unknown := servers - SERVER_DEVICES:
+            raise ValueError(f'unknown servers {sorted(unknown)}; expected a subset of {sorted(SERVER_DEVICES)}')
+        for server, image in (('clickhouse', clickhouse_image), ('opensearch', opensearch_image)):
+            if server in servers and not image:
+                raise ValueError(f'the {server} server needs {server}_image')
         if servers and read_only:
             raise ValueError('servers cannot run on read-only disks')
         compact = compact or {}
@@ -70,10 +74,10 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             raise ValueError('compact devices must be in data_disks')
         if set(compact.values()) & (set(compact) | SERVER_DEVICES) or len(set(compact.values())) < len(compact):
             raise ValueError('compact destinations must be distinct, and neither sources nor server devices')
-        if servers and set(data_disks) != SERVER_DEVICES | set(compact.values()):
-            raise ValueError(f'servers need data_disks for exactly {sorted(SERVER_DEVICES)} plus compact destinations')
+        if servers and set(data_disks) != servers | set(compact.values()):
+            raise ValueError(f'servers need data_disks for exactly {sorted(servers)} plus compact destinations')
         self.data_disks = data_disks
-        self.servers = servers
+        self.servers: frozenset[str] = servers
         self.read_only = read_only
         self.clickhouse_image = clickhouse_image
         self.opensearch_image = opensearch_image
@@ -104,20 +108,26 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         ch = '/mnt/disks/clickhouse'
         os_ = '/mnt/disks/opensearch'
         t = self.health_timeout_s
-        return f"""\
+        lines = ''
+        if 'clickhouse' in self.servers:
+            lines += f"""\
             sudo -u app docker pull {self.container_image}
             docker create --name pos {self.container_image}
             docker cp pos:/app/config/clickhouse/config.d {ch}/
             docker cp pos:/app/config/clickhouse/users.d {ch}/
             docker rm pos
-            mkdir -p {ch}/data {os_}/data
-            chown 1000:1000 {os_}/data
+            mkdir -p {ch}/data
             docker run -d --name clickhouse --network host --ulimit nofile=262144:262144 \\
                 --log-driver="gcplogs" \\
                 -v {ch}/data:/var/lib/clickhouse \\
                 -v {ch}/config.d:/etc/clickhouse-server/config.d \\
                 -v {ch}/users.d:/etc/clickhouse-server/users.d \\
                 {self.clickhouse_image}
+"""
+        if 'opensearch' in self.servers:
+            lines += f"""\
+            mkdir -p {os_}/data
+            chown 1000:1000 {os_}/data
             sysctl -w vm.max_map_count=262144
             docker run -d --name opensearch --network host \\
                 --ulimit memlock=-1:-1 --ulimit nofile=65536:65536 \\
@@ -130,13 +140,21 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
                 -e search.insights.top_queries.memory.enabled=false \\
                 -v {os_}/data:/usr/share/opensearch/data \\
                 {self.opensearch_image}
+"""
+        checks = []
+        if 'clickhouse' in self.servers:
+            checks.append('curl -sf localhost:8123/ping >/dev/null')
+        if 'opensearch' in self.servers:
+            checks.append('health=$(curl -sf localhost:9200/_cluster/health)')
+            checks.append("[[ $health == *'\"status\":\"green\"'* || $health == *'\"status\":\"yellow\"'* ]]")
+        cond = ' \\\n                    && '.join(checks)
+        names = ' and '.join(n for n in ('ClickHouse', 'OpenSearch') if n.lower() in self.servers)
+        lines += f"""\
             wait_for_servers() {{
                 local deadline=$((SECONDS + {t})) health
-                until curl -sf localhost:8123/ping >/dev/null \\
-                    && health=$(curl -sf localhost:9200/_cluster/health) \\
-                    && [[ $health == *'"status":"green"'* || $health == *'"status":"yellow"'* ]]; do
+                until {cond}; do
                     if (( SECONDS >= deadline )); then
-                        echo "ClickHouse and OpenSearch not healthy after {t} s"
+                        echo "{names} not healthy after {t} s"
                         exit 1
                     fi
                     sleep {HEALTH_POLL_S}
@@ -144,6 +162,7 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
             }}
             wait_for_servers
 """
+        return lines
 
     def compact_lines(self) -> str:
         """Copy each compact source onto its destination in the pos image and verify it, only while `rc` is 0."""
@@ -164,7 +183,8 @@ class ComputeEngineRunBackendSensor(ComputeEngineRunContainerizedWorkloadSensor)
         arg = ' '.join(self.container_args or [])
         stop = ''
         if self.servers:
-            stop += '            docker stop -t 300 opensearch clickhouse\n'
+            names = ' '.join(n for n in ('opensearch', 'clickhouse') if n in self.servers)
+            stop += f'            docker stop -t 300 {names}\n'
         stop += self.compact_lines()
         if not self.read_only:
             # umount leaves a clean filesystem to snapshot

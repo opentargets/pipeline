@@ -349,7 +349,7 @@ def test_tarballs_reads_the_restored_disks(dag) -> None:
     out = _load(False)
     t = cast(ComputeEngineRunBackendSensor, dag.get_task('run_tarballs'))
     assert isinstance(t, ComputeEngineRunBackendSensor)
-    assert t.servers is False
+    assert not t.servers
     assert t.read_only is True
     assert t.machine_type == rc.tarballs_machine_type
     assert t.work_disk_size_gb == rc.small_step_work_disk_gb

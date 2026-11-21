@@ -220,7 +220,7 @@ def test_run_backend(dag) -> None:
     up = UnifiedPipelineConfig()
     run = cast(ComputeEngineRunBackendSensor, dag.get_task('run_backend'))
     assert isinstance(run, ComputeEngineRunBackendSensor)
-    assert run.servers is True
+    assert run.servers == {'clickhouse', 'opensearch'}
     assert run.read_only is False
     assert run.compact == {'clickhouse': 'clickhouse-compact'}
     assert run.machine_type == 'n2d-highmem-96'

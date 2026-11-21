@@ -171,7 +171,7 @@ with DAG(
             'opensearch': _name('os_disk'),
         },
         compact={'clickhouse': 'clickhouse-compact'},
-        servers=True,
+        servers={'clickhouse', 'opensearch'},
         read_only=False,
         clickhouse_image=_name('clickhouse_image'),
         opensearch_image=_name('opensearch_image'),
