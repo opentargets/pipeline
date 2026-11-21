@@ -26,8 +26,8 @@ def test_unified_pipeline_pins_pos_image():
 
     config = UnifiedPipelineConfig()
 
-    assert config.pos_version == '26.12.0rc9'
-    assert config.pos_image == f'{images.REGISTRY}/pos:26.12.0rc9'
+    assert config.pos_version == '26.12.0rc10'
+    assert config.pos_image == f'{images.REGISTRY}/pos:26.12.0rc10'
     assert config.release_candidate is False
 
 
