@@ -51,8 +51,8 @@ def _toy_frame() -> pl.DataFrame:
         {
             'id': ['a', 'b', 'c', 'd'],
             'n': [1, 5, None, 3],
-            'tags': [['x', 'y'], None, [], [None, 'x']],
-            'items': [[{'v': 1.5}, {'v': None}], [], [{'v': 2.5}], [{'v': 0.5}]],
+            'tags': [['x', 'y', 'z'], None, [], [None, 'x']],
+            'items': [[{'v': 1.5}, {'v': None}, {'v': 3.5}], [], [{'v': 2.5}], [{'v': 0.5}]],
         },
         schema={
             'id': pl.String,
@@ -81,11 +81,13 @@ def test_field_profile_counts(tmp_path: Path) -> None:
     tags = by_path['tags']
     assert (tags['rows'], tags['list_nulls'], tags['null_elements'], tags['distinct']) == (4, 1, 1, None)
     element = by_path['tags[]']
-    assert (element['rows'], element['nulls'], element['distinct']) == (4, 1, '["x", "y"]')
+    assert (element['rows'], element['nulls'], element['distinct']) == (5, 1, '["x", "y", "z"]')
     assert (by_path['items']['list_nulls'], by_path['items']['null_elements']) == (0, 0)
-    assert by_path['items[]']['rows'] == 4
+    assert by_path['items[]']['rows'] == 5
+    assert by_path['items[]']['nulls'] == 0
     v = by_path['items[]/v']
-    assert (v['rows'], v['nulls'], v['min'], v['max'], v['distinct']) == (4, 1, '0.5', '2.5', None)
+    assert (v['rows'], v['nulls'], v['min'], v['max'], v['distinct']) == (5, 1, '0.5', '3.5', None)
+    assert all(row['present'] for row in by_path.values())
 
 
 def test_field_profile_distinct_capped(tmp_path: Path) -> None:
@@ -131,3 +133,50 @@ def test_profile_run_reports_missing_outputs(tmp_path: Path, monkeypatch) -> Non
     ]
     assert validation['failures'].to_list() == [0, 0]
     assert pl.read_parquet(tmp_path / 'out' / 'profile.parquet').is_empty()
+
+
+def test_field_profile_marks_absent_columns(tmp_path: Path) -> None:
+    path = _write(tmp_path / '_toy', _toy_frame().drop('n', 'items'))
+
+    by_path = {row['path']: row for row in field_profile(path, _Toy).iter_rows(named=True)}
+
+    assert list(by_path) == ['id', 'n', 'tags', 'tags[]', 'items', 'items[]', 'items[]/v']
+    assert [p for p, row in by_path.items() if not row['present']] == ['n', 'items', 'items[]', 'items[]/v']
+    assert by_path['n']['rows'] is None
+    assert by_path['tags[]']['rows'] == 5
+
+
+def test_field_profile_skips_a_column_of_the_wrong_shape(tmp_path: Path) -> None:
+    frame = _toy_frame().with_columns(items=pl.lit(1))
+    path = _write(tmp_path / '_toy', frame)
+
+    paths = field_profile(path, _Toy)['path'].to_list()
+
+    assert paths == ['id', 'n', 'tags', 'tags[]']
+
+
+def test_profile_run_survives_a_failing_dataset(tmp_path: Path, monkeypatch) -> None:
+    run = tmp_path / 'run'
+    _write(run / 'output' / 'evidence_a', pl.DataFrame({'id': ['a1', 'a2']}))
+    _write(run / 'output' / 'evidence_b', pl.DataFrame({'id': ['b1']}))
+    monkeypatch.setattr(
+        'pts.schemas.dataset.profile.discover_datasets',
+        lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
+    )
+    real = field_profile
+
+    def flaky(path: str, model: type[DatasetModel]) -> pl.DataFrame:
+        if model is _EvidenceA:
+            raise RuntimeError('boom')
+        return real(path, model)
+
+    monkeypatch.setattr('pts.schemas.dataset.profile.field_profile', flaky)
+    out = tmp_path / 'out'
+
+    profile_run(str(run), str(out))
+
+    validation = pl.read_parquet(out / 'validation.parquet')
+    assert validation.select('dataset', 'check', 'examples').rows() == [('evidence_a', 'error', ['RuntimeError: boom'])]
+    assert pl.read_parquet(out / 'profile.parquet')['dataset'].to_list() == ['evidence_b']
+    assert pl.read_parquet(out / 'profile' / 'evidence_b.parquet')['rows'].to_list() == [1]
+    assert pl.read_parquet(out / 'validation' / 'evidence_a.parquet')['check'].to_list() == ['error']

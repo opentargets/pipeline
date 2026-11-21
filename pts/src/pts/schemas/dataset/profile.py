@@ -16,8 +16,6 @@ Datasets are read one at a time, lazily, so memory stays bounded whatever the da
 import json
 import re
 import sys
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -25,6 +23,7 @@ from loguru import logger
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec, walk
+from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
 from pts.schemas.dataset.validate import REPORT_SCHEMA, validation_report
@@ -39,6 +38,7 @@ MISSING = 'missing'
 PROFILE_SCHEMA = pl.Schema({
     'dataset': pl.String,
     'path': pl.String,
+    'present': pl.Boolean,
     'nulls': pl.Int64,
     'rows': pl.Int64,
     'list_nulls': pl.Int64,
@@ -50,39 +50,81 @@ PROFILE_SCHEMA = pl.Schema({
 
 _STEP = re.compile(r'\[\]|/[^/\[]+')
 
+#: The `check` of a validation row for a dataset that could not be validated or profiled.
+ERROR = 'error'
+
 
 def _value(path: str) -> pl.Expr:
     """The values at a `walk` path: a list level explodes, a struct level takes the field."""
-    column = re.match(r'[^/\[]+', path)
-    assert column is not None
-    expr = pl.col(column.group())
-    for step in _STEP.findall(path[column.end() :]):
+    column = _column(path)
+    expr = pl.col(column)
+    for step in _STEP.findall(path[len(column) :]):
         expr = expr.list.explode(empty_as_null=False, keep_nulls=False) if step == '[]' else expr.struct.field(step[1:])
     return expr
 
 
-def _distinct_applies(node: Node) -> bool:
+def _column(path: str) -> str:
+    """The top-level column of a `walk` path."""
+    return re.split(r'[/\[]', path, maxsplit=1)[0]
+
+
+def _lists_distinct(node: Node) -> bool:
     dtype = node.dtype
     return node.kind == 'primitive' and (
         dtype in {pl.String, pl.Boolean} or dtype.is_integer() or isinstance(dtype, pl.Enum)
     )
 
 
-def _distinct(parts: list[str], expr: pl.Expr, node: Node) -> str | None:
-    """The sorted distinct non-null values as JSON, or None above `MAX_DISTINCT`; one part at a time."""
-    if isinstance(node.dtype, pl.Enum):
-        expr = expr.cast(pl.String)
-    seen: set[Any] = set()
-    for part in parts:
-        values = pl.scan_parquet(part).select(expr.drop_nulls().unique().head(MAX_DISTINCT + 1)).collect()
-        seen.update(values.to_series().to_list())
-        if len(seen) > MAX_DISTINCT:
-            return None
-    return json.dumps(sorted(seen))
+def _distinct_values(expr: pl.Expr, node: Node) -> pl.Expr:
+    return (expr.cast(pl.String) if isinstance(node.dtype, pl.Enum) else expr).drop_nulls()
 
 
-def _paths(model: type[DatasetModel]) -> Iterator[tuple[str, Node]]:
-    return walk(dataset_spec(model))
+def _profile_column(lazy: pl.LazyFrame, dataset: str, paths: list[tuple[str, Node]]) -> list[dict[str, Any]]:
+    """The profile rows of one top-level column and everything nested in it: two passes over the column.
+
+    The first pass computes every statistic of every path in one select, the second lists the distinct
+    values of the paths that have few.
+    """
+    aggregates = []
+    for i, (path, node) in enumerate(paths):
+        expr = _value(path)
+        aggregates += [expr.len().alias(f'{i}/rows'), expr.null_count().alias(f'{i}/nulls')]
+        if node.kind == 'list':
+            aggregates.append(
+                (expr.list.len() - expr.list.drop_nulls().list.len()).sum().fill_null(0).alias(f'{i}/null_elements')
+            )
+        if node.dtype.is_numeric():
+            aggregates += [expr.min().cast(pl.String).alias(f'{i}/min'), expr.max().cast(pl.String).alias(f'{i}/max')]
+        if _lists_distinct(node):
+            aggregates.append(_distinct_values(expr, node).n_unique().alias(f'{i}/distinct'))
+    stats = lazy.select(aggregates).collect(engine='streaming').row(0, named=True)
+
+    few = [i for i, (_, node) in enumerate(paths) if _lists_distinct(node) and stats[f'{i}/distinct'] <= MAX_DISTINCT]
+    values = (
+        lazy
+        .select([
+            _distinct_values(_value(paths[i][0]), paths[i][1]).unique().sort().implode().alias(str(i)) for i in few
+        ])
+        .collect(engine='streaming')
+        .row(0, named=True)
+        if few
+        else {}
+    )
+    return [
+        {
+            'dataset': dataset,
+            'path': path,
+            'present': True,
+            'nulls': stats[f'{i}/nulls'],
+            'rows': stats[f'{i}/rows'],
+            'list_nulls': stats[f'{i}/nulls'] if node.kind == 'list' else None,
+            'null_elements': stats.get(f'{i}/null_elements'),
+            'min': stats.get(f'{i}/min'),
+            'max': stats.get(f'{i}/max'),
+            'distinct': json.dumps(values[str(i)]) if str(i) in values else None,
+        }
+        for i, (path, node) in enumerate(paths)
+    ]
 
 
 def field_profile(path: str, model: type[DatasetModel]) -> pl.DataFrame:
@@ -94,86 +136,88 @@ def field_profile(path: str, model: type[DatasetModel]) -> pl.DataFrame:
 
     Returns:
         One row per `walk` path, in `PROFILE_SCHEMA`. `rows` is the number of values at that level (all
-        rows for a column, the elements of the non-null lists for `column[]`). Values of a model column
-        missing from the data, or of another shape, are skipped with a warning.
+        rows for a column, the elements of the non-null lists for `column[]`). The values of a model
+        column missing from the data get a row with `present` false and no statistics; a column of
+        another shape than the model's is skipped with a warning.
     """
-    parts = list_parts(path, '*.parquet')
-    lazy = pl.scan_parquet(parts)
-    present = set(lazy.collect_schema().names())
-    rows = []
-    for value_path, node in _paths(model):
-        if value_path.split('/')[0].split('[')[0] not in present:
-            logger.warning('{}: {} is not in the data, not profiled', model.dataset_name, value_path)
+    lazy = pl.scan_parquet(list_parts(path, '*.parquet'))
+    in_data = set(lazy.collect_schema().names())
+    by_column: dict[str, list[tuple[str, Node]]] = {}
+    for value_path, node in walk(dataset_spec(model)):
+        by_column.setdefault(_column(value_path), []).append((value_path, node))
+
+    rows: list[dict[str, Any]] = []
+    for column, paths in by_column.items():
+        if column not in in_data:
+            logger.warning('{}: column {} is not in the data', model.dataset_name, column)
+            rows += [{'dataset': model.dataset_name, 'path': p, 'present': False} for p, _ in paths]
             continue
-        expr = _value(value_path)
-        aggregates = [pl.len().alias('rows'), expr.null_count().alias('nulls')]
-        if node.kind == 'list':
-            aggregates.append(
-                (expr.list.len() - expr.list.drop_nulls().list.len()).sum().fill_null(0).alias('null_elements')
-            )
-        if node.dtype.is_numeric():
-            aggregates += [expr.min().cast(pl.String).alias('min'), expr.max().cast(pl.String).alias('max')]
         try:
-            stats = lazy.select(aggregates).collect(engine='streaming').row(0, named=True)
-            distinct = _distinct(parts, expr, node) if _distinct_applies(node) else None
+            rows += _profile_column(lazy, model.dataset_name, paths)
         except pl.exceptions.PolarsError as error:
             logger.warning(
-                '{}: {} does not have the modelled shape, not profiled: {}', model.dataset_name, value_path, error
+                '{}: column {} does not have the modelled shape, not profiled: {}', model.dataset_name, column, error
             )
-            continue
-        rows.append({
-            'dataset': model.dataset_name,
-            'path': value_path,
-            'nulls': stats['nulls'],
-            'rows': stats['rows'],
-            'list_nulls': stats['nulls'] if node.kind == 'list' else None,
-            'null_elements': stats.get('null_elements'),
-            'min': stats.get('min'),
-            'max': stats.get('max'),
-            'distinct': distinct,
-        })
     return pl.DataFrame(rows, schema=PROFILE_SCHEMA)
 
 
-def _missing(dataset: str) -> pl.DataFrame:
+def _row(dataset: str, check: str, examples: list[str] | None = None) -> pl.DataFrame:
+    """A validation row that is not a broken rule: the dataset was not written, or could not be checked."""
     return pl.DataFrame(
         {
             'dataset': [dataset],
             'column': [None],
-            'check': [MISSING],
+            'check': [check],
             'failures': [0],
             'parts': [0],
-            'examples': [None],
+            'examples': [examples],
             'first_part': [None],
         },
         schema=REPORT_SCHEMA,
     )
 
 
+def _write(frame: pl.DataFrame, path: str) -> None:
+    with StorageHandle(path).open('wb') as handle:
+        frame.write_parquet(handle)
+
+
 def profile_run(run_uri: str, out_dir: str) -> None:
-    """Validate and profile every modelled dataset of a run, writing two parquet summaries.
+    """Validate and profile every modelled dataset of a run, writing parquet summaries.
+
+    Each dataset is written as soon as it is done, to `<out_dir>/validation/<dataset>.parquet` and
+    `<out_dir>/profile/<dataset>.parquet`, so a crash keeps what came before it; a dataset that fails
+    gets an `error` row and the run goes on. At the end `validation.parquet` and `profile.parquet`
+    combine all datasets.
 
     Args:
         run_uri: the run, local or `gs://`; dataset `x` is read from `<run_uri>/output/x`.
-        out_dir: where `validation.parquet` and `profile.parquet` are written, local or `gs://`.
+        out_dir: where the summaries are written, local or `gs://`.
     """
     out = out_dir.rstrip('/')
-    if '://' not in out:
-        Path(out).mkdir(parents=True, exist_ok=True)
     validations = [REPORT_SCHEMA.to_frame()]
     profiles = [PROFILE_SCHEMA.to_frame()]
     for name, model in sorted(discover_datasets().items()):
         location = f'{run_uri.rstrip("/")}/output/{name}'
+        validation, profile = REPORT_SCHEMA.to_frame(), PROFILE_SCHEMA.to_frame()
         try:
             list_parts(location, '*.parquet')
         except (NotFoundError, ValueError) as error:
             logger.warning('{}: nothing to profile at {}: {}', name, location, error)
-            validations.append(_missing(name))
-            continue
-        validations.append(validation_report(location, model))
-        profiles.append(field_profile(location, model))
-    pl.concat(validations).write_parquet(f'{out}/validation.parquet')
-    pl.concat(profiles).write_parquet(f'{out}/profile.parquet')
+            validation = _row(name, MISSING)
+        else:
+            try:
+                validation = validation_report(location, model)
+                profile = field_profile(location, model)
+            except Exception as error:  # one bad dataset must not lose the rest of the run
+                logger.exception('{}: failed', name)
+                validation = pl.concat([validation, _row(name, ERROR, [f'{type(error).__name__}: {error}'])])
+        _write(validation, f'{out}/validation/{name}.parquet')
+        _write(profile, f'{out}/profile/{name}.parquet')
+        validations.append(validation)
+        profiles.append(profile)
+    _write(pl.concat(validations), f'{out}/validation.parquet')
+    _write(pl.concat(profiles), f'{out}/profile.parquet')
 
 
 def main(argv: list[str]) -> int:
