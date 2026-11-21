@@ -30,10 +30,13 @@ def hand_off(**overrides: object) -> HandOff:
 def test_release_config_loads_yaml():
     config = ReleaseConfig()
 
-    assert config.backend_machine_type == 'n2d-highmem-96'
+    assert config.clickhouse_machine_type == 'n2d-highmem-96'
+    assert config.opensearch_machine_type == 'n2d-highmem-32'
+    assert (config.clickhouse_work_disk_gb, config.opensearch_work_disk_gb) == (100, 100)
     assert config.backend_max_run_hours == 4
     assert config.clickhouse_build_disk_gb == 300
-    assert (config.clickhouse_disk_gb, config.opensearch_disk_gb, config.work_disk_gb) == (170, 80, 200)
+    assert (config.clickhouse_disk_gb, config.opensearch_disk_gb) == (170, 80)
+    assert not {'backend_machine_type', 'work_disk_gb'} & set(ReleaseConfig.model_fields)
     assert config.pos_release_service_account == 'pos-release@open-targets-eu-dev.iam.gserviceaccount.com'
     assert config.aws_secret == 'pos-aws-credentials'  # noqa: S105
     assert config.scratch_min_pos_version == '26.12.0rc6'

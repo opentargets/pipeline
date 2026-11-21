@@ -10,10 +10,8 @@ from airflow.sdk import BaseOperator
 from airflow.sdk.exceptions import AirflowException
 from google.api_core.exceptions import NotFound
 from google.cloud import compute_v1
-from google.cloud.storage import Client
 
 from orchestration.operators.gce import wait_for_extended_operation
-from orchestration.utils import GCSPath
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.labels import Labels
 
@@ -144,50 +142,6 @@ class DeleteSnapshotOperator(_ComputeOperator):
 
     def execute(self, context: Any) -> None:
         delete_snapshot(self.project_id, self.snapshot_name, self.log)
-
-
-class SnapshotGuardOperator(_ComputeOperator):
-    """Fail if any snapshot, disk or the hand-off blob already exists."""
-
-    template_fields: Sequence[str] = ('snapshot_names', 'disk_names', 'blob_uri')
-
-    def __init__(
-        self,
-        *args: Any,
-        snapshot_names: list[str],
-        blob_uri: str,
-        disk_names: list[str] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.snapshot_names = snapshot_names
-        self.disk_names = disk_names or []
-        self.blob_uri = blob_uri
-
-    def execute(self, context: Any) -> None:
-        client = compute_v1.SnapshotsClient()
-        found: list[str] = []
-        for name in self.snapshot_names:
-            try:
-                client.get(project=self.project_id, snapshot=name)
-            except NotFound:
-                continue
-            found.append(f'snapshot {name}')
-
-        disks = compute_v1.DisksClient()
-        for name in self.disk_names:
-            try:
-                disks.get(project=self.project_id, zone=self.zone, disk=name)
-            except NotFound:
-                continue
-            found.append(f'disk {name}')
-
-        bucket, path = GCSPath(self.blob_uri).split()
-        if Client(project=self.project_id).bucket(bucket).blob(path).exists():
-            found.append(f'blob {self.blob_uri}')
-
-        if found:
-            raise AirflowException(f'already exists: {", ".join(found)}')
 
 
 class CreateSnapshotOperator(_ComputeOperator):

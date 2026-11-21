@@ -172,27 +172,53 @@ done
 ### Release candidate
 
 DAG `release_candidate`, param `release_uri` (e.g.
-`gs://open-targets-pipeline-runs/do/platform-2612-3`). It starts a VM with ClickHouse
-and OpenSearch on their own disks, runs `backend` and stops the servers. ClickHouse
-builds on a 300 GB disk (`pos-<prefix>-<run>-ch-build`) and, if `backend` succeeded, is
-copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and compared with it (`cp -a`, then
-`diff -r`, in a container of the pos image); OpenSearch builds on
-an 80 GB disk (`pos-<prefix>-<run>-os`). It snapshots the 170 GB and 80 GB disks and
-deletes the VM and all three disks. Sizes are in `dags/config/release.yaml`. Outputs:
+`gs://open-targets-pipeline-runs/do/platform-2612-3`). ClickHouse and OpenSearch build
+on separate VMs, in parallel, each in its own branch:
 
-- snapshots `<prefix>-<run>-ch` and `<prefix>-<run>-os` in `open-targets-eu-dev`;
+```
+names → plan ─┬─ build_clickhouse → create ch-build, ch disks → run_backend_clickhouse → delete_vm_clickhouse → snapshot_clickhouse ─┐
+              └─ build_opensearch → create os disk          → run_backend_opensearch → delete_vm_opensearch → snapshot_opensearch ─┴→ write_hand_off → done
+each side, whatever happened: delete that side's disks this run created
+```
+
+- **ClickHouse** (VM `up-release-candidate-clickhouse-*`, `clickhouse_machine_type`) runs
+  pos `backend_clickhouse`. It builds on a 300 GB disk (`pos-<prefix>-<run>-ch-build`)
+  and, if the step succeeded, is copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and
+  compared with it (`cp -a`, then `diff -r`, in a container of the pos image).
+- **OpenSearch** (VM `up-release-candidate-opensearch-*`, `opensearch_machine_type`) runs
+  pos `backend_opensearch` on an 80 GB disk (`pos-<prefix>-<run>-os`).
+
+Each side snapshots its 170 GB or 80 GB disk, then deletes its VM and disks. Machine types,
+work disks and sizes are in `dags/config/release.yaml`. Outputs:
+
+- snapshots `<prefix>-<run>-ch` and `<prefix>-<run>-os` in `open-targets-eu-dev`; each
+  snapshot's description records the pos image, the server image and the Airflow run that
+  built it;
 - `<release_uri>/release_candidate.json`, the hand-off: the pos image and version, the
-  product, the snapshots and their disk sizes (170 and 80 GB, the sizes `release`
-  restores). Read it to see what a candidate is.
+  product, the snapshots and their disk sizes (the sizes `release` restores). Read it to
+  see what a candidate is.
 
-The guard refuses to start if either snapshot, any working disk
-(`pos-<prefix>-<run>-ch-build|ch|os`) or the hand-off exists. **To rebuild, delete both
-snapshots and the hand-off first**, and any of the three disks a failed run left behind
-(a stray `-ch-build` disk included).
+`plan` decides per side. It fails, deleting nothing, if the hand-off exists, if a side to
+build has a working disk left over (`pos-<prefix>-<run>-ch-build|ch|os`), or if a snapshot
+is not `READY` or was built by another pos or server image; the error names what to
+delete. A side whose snapshot is absent is built; a side whose snapshot is `READY` and was
+built by this run's pos and server images is reused, and its branch is skipped. If both
+sides are reused, only the hand-off is written.
+
+A side that fails leaves no VM, disks or partial snapshot. The other side's finished
+snapshot is kept, and no hand-off is written.
+
+- **Retry:** trigger the DAG again with the same `release_uri`. Only the missing side is
+  built. Do not retry by clearing tasks.
+- **Retry after a pos fix** (a new pos image): first delete the kept snapshot that `plan`
+  names, then trigger. Both sides are rebuilt.
+- **Rebuild one side on purpose:** delete its snapshot (and the hand-off, if written), then
+  trigger.
+- **Abandon a partial candidate:** delete the kept snapshot.
+- **Rebuild a complete candidate:** delete the hand-off and both snapshots, then trigger.
 
 **Never clear only the clean-up tasks of an old `release_candidate` run.** They reuse
 that run's old task states and XComs and could delete another run's same-named disks.
-Clear from `names`/`guard` downstream, or trigger a new run.
 
 The unified pipeline triggers this DAG at the end when `release_candidate: true` in
 `unified_pipeline.yaml`. Do not `make clean-vm` until that triggered run has finished.
