@@ -111,13 +111,22 @@ def test_plan_fails_on_other_server_image(env) -> None:
 @pytest.mark.parametrize('description', ['', 'x', '{"pos_image": "p"}', '[1]', '"s"'])
 def test_plan_fails_on_unreadable_provenance(env, description) -> None:
     env.snaps[CH] = _snap(description=description)
-    with pytest.raises(AirflowException, match=rf'{CH}.*delete'):
+    with pytest.raises(AirflowException, match=rf'{CH}.*no provenance.*delete'):
         _plan()
 
 
-def test_plan_fails_on_snapshot_not_ready(env) -> None:
-    env.snaps[CH] = _snap(status='CREATING')
-    with pytest.raises(AirflowException, match=CH):
+@pytest.mark.parametrize('status', ['CREATING', 'UPLOADING'])
+def test_plan_tells_to_wait_for_a_snapshot_being_created(env, status) -> None:
+    env.snaps[CH] = _snap(status=status)
+    with pytest.raises(AirflowException, match=rf'{CH}.*wait') as e:
+        _plan()
+    assert 'delete' not in str(e.value)
+
+
+@pytest.mark.parametrize('status', ['FAILED', 'DELETING'])
+def test_plan_tells_to_delete_a_broken_snapshot(env, status) -> None:
+    env.snaps[CH] = _snap(status=status)
+    with pytest.raises(AirflowException, match=rf'{CH}.*delete'):
         _plan()
 
 

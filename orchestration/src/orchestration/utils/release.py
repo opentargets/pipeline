@@ -115,16 +115,15 @@ def created_this_try(
 SIDES = {'clickhouse': ('ch', ['ch_build', 'ch']), 'opensearch': ('os', ['os'])}
 
 
-def _built_by_this_run(description: str, pos_image: str, server_image: str) -> bool:
+def _provenance(description: str) -> dict[str, Any] | None:
+    """The snapshot's recorded images, or None if it records none."""
     try:
         provenance = json.loads(description)
     except ValueError:
-        return False
-    return (
-        isinstance(provenance, dict)
-        and provenance.get('pos_image') == pos_image
-        and provenance.get('server_image') == server_image
-    )
+        return None
+    if not isinstance(provenance, dict) or not {'pos_image', 'server_image'} <= provenance.keys():
+        return None
+    return provenance
 
 
 def plan_candidate(names: Mapping[str, Any], project_id: str, zone: str) -> dict[str, dict[str, Any]]:
@@ -166,11 +165,21 @@ def plan_candidate(names: Mapping[str, Any], project_id: str, zone: str) -> dict
                 except NotFound:
                     continue
                 problems.append(f'disk {disk_name} already exists')
+        elif snap.status in ('CREATING', 'UPLOADING'):
+            problems.append(
+                f'snapshot {snapshot_name} is {snap.status}; another run may still be creating it, '
+                'wait for it to finish'
+            )
         elif snap.status != 'READY':
             problems.append(f'snapshot {snapshot_name} is {snap.status}, not READY; delete it to rebuild')
-        elif not _built_by_this_run(snap.description, names['pos_image'], names[f'{side}_image']):
+        elif (provenance := _provenance(snap.description)) is None:
+            problems.append(f'snapshot {snapshot_name} has no provenance; delete it to rebuild')
+        elif (
+            provenance['pos_image'] != names['pos_image']
+            or provenance['server_image'] != names[f'{side}_image']
+        ):
             problems.append(
-                f'snapshot {snapshot_name} was built by other images ({snap.description!r}); delete it to rebuild'
+                f'snapshot {snapshot_name} was built by other images ({snap.description}); delete it to rebuild'
             )
         else:
             plan[side] = {'action': 'reuse', 'disk_size_gb': snap.disk_size_gb}
