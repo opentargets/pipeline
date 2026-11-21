@@ -30,6 +30,8 @@ class CandidateNames:
     os_snapshot: str
     ch_disk: str
     os_disk: str
+    ch_build_disk: str
+    """The disk ClickHouse runs on during the build, copied onto `ch_disk`."""
 
 
 def candidate_names(release_uri: str) -> CandidateNames:
@@ -61,6 +63,7 @@ def candidate_names(release_uri: str) -> CandidateNames:
         'os_snapshot': f'{base}-os',
         'ch_disk': f'pos-{base}-ch',
         'os_disk': f'pos-{base}-os',
+        'ch_build_disk': f'pos-{base}-ch-build',
     }
     for name in names.values():
         if not _NAME_RE.fullmatch(name):

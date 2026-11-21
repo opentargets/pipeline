@@ -30,6 +30,7 @@ CAPTURED = {
     'pos_version': 'captured',
     'clickhouse_image': 'clickhouse/clickhouse-server:captured',
     'opensearch_image': 'opensearchproject/opensearch:captured',
+    'clickhouse_build_disk_gb': 678,
     'clickhouse_disk_gb': 123,
     'opensearch_disk_gb': 45,
 }
@@ -57,7 +58,12 @@ class _TI:
         return self.xcoms.get(task_ids if key == 'return_value' else f'{task_ids}:{key}')
 
 
-CREATED = {'create_disk_clickhouse:disk': NAMES['ch_disk'], 'create_disk_opensearch:disk': NAMES['os_disk']}
+CREATED = {
+    'create_disk_clickhouse_build:disk': NAMES['ch_build_disk'],
+    'create_disk_clickhouse:disk': NAMES['ch_disk'],
+    'create_disk_opensearch:disk': NAMES['os_disk'],
+}
+DISK_TASKS = ('clickhouse_build', 'clickhouse', 'opensearch')
 
 
 def _context(names: dict[str, Any] = NAMES, xcoms: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -92,18 +98,18 @@ def test_release_uri_is_a_required_param(dag) -> None:
 def test_order(dag) -> None:
     up = {t.task_id: t.upstream_task_ids for t in dag.tasks}
     assert up['guard'] == {'names'}
-    assert up['create_disk_clickhouse'] == {'guard'}
-    assert up['create_disk_opensearch'] == {'guard'}
-    assert up['run_backend'] == {'create_disk_clickhouse', 'create_disk_opensearch'}
+    for d in DISK_TASKS:
+        assert up[f'create_disk_{d}'] == {'guard'}
+    assert up['run_backend'] == {f'create_disk_{d}' for d in DISK_TASKS}
     assert up['delete_vm_backend'] == {'run_backend'}
     for s in ('snapshot_clickhouse', 'snapshot_opensearch'):
         assert 'delete_vm_backend' in up[s]
         # a failed backend must not reach the snapshots through the ALL_DONE VM delete
         assert 'run_backend' in up[s]
     assert {'snapshot_clickhouse', 'snapshot_opensearch'} <= up['write_hand_off']
-    for d in ('delete_disk_clickhouse', 'delete_disk_opensearch'):
-        assert {'delete_vm_backend', 'snapshot_clickhouse', 'snapshot_opensearch'} <= up[d]
-        assert dag.get_task(d).trigger_rule == TriggerRule.ALL_DONE
+    for d in DISK_TASKS:
+        assert {'delete_vm_backend', 'snapshot_clickhouse', 'snapshot_opensearch'} <= up[f'delete_disk_{d}']
+        assert dag.get_task(f'delete_disk_{d}').trigger_rule == TriggerRule.ALL_DONE
     assert dag.get_task('delete_vm_backend').trigger_rule == TriggerRule.ALL_DONE
     assert isinstance(dag.get_task('delete_vm_backend'), DeleteInstanceOperator)
     assert dag.get_task('write_hand_off').trigger_rule == TriggerRule.ALL_SUCCESS
@@ -117,6 +123,7 @@ def test_done_is_the_only_leaf_and_fails_on_any_failure(dag) -> None:
     assert done.upstream_task_ids == {
         'write_hand_off',
         'delete_vm_backend',
+        'delete_disk_clickhouse_build',
         'delete_disk_clickhouse',
         'delete_disk_opensearch',
         'fail_cleanup_snapshots',
@@ -132,12 +139,14 @@ def test_names_captures_the_images_and_sizes() -> None:
         'pos_version': up.pos_version,
         'clickhouse_image': rc.clickhouse_image,
         'opensearch_image': rc.opensearch_image,
+        'clickhouse_build_disk_gb': rc.clickhouse_build_disk_gb,
         'clickhouse_disk_gb': rc.clickhouse_disk_gb,
         'opensearch_disk_gb': rc.opensearch_disk_gb,
     }
 
 
 def test_names_are_templated_from_the_names_task(dag) -> None:
+    assert _render(dag, 'create_disk_clickhouse_build', 'disk_name') == NAMES['ch_build_disk']
     assert _render(dag, 'create_disk_clickhouse', 'disk_name') == NAMES['ch_disk']
     assert _render(dag, 'create_disk_opensearch', 'disk_name') == NAMES['os_disk']
     assert _render(dag, 'snapshot_clickhouse', 'snapshot_name') == NAMES['ch_snapshot']
@@ -145,9 +154,13 @@ def test_names_are_templated_from_the_names_task(dag) -> None:
     assert _render(dag, 'snapshot_opensearch', 'snapshot_name') == NAMES['os_snapshot']
     assert _render(dag, 'snapshot_opensearch', 'disk_name') == NAMES['os_disk']
     assert _render(dag, 'guard', 'snapshot_names') == [NAMES['ch_snapshot'], NAMES['os_snapshot']]
-    assert _render(dag, 'guard', 'disk_names') == [NAMES['ch_disk'], NAMES['os_disk']]
+    assert _render(dag, 'guard', 'disk_names') == [NAMES['ch_build_disk'], NAMES['ch_disk'], NAMES['os_disk']]
     assert _render(dag, 'guard', 'blob_uri') == HandOff.uri(URI)
-    assert _render(dag, 'run_backend', 'data_disks') == {'clickhouse': NAMES['ch_disk'], 'opensearch': NAMES['os_disk']}
+    assert _render(dag, 'run_backend', 'data_disks') == {
+        'clickhouse': NAMES['ch_build_disk'],
+        'clickhouse-compact': NAMES['ch_disk'],
+        'opensearch': NAMES['os_disk'],
+    }
 
 
 def test_trailing_slash_release_uri_finds_the_hand_off(dag) -> None:
@@ -160,29 +173,36 @@ def test_trailing_slash_release_uri_finds_the_hand_off(dag) -> None:
 
 
 def test_disks_are_sized_from_the_names_task(dag) -> None:
+    assert str(_render(dag, 'create_disk_clickhouse_build', 'size_gb')) == '678'
     assert str(_render(dag, 'create_disk_clickhouse', 'size_gb')) == '123'
     assert str(_render(dag, 'create_disk_opensearch', 'size_gb')) == '45'
 
 
-CREATED_OK = {'guard': 'success', 'create_disk_clickhouse': 'success', 'create_disk_opensearch': 'failed'}
+CREATED_OK = {
+    'guard': 'success',
+    'create_disk_clickhouse_build': 'success',
+    'create_disk_clickhouse': 'success',
+    'create_disk_opensearch': 'failed',
+}
 
 
 @pytest.mark.parametrize(
     ('states', 'deleted'),
     [
         # created this try, and a create whose wait failed after the insert
-        (CREATED_OK, [NAMES['ch_disk'], NAMES['os_disk']]),
+        (CREATED_OK, [NAMES['ch_build_disk'], NAMES['ch_disk'], NAMES['os_disk']]),
         # a refused guard after a clear: the creates never started, their old XComs remain
-        ({'guard': 'failed', 'create_disk_clickhouse': None, 'create_disk_opensearch': None}, []),
+        ({'guard': 'failed', **dict.fromkeys(f'create_disk_{d}' for d in DISK_TASKS)}, []),
         ({'guard': 'upstream_failed'}, []),
         # guard passed, but a create was skipped or cleared and kept an old XCom
-        ({'guard': 'success', 'create_disk_clickhouse': 'upstream_failed', 'create_disk_opensearch': None}, []),
+        ({'guard': 'success', 'create_disk_clickhouse_build': None, 'create_disk_clickhouse': 'upstream_failed',
+          'create_disk_opensearch': None}, []),
     ],
 )
 def test_disk_deletes_remove_only_disks_this_try_created(states, deleted) -> None:
     calls = []
     with patch.object(release_candidate, 'delete_disk') as delete:
-        for device in ('clickhouse', 'opensearch'):
+        for device in DISK_TASKS:
             release_candidate.cleanup_disk(_TI(CREATED, states), device)
         calls = [c.args[2] for c in delete.call_args_list]
     assert calls == deleted
@@ -202,6 +222,7 @@ def test_run_backend(dag) -> None:
     assert isinstance(run, ComputeEngineRunBackendSensor)
     assert run.servers is True
     assert run.read_only is False
+    assert run.compact == {'clickhouse': 'clickhouse-compact'}
     assert run.machine_type == 'n2d-highmem-96'
     assert run.max_run_duration == timedelta(hours=4)
     assert run.retries == 0
@@ -237,7 +258,7 @@ def test_labels_carry_the_product(dag, names: dict[str, Any], product: str) -> N
     assert vm['product'] == product
     assert (vm['tool'], vm['step']) == ('pos', 'backend')
     run = 'manual__2026-11-20t10-00-00-00-00'
-    for task_id in ('create_disk_clickhouse', 'create_disk_opensearch'):
+    for task_id in (f'create_disk_{d}' for d in DISK_TASKS):
         assert dict(_render(dag, task_id, 'labels', names)) == {**vm, 'run': run}
     for task_id in ('snapshot_clickhouse', 'snapshot_opensearch'):
         labels = dict(_render(dag, task_id, 'labels', names))
@@ -313,6 +334,10 @@ def _upload(names: dict[str, Any]) -> dict[str, Any]:
     upload = cast(MagicMock, bucket.blob.return_value.upload_from_string)
     assert upload.call_args.kwargs['if_generation_match'] == 0
     return HandOff.model_validate(json.loads(upload.call_args.args[0])).model_dump(mode='json')
+
+
+def test_hand_off_records_the_snapshotted_disk_sizes() -> None:
+    assert _upload(release_candidate.candidate(URI))['disk_size_gb'] == {'clickhouse': 170, 'opensearch': 80}
 
 
 def test_hand_off_is_built_and_uploaded_without_overwrite() -> None:

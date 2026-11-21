@@ -31,7 +31,10 @@ from orchestration.utils.labels import TemplatedLabels
 from orchestration.utils.release import candidate_names, created_this_try, task_states
 
 BACKEND_ARGS = ['-w', '/mnt/disks/work', '-p', '8']
+# snapshotted disks: device to name prefix
 DEVICES = {'clickhouse': 'ch', 'opensearch': 'os'}
+# every working disk, the ClickHouse build disk first: task suffix to name prefix
+DISKS = {'clickhouse_build': 'ch_build', **DEVICES}
 SNAPSHOT_TASKS = {f'snapshot_{device}': 'return_value' for device in DEVICES}
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ def candidate(release_uri: str) -> dict[str, Any]:
         'pos_version': up.pos_version,
         'clickhouse_image': rc.clickhouse_image,
         'opensearch_image': rc.opensearch_image,
+        'clickhouse_build_disk_gb': rc.clickhouse_build_disk_gb,
         'clickhouse_disk_gb': rc.clickhouse_disk_gb,
         'opensearch_disk_gb': rc.opensearch_disk_gb,
     }
@@ -140,7 +144,7 @@ with DAG(
     guard = SnapshotGuardOperator(
         task_id='guard',
         snapshot_names=[_name('ch_snapshot'), _name('os_snapshot')],
-        disk_names=[_name('ch_disk'), _name('os_disk')],
+        disk_names=[_name(f'{short}_disk') for short in DISKS.values()],
         blob_uri=HandOff.uri(_name('release_uri')),
     )
 
@@ -151,7 +155,7 @@ with DAG(
             size_gb=_name(f'{device}_disk_gb'),
             labels=labels(run='{{ run_id }}'),
         )
-        for device, short in DEVICES.items()
+        for device, short in DISKS.items()
     ]
 
     run = ComputeEngineRunBackendSensor(
@@ -160,7 +164,13 @@ with DAG(
         labels=labels(),
         container_image=_name('pos_image'),
         container_args=['-s', 'backend', '-r', '{{ params.release_uri }}', *BACKEND_ARGS],
-        data_disks={device: _name(f'{short}_disk') for device, short in DEVICES.items()},
+        # ClickHouse builds on the large disk and is copied onto the snapshotted one
+        data_disks={
+            'clickhouse': _name('ch_build_disk'),
+            'clickhouse-compact': _name('ch_disk'),
+            'opensearch': _name('os_disk'),
+        },
+        compact={'clickhouse': 'clickhouse-compact'},
         servers=True,
         read_only=False,
         clickhouse_image=_name('clickhouse_image'),
@@ -190,11 +200,12 @@ with DAG(
         for device, short in DEVICES.items()
     ]
 
+    # Airflow fills `run_id` from the context
     @task(task_id='write_hand_off')
-    def write_hand_off(names: Any, run_id: str) -> str:
+    def write_hand_off(names: Any, run_id: Any = None) -> str:
         return upload_hand_off(names, run_id)
 
-    hand_off = write_hand_off(n, '{{ run_id }}')
+    hand_off = write_hand_off(n)
 
     def delete_disk_task(device: str) -> Any:
         @task(task_id=f'delete_disk_{device}', trigger_rule=TriggerRule.ALL_DONE)
@@ -203,7 +214,7 @@ with DAG(
 
         return delete_disk_()
 
-    deletes = [delete_disk_task(device) for device in DEVICES]
+    deletes = [delete_disk_task(device) for device in DISKS]
 
     @task(task_id='fail_cleanup_snapshots', trigger_rule=TriggerRule.ALL_DONE)
     def fail_cleanup_snapshots(ti: Any = None) -> None:

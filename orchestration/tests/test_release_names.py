@@ -17,6 +17,7 @@ def test_names_from_a_run_uri():
     assert names.os_snapshot == 'do-platform-2612-3-os'
     assert names.ch_disk == 'pos-do-platform-2612-3-ch'
     assert names.os_disk == 'pos-do-platform-2612-3-os'
+    assert names.ch_build_disk == 'pos-do-platform-2612-3-ch-build'
 
 
 def test_trailing_slash_is_ignored():
@@ -39,6 +40,8 @@ def test_nested_path_and_run_suffix():
         'gs://b/Do_x/platform-2612-3',
         'gs://b/do/target-2612-3',
         f'gs://b/{"p" * 60}/platform-2612-3',
+        # only the build disk name is too long
+        f'gs://b/{"p" * 39}/platform-2612-3',
     ],
 )
 def test_invalid_uris_raise(uri: str):
