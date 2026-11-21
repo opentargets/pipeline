@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff==0.16.10", "ty==0.0.85"]
+dev = ["ruff==0.16.10", "ty==0.0.85", "vulture==2.16"]
 test = ["pandas>=3.0.6", "pytest>=9.0.3", "pytest-mock>=3.15.1", "pytest-split>=0.11.0", "statsmodels>=0.15.0"]
 spark = ["pyspark>=4.1,<4.2"]
 
@@ -79,6 +79,10 @@ markers = [
 
 [tool.ruff]
 extend = "../ruff.toml"
+extend-exclude = ["vulture_whitelist.py"] # bare names that vulture reads as uses
+
+[tool.ty.src]
+exclude = ["vulture_whitelist.py"]
 
 # Fix spark functions being flagged as missing arguments
 # https://github.com/astral-sh/ty/issues/2759
@@ -87,3 +91,9 @@ include = ["src/pts/pyspark/**/*.py", "tests/**/*.py"]
 [tool.ty.overrides.rules]
 missing-argument = "ignore"
 invalid-argument-type = "ignore"
+
+[tool.vulture]
+paths = ["src", "vulture_whitelist.py"]
+min_confidence = 60
+ignore_decorators = ["@field_validator", "@model_validator"]
+ignore_names = ["model_config", "artifacts"]
