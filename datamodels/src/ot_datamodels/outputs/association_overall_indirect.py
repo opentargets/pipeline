@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import AggregationType, OverallAggregationValue, enum_of
 
@@ -16,12 +16,16 @@ from ot_datamodels.vocabularies import AggregationType, OverallAggregationValue,
 class Timeseries(StructModel):
     """`timeseries[]`."""
 
-    year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, description='Year, until evidence is considered')
+    year: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt16')] | None = Field(
+        ge=0, le=65535, description='Year, until evidence is considered'
+    )
     associationScore: float = Field(
         ge=0.0, le=1.0, description='Association score based on evidence up until a given year'
     )
     novelty: float | None = Field(ge=0.0, le=1.0, description='Novelty of the association at the given year')
-    yearlyEvidenceCount: int | None = Field(ge=0, description='Number of evidence reported at a given year')
+    yearlyEvidenceCount: Annotated[int, ClickHouseType('UInt32')] | None = Field(
+        ge=0, le=4294967295, description='Number of evidence reported at a given year'
+    )
 
 
 class AssociationOverallIndirect(DatasetModel):

@@ -72,7 +72,7 @@ class EvidenceIntogen(DatasetModel):
         'directionOnTarget': 'GoF',
     }
 
-    targetId: Annotated[str, Reference('target', 'id')] = Field(
+    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
@@ -104,7 +104,7 @@ class EvidenceIntogen(DatasetModel):
         description='PubMed identifiers of the publications describing the cohort'
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
     publicationDate: str | None = Field(

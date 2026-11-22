@@ -50,7 +50,7 @@ class AssociationTimeseries(DatasetModel):
         description='How evidence data was aggregated: overall or datasourceId'
     )
     aggregationValue: str = Field(
-        min_length=1, description='The datasource aggregated by, or `None` for the overall association'
+        min_length=1, description="The datasource aggregated by; the string 'None' for the overall association"
     )
     year: Year
     associationScore: AssociationScore

@@ -1,6 +1,7 @@
 """Tests for the view models: their shape against pts's schemas, and the columns derived from outputs."""
 
 import dataclasses
+from typing import get_args
 
 import polars as pl
 import pytest
@@ -14,7 +15,7 @@ from ot_datamodels.outputs.association_by_datasource_indirect import Association
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
-from ot_datamodels.outputs.evidence_ot_crispr import EvidenceOtCrispr
+from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
@@ -84,10 +85,10 @@ def _nodes(model: type[DatasetModel]) -> dict[str, Node]:
 
 #: every derived value of a view: (view, path) -> (output, path, nullability the view sets, or None)
 DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
-    ('association_otf', 'rowId'): (EvidenceOtCrispr, 'id', None),
-    ('association_otf', 'diseaseId'): (EvidenceOtCrispr, 'diseaseId', None),
-    ('association_otf', 'targetId'): (EvidenceOtCrispr, 'targetId', None),
-    ('association_otf', 'rowScore'): (EvidenceOtCrispr, 'score', None),
+    ('association_otf', 'rowId'): (EvidenceEva, 'id', None),
+    ('association_otf', 'diseaseId'): (EvidenceEva, 'diseaseId', None),
+    ('association_otf', 'targetId'): (EvidenceEva, 'targetId', None),
+    ('association_otf', 'rowScore'): (EvidenceEva, 'score', None),
     ('association_otf', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
     ('association_otf', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
     ('association_timeseries', 'diseaseId'): (AssociationOverallDirect, 'diseaseId', None),
@@ -223,11 +224,16 @@ def test_otf_columns_are_every_evidence_s(evidence: type[DatasetModel]) -> None:
 
 @pytest.mark.parametrize('association', ASSOCIATION_INPUTS, ids=lambda m: m.dataset_name)
 def test_timeseries_columns_are_every_input_s(association: type[DatasetModel]) -> None:
-    """The view derives from one association; the others agree but for a narrower yearlyEvidenceCount."""
+    """The view derives from one association; the others agree but for by-datasource's Int32 yearlyEvidenceCount."""
     view, nodes = _nodes(AssociationTimeseries), _nodes(association)
     assert [view[c] for c in ('diseaseId', 'targetId')] == [nodes[c] for c in ('diseaseId', 'targetId')]
-    for c in ('year', 'associationScore', 'novelty', 'yearlyEvidenceCount'):
-        assert view[c] == dataclasses.replace(nodes[f'timeseries[]/{c}'], dtype=view[c].dtype), c
+    for c in ('year', 'associationScore', 'novelty'):
+        assert view[c] == nodes[f'timeseries[]/{c}'], c
+    count = nodes['timeseries[]/yearlyEvidenceCount']
+    if count.dtype == pl.Int32():
+        # Int32 caps it below UInt32's max, so it needs no `le`
+        count = dataclasses.replace(count, dtype=pl.Int64(), constraints=view['yearlyEvidenceCount'].constraints)
+    assert view['yearlyEvidenceCount'] == count
     assert view['aggregationType'].dtype == nodes['aggregationType'].dtype
     assert set(nodes['aggregationType'].constraints.allowed or ()) <= set(
         view['aggregationType'].constraints.allowed or ()
@@ -243,7 +249,16 @@ def test_association_timeseries_is_ppp_only() -> None:
 
 def test_coding_variant_datasource_is_its_vocabulary() -> None:
     node = _nodes(CodingVariant)['datasources[]/datasourceId']
-    assert node.dtype == pl.Enum(list(v.CodingVariantDatasource.__args__))
+    assert node.dtype == pl.Enum(list(get_args(v.CodingVariantDatasource)))
+
+
+def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
+    datasets = discover_datasets()
+    evidence = ('evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_variants', 'evidence_gwas_credible_sets')
+    sources = {value for name in evidence for value in _nodes(datasets[name])['datasourceId'].constraints.allowed or ()}
+    sources |= {*get_args(v.PharmacogenomicsDatasource), 'mol_qtl'}
+
+    assert sources <= set(get_args(v.CodingVariantDatasource))
 
 
 #: the ClickHouseType markers declared on view columns, from today's landing SQL
@@ -253,6 +268,64 @@ MARKERS = {
     ('coding_variant', 'referenceAminoAcid'): 'LowCardinality(String)',
     ('coding_variant', 'alternateAminoAcid'): 'LowCardinality(String)',
 }
+
+
+#: every value a view declares rather than derives
+DECLARED: dict[str, set[str]] = {
+    'association_otf': {'datasourceId', 'datatypeId', 'diseaseData', 'targetData'},
+    'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
+    'coding_variant': {
+        'therapeuticAreas',
+        'therapeuticAreas[]',
+        'diseases',
+        'diseases[]',
+        'datasources',
+        'datasources[]',
+        'datasources[]/datasourceCount',
+        'datasources[]/datasourceId',
+        'datasources[]/datasourceNiceName',
+        'uniprotAccessions',
+        'uniprotAccessions[]',
+        'referenceAminoAcid',
+        'aminoAcidPosition',
+        'alternateAminoAcid',
+    },
+    'target_view': {
+        'homologues',
+        'homologues[]',
+        'tractability',
+        'tractability[]',
+        'safetyLiabilities',
+        'safetyLiabilities[]',
+        'chemicalProbes',
+        'chemicalProbes[]',
+        'transcriptIds',
+        'transcripts',
+        'transcripts[]',
+        'transcripts[]/uniprotId',
+        'transcripts[]/isUniprotReviewed',
+        'transcripts[]/alphafoldId',
+        'transcripts[]/uniprotIsoformId',
+        'canonicalTranscript',
+        'canonicalExons',
+        'canonicalExons[]',
+        'alternativeGenes',
+        'alternativeGenes[]',
+    },
+}
+
+
+def _under_derived(name: str, path: str) -> bool:
+    return any(path.startswith((f'{p}/', f'{p}[]')) for n, p in DERIVED if n == name)
+
+
+@pytest.mark.parametrize('name', sorted(VIEWS))
+def test_every_view_value_is_derived_or_declared(name: str) -> None:
+    derived = {p for n, p in DERIVED if n == name}
+    paths = {p for p, _ in walk(dataset_spec(VIEWS[name])) if not _under_derived(name, p)}
+
+    assert not derived & DECLARED[name]
+    assert paths == derived | DECLARED[name]
 
 
 def test_declared_markers() -> None:

@@ -91,10 +91,10 @@ class EvidenceExpressionAtlas(DatasetModel):
     studyId: str = Field(min_length=1, description='Expression Atlas experiment accession (e.g. E-MTAB-1238)')
     studyOverview: str = Field(min_length=1, description='Title of the Expression Atlas experiment')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id')] = Field(
+    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

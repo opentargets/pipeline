@@ -12,11 +12,11 @@ from pydantic import Field
 from ot_datamodels import DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
-from ot_datamodels.outputs.evidence_ot_crispr import EvidenceOtCrispr
+from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.vocabularies import Datasource, Datatype
 
 # every evidence model has the same id, diseaseId, targetId and score (tests/test_views.py)
-_Evidence = EvidenceOtCrispr
+_Evidence = EvidenceEva
 
 RowId = from_output(_Evidence, 'id', primary_key=True)
 DiseaseId = from_output(_Evidence, 'diseaseId')
