@@ -158,6 +158,14 @@ def shallow(t: CHType) -> CHType:
     return canonical(t)
 
 
+def becomes_enum(before: str, after: str) -> bool:
+    """Whether a path's type turns from a non-Enum into an Enum."""
+    if not before or not after:
+        return False
+    b, a = shallow(parse_type(before)), shallow(parse_type(after))
+    return a.name.startswith('Enum') and not b.name.startswith('Enum')
+
+
 def landing_changes() -> list[tuple[str, str, CHType, CHType]]:
     """(dataset, path, before, after) of each field typed differently in the frozen and the generated table."""
     out = []
@@ -440,6 +448,8 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             result, follow_up = SUPERSEDED_SQL, 'none'
         else:
             result = outcome(category, dataset, path, rows, before, after, no_output)
+            if category not in ORDER and becomes_enum(before, after) and 'Enum' not in result:
+                result = f'{result}; String → Enum'
             follow_up = api_follow_up(category, before, after, read)
         values = (dataset, path, category, result, before, after, text, read, follow_up)
         out.append(dict(zip(COLUMNS, values, strict=True)))
@@ -510,9 +520,15 @@ Closed vocabularies are Enums in the models (`ot_datamodels.vocabularies`), so C
 vocabulary's order: today's ClickHouse Enums (chromosome, study type, interaction source, fine-mapping method), Open \
 Targets' own vocabularies (datasource, datatype, clinical stage, provider, origin...) and fixed external standards \
 (ClinicalTrials.gov, GO, HPO, ChEMBL, Ensembl, gnomAD, ClinPGx). A column that becomes an Enum has a row with \
-follow-up `open` where served. `homology.isHighConfidence` becomes a Bool; homology reaches ClickHouse only through \
-`view/target_view` (`targets`: no model yet, hand-written `Nullable(String)`), so it has no row here. \
-The API's `Provider` enum lacks `FDA`, which `clinical_report` has (DailyMed): add it (`clinical_report.provider` row).
+follow-up `open` where served, and its outcome says `String → Enum`.
+
+- `Provider`: the API enum lacks `FDA`, which `clinical_report` has (DailyMed): add it (`clinical_report.provider` row).
+- `evidence.sql` `ORDER BY` `datasourceId` (and any sort key on an Enum column) now sorts by the Enum's order (the \
+API's `Datasource` order), not alphabetically.
+- Served via the hand-written `targets` table; type unchanged until piece 3: `homology.homologyType`, \
+`homology.isHighConfidence` (String → Bool in the model), `target_tractability.modality`, \
+`target.genomicLocation.chromosome`, `target.go[].evidence`, `target.go[].aspect`, \
+`target.constraint[].constraintType`. pts `target_view` keeps writing what `targets.sql` expects.
 """
 
 
