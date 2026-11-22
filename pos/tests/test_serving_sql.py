@@ -5,20 +5,28 @@ unless `POS_REQUIRE_CLICKHOUSE=1`.
 """
 
 import csv
+import datetime
+import json
 import os
 import urllib.request
 import uuid
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
+import polars as pl
 import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import ClickHouseError
+from clickhouse_connect.driver.tools import insert_file
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.polars import to_polars_schema
 
-from pos.clickhouse_ddl import canonical, ddl_for, members, parse_type, type_at
+from pos.clickhouse_ddl import canonical, columns, create_table, ddl_for, member_table, members, parse_type, type_at
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
-from pos.tasks.clickhouse_load import member_drops, union_inserts
+from pos.tasks.clickhouse_load import INSERT_SETTINGS, member_drops, union_inserts
 
 ROOT = Path(__file__).parents[1]
 STEP = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_clickhouse']
@@ -85,8 +93,9 @@ def _statements(dataset: str, product: str) -> list[tuple[str, str]]:
     return out
 
 
-@pytest.mark.parametrize('product', ['platform', 'ppp'])
-def test_serving_sql(product):
+@contextmanager
+def _database() -> Generator:
+    """A client on a fresh database of the test server, dropped afterwards."""
     host, port = SERVER.rsplit(':', 1)
     if not _reachable(host, int(port)):
         if REQUIRE:
@@ -96,7 +105,14 @@ def test_serving_sql(product):
     admin = connect(host=host, port=int(port))
     admin.command(f'CREATE DATABASE {database}')
     try:
-        client = connect(host=host, port=int(port), database=database)
+        yield connect(host=host, port=int(port), database=database)
+    finally:
+        admin.command(f'DROP DATABASE IF EXISTS {database} SYNC')
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_serving_sql(product):
+    with _database() as client:
         for task in _tasks(product):
             if 'dataset' not in task:
                 continue
@@ -109,14 +125,87 @@ def test_serving_sql(product):
             'SELECT type FROM system.columns WHERE database = {d:String} AND table = {t:String} AND name = {c:String}'
         )
         for edit in SQL_EDITS:
-            served = client.query(query, parameters={'d': database, 't': edit['table'], 'c': edit['field']})
+            served = client.query(query, parameters={'d': client.database, 't': edit['table'], 'c': edit['field']})
             assert served.result_rows == [(edit['served'],)], f'phase5_sql_edits.csv: {edit}'
         for entry in CAST_BACK:
             column = entry['path'].split('/', 1)[0].removesuffix('[]')
-            served = client.query(query, parameters={'d': database, 't': entry['table'], 'c': column})
+            served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': column})
             assert len(served.result_rows) == 1, f'phase5_cast_back.csv: {entry}: no column {column}'
             found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
             assert found is not None, f'phase5_cast_back.csv: {entry}: no {entry["path"]}'
             assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_cast_back.csv: {entry}'
-    finally:
-        admin.command(f'DROP DATABASE IF EXISTS {database} SYNC')
+
+
+def _as_strings(dtype):
+    """`dtype` with every Enum a String: the dtype a writer has before pts conforms it."""
+    if isinstance(dtype, pl.Enum):
+        return pl.String()
+    if isinstance(dtype, pl.List):
+        return pl.List(_as_strings(dtype.inner))
+    if isinstance(dtype, pl.Struct):
+        return pl.Struct([pl.Field(f.name, _as_strings(f.dtype)) for f in dtype.fields])
+    return dtype
+
+
+SCALARS = {
+    pl.String: 'x', pl.Boolean: True, pl.Int32: 1, pl.Int64: 1, pl.Float32: 0.5, pl.Float64: 0.5,
+    pl.Date: datetime.date(2026, 1, 1),
+}  # fmt: skip
+
+
+def _value(dtype, pick: int):
+    """A value of `dtype`: an Enum gets its `pick`-th label, a list two elements (first and last label)."""
+    if isinstance(dtype, pl.Enum):
+        return dtype.categories[pick]
+    if isinstance(dtype, pl.List):
+        return [_value(dtype.inner, 0), _value(dtype.inner, -1)]
+    if isinstance(dtype, pl.Struct):
+        return {f.name: _value(f.dtype, pick) for f in dtype.fields}
+    return SCALARS[type(dtype)]
+
+
+def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
+    """(path, label) of every Enum value in `value`."""
+    if isinstance(dtype, pl.Enum):
+        yield path, value
+    elif isinstance(dtype, pl.List):
+        for i, v in enumerate(value):
+            yield from _labels(v, dtype.inner, f'{path}[{i}]')
+    elif isinstance(dtype, pl.Struct):
+        for f in dtype.fields:
+            yield from _labels(value[f.name], f.dtype, f'{path}/{f.name}')
+
+
+#: Models with an Enum at the top level, in a list and in a struct, and the dataset each loads into.
+ENUM_MODELS = {
+    'clinical_report': 'clinical_report',
+    'variant': 'variants',
+    'interaction': 'interaction',
+    'evidence_gene_burden': 'evidence',
+}
+
+
+@pytest.mark.parametrize('model_name', sorted(ENUM_MODELS))
+def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
+    """Polars-written Enum parquet (dictionary-encoded strings) loads into the generated Enum8 columns, labels kept."""
+    model = discover_datasets()[model_name]
+    schema = to_polars_schema(model)
+    rows = [{n: _value(t, pick) for n, t in schema.items()} for pick in (0, -1)]
+    strings = pl.DataFrame(rows, schema={n: _as_strings(t) for n, t in schema.items()})
+    frame = strings.cast(dict(schema.items()), strict=True)  # what pts' conform does to an output
+    file = tmp_path / 'part.parquet'
+    frame.write_parquet(file)
+    entry = DATASETS[ENUM_MODELS[model_name]]
+    if 'models' in entry:
+        table, create = member_table(model), create_table(member_table(model), columns(model))
+    else:
+        ((table, create),) = ddl_for(entry, 'platform')
+    with _database() as client:
+        client.command(create)
+        insert_file(client, table, str(file), fmt='Parquet', settings=INSERT_SETTINGS)
+        raw = client.raw_query('SELECT * FROM {t:Identifier} FORMAT JSONEachRow', parameters={'t': table}).decode()
+    back = [json.loads(line) for line in raw.splitlines()]
+    assert len(back) == len(rows)
+    for want, got in zip(frame.to_dicts(), back, strict=True):
+        for name, dtype in schema.items():
+            assert list(_labels(got[name], dtype, name)) == list(_labels(want[name], dtype, name)), name
