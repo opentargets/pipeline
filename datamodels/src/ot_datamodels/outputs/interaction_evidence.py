@@ -101,8 +101,8 @@ class InteractionEvidence(DatasetModel):
     pubmedId: str | None = Field(
         min_length=1, description='PubMed ID of the publication supporting the interaction evidence'
     )
-    interactionId: Annotated[int, Reference('interaction', 'interactionId')] = Field(
-        description='Identifier of the molecular interaction this evidence supports'
+    interactionId: Annotated[int, Reference('interaction', 'interactionId'), ClickHouseType('UInt64')] = Field(
+        ge=0, description='Identifier of the molecular interaction this evidence supports'
     )
     expansionMethodMiIdentifier: Annotated[str, Bioregistry('mi')] | None = Field(
         pattern=r'^MI:\d{4}$', description='Molecular Interactions (MI) identifier for the expansion method used'

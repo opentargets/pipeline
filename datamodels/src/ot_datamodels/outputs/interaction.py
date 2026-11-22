@@ -89,4 +89,6 @@ class Interaction(DatasetModel):
         ge=0, description='Number of interaction occurrences reported in the source databases'
     )
     scoring: float | None = Field(ge=0.0, le=1.0, description='Scoring or confidence value assigned to the interaction')
-    interactionId: Annotated[int, PrimaryKey()] = Field(description='Unique identifier of the molecular interaction')
+    interactionId: Annotated[int, PrimaryKey(), ClickHouseType('UInt64')] = Field(
+        ge=0, description='Unique identifier of the molecular interaction'
+    )
