@@ -234,7 +234,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     for r in drift.iter_rows(named=True):
         groups.setdefault((r['dataset'], r['field'], r['category']), []).append(r)
     for dataset, entry in CONFIG.items():
-        if 'glob_pattern' not in entry:
+        if 'models' not in entry:
             continue
         serving = sd._serving(entry, SCRIPTS)
         for col, ms in ppp_only(dataset).items():

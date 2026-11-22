@@ -44,7 +44,7 @@ PTS_DESTINATIONS = _destinations(yaml.safe_load((_repo_root() / 'pts/config.yaml
 
 
 def _inputs(*prefixes: str) -> list[tuple[str, str]]:
-    """The (section/dataset, input path) pairs read under the prefixes; a glob_pattern dir joins input_dir."""
+    """The (section/dataset, input path) pairs read under the prefixes; a `models` glob joins input_dir."""
     pairs = []
     for section in ('opensearch', 'clickhouse'):
         for name, entry in DATASETS[section].items():
@@ -52,7 +52,7 @@ def _inputs(*prefixes: str) -> list[tuple[str, str]]:
                 continue
             path = entry['input_dir']
             if path in PTS_PREFIXES:
-                path = f'{path}/{entry["glob_pattern"].rsplit("/", 1)[0]}'
+                path = f'{path}/{entry["models"]}'
             if path.split('/')[0] in prefixes:
                 pairs.append((f'{section}/{name}', path))
     return pairs

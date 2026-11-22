@@ -17,6 +17,7 @@ from pos.clickhouse_ddl import (
     column_type,
     columns,
     create_table,
+    ddl_for,
     landing_columns,
     members,
     parse_table,
@@ -236,11 +237,57 @@ def test_members_filters_product(monkeypatch):
 def test_landing_columns(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
     monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
-    glob = {'input_dir': 'output', 'glob_pattern': 'member_*/*.parquet'}
+    glob = {'input_dir': 'output', 'models': 'member_*'}
     assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
-    assert landing_columns({'input_dir': 'output/toy_ppp'}, 'platform') == columns(PppOnly)
-    assert landing_columns({'input_dir': 'view/toy'}, 'platform') is None
-    assert landing_columns({'input_dir': 'output/missing'}, 'platform') is None
+    assert landing_columns({'input_dir': 'output/x', 'model': 'toy_ppp'}, 'platform') == columns(PppOnly)
+    assert landing_columns({'input_dir': 'view/toy', 'preload_script': 'toy.sql'}, 'platform') is None
+    assert landing_columns({'input_dir': 'output/toy'}, 'platform') is None
+
+
+def test_ddl_for(monkeypatch):
+    models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
+    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    one = {'table': 't_log', 'model': 'toy_ppp', 'engine': 'MergeTree ORDER BY id'}
+    assert ddl_for(one, 'platform') == [('t_log', create_table('t_log', columns(PppOnly), 'MergeTree ORDER BY id'))]
+    union = {'table': 'u_log', 'models': 'member_*'}
+    assert ddl_for(union, 'platform') == [
+        ('member_a_log', create_table('member_a_log', columns(MemberA))),
+        ('member_b_log', create_table('member_b_log', columns(MemberB))),
+        ('u_log', create_table('u_log', union_columns([MemberA, MemberB]))),
+    ]
+    assert ddl_for({'table': 'v', 'preload_script': 'v.sql'}, 'platform') == []
+
+
+def test_pos_ddl_prints_one_dataset(monkeypatch, capsys):
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setattr('sys.argv', ['pos-ddl', 'disease'])
+    clickhouse_ddl.main()
+    out = capsys.readouterr().out
+    assert out.startswith('CREATE TABLE IF NOT EXISTS `disease_log` (')
+
+
+def test_pos_ddl_evidence_follows_the_product(monkeypatch, capsys):
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setattr('sys.argv', ['pos-ddl', 'evidence', '--product', 'ppp'])
+    clickhouse_ddl.main()
+    ppp = capsys.readouterr().out
+    monkeypatch.setattr('sys.argv', ['pos-ddl', 'evidence'])
+    clickhouse_ddl.main()
+    platform = capsys.readouterr().out
+    assert '`assays`' in ppp
+    assert '`assays`' not in platform
+    assert '`evidence_europepmc_log`' in platform
+    assert platform.count('CREATE TABLE') == len(members('evidence_*', 'platform')) + 1
+
+
+def test_pos_ddl_all_prints_every_modelled_entry(monkeypatch, capsys):
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setattr('sys.argv', ['pos-ddl', '--all'])
+    clickhouse_ddl.main()
+    out = capsys.readouterr().out
+    assert '`disease_log`' in out
+    assert '`evidence_log`' in out
+    assert '`targets_log`' not in out  # hand-written
 
 
 def test_type_at():
@@ -267,11 +314,9 @@ def test_every_entry_round_trips():
     models = discover_datasets()
     checked = 0
     for name, entry in entries.items():
-        input_dir = entry.get('input_dir', '')
-        model = models.get(input_dir.removeprefix('output/')) if input_dir.startswith('output/') else None
-        if name == 'evidence' or model is None:
+        if 'model' not in entry:
             continue
-        cols = columns(model)
+        cols = columns(models[entry['model']])
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20

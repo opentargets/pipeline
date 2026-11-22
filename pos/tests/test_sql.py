@@ -39,7 +39,7 @@ def test_split_real_scripts(script):
         ('scripts/aotf.sql', 6),  # the stray `;` on line 38 is empty
         ('scripts/targets.sql', 12),
         ('scripts/credible_sets.sql', 9),  # leading comments belong to the first statement
-        ('schema/credible_sets.sql', 1),
+        ('schema/targets.sql', 1),
     ],
 )
 def test_split_real_script_counts(script, count):

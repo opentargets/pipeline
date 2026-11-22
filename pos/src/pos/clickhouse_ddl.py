@@ -1,11 +1,15 @@
 """ClickHouse landing DDL generated from the `ot_datamodels` dataset models, and a parser for ClickHouse types."""
 
+import argparse
 import re
-from collections.abc import Sequence
+import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from fnmatch import fnmatch
+from pathlib import Path
 
 import polars as pl
+import yaml
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec
@@ -270,19 +274,53 @@ def members(pattern: str, product: str) -> list[type[DatasetModel]]:
     return [m for name, m in sorted(models.items()) if fnmatch(name, pattern) and product in m.products]
 
 
-def landing_columns(entry: dict, product: str) -> list[tuple[str, CHType]] | None:
+def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]] | None:
     """The generated columns of a `datasets.yaml` clickhouse entry; None if it has no model.
 
-    A `glob_pattern` entry is the union of its members for `product`; any other `output/` entry is its one model,
-    whatever the model's products (a product without the output loads an empty table).
+    A `models` entry is the union of its members for `product`; a `model` entry is that model, whatever its
+    products (a product without the output loads an empty table).
     """
-    input_dir = entry.get('input_dir', '')
-    if not input_dir.startswith('output'):
-        return None
-    if 'glob_pattern' in entry:
-        return union_columns(members(entry['glob_pattern'].split('/')[0], product))
-    model = discover_datasets().get(input_dir.rstrip('/').rsplit('/', 1)[-1])
-    return columns(model) if model else None
+    if 'models' in entry:
+        return union_columns(members(entry['models'], product))
+    if 'model' in entry:
+        return columns(discover_datasets()[entry['model']])
+    return None
+
+
+def member_table(model: type[DatasetModel]) -> str:
+    """The landing table of one member of a `models` entry."""
+    return f'{model.dataset_name}_log'
+
+
+def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
+    """(table, CREATE TABLE) pairs a load of the entry runs: its one table, or each member then the union."""
+    cols = landing_columns(entry, product)
+    if cols is None:
+        return []
+    union = (entry['table'], create_table(entry['table'], cols, entry.get('engine', 'Log')))
+    if 'models' not in entry:
+        return [union]
+    found = members(entry['models'], product)
+    return [(member_table(m), create_table(member_table(m), columns(m))) for m in found] + [union]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description='Print the generated ClickHouse landing DDL.')
+    parser.add_argument('dataset', nargs='?', help='a clickhouse entry of the datasets config')
+    parser.add_argument('--all', action='store_true', help='every entry with a model')
+    parser.add_argument('--product', default='platform', choices=('platform', 'ppp'))
+    parser.add_argument('--config', default='config/datasets.yaml', help='the datasets config (default: %(default)s)')
+    args = parser.parse_args()
+    if bool(args.dataset) == args.all:
+        parser.error('give one dataset or --all')
+    entries = yaml.safe_load(Path(args.config).read_text())['clickhouse']
+    if args.dataset and args.dataset not in entries:
+        parser.error(f'no clickhouse entry {args.dataset}')
+    names = list(entries) if args.all else [args.dataset]
+    statements = [sql for name in names for _, sql in ddl_for(entries[name], args.product)]
+    if not statements:
+        parser.error(f'{args.dataset} has no model: its DDL is {entries[args.dataset].get("preload_script")}')
+    sys.stdout.write(''.join(f'{sql};\n' for sql in statements))
 
 
 def type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:

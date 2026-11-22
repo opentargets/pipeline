@@ -46,8 +46,29 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
-  `config/clickhouse/` holds the SQL, schemas and server config (`config.d/`,
-  `users.d/`); `config/opensearch/` the index settings.
+  `config/clickhouse/` holds the serving SQL (`scripts/`), the hand-written landing DDL of
+  the datasets with no model (`schema/`) and the server config (`config.d/`, `users.d/`);
+  `config/opensearch/` the index settings.
+
+## ClickHouse landing tables
+
+A ClickHouse dataset with an `ot_datamodels` model gets `model: <dataset_name>` in
+`config/datasets.yaml`, not a `preload_script`: `clickhouse_load` builds its landing table
+from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the default `Log`.
+`evidence` has `models: 'evidence_*'`: each member for the run's product loads into
+`evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
+columns), and the member tables are dropped. A member with no parquet fails the load unless
+it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
+load. Only datasets with no model (`view/` inputs) keep a `schema/` file; a config test
+checks each entry has exactly one of `model`, `models`, `preload_script`.
+
+Print the generated DDL:
+
+```sh
+cd pos && uv run pos-ddl disease
+cd pos && uv run pos-ddl evidence --product ppp
+cd pos && uv run pos-ddl --all
+```
 
 ## Scratch mode
 
@@ -156,8 +177,8 @@ in the same PR.
 
 ## Schema drift and the change register (phase 5)
 
-`scripts/schema_drift.py` lists every disagreement between the dataset models and the ClickHouse landing DDL
-(`config/clickhouse/`). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
+`scripts/schema_drift.py` lists every disagreement between the dataset models and the hand-written ClickHouse
+landing DDL (entries with a `preload_script`; generated entries are skipped). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
 category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
 column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
 `docs/phase5_drift_before.csv` (the drift before the piece 1 model changes), `docs/phase5_landing_before.csv` (the

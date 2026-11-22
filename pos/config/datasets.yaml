@@ -1,5 +1,7 @@
 ---
 # input_dir is relative to the synced release data; croissant is written by ot_croissant.
+# A clickhouse entry with `model:` (or `models:`, a glob) gets its landing table from the ot_datamodels model
+# (`pos-ddl <dataset>` prints it); `engine:` defaults to Log. The rest run their `preload_script`.
 opensearch:
   croissant:
     index: downloads
@@ -43,98 +45,100 @@ clickhouse:
   baseline_expression:
     table: baseline_expression_log
     input_dir: output/baseline_expression
-    preload_script: config/clickhouse/schema/baseline_expression.sql
+    model: baseline_expression
     postload_script: config/clickhouse/scripts/baseline_expression.sql
   biosample:
     table: biosample_log
     input_dir: output/biosample
-    preload_script: config/clickhouse/schema/biosample.sql
+    model: biosample
     postload_script: config/clickhouse/scripts/biosample.sql
   colocalisation:
     table: colocalisation_log
     input_dir: output/colocalisation
-    preload_script: config/clickhouse/schema/colocalisation.sql
+    model: colocalisation
     postload_script: config/clickhouse/scripts/colocalisation.sql
   # credible_set_variant has no postload script: credible_sets builds its tables from both _log tables.
   credible_set_variant:
     table: credible_set_variant_log
     input_dir: output/credible_set_variant
-    preload_script: config/clickhouse/schema/credible_set_variant.sql
+    model: credible_set_variant
+    engine: MergeTree ORDER BY (credibleSetId, variantId)
   credible_sets:
     table: credible_sets_log
     input_dir: output/credible_set
-    preload_script: config/clickhouse/schema/credible_sets.sql
+    model: credible_set
     postload_script: config/clickhouse/scripts/credible_sets.sql
   disease:
     table: disease_log
     input_dir: output/disease
-    preload_script: config/clickhouse/schema/disease.sql
+    model: disease
     postload_script: config/clickhouse/scripts/disease.sql
   disease_hpo:
     table: disease_hpo_log
     input_dir: output/disease_phenotype
-    preload_script: config/clickhouse/schema/disease_hpo.sql
+    model: disease_phenotype
     postload_script: config/clickhouse/scripts/disease_hpo.sql
   drug:
     table: drug_log
     input_dir: output/drug_molecule
-    preload_script: config/clickhouse/schema/drug.sql
+    model: drug_molecule
     postload_script: config/clickhouse/scripts/drug.sql
   drug_warnings:
     table: drug_warnings_log
     input_dir: output/drug_warning
-    preload_script: config/clickhouse/schema/drug_warnings.sql
+    model: drug_warning
     postload_script: config/clickhouse/scripts/drug_warnings.sql
   enhancer_to_gene:
     table: enhancer_to_gene_log
     input_dir: output/enhancer_to_gene
-    preload_script: config/clickhouse/schema/enhancer_to_gene.sql
+    model: enhancer_to_gene
     postload_script: config/clickhouse/scripts/enhancer_to_gene.sql
   evidence:
     table: evidence_log
     input_dir: output
-    preload_script: config/clickhouse/schema/evidence.sql
+    models: 'evidence_*'
+    # the members with no 2612-3 output; each member gets its own table, then all load into evidence_log
+    optional_models: [evidence_encore, evidence_ot_crispr, evidence_ot_crispr_validation]
     postload_script: config/clickhouse/scripts/evidence.sql
-    glob_pattern: 'evidence_*/*.parquet'
   go:
     table: gene_ontology_log
     input_dir: output/go
-    preload_script: config/clickhouse/schema/go.sql
+    model: go
     postload_script: config/clickhouse/scripts/go.sql
   interaction:
     table: interaction_log
     input_dir: output/interaction
-    preload_script: config/clickhouse/schema/interaction.sql
+    model: interaction
     postload_script: config/clickhouse/scripts/interaction.sql
   interaction_evidence:
     table: interaction_evidence_log
     input_dir: output/interaction_evidence
-    preload_script: config/clickhouse/schema/interaction_evidence.sql
+    model: interaction_evidence
     postload_script: config/clickhouse/scripts/interaction_evidence.sql
   hpo:
     table: hpo_log
     input_dir: output/disease_hpo
-    preload_script: config/clickhouse/schema/hpo.sql
+    model: disease_hpo
     postload_script: config/clickhouse/scripts/hpo.sql
   l2g_predictions:
     table: l2g_predictions_log
     input_dir: output/l2g_prediction
-    preload_script: config/clickhouse/schema/l2g_predictions.sql
+    model: l2g_prediction
     postload_script: config/clickhouse/scripts/l2g_predictions.sql
   literature_entity_lut:
     table: literature_entity_lut_log
     input_dir: output/literature_entity_lut
-    preload_script: config/clickhouse/schema/literature_entity_lut.sql
+    model: literature_entity_lut
     postload_script: config/clickhouse/scripts/literature_entity_lut.sql
   mechanism_of_action:
     table: mechanism_of_action_log
     input_dir: output/drug_mechanism_of_action
-    preload_script: config/clickhouse/schema/mechanism_of_action.sql
+    model: drug_mechanism_of_action
     postload_script: config/clickhouse/scripts/mechanism_of_action.sql
   mouse_phenotypes:
     table: mouse_phenotypes_log
     input_dir: output/mouse_phenotype
-    preload_script: config/clickhouse/schema/mouse_phenotypes.sql
+    model: mouse_phenotype
     postload_script: config/clickhouse/scripts/mouse_phenotypes.sql
   association_time_series:
     table: association_time_series_log
@@ -144,19 +148,19 @@ clickhouse:
   pharmacovigilance:
     table: pharmacovigilance_log
     input_dir: output/pharmacovigilance
-    preload_script: config/clickhouse/schema/pharmacovigilance.sql
+    model: pharmacovigilance
     postload_script: config/clickhouse/scripts/pharmacovigilance.sql
   # pts writes output/otar for ppp only; platform gets the empty tables
   otar_projects:
     table: otar_projects_log
     input_dir: output/otar
     optional: true
-    preload_script: config/clickhouse/schema/otar_projects.sql
+    model: otar
     postload_script: config/clickhouse/scripts/otar_projects.sql
   pharmacogenomics:
     table: pharmacogenomics_log
     input_dir: output/pharmacogenomics
-    preload_script: config/clickhouse/schema/pharmacogenomics.sql
+    model: pharmacogenomics
     postload_script: config/clickhouse/scripts/pharmacogenomics.sql
   protein_coding_coords:
     table: protein_coding_coords_log
@@ -166,27 +170,27 @@ clickhouse:
   w2v:
     table: ml_w2v_log
     input_dir: output/literature_vector
-    preload_script: config/clickhouse/schema/w2v.sql
+    model: literature_vector
     postload_script: config/clickhouse/scripts/w2v.sql
   studies:
     table: studies_log
     input_dir: output/study
-    preload_script: config/clickhouse/schema/studies.sql
+    model: study
     postload_script: config/clickhouse/scripts/studies.sql
   so:
     table: sequence_ontology_log
     input_dir: output/so
-    preload_script: config/clickhouse/schema/so.sql
+    model: so
     postload_script: config/clickhouse/scripts/so.sql
   target_essentiality:
     table: target_essentiality_log
     input_dir: output/target_essentiality
-    preload_script: config/clickhouse/schema/target_essentiality.sql
+    model: target_essentiality
     postload_script: config/clickhouse/scripts/target_essentiality.sql
   target_prioritisation:
     table: target_prioritisation_log
     input_dir: output/target_prioritisation
-    preload_script: config/clickhouse/schema/target_prioritisation.sql
+    model: target_prioritisation
     postload_script: config/clickhouse/scripts/target_prioritisation.sql
   targets:
     table: targets_log
@@ -196,12 +200,12 @@ clickhouse:
   transcript:
     table: transcript_log
     input_dir: output/transcript
-    preload_script: config/clickhouse/schema/transcript.sql
+    model: transcript
     postload_script: config/clickhouse/scripts/transcript.sql
   variants:
     table: variants_log
     input_dir: output/variant
-    preload_script: config/clickhouse/schema/variants.sql
+    model: variant
     postload_script: config/clickhouse/scripts/variants.sql
   # Built by its preload script from loaded tables.
   variant_credible_sets:
@@ -224,15 +228,15 @@ clickhouse:
   clinical_indication:
     table: clinical_indication_log
     input_dir: output/clinical_indication
-    preload_script: config/clickhouse/schema/clinical_indication.sql
+    model: clinical_indication
     postload_script: config/clickhouse/scripts/clinical_indication.sql
   clinical_report:
     table: clinical_report_log
     input_dir: output/clinical_report
-    preload_script: config/clickhouse/schema/clinical_report.sql
+    model: clinical_report
     postload_script: config/clickhouse/scripts/clinical_report.sql
   clinical_target:
     table: clinical_target_log
     input_dir: output/clinical_target
-    preload_script: config/clickhouse/schema/clinical_target.sql
+    model: clinical_target
     postload_script: config/clickhouse/scripts/clinical_target.sql

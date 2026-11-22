@@ -44,8 +44,13 @@ schema_drift = _load_script()
 
 @pytest.fixture(scope='module')
 def drift() -> set[tuple[str, str, str]]:
-    """(dataset, field, category) of every disagreement drift() finds now."""
+    """(dataset, field, category) of every disagreement drift() finds now in the hand-written landing DDL.
+
+    Generated entries have none by construction; the snapshot is the coverage list for their piece 1 rows.
+    """
     frame = schema_drift.drift(ROOT / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLICKHOUSE / 'scripts')
+    hand_written = {d for d, e in CONFIG.items() if 'preload_script' in e and not e.get('derived')}
+    assert set(frame['dataset']) == hand_written
     return {(r['dataset'], r['field'], r['category']) for r in frame.iter_rows(named=True)}
 
 
