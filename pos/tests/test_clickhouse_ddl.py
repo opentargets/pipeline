@@ -10,6 +10,7 @@ import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
+from ot_datamodels.views.target_view import TargetView
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -346,3 +347,30 @@ def test_every_entry_round_trips():
         tables.append((entries['evidence']['table'], union_columns(found)))
         for table, cols in tables:
             assert list(parse_table(create_table(table, cols)).items()) == cols, (product, table)
+
+
+#: The `targets` landing types the markers on the `target` model keep.
+TARGET_VIEW_TYPES = {
+    'genomicLocation/start': 'UInt32',
+    'genomicLocation/end': 'UInt32',
+    'genomicLocation/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+    'constraint[]/exp': 'Nullable(Float64)',
+    'constraint[]/oe': 'Nullable(Float64)',
+    'constraint[]/oeLower': 'Nullable(Float64)',
+    'constraint[]/oeUpper': 'Nullable(Float64)',
+    'constraint[]/score': 'Nullable(Float64)',
+    'constraint[]/obs': 'Nullable(UInt32)',
+    'constraint[]/upperBin': 'Nullable(UInt32)',
+    'constraint[]/upperBin6': 'Nullable(UInt32)',
+    'constraint[]/upperRank': 'Nullable(UInt32)',
+    'hallmarks/attributes[]/pmid': 'Nullable(UInt32)',
+    'hallmarks/cancerHallmarks[]/pmid': 'UInt32',
+    'targetClass[]/id': 'UInt32',
+}
+
+
+@pytest.mark.parametrize(('path', 'expected'), TARGET_VIEW_TYPES.items())
+def test_target_view_keeps_landing_types(path, expected):
+    t = type_at(columns(TargetView), path)
+    assert t is not None
+    assert render(t) == expected
