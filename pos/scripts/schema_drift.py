@@ -254,23 +254,54 @@ def _type_categories(node: Node, d: CHType) -> list[str]:
 # serving scripts
 
 
+_NOT_ALIASES = frozenset({
+    'where', 'on', 'using', 'left', 'right', 'inner', 'outer', 'full', 'cross', 'join', 'array', 'group', 'order',
+    'limit', 'union', 'settings', 'format', 'final', 'prewhere', 'having', 'as',
+})  # fmt: skip
+
+
+def _reads_star(text: str, table: str) -> bool:
+    """Whether a script selects `*`, `* EXCEPT ...`, `<table>.*` or `<alias>.*` from `table`."""
+    t = re.escape(table)
+    # a bare * item of a select list, then the FROM of that same select
+    for star in re.finditer(r'(?:\bselect|,)\s*\*', text, re.IGNORECASE):
+        depth = 0
+        for m in re.finditer(r'\(|\)|;|\bfrom\b', text[star.end() :], re.IGNORECASE):
+            word = m.group().lower()
+            if word == '(':
+                depth += 1
+            elif word == ')':
+                depth -= 1
+            if depth < 0 or word == ';':
+                break
+            if word == 'from' and depth == 0:
+                if re.match(rf'\s+{t}\b', text[star.end() + m.end() :]):
+                    return True
+                break
+    aliases = {table}
+    for m in re.finditer(rf'\b(?:from|join)\s+{t}(?:\s+as)?\s+(\w+)', text, re.IGNORECASE):
+        if m.group(1).lower() not in _NOT_ALIASES:
+            aliases.add(m.group(1))
+    return any(re.search(rf'(?<![\w.]){re.escape(a)}\.\*', text) for a in aliases)
+
+
 @dataclass(frozen=True)
 class _Serving:
-    script: str
-    text: str
+    """Every script in the scripts dir that mentions the landing table, name -> comment-free text."""
+
     table: str
+    scripts: tuple[tuple[str, str], ...]
 
     def read(self, path: str, *, landed: bool) -> str:
-        """`named:` if the field's name is a word in the script, `pass:` if it selects * from the table."""
-        if not self.script:
+        """`named:<s>` for each script naming the field or its column, `pass:<s>` for each other one reading `*`."""
+        if not landed:
             return 'no'
-        leaf = path.rsplit('/', 1)[-1].removesuffix('[]') if path else ''
-        if leaf and re.search(rf'\b{re.escape(leaf)}\b', self.text):
-            return f'named:{self.script}'
-        star = rf'select\s+\*(?:\s+except\s+(?:\w+|\([^)]*\)))?\s+from\s+{re.escape(self.table)}\b'
-        if landed and re.search(star, self.text, re.IGNORECASE):
-            return f'pass:{self.script}'
-        return 'no'
+        parts = [p.removesuffix('[]') for p in path.split('/')] if path else []
+        words = {parts[0], parts[-1]} if parts else set()
+        named = [n for n, text in self.scripts if any(re.search(rf'\b{re.escape(w)}\b', text) for w in words)]
+        passed = [n for n, text in self.scripts if n not in named and _reads_star(text, self.table)]
+        hits = [f'named:{n}' for n in named] + [f'pass:{n}' for n in passed]
+        return ';'.join(hits) or 'no'
 
 
 # diff
@@ -348,13 +379,14 @@ def _b(value: bool) -> str:
     return 'true' if value else 'false'
 
 
-def _serving(entry: dict, scripts_dir: Path) -> _Serving:
-    script = entry.get('postload_script')
-    if not script:
-        return _Serving('', '', entry.get('table', ''))
-    name = Path(script).name
-    text = re.sub(r'--[^\n]*', '', (scripts_dir / name).read_text())
-    return _Serving(name, text, entry['table'])
+def _scripts(scripts_dir: Path) -> tuple[tuple[str, str], ...]:
+    return tuple((p.name, re.sub(r'--[^\n]*', '', p.read_text())) for p in sorted(scripts_dir.glob('*.sql')))
+
+
+def _serving(entry: dict, scripts: tuple[tuple[str, str], ...]) -> _Serving:
+    table = entry.get('table', '')
+    pattern = re.compile(rf'\b{re.escape(table)}\b')
+    return _Serving(table, tuple((n, text) for n, text in scripts if table and pattern.search(text)))
 
 
 def _models_for(entry: dict, models: dict[str, type[DatasetModel]]) -> list[type[DatasetModel]] | None:
@@ -368,9 +400,9 @@ def _models_for(entry: dict, models: dict[str, type[DatasetModel]]) -> list[type
     return [model] if model else None
 
 
-def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts_dir: Path,
+def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts: tuple[tuple[str, str], ...],
                   models: dict[str, type[DatasetModel]]) -> Iterator[dict[str, str]]:  # fmt: skip
-    serving = _serving(entry, scripts_dir)
+    serving = _serving(entry, scripts)
     matched = _models_for(entry, models)
     if matched is None:
         yield dict.fromkeys(COLUMNS, '') | {'category': 'no_model', 'dataset': dataset, 'serving_read': 'no'}
@@ -405,11 +437,12 @@ def drift(datasets_yaml: Path, schema_dir: Path, scripts_dir: Path, *,
     """One row per disagreement between each landing table and its model(s); `no_model` for the rest."""
     models = discover_datasets() if models is None else models
     config = yaml.safe_load(datasets_yaml.read_text())['clickhouse']
+    scripts = _scripts(scripts_dir)
     rows = [
         row
         for dataset, entry in config.items()
         if not entry.get('derived')
-        for row in _dataset_rows(dataset, entry, schema_dir, scripts_dir, models)
+        for row in _dataset_rows(dataset, entry, schema_dir, scripts, models)
     ]
     return pl.DataFrame(rows, schema=dict.fromkeys(COLUMNS, pl.String))
 
@@ -421,7 +454,7 @@ def main() -> None:
     clickhouse = pos / 'config' / 'clickhouse'
     frame = drift(pos / 'config' / 'datasets.yaml', clickhouse / 'schema', clickhouse / 'scripts')
     frame.write_csv(sys.argv[1])
-    read = pl.col('serving_read').str.extract(r'^(\w+)')
+    read = pl.col('serving_read').str.extract(r'^(\w+)')  # first hit: named before pass
     counts = frame.group_by('category').agg(
         items=pl.len(), **{r: (read == r).sum() for r in ('named', 'pass', 'no')}
     )

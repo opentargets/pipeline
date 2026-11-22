@@ -125,7 +125,19 @@ ALPHA_SCRIPT = """CREATE TABLE alpha ENGINE = Log AS (
     SELECT *
     FROM alpha_log
 );
-SELECT max(count) FROM alpha;
+SELECT max(count), any(extra) FROM alpha;
+"""
+
+# reads two other datasets' landing tables: evidence through an alias, alpha by column name
+OTHER_SCRIPT = """CREATE TABLE other ENGINE = Log AS (
+    SELECT e.*, flag
+    FROM evidence_log AS e
+    LEFT JOIN alpha_log ON alpha_log.id = e.datasourceId
+);
+"""
+
+# only a table whose name starts with the landing name: not a read of alpha_log
+MERGETREE_SCRIPT = """SELECT * FROM alpha_log_mergetree;
 """
 
 COLUMNS = (
@@ -142,10 +154,11 @@ COLUMNS = (
 )
 
 PASS = 'pass:alpha.sql'  # noqa: S105
+OTHER = 'pass:other.sql'
 EXPECTED = [
     ('model_only', 'alpha', 'alpha', 'extra', 'String', '', '', 'false', '', 'no'),
     ('type', 'alpha', 'alpha', 'count', 'Int32', '', 'UInt32', 'false', 'false', 'named:alpha.sql'),
-    ('kind', 'alpha', 'alpha', 'flag', 'String', '', 'Float64', 'false', 'false', PASS),
+    ('kind', 'alpha', 'alpha', 'flag', 'String', '', 'Float64', 'false', 'false', 'named:other.sql;pass:alpha.sql'),
     ('open_vs_enum', 'alpha', 'alpha', 'chrom', 'String', '', "Enum('1', 'X')", 'false', 'false', PASS),
     ('low_cardinality', 'alpha', 'alpha', 'biotype', 'String', '', 'LowCardinality(String)', 'false', 'false', PASS),
     ('nullability', 'alpha', 'alpha', 'marked', 'Int64', 'UInt8', 'Nullable(UInt8)', 'false', 'true', PASS),
@@ -178,8 +191,8 @@ EXPECTED = [
         '',
         PASS,
     ),
-    ('ddl_only', 'evidence', '', 'old', '', '', 'Nullable(String)', '', 'true', 'no'),
-    ('nullability', 'evidence', 'evidence_b', 'score', 'Float64', '', 'Nullable(Float64)', 'false', 'true', 'no'),
+    ('ddl_only', 'evidence', '', 'old', '', '', 'Nullable(String)', '', 'true', OTHER),
+    ('nullability', 'evidence', 'evidence_b', 'score', 'Float64', '', 'Nullable(Float64)', 'false', 'true', OTHER),
     ('no_model', 'viewed', '', '', '', '', '', '', '', 'no'),
 ]
 
@@ -195,6 +208,8 @@ def config(tmp_path: Path) -> tuple[Path, Path, Path]:
     (schema_dir / 'alpha.sql').write_text(ALPHA_DDL)
     (schema_dir / 'evidence.sql').write_text(EVIDENCE_DDL)
     (scripts_dir / 'alpha.sql').write_text(ALPHA_SCRIPT)
+    (scripts_dir / 'other.sql').write_text(OTHER_SCRIPT)
+    (scripts_dir / 'mergetree.sql').write_text(MERGETREE_SCRIPT)
     return datasets_yaml, schema_dir, scripts_dir
 
 
@@ -233,6 +248,51 @@ def test_marker_equal_to_ddl_is_no_type_disagreement(config):
 )
 def test_parse_type_normalises(ddl, rendered):
     assert schema_drift.render(schema_drift.parse_type(ddl)) == rendered
+
+
+def test_unlanded_fields_are_never_read(config):
+    frame = schema_drift.drift(*config, models=MODELS)
+    unlanded = frame.filter(pl.col('category').is_in(['model_only', 'struct_field_missing']))
+    assert 'extra' in unlanded['field'].to_list()  # named in alpha.sql, but never loaded
+    assert set(unlanded['serving_read']) == {'no'}
+
+
+@pytest.mark.parametrize(
+    ('sql', 'reads'),
+    [
+        ('SELECT * FROM t_log', True),
+        ('select *\n  from\n    t_log\n', True),
+        ('SELECT * EXCEPT (a, b) FROM t_log', True),
+        ('SELECT * EXCEPT a FROM t_log', True),
+        ('SELECT rowNumberInAllBlocks() AS rowId,\n *\n FROM t_log', True),
+        ('SELECT *, x FROM t_log', True),
+        ('SELECT count(*) FROM t_log', False),
+        ('SELECT * FROM (SELECT a FROM t_log)', False),
+        ('SELECT t_log.* FROM t_log', True),
+        ('SELECT i.* FROM t_log AS i', True),
+        ('SELECT i.* FROM other LEFT JOIN t_log i ON true', True),
+        ('SELECT * FROM t_log_mergetree', False),
+        ('SELECT * FROM t_logx', False),
+        ('SELECT x.* FROM t_log AS i JOIN other AS x ON true', False),
+        ('SELECT i.* FROM t_log LEFT JOIN other AS i ON true', False),
+        ('SELECT a FROM t_log', False),
+    ],
+)
+def test_reads_star(sql, reads):
+    assert schema_drift._reads_star(sql, 't_log') is reads
+
+
+@pytest.mark.parametrize(
+    ('path', 'read'),
+    [
+        ('info[]/a', 'named:s.sql'),  # its column is named
+        ('other/b', 'no'),
+        ('', 'no'),
+    ],
+)
+def test_nested_field_is_named_through_its_column(path, read):
+    serving = schema_drift._Serving('t_log', (('s.sql', 'SELECT info FROM t_log'),))
+    assert serving.read(path, landed=True) == read
 
 
 def test_parse_table_reads_columns_in_order():
