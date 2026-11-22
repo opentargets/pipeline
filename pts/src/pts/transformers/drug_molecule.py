@@ -14,6 +14,7 @@ from loguru import logger
 from ot_datamodels.outputs.drug_molecule import DrugMolecule
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.schemas.drug_molecule import drug_molecule_schema
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
@@ -89,7 +90,7 @@ def drug_molecule(
         config: Config object (not used in this transformer).
     """
     logger.info(f'Loading data from {source}')
-    clinical_report = scan_dataset(source['clinical_report']).collect()
+    clinical_report = without_enums(scan_dataset(source['clinical_report'])).collect()
 
     clinical_report, excluded = valid_rows(clinical_report, settings.get('invalid_clinical_report_qc', []))
     logger.info(f'Writing {excluded.height} excluded clinical reports to {destination["excluded"]}')
@@ -97,7 +98,7 @@ def drug_molecule(
 
     molecule = scan_dataset(source['molecule'])
     chemical_probes = scan_dataset(source['chemical_probes']).collect()
-    mechanism_of_action = scan_dataset(source['mechanism_of_action']).collect()
+    mechanism_of_action = without_enums(scan_dataset(source['mechanism_of_action'])).collect()
     disease = scan_dataset(source['disease']).collect()
 
     logger.info('Processing drug index')
@@ -105,7 +106,7 @@ def drug_molecule(
     logger.info(f'Drug index has {output.height} molecules')
 
     logger.info(f'Writing drug index to {destination["output"]}')
-    write_dataset(output, str(destination['output']))
+    write_dataset(conform(output, DrugMolecule), str(destination['output']))
 
 
 def process_drug_index(

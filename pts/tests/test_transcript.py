@@ -5,7 +5,9 @@ from typing import Any
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.transcript import Transcript
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.transcript import transcript as transcript_schema
 from pts.transformers.transcript import build_flags, build_transcripts, transcript
 from tests.ensembl_fixtures import NULL, RELEASE_116_COLUMNS, release_116_ddl, write_dump
@@ -607,7 +609,7 @@ def test_transcript_end_to_end(tmp_path: Path) -> None:
     transcript(source, str(tmp_path / 'out' / 'b'), {}, None)
 
     out = pl.read_parquet(tmp_path / 'out' / 'a')
-    assert dict(out.schema) == OUTPUT_SCHEMA
+    assert out.schema == conformed_schema(pl.Schema(OUTPUT_SCHEMA), Transcript)
     assert out.rows(named=True) == [
         {
             'targetId': 'ENSG00000186092',

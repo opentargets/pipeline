@@ -29,4 +29,4 @@ def clinvar_somatic(
         settings: unused.
         config: unused.
     """
-    run_eva(source, destination, EVA_SOMATIC)
+    run_eva(source, destination, EVA_SOMATIC, EvidenceEvaSomatic)

@@ -3,7 +3,7 @@
 Generated from the 26.12 release output (1,302 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
@@ -17,6 +17,7 @@ from ot_datamodels.outputs.patterns import (
     SHA1_HEX,
     VARIANT_ID,
 )
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class Urls(StructModel):
@@ -117,8 +118,10 @@ class EvidenceCancerBiomarkers(DatasetModel):
         min_length=1, description='Gene symbol of the target as reported by the Cancer Genome Interpreter'
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['cancer_biomarkers'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['affected_pathway'], enum_of(Datatype)] = Field(description='Type of the evidence')
     drugFromSource: str = Field(
         min_length=1,
         description=('Drug or drug family associated with the biomarker, as reported by the Cancer Genome Interpreter'),

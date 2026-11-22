@@ -7,7 +7,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+from ot_datamodels.discovery import discover_datasets
 
+from pts.schemas.dataset.conform import conform
 from pts.transformers.target_prioritisation import (
     baseline_query,
     biotype_query,
@@ -856,3 +858,40 @@ def test_target_prioritisation_counts_an_electronic_mechanism(tmp_path):
     stages = dict(got.select('targetId', 'maxClinicalStage').rows())
     assert stages['T2'] == 1.0
     assert stages['T1'] == 1.0
+
+
+#: The inputs pts writes with a model, by the dataset they are.
+WRITTEN = {
+    'targets': 'target',
+    'tractability': 'target_tractability',
+    'homology': 'homology',
+    'molecule': 'drug_molecule',
+    'baseline_expression': 'baseline_expression',
+}
+
+
+def test_inputs_as_pts_writes_them_give_the_same_result(tmp_path):
+    """Its inputs' Enums (and homology's bool) are read as the strings the step computes with."""
+    models = discover_datasets()
+    stored = {
+        # the fixture's other spellings, as the model has them; DICE is left out like hpa
+        'baseline_expression': pl.col('datasourceId').replace({'Tabula_Sapiens': 'tabula_sapiens', 'hpa': 'DICE'}),
+        'homology': pl.col('isHighConfidence').cast(pl.Int8).cast(pl.Boolean),
+    }
+    typed = {
+        name: conform(df.with_columns(stored[name]) if name in stored else df, models[WRITTEN[name]])
+        for name, df in inputs().items()
+        if name in WRITTEN
+    }
+    assert isinstance(typed['homology'].schema['homologyType'], pl.Enum)
+    assert isinstance(typed['baseline_expression'].schema['datasourceId'], pl.Enum)
+    source = write_inputs(tmp_path)
+    for name, df in typed.items():
+        path = tmp_path / f'typed_{name}'
+        path.mkdir()
+        df.write_parquet(path / 'part-0.parquet')
+        source[name] = str(path)
+
+    target_prioritisation(source, str(tmp_path / 'out'), None, None)
+
+    assert pl.read_parquet(tmp_path / 'out').equals(compute_target_prioritisation(**inputs()))

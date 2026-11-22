@@ -3,11 +3,13 @@
 Generated from the 26.12 release output (22,620,749 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
+from ot_datamodels.vocabularies import InteractionSource
 
 
 class InteractionResources(StructModel):
@@ -16,9 +18,9 @@ class InteractionResources(StructModel):
     databaseVersion: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description='Version of the source database providing interaction evidence'
     )
-    sourceDatabase: Annotated[
-        Literal['intact', 'reactome', 'signor', 'string'], ClickHouseType('LowCardinality(String)')
-    ] = Field(description='Name of the source database reporting the interaction evidence')
+    sourceDatabase: Annotated[InteractionSource, PolarsDtype(pl.Enum)] = Field(
+        description='Name of the source database reporting the interaction evidence'
+    )
 
 
 class HostOrganismTissue(StructModel):

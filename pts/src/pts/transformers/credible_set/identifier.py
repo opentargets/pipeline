@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.schemas.credible_set import Chromosome
+from pts.schemas.credible_set import CHROMOSOMES
 
 #: A credible set identifier: a 32-character lowercase md5 hex digest.
 
@@ -17,7 +17,7 @@ from pts.schemas.credible_set import Chromosome
 CREDIBLE_SET_ID_PATTERN = r'^[0-9a-f]{32}$'
 
 
-VARIANT_ID_PATTERN = rf'^(?:{"|".join(chromosome.value for chromosome in Chromosome)})_[1-9][0-9]*_[ACGT]+_[ACGT]+$'
+VARIANT_ID_PATTERN = rf'^(?:{"|".join(CHROMOSOMES)})_[1-9][0-9]*_[ACGT]+_[ACGT]+$'
 
 
 def variant_chromosome(variant_id: pl.Expr) -> pl.Expr:

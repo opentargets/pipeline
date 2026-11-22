@@ -14,8 +14,8 @@ import pytest
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
 
-from pts.schemas.credible_set import Chromosome, FinemappingMethod
-from pts.schemas.study import StudyType
+from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS
+from pts.schemas.study import STUDY_TYPES
 from pts.transformers.clinical_mira.moa.schemas import ActionType
 from pts.transformers.clinical_mira.schemas import ClinicalProvider, ClinicalReportType, ClinicalStageCategory
 from pts.transformers.clinical_report import ClinicalReportFlags
@@ -27,8 +27,8 @@ from pts.transformers.lof_curation import METHOD as LOF_CURATION_METHOD
 from pts.transformers.study import QualityFlag as StudyFlag
 from pts.transformers.variant.annotators.gpn_star import METHOD as GPN_STAR_METHOD
 
-#: (dataset, value path, the enum the code writes it from)
-VOCABULARIES: list[tuple[str, str, type[Enum]]] = [
+#: (dataset, value path, the enum or vocabulary the code writes it from)
+VOCABULARIES: list[tuple[str, str, type[Enum] | tuple[str, ...]]] = [
     ('chembl_bioactivity', 'assayActionType', ActionType),
     ('chembl_bioactivity', 'actionTypes[]', ActionType),
     ('clinical_indication', 'maxClinicalStage', ClinicalStageCategory),
@@ -39,13 +39,13 @@ VOCABULARIES: list[tuple[str, str, type[Enum]]] = [
     ('clinical_report', 'type', ClinicalReportType),
     ('clinical_report', 'provider', ClinicalProvider),
     ('clinical_report', 'qualityControls[]', ClinicalReportFlags),
-    ('colocalisation', 'rightStudyType', StudyType),
-    ('credible_set', 'studyType', StudyType),
-    ('study', 'studyType', StudyType),
-    ('colocalisation', 'chromosome', Chromosome),
-    ('credible_set', 'chromosome', Chromosome),
-    ('variant', 'chromosome', Chromosome),
-    ('credible_set', 'fineMappingMethod', FinemappingMethod),
+    ('colocalisation', 'rightStudyType', STUDY_TYPES),
+    ('credible_set', 'studyType', STUDY_TYPES),
+    ('study', 'studyType', STUDY_TYPES),
+    ('colocalisation', 'chromosome', CHROMOSOMES),
+    ('credible_set', 'chromosome', CHROMOSOMES),
+    ('variant', 'chromosome', CHROMOSOMES),
+    ('credible_set', 'fineMappingMethod', FINEMAPPING_METHODS),
     ('credible_set', 'qualityControls[]', CredibleSetFlag),
     ('credible_set_variant', 'qualityControls[]', CredibleSetVariantFlag),
     ('enhancer_to_gene', 'qualityControls[]', EnhancerToGeneFlag),
@@ -66,14 +66,15 @@ DATASETS = discover_datasets()
 
 @pytest.mark.parametrize(('dataset', 'path', 'vocabulary'), VOCABULARIES, ids=[f'{d}:{p}' for d, p, _ in VOCABULARIES])
 def test_the_model_lists_the_code_vocabulary_in_full_and_in_order(
-    dataset: str, path: str, vocabulary: type[Enum]
+    dataset: str, path: str, vocabulary: type[Enum] | tuple[str, ...]
 ) -> None:
     nodes = dict(walk(dataset_spec(DATASETS[dataset])))
     assert path in nodes, f'{dataset} has no value at {path}'
-    expected = tuple(member.value for member in vocabulary)
+    expected = vocabulary if isinstance(vocabulary, tuple) else tuple(member.value for member in vocabulary)
+    name = 'the vocabulary' if isinstance(vocabulary, tuple) else f'{vocabulary.__module__}.{vocabulary.__name__}'
 
     assert nodes[path].constraints.allowed == expected, (
-        f'{dataset}:{path} must allow exactly {vocabulary.__module__}.{vocabulary.__name__}, in its order: '
+        f'{dataset}:{path} must allow exactly {name}, in its order: '
         f'update the Literal in datamodels/src/ot_datamodels/outputs/{dataset}.py to {list(expected)}'
     )
 

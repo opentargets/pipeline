@@ -8,10 +8,11 @@ from typing import Any
 
 import polars as pl
 import pytest
+from ot_datamodels import to_polars_schema
+from ot_datamodels.outputs.evidence_gene_burden import EvidenceGeneBurden
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
-from pts.schemas.evidence import evidence_schema
 from pts.schemas.gene_burden import GENE_BURDEN_PARSED, GENE_BURDEN_UNION
 from pts.transformers.evidence.gene_burden import (
     DIRECTION_ON_TARGET,
@@ -393,7 +394,7 @@ def test_empty_sub_source_writes_outputs(tmp_path: Path) -> None:
     assert empty_valid.schema == valid.schema
     assert empty_failed.schema == failed.schema
     for column in ('pValueExponent', 'studySampleSize', 'urls', 'directionOnTrait', 'directionOnTarget', 'score'):
-        assert empty_valid.schema[column] == evidence_schema[column]
+        assert empty_valid.schema[column] == to_polars_schema(EvidenceGeneBurden)[column]
     assert 'curatedDiseaseFromSourceMappedId' not in empty_valid.columns
 
 

@@ -30,6 +30,7 @@ class Otar(DatasetModel):
     dataset_title: ClassVar[str] = 'Open Targets Projects'
     dataset_description: ClassVar[str] = 'Open Targets projects grouped by studied disease or phenotype'
     dataset_tags: ClassVar[tuple[str, ...]] = ()
+    products: ClassVar[tuple[str, ...]] = ('ppp',)
     example: ClassVar[dict] = {
         'efo_id': 'EFO_0000651',
         'projects': [

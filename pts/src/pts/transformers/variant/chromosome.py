@@ -24,7 +24,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.outputs.variant import Variant
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.variant import variant_schema
 from pts.transformers.variant.annotators.alphamissense import add_alphamissense
 from pts.transformers.variant.annotators.bigwig import KentBigWig
@@ -236,7 +238,7 @@ def annotate_chunk(prepared: PreparedChromosome, chunk: int, annotated: bool, pa
         index = annotate_inputs(inputs, prepared.settings)
     if annotated:
         prepared.release(chunk)
-    return write_complete(index, part)
+    return write_complete(conform(index, Variant), part)
 
 
 @dataclass(frozen=True)

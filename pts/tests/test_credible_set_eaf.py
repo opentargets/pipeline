@@ -4,8 +4,11 @@ import math
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.study import Study
+from ot_datamodels.outputs.variant import Variant
 
 from pts.schemas.credible_set import credible_set_variant_schema
+from pts.schemas.dataset.conform import conform
 from pts.schemas.study import study_schema
 from pts.schemas.variant import variant_schema
 from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
@@ -151,3 +154,14 @@ def test_the_origin_flags_are_added_like_every_other_flag_unique_and_sorted() ->
     variants = _variants(('v', 0.3)).with_columns(pl.lit([source, pip]).alias('qualityControls'))
     [flags] = effect_allele_frequency(variants, SETS, _studies(NFE_EAS), _index(**GNOMAD)).collect()['qualityControls']
     assert flags.to_list() == sorted({source, pip})
+
+
+def test_the_population_enums_of_the_published_study_and_variant_index_are_matched() -> None:
+    """Study and variant index store `ldPopulation` and `populationName` as different Enums."""
+    studies = conform(_studies(NFE_EAS).collect(), Study).lazy()
+    index = conform(_index(**GNOMAD).collect(), Variant).lazy()
+    assert index.collect_schema()['alleleFrequencies'] != variant_schema['alleleFrequencies']
+
+    result = effect_allele_frequency(_variants(('v', None)), SETS, studies, index).collect()
+
+    assert result['effectAlleleFrequency'].to_list() == [pytest.approx(0.25)]

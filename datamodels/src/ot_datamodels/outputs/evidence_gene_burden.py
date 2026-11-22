@@ -5,10 +5,12 @@ Generated from the 26.12 release output (55,611 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, GeneBurdenSex, enum_of
 
 
 class Urls(StructModel):
@@ -87,15 +89,17 @@ class EvidenceGeneBurden(DatasetModel):
         description=('Ensembl gene identifier or gene symbol of the target as reported by the burden study'),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['gene_burden'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description="Genetic model of the burden test (e.g. 'dominant', 'recessive')"
     )
     diseaseFromSource: str = Field(min_length=1, description='Trait or phenotype label as reported by the burden study')
     pValueMantissa: float = Field(ge=0.0, description='Mantissa of the p-value of the burden test')
     pValueExponent: Annotated[int, ClickHouseType('Int32')] = Field(
-        description='Exponent of the p-value of the burden test'
+        ge=-2147483648, le=2147483647, description='Exponent of the p-value of the burden test'
     )
     beta: float | None = Field(description='Effect size of the gene burden on a quantitative trait')
     betaConfidenceIntervalLower: float | None = Field(
@@ -156,13 +160,13 @@ class EvidenceGeneBurden(DatasetModel):
         min_length=1, description="Release version of the source data (e.g. FinnGen 'R12')"
     )
     studySampleSize: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Total number of samples in the burden analysis'
+        ge=0, le=4294967295, description='Total number of samples in the burden analysis'
     )
     studyCases: Annotated[int, ClickHouseType('UInt32')] | None = Field(
-        ge=0, description='Number of cases in the burden analysis of a binary trait'
+        ge=0, le=4294967295, description='Number of cases in the burden analysis of a binary trait'
     )
     studyCasesWithQualifyingVariants: Annotated[int, ClickHouseType('UInt32')] | None = Field(
-        ge=0, description='Number of cases carrying at least one qualifying variant in the target'
+        ge=0, le=4294967295, description='Number of cases carrying at least one qualifying variant in the target'
     )
     statisticalMethod: str = Field(
         min_length=1,
@@ -179,7 +183,7 @@ class EvidenceGeneBurden(DatasetModel):
     urls: list[Urls] | None = Field(
         description=("Links to the burden result in the source portal (e.g. 'AstraZeneca PheWAS Portal')")
     )
-    sex: list[Annotated[str, Field(min_length=1)]] | None = Field(
+    sex: list[Annotated[GeneBurdenSex, PolarsDtype(pl.Enum)]] | None = Field(
         description='Sex of the samples included in the burden analysis'
     )
     diseaseFromSourceId: str | None = Field(
@@ -204,10 +208,10 @@ class EvidenceGeneBurden(DatasetModel):
             'relationship, derived from the log10 of the burden test p-value'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] | None = Field(
         description='Predicted direction of effect on the trait'
     )
-    directionOnTarget: Literal['GoF', 'LoF'] = Field(
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

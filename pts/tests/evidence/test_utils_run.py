@@ -6,6 +6,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.evidence_eva import EvidenceEva
 
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.evidence import QC_COLUMN, EvidenceFlags
@@ -79,6 +80,7 @@ class TestRunEvidence:
         run_evidence(
             raw(),
             SPEC,
+            model=EvidenceEva,
             disease=write_disease(tmp_path / 'disease', ['EFO_1']),
             target=write_target(tmp_path / 'target', ['ENSG1']),
             destination={'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
@@ -95,6 +97,7 @@ class TestRunEvidence:
         run_evidence(
             raw(literature=[['1'], ['2']]),
             SPEC,
+            model=EvidenceEva,
             disease=write_disease(tmp_path / 'disease', ['EFO_1']),
             target=write_target(tmp_path / 'target', ['ENSG1']),
             literature=write_literature(tmp_path / 'literature', {'1': '2001-01-01'}),
@@ -109,6 +112,7 @@ class TestRunEvidence:
             run_evidence(
                 raw(literature=[['1'], None]),
                 SPEC,
+                model=EvidenceEva,
                 disease=str(tmp_path),
                 target=str(tmp_path),
                 destination={},
@@ -122,9 +126,9 @@ def test_rerun_into_an_existing_destination_fails_and_names_it(tmp_path: Path) -
         'target': write_target(tmp_path / 'target', ['ENSG1']),
         'destination': dst,
     }
-    run_evidence(raw(), SPEC, **kwargs)
+    run_evidence(raw(), SPEC, model=EvidenceEva, **kwargs)
     with pytest.raises(ValueError, match=str(tmp_path / 'out' / 'valid')):
-        run_evidence(raw(), SPEC, **kwargs)
+        run_evidence(raw(), SPEC, model=EvidenceEva, **kwargs)
 
 
 def test_valid_and_failed_evidence_are_computed_in_one_pass(tmp_path: Path) -> None:
@@ -139,6 +143,7 @@ def test_valid_and_failed_evidence_are_computed_in_one_pass(tmp_path: Path) -> N
     run_evidence(
         counted,
         SPEC,
+        model=EvidenceEva,
         disease=write_disease(tmp_path / 'disease', ['EFO_1']),
         target=write_target(tmp_path / 'target', ['ENSG1']),
         destination={'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
@@ -156,6 +161,7 @@ def test_an_existing_failed_destination_stops_both_writes(tmp_path: Path) -> Non
         run_evidence(
             raw(),
             SPEC,
+            model=EvidenceEva,
             disease=write_disease(tmp_path / 'disease', ['EFO_1']),
             target=write_target(tmp_path / 'target', ['ENSG1']),
             destination=dst,

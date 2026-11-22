@@ -12,6 +12,19 @@ from pydantic import Field
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ONTOLOGY_ID
+from ot_datamodels.vocabularies import (
+    ClinicalReportType,
+    ClinicalStage,
+    Origin,
+    Provider,
+    TrialAgencyClass,
+    TrialOverallStatus,
+    TrialPhase,
+    TrialPrimaryPurpose,
+    TrialReferenceType,
+    TrialStopReasonCategory,
+    TrialStudyType,
+)
 
 
 class Drugs(StructModel):
@@ -26,8 +39,8 @@ class Drugs(StructModel):
 class TrialSponsor(StructModel):
     """`trialSponsor`."""
 
-    agencyClass: str = Field(
-        min_length=1, description='Classification of the lead trial sponsor (e.g. INDUSTRY, NIH, OTHER)'
+    agencyClass: Annotated[TrialAgencyClass, PolarsDtype(pl.Enum)] = Field(
+        description='Classification of the lead trial sponsor (e.g. INDUSTRY, NIH, OTHER)'
     )
     name: str = Field(min_length=1, description='Name of the lead sponsor associated with the clinical trial')
 
@@ -40,7 +53,7 @@ class TrialLiterature(StructModel):
     id: str | None = Field(
         pattern=DIGITS, description='PubMed identifier of the reference, when the source records one'
     )
-    type: Literal['BACKGROUND', 'DERIVED', 'RESULT'] = Field(
+    type: Annotated[TrialReferenceType, PolarsDtype(pl.Enum)] = Field(
         description=(
             'How the reference relates to the trial: RESULT and DERIVED report its '
             'outcome, BACKGROUND is literature its authors cited'
@@ -107,32 +120,14 @@ class ClinicalReport(DatasetModel):
     }
 
     id: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the clinical report')
-    clinicalStage: Annotated[
-        Literal[
-            'WITHDRAWAL',
-            'APPROVAL',
-            'PHASE_4',
-            'PREAPPROVAL',
-            'PHASE_3',
-            'PHASE_2_3',
-            'PHASE_2',
-            'PHASE_1_2',
-            'PHASE_1',
-            'EARLY_PHASE_1',
-            'IND',
-            'PRECLINICAL',
-            'UNKNOWN',
-        ],
-        ClickHouseType('LowCardinality(String)'),
-    ] = Field(description='Clinical stage of the report')
-    origin: str = Field(
-        pattern=ONTOLOGY_ID,
+    clinicalStage: Annotated[ClinicalStage, PolarsDtype(pl.Enum)] = Field(description='Clinical stage of the report')
+    origin: Annotated[Origin, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Nature of the record the report originates from (e.g. CLINICAL_TRIAL, '
             'DRUG_LABEL, REGULATORY_AGENCY, CURATED_RESOURCE)'
-        ),
+        )
     )
-    type: Literal['INDICATION', 'SAFETY'] = Field(
+    type: Annotated[ClinicalReportType, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Kind of evidence the report describes: INDICATION for a drug/disease claim, SAFETY for a drug warning'
         )
@@ -140,7 +135,7 @@ class ClinicalReport(DatasetModel):
     source: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description=('Source database or registry from which the clinical report was obtained')
     )
-    provider: Literal['AACT', 'ChEMBL', 'EMA', 'FDA', 'PMDA', 'TTD'] = Field(
+    provider: Annotated[Provider, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Resource or organisation that distributes the data fetched from the '
             'primary source (e.g. AACT, ChEMBL, EMA, FDA, PMDA, TTD)'
@@ -165,9 +160,9 @@ class ClinicalReport(DatasetModel):
     sideEffects: list[SideEffects] | None = Field(
         description='Side effects or adverse events associated with the clinical report'
     )
-    trialPhase: str | None = Field(min_length=1, description='Phase of the clinical trial')
+    trialPhase: Annotated[TrialPhase, PolarsDtype(pl.Enum)] | None = Field(description='Phase of the clinical trial')
     trialWhyStopped: str | None = Field(min_length=1, description='Reason provided for stopping the clinical trial')
-    trialStudyType: Literal['EXPANDED_ACCESS', 'INTERVENTIONAL', 'OBSERVATIONAL'] | None = Field(
+    trialStudyType: Annotated[TrialStudyType, PolarsDtype(pl.Enum)] | None = Field(
         description='Type of clinical study (e.g. Interventional, Observational)'
     )
     qualityControls: (
@@ -184,38 +179,21 @@ class ClinicalReport(DatasetModel):
         ]
         | None
     ) = Field(description='Quality control flags or notes for the clinical report')
-    trialPrimaryPurpose: str | None = Field(
-        min_length=1, description='Primary purpose of the clinical trial (e.g. Treatment, Prevention)'
+    trialPrimaryPurpose: Annotated[TrialPrimaryPurpose, PolarsDtype(pl.Enum)] | None = Field(
+        description='Primary purpose of the clinical trial (e.g. Treatment, Prevention)'
     )
     title: str = Field(min_length=1, description='Title of the clinical report')
     trialNumberOfArms: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Number of arms in the clinical trial'
     )
-    trialOverallStatus: str | None = Field(
-        min_length=1, description='Overall status of the clinical trial (e.g. Completed, Terminated)'
+    trialOverallStatus: Annotated[TrialOverallStatus, PolarsDtype(pl.Enum)] | None = Field(
+        description='Overall status of the clinical trial (e.g. Completed, Terminated)'
     )
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Year the report was registered or published'
     )
-    trialStopReasonCategories: (
-        list[
-            Literal[
-                'Another_Study',
-                'Business_Administrative',
-                'Covid19',
-                'Insufficient_Enrollment',
-                'Invalid_Reason',
-                'Logistics_Resources',
-                'Negative',
-                'No_Context',
-                'Regulatory',
-                'Safety_Sideeffects',
-                'Study_Design',
-                'Study_Staff_Moved',
-                'Uncategorised',
-            ]
-        ]
-        | None
-    ) = Field(description='Categories describing reasons why the trial was stopped')
+    trialStopReasonCategories: list[Annotated[TrialStopReasonCategory, PolarsDtype(pl.Enum)]] | None = Field(
+        description='Categories describing reasons why the trial was stopped'
+    )
     url: str = Field(min_length=1, description='URL linking to the source record')
     trialStartDate: datetime.date | None = Field(description='Start date of the clinical trial')

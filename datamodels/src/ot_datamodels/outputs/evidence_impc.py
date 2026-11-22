@@ -5,10 +5,12 @@ Generated from the 26.12 release output (4,659,348 rows) and its croissant metad
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class DiseaseModelAssociatedModelPhenotypes(StructModel):
@@ -111,8 +113,10 @@ class EvidenceImpc(DatasetModel):
         description='List of PubMed or preprint reference identifiers'
     )
     biologicalModelId: str | None = Field(min_length=1, description='MGI identifier of the mouse model')
-    datasourceId: Literal['impc'] = Field(description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['impc'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['animal_model'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
@@ -129,8 +133,10 @@ class EvidenceImpc(DatasetModel):
             'relationship; the PhenoDigm score divided by 100'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['GoF', 'LoF'] = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

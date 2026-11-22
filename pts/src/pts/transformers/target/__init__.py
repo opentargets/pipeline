@@ -14,6 +14,7 @@ from ot_datamodels.outputs.target import Target
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.target import chembl_class, constraint, go, hallmarks, hgnc, hpa, ncbi, reactome, uniprot
 from pts.transformers.target.assemble import assemble
@@ -92,4 +93,4 @@ def target(
         reactome_df,
     )
     logger.info(f'writing {result.height} targets to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, Target), destination)

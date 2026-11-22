@@ -44,22 +44,24 @@ class TargetPrioritisation(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Unique identifier for the target, typically an Ensembl gene ID'
     )
     isInMembrane: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description=('Indicates if the target protein is located in the cell or plasma membrane')
+        ge=0, le=255, description=('Indicates if the target protein is located in the cell or plasma membrane')
     )
     isSecreted: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description=('Indicates if the target protein is secreted or predicted to be secreted')
+        ge=0, le=255, description=('Indicates if the target protein is secreted or predicted to be secreted')
     )
     hasSafetyEvent: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('Int8')] | None = Field(
-        description='Indicates if there are known safety events associated with the target'
+        ge=-128, le=127, description='Indicates if there are known safety events associated with the target'
     )
     hasPocket: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description=('Indicates if the target has predicted binding pockets suitable for small molecule binding')
+        ge=0,
+        le=255,
+        description=('Indicates if the target has predicted binding pockets suitable for small molecule binding'),
     )
     hasLigand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description='Indicates if the target binds at least one high-quality ligand'
+        ge=0, le=255, description='Indicates if the target binds at least one high-quality ligand'
     )
     hasSmallMoleculeBinder: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description='Indicates if the target has at least one small molecule binder'
+        ge=0, le=255, description='Indicates if the target has at least one small molecule binder'
     )
     geneticConstraint: float | None = Field(
         description=(
@@ -73,13 +75,13 @@ class TargetPrioritisation(DatasetModel):
         ge=0.0, le=1.0, description='Maximum percentage identity between the target and its mouse ortholog'
     )
     isCancerDriverGene: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('Int8')] | None = Field(
-        description='Indicates if the target is identified as a cancer driver gene'
+        ge=-128, le=127, description='Indicates if the target is identified as a cancer driver gene'
     )
     mouseKOScore: float | None = Field(
         description=('Represents the phenotypic score from mouse knockout models for the target')
     )
     hasHighQualityChemicalProbes: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description=('Indicates if there are high-quality chemical probes available for the target')
+        ge=0, le=255, description=('Indicates if there are high-quality chemical probes available for the target')
     )
     maxClinicalStage: float | None = Field(
         ge=0.0,

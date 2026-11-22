@@ -16,13 +16,14 @@ croissant declares no primary key, and the natural one (unit, dataset, biosample
 columns, so none is declared.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, Reference, RowCheck
+from ot_datamodels import DatasetModel, PolarsDtype, Reference, RowCheck
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
+from ot_datamodels.vocabularies import EnrichmentApproach
 
 
 class BiosampleEnrichment(DatasetModel):
@@ -83,7 +84,9 @@ class BiosampleEnrichment(DatasetModel):
         min_length=1, description='Source dataset containing the biosample annotations used for enrichment'
     )
     biosampleFromSource: str | None = Field(min_length=1, description='Biosample as reported by the source dataset')
-    enrichmentApproach: Literal['l2g_regression'] = Field(description='Method used to estimate biosample enrichment')
+    enrichmentApproach: Annotated[EnrichmentApproach, PolarsDtype(pl.Enum)] = Field(
+        description='Method used to estimate biosample enrichment'
+    )
     beta: float | None = Field(description='Estimated effect size of the biosample enrichment')
     betaError: float | None = Field(ge=0.0, description='Standard error of the biosample enrichment effect size')
     pValue: float | None = Field(ge=0.0, le=1.0, description='P-value for the biosample enrichment')

@@ -44,6 +44,13 @@ changes need a `pts_version` bump.
   same PR.** Nothing fails without it; `pos/AGENTS.md` says what to edit under `pos/src/pos/croissant/assets/`.
 - Output datasets are declared once, as models in `datamodels/` (`ot_datamodels.outputs`);
   a transformer's `validate` imports its model from there (`datamodels/AGENTS.md`).
+- A polars transformer writes a modelled output through `conform(frame, Model)`
+  (`pts.schemas.dataset.conform`), which stores its closed vocabularies as Enums. A step
+  reading an output joins, concatenates or applies `str` functions to those columns only
+  after `without_enums`. `scan_parquet(schema=...)` with `pl.String` for an Enum column
+  fails on such a file: read it with its own dtypes, then `without_enums`. A partial
+  rerun that mixes intermediates written before and after a column became an Enum
+  fails on concat (different categories); rerun the whole chain.
 - Input and intermediate schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes)
   go in `src/pts/schemas/`, one module per step (follow `drug_molecule.py`), not in
   the transformer.

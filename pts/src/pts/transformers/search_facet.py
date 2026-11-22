@@ -13,6 +13,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.transformers.gene_sets import CHEMBL_TARGET_CLASS_SOURCE, GO_SOURCE, REACTOME_SOURCE
 from pts.transformers.utils.dataset import scan_dataset, write_json_dataset
 from pts.transformers.utils.lists import collect_set, explode
@@ -177,9 +178,13 @@ def search_facet(
     categories = {**DEFAULT_CATEGORIES, **(settings.get('categories') or {})}
 
     disease = scan_dataset(source['diseases']).select('id', 'name', 'therapeuticAreas')
-    target = scan_dataset(source['targets']).select('id', 'approvedSymbol', 'approvedName', 'subcellularLocations')
+    target = without_enums(scan_dataset(source['targets'])).select(
+        'id', 'approvedSymbol', 'approvedName', 'subcellularLocations'
+    )
     gene_sets = scan_dataset(source['gene_sets']).select('id', 'label', 'source', 'category', 'entityIds')
-    tractability = scan_dataset(source['tractability']).select('targetId', 'modality', 'category', 'value')
+    tractability = without_enums(
+        scan_dataset(source['tractability']).select('targetId', 'modality', 'category', 'value')
+    )
 
     logger.info('computing target facets')
     targets = target_facets(target, gene_sets, tractability, categories).collect()

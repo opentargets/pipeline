@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID
+from ot_datamodels.vocabularies import HomologyType
 
 
 class Homology(DatasetModel):
@@ -27,7 +28,7 @@ class Homology(DatasetModel):
         'speciesName': 'Dog',
         'homologyType': 'ortholog_one2one',
         'targetGeneId': 'ENSCAFG00845015955',
-        'isHighConfidence': '1',
+        'isHighConfidence': True,
         'targetGeneSymbol': 'TSPAN6',
         'queryPercentageIdentity': 94.6939,
         'targetPercentageIdentity': 94.6939,
@@ -39,9 +40,9 @@ class Homology(DatasetModel):
     )
     speciesId: str = Field(pattern=DIGITS, description='Species ID for the homologue')
     speciesName: str = Field(min_length=1, description='Species name for the homologue')
-    homologyType: str = Field(min_length=1, description='Type of homology relationship')
+    homologyType: Annotated[HomologyType, PolarsDtype(pl.Enum)] = Field(description='Type of homology relationship')
     targetGeneId: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Target gene ID of the homologue')
-    isHighConfidence: str | None = Field(pattern=DIGITS, description='Indicates if the homology is high confidence')
+    isHighConfidence: bool | None = Field(description='Indicates if the homology is high confidence')
     targetGeneSymbol: str = Field(min_length=1, description='Gene symbol of the homologous target')
     queryPercentageIdentity: float = Field(ge=0.0, description='Percentage identity of the query gene in the homologue')
     targetPercentageIdentity: float = Field(

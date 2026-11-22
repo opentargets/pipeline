@@ -5,29 +5,31 @@ Generated from the 26.12 release output (28,772,039 rows) and its croissant meta
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, EuropePmcSection, enum_of
 
 
 class TextMiningSentences(StructModel):
     """`textMiningSentences[]`."""
 
     dEnd: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='End position of the disease label in sentence'
+        ge=0, le=4294967295, description='End position of the disease label in sentence'
     )
     dStart: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Start position of the disease label in the sentence'
+        ge=0, le=4294967295, description='Start position of the disease label in the sentence'
     )
-    section: Literal[
-        'abstract', 'appendix', 'case', 'concl', 'discuss', 'figure', 'intro', 'other', 'results', 'table', 'title'
-    ] = Field(description='Section of the publication the sentence was extracted from')
+    section: Annotated[EuropePmcSection, PolarsDtype(pl.Enum)] = Field(
+        description='Section of the publication the sentence was extracted from'
+    )
     tEnd: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='End position of the target label in the sentence'
+        ge=0, le=4294967295, description='End position of the target label in the sentence'
     )
     tStart: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Start position of the target label in the sentence'
+        ge=0, le=4294967295, description='Start position of the target label in the sentence'
     )
     text: str = Field(min_length=1, description='Text of the sentence with the disease/target relationship')
 
@@ -82,8 +84,10 @@ class EvidenceEuropepmc(DatasetModel):
         description=('Ensembl gene identifier of the target recognised by Europe PMC text mining'),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: Literal['europepmc'] = Field(description='Identifer of the evidence source')
-    datatypeId: Literal['literature'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['europepmc'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['literature'], enum_of(Datatype)] = Field(description='Type of the evidence')
     resourceScore: float = Field(
         ge=0.0,
         description=('Sum of the Europe PMC text-mining scores of the target-disease co-mentions in the publication'),
@@ -100,7 +104,7 @@ class EvidenceEuropepmc(DatasetModel):
         description='PubMed Central identifiers of the full text publication'
     )
     publicationYear: Annotated[int, ClickHouseType('UInt16')] | None = Field(
-        ge=0, description='Year of publication of the article'
+        ge=0, le=65535, description='Year of publication of the article'
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(

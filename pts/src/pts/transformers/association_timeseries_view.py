@@ -67,7 +67,9 @@ def association_timeseries_view(
                 pl.lit(is_direct).alias('isDirect'),
                 (pl.col('targetId').hash(seed=0) % file_count).cast(pl.UInt32).alias('file'),
             )
-            .with_columns(pl.col('timeseries').cast(TIMESERIES))
+            .with_columns(
+                pl.col('timeseries').cast(TIMESERIES), pl.col('aggregationType', 'aggregationValue').cast(pl.String)
+            )
             .collect()
         )
         for (index,), piece in frame.partition_by('file', as_dict=True, include_key=False).items():

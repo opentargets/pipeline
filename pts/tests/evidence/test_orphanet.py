@@ -154,12 +154,12 @@ def _run(tmp_path: Path, *disorders: str) -> tuple[pl.DataFrame, pl.DataFrame]:
 )
 def test_excluded_association_types_dropped(tmp_path: Path, kind: str) -> None:
     valid, failed = _run(tmp_path, _disorder('558', 'cystic fibrosis', _association(kind=kind), _association(gene='K')))
-    assert pl.concat([valid, failed], how='diagonal')['targetFromSource'].to_list() == ['K']
+    assert pl.concat([valid, failed], how='diagonal_relaxed')['targetFromSource'].to_list() == ['K']
 
 
 def test_null_association_type_dropped(tmp_path: Path) -> None:
     valid, failed = _run(tmp_path, _disorder('558', 'cystic fibrosis', _association(kind=None), _association(gene='K')))
-    assert pl.concat([valid, failed], how='diagonal')['targetFromSource'].to_list() == ['K']
+    assert pl.concat([valid, failed], how='diagonal_relaxed')['targetFromSource'].to_list() == ['K']
 
 
 def test_allele_origins_are_germline_and_somatic(tmp_path: Path) -> None:

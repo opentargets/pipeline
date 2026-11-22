@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import NamedTuple
 
-from pts.schemas.credible_set import Chromosome
+from ot_datamodels.vocabularies import Chromosome
 
 
 class GenomicRegion(NamedTuple):
@@ -23,4 +23,4 @@ class GenomicRegion(NamedTuple):
 class KnownGenomicRegion(Enum):
     """Known genomic regions."""
 
-    MHC = GenomicRegion(Chromosome.CHR_6, 25726063, 33400556)
+    MHC = GenomicRegion('6', 25726063, 33400556)

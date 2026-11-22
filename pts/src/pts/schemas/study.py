@@ -1,22 +1,12 @@
 """Schema and study types of the Study dataset."""
 
-from enum import StrEnum
+from typing import get_args
 
 import polars as pl
+from ot_datamodels.vocabularies import StudyType
 
-
-class StudyType(StrEnum):
-    """Study types."""
-
-    GWAS = 'gwas'
-    EQTL = 'eqtl'
-    PQTL = 'pqtl'
-    SQTL = 'sqtl'
-    TUQTL = 'tuqtl'
-    SCEQTL = 'sceqtl'
-    SCPQTL = 'scpqtl'
-    SCSQTL = 'scsqtl'
-    SCTUQTL = 'sctuqtl'
+#: The gentropy study types, in the model's order.
+STUDY_TYPES: tuple[StudyType, ...] = get_args(StudyType)
 
 
 study_schema = pl.Schema({

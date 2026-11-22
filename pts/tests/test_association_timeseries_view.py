@@ -6,8 +6,10 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels.discovery import discover_datasets
 
 from pts.schemas.association import association_schema, association_timeseries_schema
+from pts.schemas.dataset.conform import conform
 from pts.transformers.association_timeseries_view import association_timeseries_view
 
 NAMES = ['overall_direct', 'overall_indirect', 'by_datasource_direct', 'by_datasource_indirect']
@@ -166,3 +168,27 @@ def test_worker_failure_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     with pytest.raises(RuntimeError, match='file boom'):
         association_timeseries_view(source, str(tmp_path / 'out'), {'file_count': 3, 'concurrency': 1}, None)
     assert not (tmp_path / 'out' / 'part-00001.parquet').exists()
+
+
+def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
+    """The overall and by-datasource `aggregationValue` Enums differ; both are read as strings."""
+    rows = {
+        'overall_direct': [_row('T1', 'D1', None, [2020])],
+        'by_datasource_direct': [_row('T1', 'D1', 'eva', [2020]), _row('T2', 'D1', 'europepmc', [2021])],
+    }
+    models = discover_datasets()
+    rows['overall_direct'][0] |= {'aggregationType': 'overall', 'aggregationValue': 'None'}
+    for row in rows['by_datasource_direct']:
+        row['aggregationType'] = 'datasourceId'
+    (tmp_path / 'strings').mkdir()
+    (tmp_path / 'typed').mkdir()
+    strings = _run(tmp_path / 'strings', rows)
+    source = _write(tmp_path / 'typed', rows)
+    for name in NAMES:
+        path = Path(source[f'association_{name}']) / 'part-0.parquet'
+        conform(pl.read_parquet(path), models[f'association_{name}']).write_parquet(path)
+    assert isinstance(pl.read_parquet_schema(path)['aggregationValue'], pl.Enum)
+
+    association_timeseries_view(source, str(tmp_path / 'typed' / 'out'), {'file_count': 3}, None)
+
+    assert pl.read_parquet(tmp_path / 'typed' / 'out' / '*.parquet').equals(strings)

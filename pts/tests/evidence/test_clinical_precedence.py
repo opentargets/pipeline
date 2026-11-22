@@ -7,7 +7,10 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.clinical_report import ClinicalReport
+from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 
+from pts.schemas.dataset.conform import conform
 from pts.transformers.evidence.clinical_precedence import (
     CLINICAL_PRECEDENCE,
     DIRECTION_ON_TARGET,
@@ -158,11 +161,17 @@ EXPECTED = [
 ]
 
 
-def _sources(src: Path, reports: list[dict] = REPORTS) -> dict:
+def _sources(src: Path, reports: list[dict] = REPORTS, *, typed: bool = False) -> dict:
+    """The inputs, as strings or, `typed`, with the Enums pts writes them with."""
     (src / 'clinical_report').mkdir(parents=True)
     (src / 'moa').mkdir(parents=True)
-    pl.DataFrame(reports, schema=REPORT_SCHEMA).write_parquet(src / 'clinical_report' / 'part.parquet')
-    pl.DataFrame(MECHANISMS, schema=MOA_SCHEMA).write_parquet(src / 'moa' / 'part.parquet')
+    report = pl.DataFrame(reports, schema=REPORT_SCHEMA)
+    moa = pl.DataFrame(MECHANISMS, schema=MOA_SCHEMA)
+    if typed:
+        report, moa = conform(report, ClinicalReport), conform(moa, DrugMechanismOfAction)
+        assert isinstance(report.schema['clinicalStage'], pl.Enum)
+    report.write_parquet(src / 'clinical_report' / 'part.parquet')
+    moa.write_parquet(src / 'moa' / 'part.parquet')
     return {'clinical_report': str(src / 'clinical_report'), 'drug_mechanism_of_action': str(src / 'moa')}
 
 
@@ -311,9 +320,12 @@ def test_clinical_precedence_unique_fields_are_the_config_ones() -> None:
     ]
 
 
-def test_clinical_precedence_step_scores_assigns_directions_and_writes_excluded_reports(tmp_path: Path) -> None:
+@pytest.mark.parametrize('typed', [False, True], ids=['strings', 'enums'])
+def test_clinical_precedence_step_scores_assigns_directions_and_writes_excluded_reports(
+    tmp_path: Path, typed: bool
+) -> None:
     src = tmp_path / 'src'
-    sources = _sources(src)
+    sources = _sources(src, typed=typed)
     dst = tmp_path / 'out'
 
     clinical_precedence(

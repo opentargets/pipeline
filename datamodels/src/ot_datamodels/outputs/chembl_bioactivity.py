@@ -10,6 +10,15 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID
+from ot_datamodels.vocabularies import (
+    ChemblActionType,
+    ChemblActivityOutcome,
+    ChemblAssayType,
+    ChemblDocumentType,
+    ChemblMeasurementClass,
+    ChemblStandardType,
+    enum_of,
+)
 
 
 class ChemblBioactivity(DatasetModel):
@@ -86,17 +95,17 @@ class ChemblBioactivity(DatasetModel):
             'concentration or potency, comparable across measurement types'
         ),
     )
-    standardMeasurementType: Literal['AC50', 'EC50', 'ED50', 'IC50', 'Kd', 'Ki', 'Potency', 'XC50'] = Field(
+    standardMeasurementType: Annotated[ChemblStandardType, PolarsDtype(pl.Enum)] = Field(
         description='Standardised type of the measurement (e.g., IC50)'
     )
     standardMeasurementValue: float = Field(ge=0.0, description='Standardised value of the measurement, in nM')
-    measurementClass: Literal['affinity', 'functional_potency', 'inhibition'] = Field(
+    measurementClass: Annotated[ChemblMeasurementClass, PolarsDtype(pl.Enum)] = Field(
         description=(
             'What the measurement quantifies: affinity (Ki, Kd), inhibition (IC50) '
             'or functional_potency (EC50, AC50, XC50, Potency, ED50)'
         )
     )
-    activityOutcome: Literal['active', 'inactive', 'inconclusive'] | None = Field(
+    activityOutcome: Annotated[ChemblActivityOutcome, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Outcome the depositor recorded for the measurement: active, inactive '
             'or inconclusive. Recorded mostly for PubChem BioAssay screens, and '
@@ -106,37 +115,40 @@ class ChemblBioactivity(DatasetModel):
         )
     )
     assayActionType: (
-        Literal[
-            'ACTIVATOR',
-            'AGONIST',
-            'ALLOSTERIC ANTAGONIST',
-            'ANTAGONIST',
-            'ANTISENSE INHIBITOR',
-            'BINDING AGENT',
-            'BLOCKER',
-            'CROSS-LINKING AGENT',
-            'DEGRADER',
-            'DISRUPTING AGENT',
-            'EXOGENOUS GENE',
-            'EXOGENOUS PROTEIN',
-            'GENE EDITING NEGATIVE MODULATOR',
-            'HYDROLYTIC ENZYME',
-            'INHIBITOR',
-            'INVERSE AGONIST',
-            'MODULATOR',
-            'NEGATIVE ALLOSTERIC MODULATOR',
-            'NEGATIVE MODULATOR',
-            'OPENER',
-            'PARTIAL AGONIST',
-            'POSITIVE ALLOSTERIC MODULATOR',
-            'POSITIVE MODULATOR',
-            'PROTEOLYTIC ENZYME',
-            'RELEASING AGENT',
-            'RNAI INHIBITOR',
-            'STABILISER',
-            'SUBSTRATE',
-            'VACCINE ANTIGEN',
-            'OTHER',
+        Annotated[
+            Literal[
+                'ACTIVATOR',
+                'AGONIST',
+                'ALLOSTERIC ANTAGONIST',
+                'ANTAGONIST',
+                'ANTISENSE INHIBITOR',
+                'BINDING AGENT',
+                'BLOCKER',
+                'CROSS-LINKING AGENT',
+                'DEGRADER',
+                'DISRUPTING AGENT',
+                'EXOGENOUS GENE',
+                'EXOGENOUS PROTEIN',
+                'GENE EDITING NEGATIVE MODULATOR',
+                'HYDROLYTIC ENZYME',
+                'INHIBITOR',
+                'INVERSE AGONIST',
+                'MODULATOR',
+                'NEGATIVE ALLOSTERIC MODULATOR',
+                'NEGATIVE MODULATOR',
+                'OPENER',
+                'PARTIAL AGONIST',
+                'POSITIVE ALLOSTERIC MODULATOR',
+                'POSITIVE MODULATOR',
+                'PROTEOLYTIC ENZYME',
+                'RELEASING AGENT',
+                'RNAI INHIBITOR',
+                'STABILISER',
+                'SUBSTRATE',
+                'VACCINE ANTIGEN',
+                'OTHER',
+            ],
+            enum_of(ChemblActionType),
         ]
         | None
     ) = Field(
@@ -146,37 +158,40 @@ class ChemblBioactivity(DatasetModel):
         )
     )
     actionTypes: list[
-        Literal[
-            'ACTIVATOR',
-            'AGONIST',
-            'ALLOSTERIC ANTAGONIST',
-            'ANTAGONIST',
-            'ANTISENSE INHIBITOR',
-            'BINDING AGENT',
-            'BLOCKER',
-            'CROSS-LINKING AGENT',
-            'DEGRADER',
-            'DISRUPTING AGENT',
-            'EXOGENOUS GENE',
-            'EXOGENOUS PROTEIN',
-            'GENE EDITING NEGATIVE MODULATOR',
-            'HYDROLYTIC ENZYME',
-            'INHIBITOR',
-            'INVERSE AGONIST',
-            'MODULATOR',
-            'NEGATIVE ALLOSTERIC MODULATOR',
-            'NEGATIVE MODULATOR',
-            'OPENER',
-            'PARTIAL AGONIST',
-            'POSITIVE ALLOSTERIC MODULATOR',
-            'POSITIVE MODULATOR',
-            'PROTEOLYTIC ENZYME',
-            'RELEASING AGENT',
-            'RNAI INHIBITOR',
-            'STABILISER',
-            'SUBSTRATE',
-            'VACCINE ANTIGEN',
-            'OTHER',
+        Annotated[
+            Literal[
+                'ACTIVATOR',
+                'AGONIST',
+                'ALLOSTERIC ANTAGONIST',
+                'ANTAGONIST',
+                'ANTISENSE INHIBITOR',
+                'BINDING AGENT',
+                'BLOCKER',
+                'CROSS-LINKING AGENT',
+                'DEGRADER',
+                'DISRUPTING AGENT',
+                'EXOGENOUS GENE',
+                'EXOGENOUS PROTEIN',
+                'GENE EDITING NEGATIVE MODULATOR',
+                'HYDROLYTIC ENZYME',
+                'INHIBITOR',
+                'INVERSE AGONIST',
+                'MODULATOR',
+                'NEGATIVE ALLOSTERIC MODULATOR',
+                'NEGATIVE MODULATOR',
+                'OPENER',
+                'PARTIAL AGONIST',
+                'POSITIVE ALLOSTERIC MODULATOR',
+                'POSITIVE MODULATOR',
+                'PROTEOLYTIC ENZYME',
+                'RELEASING AGENT',
+                'RNAI INHIBITOR',
+                'STABILISER',
+                'SUBSTRATE',
+                'VACCINE ANTIGEN',
+                'OTHER',
+            ],
+            enum_of(ChemblActionType),
         ]
     ] = Field(
         description=(
@@ -199,7 +214,7 @@ class ChemblBioactivity(DatasetModel):
         )
     )
     assayId: str = Field(pattern=CHEMBL_ID, description='ChEMBL assay identifier')
-    assayType: Literal['B', 'F', 'U'] = Field(
+    assayType: Annotated[Literal['B', 'F', 'U'], enum_of(ChemblAssayType)] = Field(
         description='ChEMBL assay type: B (binding), F (functional) or U (unclassified)'
     )
     assayDescription: str = Field(min_length=1, description='ChEMBL description of the assay')
@@ -238,7 +253,9 @@ class ChemblBioactivity(DatasetModel):
         )
     )
     documentId: str = Field(pattern=CHEMBL_ID, description='ChEMBL identifier of the source document')
-    docType: str = Field(min_length=1, description='Type of the source document (e.g., PUBLICATION, DATASET)')
+    docType: Annotated[ChemblDocumentType, PolarsDtype(pl.Enum)] = Field(
+        description='Type of the source document (e.g., PUBLICATION, DATASET)'
+    )
     pubmedId: int | None = Field(ge=0, description='PubMed identifier of the source document')
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Publication year of the source document'

@@ -213,7 +213,7 @@ OUTPUT = [
                 'datasource': 'Brennan',
                 'literature': '123',
                 'url': None,
-                'studies': [{'description': 'd', 'name': 'n', 'type': 't'}],
+                'studies': [{'description': 'd', 'name': 'n', 'type': 'clinical'}],
             },
         ],
         'chemicalProbes': [
@@ -551,7 +551,7 @@ EMPTY_TRANSCRIPT = [
                 'datasource': 'Brennan',
                 'literature': '123',
                 'url': None,
-                'studies': [{'description': 'd', 'name': 'n', 'type': 't'}],
+                'studies': [{'description': 'd', 'name': 'n', 'type': 'clinical'}],
             },
         ],
         'chemicalProbes': [

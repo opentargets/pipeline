@@ -114,7 +114,7 @@ def _gnomad_frequencies(
         .explode('_population', empty_as_null=True)
         .select(
             'studyId',
-            (pl.col('_population').struct.field('ldPopulation') + '_adj').alias('populationName'),
+            (pl.col('_population').struct.field('ldPopulation').cast(pl.String) + '_adj').alias('populationName'),
             pl.col('_population').struct.field('relativeSampleSize').alias('_weight'),
         )
     )
@@ -124,6 +124,7 @@ def _gnomad_frequencies(
         .join(study_variant.select('variantId').unique(), on='variantId', how='semi')
         .explode('alleleFrequencies')
         .select('variantId', pl.col('alleleFrequencies').struct.unnest())
+        .with_columns(pl.col('populationName').cast(pl.String))
     )
     af, weight = pl.col('alleleFrequency'), pl.col('_weight')
     single = pl.len() == 1

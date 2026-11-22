@@ -9,7 +9,8 @@ Only a strict subset of Pydantic is supported, and anything outside it raises
 
 * types: `str`, `bool`, `int`, `float` (see `PolarsDtype` to change their Polars precision), `datetime.date`,
   `Literal[...]` of all-`str` or all-`int` values (a `str` one stored as a Polars `Enum` with
-  `PolarsDtype(pl.Enum)`: its categories are the values, in order), `list[T]`, `StructModel` subclasses, and
+  `PolarsDtype(pl.Enum)`: its categories are the values, in order; or with `PolarsDtype(pl.Enum([...]))`, the
+  Enum of a whole vocabulary the values are part of, in its order), `list[T]`, `StructModel` subclasses, and
   `T | None` for any of those;
 * constraints: `ge`/`gt`/`le`/`lt` on numbers and dates, `pattern`/`min_length`/`max_length` on strings,
   `min_length`/`max_length` on lists -- on a column, a struct field or a list element alike
@@ -444,14 +445,16 @@ def _accept_only(constraints: Constraints, accepted: frozenset[str], path: str, 
 def _string_literal_dtype(
     values: tuple[str, ...], override: pl.DataType | type[pl.DataType] | None, path: str
 ) -> pl.DataType:
-    """`String`, or with `PolarsDtype(pl.Enum)` an Enum whose categories are the Literal's values, in order."""
+    """`String`; with `PolarsDtype(pl.Enum)` the Enum of the Literal's values, in order; or the given Enum."""
     if override is None:
         return pl.String()
     if override is pl.Enum:
         return pl.Enum(list(values))
     if isinstance(override, pl.Enum):
-        if list(override.categories) != list(values):
-            raise SchemaDefinitionError(f'{path}: the Enum categories must be the Literal values, in the same order')
+        categories = iter(override.categories.to_list())
+        if not all(value in categories for value in values):
+            msg = f'{path}: the Literal values must be Enum categories, in the same order'
+            raise SchemaDefinitionError(msg)
         return override
     raise SchemaDefinitionError(f'{path}: a str Literal only takes PolarsDtype(pl.Enum)')
 

@@ -5,10 +5,12 @@ Generated from the 26.12 release output (74,341 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class MutatedSamples(StructModel):
@@ -18,13 +20,19 @@ class MutatedSamples(StructModel):
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
     numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease with a mutation of any type in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease with a mutation of any type in the target'),
     )
     numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease screened for mutations in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease screened for mutations in the target'),
     )
     numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease with a mutation of the given type in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease with a mutation of the given type in the target'),
     )
 
 
@@ -71,12 +79,14 @@ class EvidenceCancerGeneCensus(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target as reported by COSMIC'
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datatypeId: Annotated[Literal['somatic_mutation'], enum_of(Datatype)] = Field(description='Type of the evidence')
     studyId: str | None = Field(pattern=DIGITS, description='COSMIC identifier of the study reporting the mutations')
     mutatedSamples: list[MutatedSamples] = Field(
         description=('Counts of COSMIC samples with mutations in the target, by mutation type')
     )
-    datasourceId: Literal['cancer_gene_census'] = Field(description='Identifer of the evidence source')
+    datasourceId: Annotated[Literal['cancer_gene_census'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
     resourceScore: float = Field(
         ge=0.0,
         le=1.0,
@@ -102,8 +112,10 @@ class EvidenceCancerGeneCensus(DatasetModel):
             'relationship; equal to the COSMIC resource score'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Gain of function for oncogenes and loss of function for tumour '
             'suppressor genes, as classified in the Cancer Gene Census'

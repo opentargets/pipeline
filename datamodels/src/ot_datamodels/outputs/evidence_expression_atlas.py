@@ -3,12 +3,13 @@
 Generated from the 26.12 release output (238,857 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class EvidenceExpressionAtlas(DatasetModel):
@@ -66,13 +67,16 @@ class EvidenceExpressionAtlas(DatasetModel):
             "Expression Atlas comparison between disease and reference samples (e.g. \"'sporadic ALS' vs 'normal'\")"
         ),
     )
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['expression_atlas'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['rna_expression'], enum_of(Datatype)] = Field(description='Type of the evidence')
     literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description=('PubMed identifiers of the publications describing the Expression Atlas experiment')
     )
     log2FoldChangePercentileRank: Annotated[int, ClickHouseType('Int32')] = Field(
         ge=0,
+        le=2147483647,
         description=(
             'Percentile rank of the absolute log 2 fold change of the target among '
             'the differentially expressed genes of the contrast'

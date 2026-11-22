@@ -12,6 +12,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.transformers.utils.dataset import scan_dataset, write_json_file
 
 SORT_KEYS = ['targetId', 'diseaseId', 'score']
@@ -57,8 +58,8 @@ def search_ebi(
         config: unused.
     """
     diseases = scan_dataset(source['disease']).rename({'id': 'diseaseId'})
-    targets = scan_dataset(source['target']).rename({'id': 'targetId'})
-    associations = scan_dataset(source['association'])
+    targets = without_enums(scan_dataset(source['target'])).rename({'id': 'targetId'})
+    associations = without_enums(scan_dataset(source['association']))
 
     logger.info(f'writing {destination["associations"]}')
     write_json_file(generate_associations(diseases, targets, associations), destination['associations'])

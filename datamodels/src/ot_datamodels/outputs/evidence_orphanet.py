@@ -5,10 +5,12 @@ Generated from the 26.12 release output (6,781 rows) and its croissant metadata.
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class EvidenceOrphanet(DatasetModel):
@@ -49,8 +51,10 @@ class EvidenceOrphanet(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target as reported by Orphanet'
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: Literal['orphanet'] = Field(description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['orphanet'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     alleleOrigins: list[Literal['germline', 'somatic']] = Field(
         description=('Origin of the variant allele; germline and somatic for all Orphanet associations')
     )
@@ -86,12 +90,13 @@ class EvidenceOrphanet(DatasetModel):
             'relationship, derived from the Orphanet assessment status'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: str | None = Field(
-        min_length=1,
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '
             'perturbations'
-        ),
+        )
     )

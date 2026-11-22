@@ -2,9 +2,9 @@
 
 Usage: `uv run python scripts/schema_drift.py <out.csv>` from `pos/`. Reads code and config only.
 
-A landing table maps to the model whose `dataset_name` is the last segment of its `output/...`
-`input_dir`; `evidence` (a glob over `output/evidence_*`) maps to every `evidence_*` model. Tables fed
-from `view/...` have no model and are listed as `no_model`.
+Compares the entries with a hand-written `preload_script`: a landing table maps to its entry's `model`, or to
+every model matching its `models` glob; an entry with neither is listed as `no_model`. Entries generated from
+their model (`model`/`models` and no `preload_script`) have no hand-written DDL and are skipped.
 """
 
 import re
@@ -19,6 +19,9 @@ import yaml
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec
+
+from pos import clickhouse_ddl as ddl
+from pos.clickhouse_ddl import _ENUMS, CHType, model_type, parse_table, parse_type
 
 CATEGORIES = (
     'model_only',
@@ -48,164 +51,16 @@ COLUMNS = (
     'serving_read',
 )
 
-_ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _INTS = frozenset({f'{s}Int{w}' for s in ('', 'U') for w in (8, 16, 32, 64, 128, 256)})
 _FLOATS = frozenset({'Float32', 'Float64'})
-_POLARS_NAMES = {'Boolean': 'Bool'}
-_TOKEN = re.compile(r"\s*(?:`([^`]*)`|('(?:[^'\\]|\\.)*')|(-?\d+(?:\.\d+)?)|([A-Za-z_]\w*)|(\S))")
-_CREATE = re.compile(r'create\s+table\s+(?:if\s+not\s+exists\s+)?[\w.`]+\s*\(', re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class CHType:
-    """A ClickHouse type: a primitive (`args` hold Enum entries or a length), an Array or a Tuple."""
-
-    name: str
-    nullable: bool = False
-    low_cardinality: bool = False
-    args: tuple[str, ...] = ()
-    element: 'CHType | None' = None
-    fields: tuple[tuple[str, 'CHType'], ...] = ()
-
-
-# DDL parsing
-
-
-def _tokens(text: str) -> list[tuple[str, str]]:
-    """(kind, value) pairs; kind is `name` (identifier or backticked), `str`, `num` or `sym`."""
-    out = []
-    for m in _TOKEN.finditer(text):
-        quoted, string, number, ident, sym = m.groups()
-        if quoted is not None:
-            out.append(('name', quoted))
-        elif string is not None:
-            out.append(('str', string))
-        elif number is not None:
-            out.append(('num', number))
-        elif ident is not None:
-            out.append(('name', ident))
-        elif sym is not None:
-            out.append(('sym', sym))
-    return out
-
-
-class _Parser:
-    def __init__(self, text: str) -> None:
-        self.tokens = _tokens(text)
-        self.i = 0
-
-    def peek(self, ahead: int = 0) -> tuple[str, str]:
-        j = self.i + ahead
-        return self.tokens[j] if j < len(self.tokens) else ('end', '')
-
-    def take(self, kind: str | None = None, value: str | None = None) -> str:
-        k, v = self.peek()
-        if (kind and k != kind) or (value and v != value):
-            raise ValueError(f'expected {value or kind} at token {self.i}, got {v!r}')
-        self.i += 1
-        return v
-
-    def at(self, value: str) -> bool:
-        return self.peek()[1] == value
-
-    def items(self, item):
-        """`(item, item, ...)`, with an optional trailing comma."""
-        self.take('sym', '(')
-        out = []
-        while not self.at(')'):
-            out.append(item())
-            if not self.at(')'):
-                self.take('sym', ',')
-        self.take('sym', ')')
-        return out
-
-    def type(self) -> CHType:
-        name = self.take('name')
-        if name in {'Nullable', 'LowCardinality'}:
-            self.take('sym', '(')
-            inner = self.type()
-            self.take('sym', ')')
-            flag = 'nullable' if name == 'Nullable' else 'low_cardinality'
-            return replace(inner, **{flag: True})
-        if name == 'Array':
-            self.take('sym', '(')
-            element = self.type()
-            self.take('sym', ')')
-            return CHType('Array', element=element)
-        if name == 'Tuple':
-            return CHType('Tuple', fields=tuple(self.items(self.tuple_field)))
-        if name in _ENUMS:
-            return CHType(name, args=tuple(self.items(self.enum_entry)))
-        name = _POLARS_NAMES.get(name, name)
-        if self.at('('):
-            return CHType(name, args=tuple(self.items(lambda: self.take())))
-        return CHType(name)
-
-    def tuple_field(self) -> tuple[str, CHType]:
-        if self.peek()[0] == 'name' and self.peek(1)[0] == 'name':
-            return self.take('name'), self.type()
-        raise ValueError(f'unnamed Tuple element at token {self.i}')
-
-    def enum_entry(self) -> str:
-        label = self.take('str')
-        if self.at('='):
-            self.take('sym', '=')
-            return f'{label} = {self.take("num")}'
-        return label
-
-
-def parse_type(text: str) -> CHType:
-    """Parse one ClickHouse type expression."""
-    parser = _Parser(text)
-    parsed = parser.type()
-    if parser.peek()[0] != 'end':
-        raise ValueError(f'trailing text after type in {text!r}')
-    return parsed
-
-
-def parse_table(sql: str) -> dict[str, CHType]:
-    """The columns of the first `CREATE TABLE ... (...)` in `sql`, in order."""
-    sql = re.sub(r'--[^\n]*', '', sql)
-    match = _CREATE.search(sql)
-    if match is None:
-        raise ValueError('no CREATE TABLE found')
-    parser = _Parser(sql[match.end() - 1 :])
-    columns = parser.items(lambda: (parser.take('name'), parser.type()))
-    return dict(columns)
 
 
 def render(t: CHType) -> str:
-    """The type as ClickHouse spells it, normalised."""
-    if t.name == 'Array' and t.element is not None:
-        text = f'Array({render(t.element)})'
-    elif t.name == 'Tuple':
-        text = f'Tuple({", ".join(f"{n} {render(f)}" for n, f in t.fields)})'
-    elif t.args:
-        text = f'{t.name}({", ".join(t.args)})'
-    else:
-        text = t.name
-    if t.low_cardinality:
-        text = f'LowCardinality({text})'
-    if t.nullable:
-        text = f'Nullable({text})'
-    return text
+    """The type as the drift CSVs spell it: `Nullable` outermost, Tuple field names bare."""
+    return ddl.render(t, nullable_outermost=True, quote_fields=False)
 
 
 # models
-
-
-def model_type(node: Node) -> CHType:
-    """The ClickHouse type derived from a node's polars dtype, ignoring any `ClickHouseType`."""
-    if node.kind == 'list':
-        assert node.element is not None
-        return CHType('Array', element=model_type(node.element))
-    if node.kind == 'struct':
-        return CHType('Tuple', fields=tuple((f.name, model_type(f.node)) for f in node.fields))
-    dtype = node.dtype
-    if isinstance(dtype, pl.Enum):
-        return CHType('Enum', nullable=node.nullable, args=tuple(f"'{c}'" for c in dtype.categories))
-    name = type(dtype).__name__
-    return CHType(_POLARS_NAMES.get(name, name), nullable=node.nullable)
 
 
 def _enum_labels(t: CHType) -> set[str]:
@@ -390,13 +245,9 @@ def _serving(entry: dict, scripts: tuple[tuple[str, str], ...]) -> _Serving:
 
 
 def _models_for(entry: dict, models: dict[str, type[DatasetModel]]) -> list[type[DatasetModel]] | None:
-    input_dir = entry.get('input_dir', '')
-    if not input_dir.startswith('output'):
-        return None
-    if 'glob_pattern' in entry:
-        pattern = entry['glob_pattern'].split('/')[0]
-        return [m for name, m in sorted(models.items()) if fnmatch(name, pattern)] or None
-    model = models.get(input_dir.rstrip('/').rsplit('/', 1)[-1])
+    if 'models' in entry:
+        return [m for name, m in sorted(models.items()) if fnmatch(name, entry['models'])] or None
+    model = models.get(entry.get('model', ''))
     return [model] if model else None
 
 
@@ -408,7 +259,7 @@ def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts: tuple[tu
         yield dict.fromkeys(COLUMNS, '') | {'category': 'no_model', 'dataset': dataset, 'serving_read': 'no'}
         return
     ddl = parse_table((schema_dir / Path(entry['preload_script']).name).read_text())
-    union = len(matched) > 1 or 'glob_pattern' in entry
+    union = len(matched) > 1 or 'models' in entry
     rows: list[dict[str, str]] = []
     for model in matched:
         spec = dataset_spec(model)
@@ -434,14 +285,17 @@ def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts: tuple[tu
 
 def drift(datasets_yaml: Path, schema_dir: Path, scripts_dir: Path, *,
           models: dict[str, type[DatasetModel]] | None = None) -> pl.DataFrame:  # fmt: skip
-    """One row per disagreement between each landing table and its model(s); `no_model` for the rest."""
+    """One row per disagreement between each hand-written landing table and its model(s); `no_model` for the rest.
+
+    Only entries with a `preload_script` have hand-written DDL; derived entries are skipped.
+    """
     models = discover_datasets() if models is None else models
     config = yaml.safe_load(datasets_yaml.read_text())['clickhouse']
     scripts = _scripts(scripts_dir)
     rows = [
         row
         for dataset, entry in config.items()
-        if not entry.get('derived')
+        if 'preload_script' in entry and not entry.get('derived')
         for row in _dataset_rows(dataset, entry, schema_dir, scripts, models)
     ]
     return pl.DataFrame(rows, schema=dict.fromkeys(COLUMNS, pl.String))

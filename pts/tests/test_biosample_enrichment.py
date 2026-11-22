@@ -8,6 +8,7 @@ import pytest
 from ot_datamodels.outputs.biosample_enrichment import BiosampleEnrichment
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.dataset.validate import format_report, validation_report
 from pts.transformers.biosample_enrichment import (
     Panel,
@@ -174,7 +175,7 @@ def _run(workspace: dict[str, str], **settings) -> pl.DataFrame:
 
 def test_output_has_the_pinned_schema(workspace) -> None:
     out = _run(workspace)
-    assert out.schema == biosample_enrichment_schema
+    assert out.schema == conformed_schema(biosample_enrichment_schema, BiosampleEnrichment)
 
 
 @pytest.mark.parametrize('pool_by_disease', [False, True], ids=['by_study', 'pooled'])

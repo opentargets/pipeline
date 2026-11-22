@@ -15,7 +15,6 @@ from collections.abc import Sequence
 
 import polars as pl
 
-from pts.schemas.study import StudyType
 from pts.transformers.utils.dataset import scan_dataset
 
 
@@ -48,5 +47,5 @@ def study_of_set(credible_set: pl.LazyFrame) -> pl.LazyFrame:
 
 def qtl_genes(study: pl.LazyFrame) -> pl.LazyFrame:
     """The `geneId` of each QTL study that has one."""
-    qtl = (pl.col('studyType') != StudyType.GWAS.value) & pl.col('geneId').is_not_null()
+    qtl = (pl.col('studyType') != 'gwas') & pl.col('geneId').is_not_null()
     return study.filter(qtl).select('studyId', 'geneId')

@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import CHEMBL_ID
+from ot_datamodels.vocabularies import ChemblWarningType
 
 
 class References(StructModel):
@@ -64,14 +65,14 @@ class DrugWarning(DatasetModel):
     country: str = Field(min_length=1, description='Country where the warning was issued')
     description: str | None = Field(min_length=1, description='Description of the drug adverse effect')
     id: Annotated[int, PrimaryKey(), ClickHouseType('UInt32')] = Field(
-        ge=0, description='Internal identifier for the drug warning record'
+        ge=0, le=4294967295, description='Internal identifier for the drug warning record'
     )
     references: list[References] = Field(description='List of sources supporting the warning information')
-    warningType: str = Field(
-        min_length=1, description=('Classification of action taken (drug is withdrawn or has a black box warning)')
+    warningType: Annotated[ChemblWarningType, PolarsDtype(pl.Enum)] = Field(
+        description='Classification of action taken (drug is withdrawn or has a black box warning)'
     )
     year: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt16')] | None = Field(
-        ge=0, description='Year when the warning was issued'
+        ge=0, le=65535, description='Year when the warning was issued'
     )
     efoTerm: str | None = Field(min_length=1, description='List of disease labels')
     efoId: Annotated[str, Reference('disease', 'id')] | None = Field(

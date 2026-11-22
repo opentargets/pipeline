@@ -14,6 +14,7 @@ from loguru import logger
 from ot_datamodels.outputs.homology import Homology
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.homology import homology_schema, orthologs_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -136,7 +137,9 @@ def build_homology(
             speciesName='name',
             homologyType='homology_type',
             targetGeneId='homology_gene_stable_id',
-            isHighConfidence=pl.when(pl.col('is_high_confidence') != 'NULL').then(pl.col('is_high_confidence')),
+            isHighConfidence=pl.col('is_high_confidence').replace_strict(
+                {'1': True, '0': False, 'NULL': None}, return_dtype=pl.Boolean
+            ),
             targetGeneSymbol='targetGeneSymbol',
             queryPercentageIdentity=cast_double('identity'),
             targetPercentageIdentity=cast_double('homology_identity'),
@@ -209,4 +212,4 @@ def homology(
     result = resolve_homology(orthologs, target)
 
     logger.info(f'writing output data to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, Homology), destination)

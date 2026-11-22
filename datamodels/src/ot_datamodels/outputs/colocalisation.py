@@ -16,26 +16,19 @@ Rules confirmed against the 26.12 release (310,901,029 rows in 200 parts):
 * Chromosomes are 1-22 and X: no Y or MT pair was found.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, Note, PrimaryKey, Reference, RowCheck
+from ot_datamodels import ClickHouseType, DatasetModel, Note, PolarsDtype, PrimaryKey, Reference, RowCheck
+from ot_datamodels.vocabularies import Chromosome, ColocalisationMethod, StudyType
 
 #: Rounding slack allowed on a sum of probabilities.
 _TOLERANCE = 1e-9
 
 #: md5 hex digest: the shape of gentropy's credible set identifiers.
 MD5_HEX = r'^[0-9a-f]{32}$'
-
-#: pts's `StudyType`, in its order (a test keeps the two in sync).
-StudyType = Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl']
-
-Chromosome = Literal[
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
-    '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT',
-]  # fmt: skip
 
 
 class Colocalisation(DatasetModel):
@@ -78,17 +71,22 @@ class Colocalisation(DatasetModel):
         pattern=MD5_HEX,
         description='Identifier of the credible set of the right-side overlapping signal',
     )
-    rightStudyType: Annotated[StudyType, Note('the `studyType` of the right-side credible set')] = Field(
-        description='Type of the right-side study (e.g., gwas, eqtl)'
+    rightStudyType: Annotated[
+        StudyType,
+        PolarsDtype(pl.Enum),
+        Note('the `studyType` of the right-side credible set'),
+    ] = Field(description='Type of the right-side study (e.g., gwas, eqtl)')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
+        description='Chromosome where the colocalisation occurs'
     )
-    chromosome: Chromosome = Field(description='Chromosome where the colocalisation occurs')
     colocalisationMethod: Annotated[
-        Literal['COLOC_PIP_ECAVIAR'],
+        ColocalisationMethod,
+        PolarsDtype(pl.Enum),
         Note('both methods are run on every pair, and reported in one row'),
-        ClickHouseType('LowCardinality(String)'),
     ] = Field(description='Method used to estimate colocalisation (e.g., coloc)')
     numberColocalisingVariants: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=1,
+        le=4294967295,
         description='Number of variants shared by the two colocalising credible sets',
     )
     h3: float = Field(

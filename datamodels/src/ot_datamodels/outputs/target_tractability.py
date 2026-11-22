@@ -5,10 +5,12 @@ Generated from the 26.12 release output (528,332 rows) and its croissant metadat
 
 from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID
+from ot_datamodels.vocabularies import TractabilityModality
 
 
 class TargetTractability(DatasetModel):
@@ -30,9 +32,8 @@ class TargetTractability(DatasetModel):
     targetId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id'), PrimaryKey()] = Field(
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the assessed target'
     )
-    modality: Annotated[str, PrimaryKey()] = Field(
-        min_length=1,
-        description=('Drug modality the tractability assessment applies to (e.g. Small molecule, Antibody)'),
+    modality: Annotated[TractabilityModality, PolarsDtype(pl.Enum), PrimaryKey()] = Field(
+        description='Drug modality the tractability assessment applies to (e.g. Small molecule, Antibody)'
     )
     category: Annotated[str, PrimaryKey()] = Field(
         min_length=1,

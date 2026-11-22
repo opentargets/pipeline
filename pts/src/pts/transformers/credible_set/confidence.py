@@ -11,7 +11,7 @@ from enum import IntEnum
 
 import polars as pl
 
-from pts.schemas.credible_set import FinemappingMethod
+from pts.schemas.credible_set import SUSIE_METHODS
 from pts.transformers.credible_set.flags import CredibleSetFlag
 
 
@@ -46,8 +46,8 @@ def assign_confidence(frame: pl.LazyFrame) -> pl.LazyFrame:
         [4, 3, 2, 1, 0]
     """
     quality_control = pl.col('qualityControls')
-    susie = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
-    pics = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
+    susie = pl.col('fineMappingMethod').is_in(SUSIE_METHODS)
+    pics = pl.col('fineMappingMethod') == 'PICS'
     confidence = (
         pl
         .when(susie & ~quality_control.list.contains(CredibleSetFlag.OUT_OF_SAMPLE_LD.value))

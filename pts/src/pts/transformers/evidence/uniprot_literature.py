@@ -44,4 +44,5 @@ def uniprot_literature(
         target=source['target'],
         literature=source['literature'],
         destination=destination,
+        model=EvidenceUniprotLiterature,
     )

@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class EvidenceCrisprScreen(DatasetModel):
@@ -52,8 +53,10 @@ class EvidenceCrisprScreen(DatasetModel):
     targetFromSourceId: str = Field(min_length=1, description='Gene symbol of the target as reported by CRISPRbrain')
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
     studyId: str = Field(min_length=1, description='Name of the CRISPRbrain screen')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
+    datatypeId: Annotated[Literal['affected_pathway'], enum_of(Datatype)] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['crispr_screen'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
     projectId: str = Field(
         pattern=ONTOLOGY_ID,
         description=("Identifier of the project that generated the data ('crispr_brain' for CRISPRbrain)"),

@@ -79,13 +79,18 @@ clickhouse:
   alpha:
     table: alpha_log
     input_dir: output/alpha
+    model: alpha
     preload_script: config/clickhouse/schema/alpha.sql
     postload_script: config/clickhouse/scripts/alpha.sql
   evidence:
     table: evidence_log
     input_dir: output
+    models: 'evidence_*'
     preload_script: config/clickhouse/schema/evidence.sql
-    glob_pattern: 'evidence_*/*.parquet'
+  generated:
+    table: generated_log
+    input_dir: output/alpha
+    model: alpha
   viewed:
     table: viewed_log
     input_dir: view/thing

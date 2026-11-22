@@ -52,4 +52,5 @@ def encore(
         disease=source['disease'],
         target=source['target'],
         destination=destination,
+        model=EvidenceEncore,
     )

@@ -14,6 +14,7 @@ from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira.staged_outputs import MOA, MOA_LITERATURE
 from pts.transformers.drug_mechanism_of_action_candidates import (
@@ -142,7 +143,7 @@ def drug_mechanism_of_action(
     output_path = destinations['output']
 
     logger.info(f'Writing mechanism of action to {output_path}')
-    write_dataset(output_df, str(output_path))
+    write_dataset(conform(output_df, DrugMechanismOfAction), str(output_path))
 
 
 def process_mechanism_of_action(
@@ -227,9 +228,9 @@ def build_inferred_candidates(source: dict[str, Path], settings: dict[str, Any])
     present = [name for name in (SOURCE_AACT, SOURCE_LITERATURE) if source.get(name) is not None]
     if not present:
         return None
-    clinical_report = (
-        scan_dataset(str(source['clinical_report'])).select('id', 'source', 'drugs', 'clinicalStage').collect()
-    )
+    clinical_report = without_enums(
+        scan_dataset(str(source['clinical_report'])).select('id', 'source', 'drugs', 'clinicalStage')
+    ).collect()
     chembl_molecule = (
         scan_dataset(str(source['chembl_molecule'])).select('id', 'parentId', 'childChemblIds', 'drugType').collect()
     )

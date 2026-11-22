@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.schemas.study import StudyType
 from pts.transformers.credible_set.source import qtl_genes
 from pts.transformers.disease.coalescing import MEASUREMENT
 
@@ -149,7 +148,7 @@ def _gwas_traits(study: pl.LazyFrame, disease: pl.LazyFrame) -> pl.LazyFrame:
     is_measurement = _measurement_term(disease).select(pl.col('id').alias('term'), pl.lit(True).alias('is_measurement'))
     term_by_study = (
         study
-        .filter(pl.col('studyType') == StudyType.GWAS.value)
+        .filter(pl.col('studyType') == 'gwas')
         .select('studyId', pl.col('diseaseIds').alias('term'))
         .explode('term')
         .drop_nulls('term')

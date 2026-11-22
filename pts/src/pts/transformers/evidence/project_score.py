@@ -163,4 +163,5 @@ def project_score(
         target=source['target'],
         literature=source['literature'],
         destination=destination,
+        model=EvidenceCrispr,
     )

@@ -11,15 +11,17 @@ target safety event dataset.
 from __future__ import annotations
 
 import io
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
+from ot_datamodels.vocabularies import SafetyStudyType
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
+from pts.schemas.dataset.conform import conform, without_enums
+from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.spark_strings import spark_trim
@@ -66,6 +68,8 @@ AE_STUDY_TYPES = {
     'Bowes et al. (2012)': 'preclinical',
     'Urban et al. (2012)': 'clinical',
 }
+#: ToxCast `assay_format_type` and Brennan `studies.type` are study types already.
+STUDY_TYPES: dict[str, str] = {study_type: study_type for study_type in get_args(SafetyStudyType)}
 
 
 def _null() -> pl.Expr:
@@ -94,6 +98,18 @@ def _biosample(**fields: pl.Expr) -> pl.Expr:
 
 def _study(description: pl.Expr, name: pl.Expr, type_: pl.Expr) -> pl.Expr:
     return pl.struct(description.alias('description'), name.alias('name'), type_.alias('type'))
+
+
+def _study_type(df: pl.DataFrame, value: pl.Expr, types: dict[str, str], source: str) -> pl.Expr:
+    """`value` mapped to its study type by `types`.
+
+    Raises:
+        ValueError: naming the values of `df` that `types` does not map.
+    """
+    values = df.select(value.alias('value')).to_series().drop_nulls().unique().sort()
+    if unmapped := values.filter(~values.is_in(list(types))).to_list():
+        raise ValueError(f'{source}: no safety study type for {unmapped}')
+    return value.replace_strict(types, return_dtype=pl.String)
 
 
 def _sorted_set(column: str) -> pl.Expr:
@@ -197,7 +213,7 @@ def process_adverse_events(adverse_events_df: pl.DataFrame) -> pl.DataFrame:
         _study(
             pl.col('symptom'),
             pl.col('efoId'),
-            pl.col('ref').replace_strict(AE_STUDY_TYPES, default=pl.col('ref'), return_dtype=pl.String),
+            _study_type(adverse_events_df, pl.col('ref'), AE_STUDY_TYPES, 'adverse events ref'),
         ).alias('study'),
     )
     keys = ['id', 'event', 'datasource']
@@ -225,7 +241,11 @@ def process_brennan(brennan_df: pl.DataFrame) -> pl.DataFrame:
         )
         .alias('effects'),
         pl.col('biosamples').cast(biosample).alias('biosample'),
-        _study(*(pl.col('studies').struct.field(f) for f in study.to_schema())).alias('study'),
+        _study(
+            pl.col('studies').struct.field('description'),
+            pl.col('studies').struct.field('name'),
+            _study_type(brennan_df, pl.col('studies').struct.field('type'), STUDY_TYPES, 'Brennan studies.type'),
+        ).alias('study'),
     )
 
 
@@ -265,7 +285,7 @@ def process_toxcast(toxcast_df: pl.DataFrame) -> pl.DataFrame:
         _study(
             pl.col('assay_component_desc'),
             pl.col('assay_component_endpoint_name'),
-            pl.col('assay_format_type'),
+            _study_type(toxcast_df, pl.col('assay_format_type'), STUDY_TYPES, 'ToxCast assay_format_type'),
         ).alias('study'),
     )
 
@@ -392,7 +412,7 @@ def target_safety_event(
     aopwiki = _read_json_array(source['aopwiki'], aopwiki_schema)
     brennan = scan_dataset(source['brennan'], format='ndjson', schema=brennan_schema).collect()
     pharmacogenetics = (
-        scan_dataset(source['pharmacogenetics'])
+        without_enums(scan_dataset(source['pharmacogenetics']))
         .select('pgxCategory', 'targetFromSourceId', 'phenotypeText', 'genotypeId', 'haplotypeId', 'drugs')
         .collect()
     )
@@ -411,4 +431,4 @@ def target_safety_event(
     result = _sort_output(build_target_safety_events(safety, target, diseases))
 
     logger.info(f'writing {result.height} target safety events to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, TargetSafetyEvent), destination)

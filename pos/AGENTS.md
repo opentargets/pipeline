@@ -46,8 +46,29 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
-  `config/clickhouse/` holds the SQL, schemas and server config (`config.d/`,
-  `users.d/`); `config/opensearch/` the index settings.
+  `config/clickhouse/` holds the serving SQL (`scripts/`), the hand-written landing DDL of
+  the datasets with no model (`schema/`) and the server config (`config.d/`, `users.d/`);
+  `config/opensearch/` the index settings.
+
+## ClickHouse landing tables
+
+A ClickHouse dataset with an `ot_datamodels` model gets `model: <dataset_name>` in
+`config/datasets.yaml`, not a `preload_script`: `clickhouse_load` builds its landing table
+from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the default `Log`.
+`evidence` has `models: 'evidence_*'`: each member for the run's product loads into
+`evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
+columns), and the member tables are dropped. A member with no parquet fails the load unless
+it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
+load. Only datasets with no model (`view/` inputs) keep a `schema/` file; a config test
+checks each entry has exactly one of `model`, `models`, `preload_script`.
+
+Print the generated DDL:
+
+```sh
+cd pos && uv run pos-ddl disease
+cd pos && uv run pos-ddl evidence --product ppp
+cd pos && uv run pos-ddl --all
+```
 
 ## Scratch mode
 
@@ -154,21 +175,38 @@ destinations, for test runs that must not touch the public release:
 dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
 in the same PR.
 
+`tests/test_serving_sql.py` runs the `backend_clickhouse` DDL and serving SQL, in `requires:`
+order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
+`localhost:8123`; CI starts one and sets `POS_REQUIRE_CLICKHOUSE=1`; without a server it
+skips). Locally: `docker run -d --rm --name pos-test-clickhouse -p 8123:8123 -e
+CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7`. It also loads polars-written
+Enum parquet (top level, list, struct) into generated `Enum8` landing tables. A serving-script edit a
+generated type forces goes in `docs/phase5_sql_edits.csv`, which `scripts/build_register.py`
+turns into a `serving_sql` register row. A landing-only type change a serving script casts back
+to the landing type goes in `docs/phase5_cast_back.csv` (`path` in the served `table`); the test
+checks the served type there.
+
 ## Schema drift and the change register (phase 5)
 
-`scripts/schema_drift.py` lists every disagreement between the dataset models and the ClickHouse landing DDL
-(`config/clickhouse/`). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
+`scripts/schema_drift.py` lists every disagreement between the dataset models and the hand-written ClickHouse
+landing DDL (entries with a `preload_script`; generated entries are skipped). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
 category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
 column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
-`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes) and the 2612-3 evidence; the
+`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes), `docs/phase5_landing_before.csv` (the
+hand-written landing DDL at the end of piece 1), the generator and the 2612-3 evidence; it reads no landing DDL. The
 builder's docstring says where the evidence is. The register's companion note in the vault
 (`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
 
 `tests/test_schema_register.py` requires a register row for every snapshot row and for every disagreement
-`drift()` finds now. If it fails with "new schema drift", a later model or DDL change opened a disagreement:
+`drift()` finds now, and checks each `after` against the Platform table `pos.clickhouse_ddl` generates (empty
+where that table lacks the column). It also requires a row showing every type change (Enum values included) and
+column order change from `docs/phase5_landing_before.csv` to the generated Platform tables (`type_unrecorded` and
+`column_order` rows). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
 add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
-serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`) and set the follow-up
-to `open` if the ClickHouse type changes and a serving script reads the column. Do not regenerate the file.
+serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
+to `open` if the ClickHouse type changes and a serving script reads the column. Regenerate the file with
+`scripts/build_register.py` from the committed inputs in `docs/` (API changes that are no schema diff go in
+`docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 
 ## Croissant
 

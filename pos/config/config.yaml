@@ -58,6 +58,7 @@ steps:
           dataset: ${each}
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
+          product: ${product}
     # top level, not in the explode: later tasks require them by name
     - name: clickhouse_load clickhouse load biosample
       requires:
@@ -67,6 +68,7 @@ steps:
       dataset: biosample
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load credible_set_variant
       requires:
         - sync_bucket etl output files
@@ -75,6 +77,7 @@ steps:
       dataset: credible_set_variant
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
         - sync_bucket etl output files
@@ -83,6 +86,7 @@ steps:
       dataset: interaction_evidence
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load l2g_predictions
       requires:
         - sync_bucket etl output files
@@ -91,6 +95,7 @@ steps:
       dataset: l2g_predictions
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load pharmacogenomics
       requires:
         - sync_bucket etl output files
@@ -99,6 +104,7 @@ steps:
       dataset: pharmacogenomics
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load target_essentiality
       requires:
         - sync_bucket etl output files
@@ -107,6 +113,7 @@ steps:
       dataset: target_essentiality
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load association_time_series
       products: [ppp]
       requires:
@@ -116,24 +123,28 @@ steps:
       dataset: association_time_series
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse target_prioritisation
       requires:
         - clickhouse_load clickhouse load target_essentiality
       dataset: target_prioritisation
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load interaction
       requires:
         - clickhouse_load clickhouse load interaction_evidence
       dataset: interaction
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load credible_sets
       requires:
         - clickhouse_load clickhouse load credible_set_variant
       dataset: credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load variants
       requires:
         - clickhouse_load clickhouse load pharmacogenomics
@@ -141,18 +152,21 @@ steps:
       dataset: variants
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load studies
       requires:
         - clickhouse_load clickhouse load credible_sets
       dataset: studies
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load drug
       requires:
         - clickhouse_load clickhouse load pharmacogenomics
       dataset: drug
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load targets
       requires:
         - clickhouse_load clickhouse load pharmacogenomics
@@ -161,18 +175,21 @@ steps:
       dataset: targets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load disease
       requires:
         - clickhouse_load clickhouse load studies
       dataset: disease
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load aotf
       requires:
         - clickhouse_load clickhouse load disease
       dataset: aotf
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load variant_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
@@ -185,6 +202,7 @@ steps:
       dataset: variant_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load study_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
@@ -194,6 +212,7 @@ steps:
       dataset: study_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load target_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
@@ -204,6 +223,7 @@ steps:
       dataset: target_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse credible_sets_build_cleanup
       requires:
         - clickhouse_load clickhouse load variant_credible_sets
@@ -212,6 +232,7 @@ steps:
       dataset: credible_sets_build_cleanup
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
+      product: ${product}
 
   backend_opensearch:
     - name: sync_bucket etl output files

@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import MD5_HEX, VARIANT_ID
+from ot_datamodels.vocabularies import Chromosome, FineMappingMethod, StudyType
 
 
 class CredibleSet(DatasetModel):
@@ -47,36 +48,7 @@ class CredibleSet(DatasetModel):
             'bounds, lead variant and fine-mapping method'
         ),
     )
-    chromosome: Annotated[
-        Literal[
-            '1',
-            '2',
-            '3',
-            '4',
-            '5',
-            '6',
-            '7',
-            '8',
-            '9',
-            '10',
-            '11',
-            '12',
-            '13',
-            '14',
-            '15',
-            '16',
-            '17',
-            '18',
-            '19',
-            '20',
-            '21',
-            '22',
-            'X',
-            'Y',
-            'MT',
-        ],
-        PolarsDtype(pl.Enum),
-    ] = Field(description='Chromosome of the credible set')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(description='Chromosome of the credible set')
     locusStart: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0, description='Start of the fine-mapped region of the credible set'
     )
@@ -86,14 +58,14 @@ class CredibleSet(DatasetModel):
     studyId: Annotated[str, Reference('study', 'studyId')] = Field(
         min_length=1, description='Identifier of the study of the credible set'
     )
-    studyType: Annotated[
-        Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'], PolarsDtype(pl.Enum)
-    ] = Field(description='Type of the study of the credible set (e.g., gwas, eqtl, pqtl)')
+    studyType: Annotated[StudyType, PolarsDtype(pl.Enum)] = Field(
+        description='Type of the study of the credible set (e.g., gwas, eqtl, pqtl)'
+    )
     leadVariantId: Annotated[str, Reference('variant', 'variantId')] = Field(
         pattern=VARIANT_ID, description='Lead variant of the credible set'
     )
-    fineMappingMethod: Annotated[Literal['PICS', 'SuSiE', 'SuSiE-inf'], PolarsDtype(pl.Enum)] = Field(
-        description=('Method used for fine-mapping of the credible set (PICS, SuSiE or SuSiE-inf)')
+    fineMappingMethod: Annotated[FineMappingMethod, PolarsDtype(pl.Enum)] = Field(
+        description='Method used for fine-mapping of the credible set (PICS, SuSiE or SuSiE-inf)'
     )
     logBayesFactor: float | None = Field(ge=0.0, description='Log Bayes factor of the entire credible set')
     confidence: Annotated[int, PolarsDtype(pl.Int8), ClickHouseType('UInt8')] = Field(

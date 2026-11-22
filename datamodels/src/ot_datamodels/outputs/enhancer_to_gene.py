@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, MD5_HEX, ONTOLOGY_ID
+from ot_datamodels.vocabularies import Chromosome, IntervalDatasource, IntervalType
 
 
 class ResourceScore(StructModel):
@@ -50,9 +51,13 @@ class EnhancerToGene(DatasetModel):
         'qualityControls': ['Interval has a duplicate with different score'],
     }
 
-    chromosome: str = Field(min_length=1, description='Chromosome the interval is located on')
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Basepair position of the interval start')
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Basepair position of the interval end')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(description='Chromosome the interval is located on')
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Basepair position of the interval start'
+    )
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Basepair position of the interval end'
+    )
     geneId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target the interval is linked with'
     )
@@ -68,12 +73,10 @@ class EnhancerToGene(DatasetModel):
         ge=0, description='Distance of the interval from the transcription start site of the gene'
     )
     resourceScore: list[ResourceScore] = Field(description='List of contributing score components')
-    datasourceId: Annotated[Literal['E2G'], ClickHouseType('LowCardinality(String)')] = Field(
+    datasourceId: Annotated[IntervalDatasource, PolarsDtype(pl.Enum)] = Field(
         description='Identifier of the interval datasource'
     )
-    intervalType: Annotated[Literal['genic', 'intergenic', 'promoter'], ClickHouseType('LowCardinality(String)')] = (
-        Field(description='Type of the interval')
-    )
+    intervalType: Annotated[IntervalType, PolarsDtype(pl.Enum)] = Field(description='Type of the interval')
     pmid: str = Field(
         pattern=DIGITS, description='Pubmed identifier of the publication that reported the interval data'
     )

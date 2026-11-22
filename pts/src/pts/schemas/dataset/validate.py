@@ -4,6 +4,8 @@ Datasets are validated after they are written, not on the way to disk, so steps 
 their output, and datasets written by any step -- Polars or PySpark, this run or an old one -- can
 be checked the same way. The dataset is read once, one parquet part at a time:
 
+* **Strings cast to the model's Enums.** A part storing an Enum value as a string (as Spark writes it) is
+  cast to the Enum first, so it is held to the same closed set; a value outside it is reported.
 * **Every rule but the primary key, per part.** Each part is validated on its own against the
   model's pandera schema without its primary-key check. Every derived rule decides a row on that row
   alone, so validating the parts one by one finds the same violations as validating the whole.
@@ -39,6 +41,7 @@ from ot_datamodels.spec import dataset_spec
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
+from pts.schemas.dataset.conform import targets, unknown_values
 from pts.schemas.dataset.converter import to_pandera
 from pts.transformers.utils.dataset import list_parts
 
@@ -58,6 +61,14 @@ REPORT_SCHEMA = pl.Schema({
 
 #: The `check` of a report row for a repeated primary key.
 DUPLICATE_KEY = 'unique primary key'
+
+#: The `check` of a report row for values a dataset stores as strings outside the model's Enum.
+OUTSIDE_ENUM = 'one of its Enum categories'
+
+#: A part's summary: `REPORT_SCHEMA` without the columns added over the parts.
+_PART_SCHEMA = pl.Schema({
+    name: REPORT_SCHEMA[name] for name in ('column', 'check', 'failures', 'examples', 'first_part')
+})
 
 
 def validate_dataset(model: type[DatasetModel], path: str) -> None:
@@ -102,11 +113,13 @@ def validation_report(path: str, model: type[DatasetModel]) -> pl.DataFrame:
 
     summaries = []
     for part in parts:
-        frame = pl.read_parquet(part)
+        stored = pl.read_parquet(part)
+        frame, summary = _as_enums(stored, model, part)
         try:
             schema.validate(frame, lazy=True)
         except pe.SchemaErrors as errors:
-            summary = _summarise_part(errors.failure_cases, part)
+            summary = pl.concat([summary, _summarise_part(errors.failure_cases, part)])
+        if not summary.is_empty():
             logger.warning(
                 '{} part {} breaks {} rule(s):\n{}',
                 model.dataset_name,
@@ -116,8 +129,8 @@ def validation_report(path: str, model: type[DatasetModel]) -> pl.DataFrame:
             )
             summaries.append(summary)
         if hashes is not None:
-            if set(key) <= set(frame.columns):
-                hashes.add(frame.select(_key_hash(key)).to_series())
+            if set(key) <= set(stored.columns):  # as stored, as `_duplicate_keys` reads the key again
+                hashes.add(stored.select(_key_hash(key)).to_series())
             else:
                 hashes = None  # the missing key column is reported above; the key cannot be checked
 
@@ -164,6 +177,25 @@ class _KeyHashes:
 
 def _key_hash(key: list[str]) -> pl.Expr:
     return pl.struct(key).hash(seed=0)
+
+
+def _as_enums(frame: pl.DataFrame, model: type[DatasetModel], part: str) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """The part with each string the model stores as an Enum cast to it, and the values outside an Enum.
+
+    A Spark-written part stores Enums as strings. A column holding a value outside its Enum is left uncast, and
+    the summary has a row per value path holding such values.
+    """
+    casts, _ = targets(frame.schema, model, nulls=False)  # other differences are left to pandera
+    rows = []
+    for name, dtype in casts.items():
+        try:
+            frame = frame.with_columns(pl.col(name).cast(dtype, strict=True))
+        except pl.exceptions.InvalidOperationError:
+            rows += [
+                {'column': path, 'check': OUTSIDE_ENUM, 'failures': count, 'examples': values, 'first_part': part}
+                for path, values, count in unknown_values(frame[name], dtype, name)
+            ]
+    return frame, pl.DataFrame(rows, schema=_PART_SCHEMA)
 
 
 def _summarise_part(failure_cases: pl.DataFrame, part: str) -> pl.DataFrame:

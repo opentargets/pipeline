@@ -2,11 +2,13 @@
 
 import re
 import sys
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
 import yaml
 from loguru import logger
+from ot_datamodels.discovery import discover_datasets
 
 from pos import core
 from pos.run import PRODUCTS, parse_release_uri
@@ -203,4 +205,36 @@ def test_publish_manifest_and_scratch_cleanup_resolve(load, mocker):
 def test_ftp_and_aws_skip_scratch():
     for step in ('aws_sync', 'ftp_sync'):
         assert all(s.get('scratch') == 'skip' for s in CONFIG['steps'][step]), step
+
+
+def test_every_clickhouse_load_passes_the_product():
+    loads = [s for s in _specs(CONFIG['steps']['backend_clickhouse']) if s['name'].startswith('clickhouse_load ')]
+    assert loads
+    assert all(s.get('product') == '${product}' for s in loads)
+
+
+def test_clickhouse_entries_have_one_ddl_source():
+    for name, entry in DATASETS['clickhouse'].items():
+        sources = [k for k in ('model', 'models', 'preload_script') if k in entry]
+        assert len(sources) == 1, f'{name}: {sources}'
+
+
+def test_clickhouse_models_are_datasets():
+    models = discover_datasets()
+    for name, entry in DATASETS['clickhouse'].items():
+        output = entry.get('input_dir', '').removeprefix('output/')
+        if output in models:
+            assert entry.get('model') == output, f'{name}: output/{output} has a model'
+        if 'model' in entry:
+            assert entry['model'] in models, name
+        if 'models' in entry:
+            assert any(fnmatch(m, entry['models']) for m in models), name
+        for optional in entry.get('optional_models', []):
+            assert optional in models and fnmatch(optional, entry.get('models', '')), f'{name}: {optional}'
+
+
+def test_every_schema_file_is_referenced():
+    scripts = {e['preload_script'] for e in DATASETS['clickhouse'].values() if 'preload_script' in e}
+    files = {str(p.relative_to(ROOT)) for p in (ROOT / 'config' / 'clickhouse' / 'schema').glob('*')}
+    assert files <= scripts
 

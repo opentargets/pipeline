@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from otter.config.yaml import parse_yaml
 
-from pts.schemas.credible_set import FinemappingMethod
+from pts.schemas.credible_set import FINEMAPPING_METHODS
 from pts.tasks.transform import Transform
 from pts.transformers import credible_set
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
@@ -217,7 +217,7 @@ def test_set_qc_of_every_source_allows_every_finemapping_method() -> None:
     tasks = _tasks()
     for source, kind in SOURCES.items():
         settings = SetQcSettings.model_validate(tasks[f'transform qc credible sets {kind}/{source}']['settings'])
-        assert settings.allowed_fm_methods == list(FinemappingMethod), source
+        assert settings.allowed_fm_methods == list(FINEMAPPING_METHODS), source
 
 
 def test_the_variant_index_reads_the_validated_variants() -> None:

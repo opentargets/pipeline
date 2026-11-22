@@ -333,4 +333,5 @@ def ot_crispr(
         disease=source['disease'],
         target=source['target'],
         destination=destination,
+        model=EvidenceOtCrispr,
     )

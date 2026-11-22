@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class Urls(StructModel):
@@ -54,8 +55,10 @@ class EvidenceClingen(DatasetModel):
 
     targetFromSourceId: str = Field(min_length=1, description='Gene symbol of the target as curated by ClinGen')
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: Literal['clingen'] = Field(description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['clingen'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['genetic_literature'], enum_of(Datatype)] = Field(description='Type of the evidence')
     diseaseFromSource: str = Field(min_length=1, description='Disease label as curated by ClinGen')
     diseaseFromSourceId: str = Field(min_length=1, description='MONDO identifier of the disease as curated by ClinGen')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] = Field(

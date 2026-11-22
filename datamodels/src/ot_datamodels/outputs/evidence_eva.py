@@ -5,10 +5,12 @@ Generated from the 26.12 release output (3,670,754 rows) and its croissant metad
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, RS_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class EvidenceEva(DatasetModel):
@@ -62,8 +64,8 @@ class EvidenceEva(DatasetModel):
     alleleOrigins: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description=("Origin(s) of the variant allele as reported in ClinVar (e.g. 'germline')")
     )
-    datasourceId: Literal['eva'] = Field(description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['eva'], enum_of(Datasource)] = Field(description='Identifer of the evidence source')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description='Mode(s) of inheritance reported in the ClinVar submissions'
     )
@@ -121,10 +123,10 @@ class EvidenceEva(DatasetModel):
             'review status'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] | None = Field(
         description='Predicted direction of effect on the trait'
     )
-    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

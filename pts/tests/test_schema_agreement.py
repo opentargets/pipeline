@@ -40,6 +40,7 @@ from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from pandera.config import ValidationDepth, config_context
 from pydantic import Field, ValidationError
 
+from pts.schemas.dataset.conform import enums_as_strings
 from pts.schemas.dataset.converter import to_base_pandera
 
 
@@ -200,9 +201,10 @@ def as_frame(model: type[DatasetModel], mutation: Mutation) -> pl.DataFrame:
 def _series(name: str, value: Any, dtype: pl.DataType) -> pl.Series:
     """`value` in the column's dtype -- or, for a value no Enum category holds, as the string column it would
     arrive in (an Enum cannot store it)."""
-    if isinstance(dtype, pl.Enum) and value is not None and value not in dtype.categories:
-        return pl.Series(name, [value])
-    return pl.Series(name, [value], dtype=dtype, strict=True)
+    try:
+        return pl.Series(name, [value], dtype=dtype, strict=True)
+    except pl.exceptions.InvalidOperationError:
+        return pl.Series(name, [value], dtype=enums_as_strings(dtype), strict=True)
 
 
 def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:

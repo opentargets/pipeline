@@ -4,24 +4,26 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import get_args
 
 import polars as pl
 import pytest
+from ot_datamodels import to_polars_schema
+from ot_datamodels.vocabularies import Datasource, Datatype
 
-from pts.schemas.association import association_schema
-from pts.transformers.association import association
+from pts.transformers.association import MODELS, association
 from pts.transformers.utils.dataset import scan_dataset
 
 OUTPUTS = [f'{kind}_{way}' for kind in ('overall', 'by_datasource', 'by_datatype') for way in ('direct', 'indirect')]
 WEIGHTS = [
-    {'datasourceId': 'ds1', 'weight': 1.0, 'datatypeId': 'dt1', 'toPropagate': True},
-    {'datasourceId': 'ds2', 'weight': 0.5, 'datatypeId': 'dt2', 'toPropagate': False},
+    {'datasourceId': 'eva', 'weight': 1.0, 'datatypeId': 'genetic_association', 'toPropagate': True},
+    {'datasourceId': 'europepmc', 'weight': 0.5, 'datatypeId': 'literature', 'toPropagate': False},
 ]
 EVIDENCE_SCHEMA = {
     'targetId': pl.String,
     'diseaseId': pl.String,
-    'datasourceId': pl.String,
-    'datatypeId': pl.String,
+    'datasourceId': pl.Enum(get_args(Datasource)),
+    'datatypeId': pl.Enum(get_args(Datatype)),
     'score': pl.Float64,
     'evidenceDate': pl.String,
     'clinicalReportId': pl.String,
@@ -30,7 +32,7 @@ ROWS = [
     (f't{i}', d, ds, dt, 0.3 + 0.1 * (i % 5), f'{2015 + i % 6}-01-01', None)
     for i in range(150)
     for d in ('d_leaf', 'd_other')
-    for ds, dt in (('ds1', 'dt1'), ('ds2', 'dt2'))
+    for ds, dt in (('eva', 'genetic_association'), ('europepmc', 'literature'))
 ]
 
 
@@ -73,8 +75,7 @@ def test_end_to_end_writes_six_outputs_with_schemas(tmp_path: Path) -> None:
     association(source, destination, _settings(4), None)
     for name in OUTPUTS:
         df = scan_dataset(destination[name]).collect()
-        dtype = pl.Int32() if name.startswith('by_datasource') else pl.Int64()
-        assert df.schema == association_schema(dtype)
+        assert df.schema == to_polars_schema(MODELS[name])
         assert df.height > 0
     assert scan_dataset(destination['overall_indirect']).filter(pl.col('diseaseId') == 'd_root').collect().height > 0
     assert scan_dataset(destination['overall_direct']).filter(pl.col('diseaseId') == 'd_root').collect().height == 0
@@ -102,7 +103,7 @@ def test_rerun_is_byte_identical(tmp_path: Path) -> None:
 
 
 def test_rerun_of_large_parts_is_byte_identical(tmp_path: Path) -> None:
-    rows = [(f't{i}', 'd_leaf', 'ds1', 'dt1', 0.5, '2020-01-01', None) for i in range(100_000)]
+    rows = [(f't{i}', 'd_leaf', 'eva', 'genetic_association', 0.5, '2020-01-01', None) for i in range(100_000)]
     digests = []
     for run in ('a', 'b'):
         source, destination = _stage(tmp_path / run, rows)
@@ -136,8 +137,7 @@ def test_no_evidence_gives_empty_outputs_with_schemas(tmp_path: Path) -> None:
     association(source, destination, _settings(3), None)
     for name in OUTPUTS:
         df = scan_dataset(destination[name]).collect()
-        dtype = pl.Int32() if name.startswith('by_datasource') else pl.Int64()
-        assert df.schema == association_schema(dtype)
+        assert df.schema == to_polars_schema(MODELS[name])
         assert df.height == 0
 
 
@@ -149,7 +149,7 @@ def test_refuses_existing_destination(tmp_path: Path) -> None:
 
 
 def test_future_dated_evidence_counts_as_current_year(tmp_path: Path) -> None:
-    rows = [('t_future', 'd_other', 'ds1', 'dt1', 0.8, '2040-01-01', None)]
+    rows = [('t_future', 'd_other', 'eva', 'genetic_association', 0.8, '2040-01-01', None)]
     source, destination = _stage(tmp_path, rows=rows)
     association(source, destination, _settings(2), None)
     current_year = datetime.now().year

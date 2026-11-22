@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from otter.config.model import Config
 
-from pts.schemas.credible_set import FinemappingMethod, credible_set_schema
+from pts.schemas.credible_set import credible_set_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.set_qc import SetQcSettings, set_qc
 from pts.transformers.study import QualityFlag as StudyQualityFlag
@@ -81,16 +81,12 @@ def test_invalid_finemapping_method_with_the_default_methods(qc_sets, method: st
 
 
 def test_a_method_left_out_of_the_allowed_methods_is_invalid(qc_sets) -> None:
-    frame = qc_sets(_set(fineMappingMethod='PICS'), allowed_fm_methods=[FinemappingMethod.SUSIE])
+    frame = qc_sets(_set(fineMappingMethod='PICS'), allowed_fm_methods=['SuSiE'])
     assert _carries(frame, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
 
 
 def test_the_allowed_methods_default_to_every_method_and_reject_unknown_ones() -> None:
-    assert SetQcSettings().allowed_fm_methods == [
-        FinemappingMethod.PICS,
-        FinemappingMethod.SUSIE,
-        FinemappingMethod.SUSIE_INF,
-    ]
+    assert SetQcSettings().allowed_fm_methods == ['PICS', 'SuSiE', 'SuSiE-inf']
     with pytest.raises(ValueError, match='allowed_fm_methods'):
         SetQcSettings.model_validate({'allowed_fm_methods': ['SuSie']})
 

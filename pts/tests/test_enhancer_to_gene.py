@@ -6,7 +6,9 @@ from typing import Any
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.enhancer_to_gene import EnhancerToGene
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.transformers.enhancer_to_gene import parse_enhancer_to_gene, read_enhancer_to_gene
 
@@ -397,7 +399,8 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
     assert output_path.is_dir() and excluded_path.is_dir()
     valid = pl.read_parquet(str(output_path / '*.parquet'))
     excluded = pl.read_parquet(str(excluded_path / '*.parquet'))
-    assert valid.schema == excluded.schema == enhancer_to_gene_schema
+    assert excluded.schema == enhancer_to_gene_schema
+    assert valid.schema == conformed_schema(enhancer_to_gene_schema, EnhancerToGene)
     assert valid.height == excluded.height == 1
     assert valid['score'].to_list() == [0.8]
     assert excluded['score'].to_list() == [0.1]
@@ -406,6 +409,7 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
     assert valid['qualityControls'].to_list() == [[]]
     assert excluded['qualityControls'].to_list() == [[QualityFlag.SCORE_OUTSIDE_BOUNDS.value]]
     assert valid['intervalId'].to_list() == [hashlib.md5(b'1|100|200|ENSG1|study|enhancer').hexdigest()]
+    assert valid['intervalType'].cast(pl.String).to_list() == ['enhancer']
     assert excluded['resourceScore'].to_list() == [
         [{'name': 'DNase', 'value': 2.5}, {'name': 'HiC_contacts', 'value': 3.25}]
     ]

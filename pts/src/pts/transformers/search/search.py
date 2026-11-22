@@ -29,6 +29,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.transformers.search.disease import build_disease_index
 from pts.transformers.search.drug import build_drug_index
 from pts.transformers.search.lookups import (
@@ -63,7 +64,7 @@ def _evidence_with_drug_associations(pattern: str) -> pl.LazyFrame:
     Returns:
         LazyFrame with `drugId`, `targetId`, `diseaseId`.
     """
-    evidence = scan_datasets(pattern)
+    evidence = without_enums(scan_datasets(pattern))
     if 'drugId' not in evidence.collect_schema():
         evidence = evidence.with_columns(pl.lit(None, dtype=pl.String).alias('drugId'))
     return evidence.select('drugId', 'targetId', 'diseaseId')
@@ -105,17 +106,17 @@ def search(
     """
     logger.info('loading input data')
     diseases = resolve_ta_labels(scan_dataset(source['disease']).rename({'id': 'diseaseId'}))
-    targets = scan_dataset(source['target']).rename({'id': 'targetId'})
+    targets = without_enums(scan_dataset(source['target'])).rename({'id': 'targetId'})
     drugs = _drugs_with_mechanisms(
-        scan_dataset(source['drug']),
-        scan_dataset(source['mechanism']),
-        scan_dataset(source['indication']),
+        without_enums(scan_dataset(source['drug'])),
+        without_enums(scan_dataset(source['mechanism'])),
+        without_enums(scan_dataset(source['indication'])),
     )
-    indication = scan_dataset(source['indication'])
-    variants = scan_dataset(source['variants']).select(
+    indication = without_enums(scan_dataset(source['indication']))
+    variants = without_enums(scan_dataset(source['variants'])).select(
         'variantId', 'rsIds', 'hgvsId', 'dbXrefs', 'chromosome', 'position', 'transcriptConsequences'
     )
-    studies = scan_dataset(source['studies']).select(
+    studies = without_enums(scan_dataset(source['studies'])).select(
         'studyId', 'traitFromSource', 'pubmedId', 'publicationFirstAuthor', 'diseaseIds', 'nSamples', 'geneId'
     )
     # Most evidence datasets carry no `drugId`; the union null-fills it, and is guaranteed to
@@ -126,10 +127,10 @@ def search(
     d_lut = disease_lut(diseases)
     t_lut = target_lut(targets)
     dr_lut = drug_lut(drugs)
-    phenotypes = phenotype_names(scan_dataset(source['disease_hpo']), scan_dataset(source['hpo']))
+    phenotypes = phenotype_names(without_enums(scan_dataset(source['disease_hpo'])), scan_dataset(source['hpo']))
 
     logger.info('building association scores')
-    scores = association_scores(scan_dataset(source['association']))
+    scores = association_scores(without_enums(scan_dataset(source['association'])))
     from_evidence = drug_associations_from_evidence(evidence).collect().lazy()
     # Counted BEFORE the join with scores, as spark does. See the function's docstring.
     total = from_evidence.select(pl.len()).collect().item()
@@ -161,6 +162,6 @@ def search(
 
     logger.info('building search index for studies')
     write_json_dataset(
-        build_study_index(studies, targets, scan_dataset(source['credible_sets'])),
+        build_study_index(studies, targets, without_enums(scan_dataset(source['credible_sets']))),
         destination['studies'],
     )

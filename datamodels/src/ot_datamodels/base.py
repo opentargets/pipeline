@@ -66,6 +66,7 @@ class DatasetModel(SchemaModel):
         dataset_title: human-readable name of the dataset, e.g. `Biosample core annotation`.
         dataset_description: description of the dataset.
         dataset_tags: categories the dataset belongs to, e.g. `Target-Disease`.
+        products: the products the dataset is loaded for, a subset of `platform` and `ppp`.
         example: one valid row, used by the test suite and shown in the documentation. Every list
             in it should hold at least one element, so every nested field is exercised.
         row_checks: rules across a row's columns that no field constraint states. Inherited, so a
@@ -76,6 +77,7 @@ class DatasetModel(SchemaModel):
     dataset_title: ClassVar[str]
     dataset_description: ClassVar[str]
     dataset_tags: ClassVar[tuple[str, ...]] = ()
+    products: ClassVar[tuple[str, ...]] = ('platform', 'ppp')
     example: ClassVar[dict[str, Any]]
     row_checks: ClassVar[tuple[RowCheck, ...]] = ()
 

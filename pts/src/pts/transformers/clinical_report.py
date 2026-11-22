@@ -9,6 +9,7 @@ from ot_datamodels.outputs.clinical_report import ClinicalReport as ClinicalRepo
 from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     ClinicalProvider,
@@ -276,7 +277,7 @@ def clinical_report(
     )
 
     logger.info(f'destination paths: {destination}')
-    write_dataset(order_output_columns(output.df), destination['output'])
+    write_dataset(conform(order_output_columns(output.df), ClinicalReportOutput), destination['output'])
 
 
 def staged_mining_reports(source: dict[str, str], staged: pl.DataFrame) -> dict[str, ClinicalReport]:

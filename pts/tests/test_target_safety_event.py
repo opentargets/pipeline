@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import polars as pl
+import pytest
+from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.target_safety_event import biosample, effect, study
 from pts.transformers.target_safety_event import (
     build_target_safety_events,
@@ -177,8 +181,8 @@ def test_process_adverse_events_groups_effects_and_reads_text_as_spark() -> None
         (*base[:2], 'activation_general', *base[3:5], '0042', *base[6:]),
         (*base[:2], 'inhibition_acute', *base[3:5], '7', *base[6:]),
         (*base[:2], 'activation', *base[3:]),
-        (None, 's', 'activation_acute', 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
-        ('f', 's', None, 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
+        (None, 's', 'activation_acute', 'EFO_1', 'ENSG1', None, 'Lynch et al. (2017)', 'T', 'U', None),
+        ('f', 's', None, 'EFO_1', 'ENSG1', None, 'Lynch et al. (2017)', 'T', 'U', None),
     )
     out = process_adverse_events(df).sort('literature', 'event', nulls_last=True)
     rows = out.select('event', 'literature', 'effects', pl.col('study').struct.field('type')).rows()
@@ -191,9 +195,28 @@ def test_process_adverse_events_groups_effects_and_reads_text_as_spark() -> None
         ('e', '42', grouped, 'clinical'),
         ('e', '7', grouped, 'clinical'),
         ('e', None, grouped, 'clinical'),
-        ('f', None, [{'direction': None, 'dosing': None}], 'Unknown (2000)'),
-        (None, None, None, 'Unknown (2000)'),
+        ('f', None, [{'direction': None, 'dosing': None}], 'preclinical'),
+        (None, None, None, 'preclinical'),
     ]
+
+
+def test_an_adverse_event_reference_without_a_study_type_fails_naming_it() -> None:
+    row = ('e', 's', None, 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None)
+    with pytest.raises(ValueError, match=re.escape("adverse events ref: no safety study type for ['Unknown (2000)']")):
+        process_adverse_events(_ae(row))
+
+
+def test_a_toxcast_assay_format_outside_the_study_types_fails_naming_it() -> None:
+    df = _strings(TC_COLUMNS, [('A', 'd', 'e', None, None, None, 'tissue-based', 'ESR1', None)])
+    expected = "ToxCast assay_format_type: no safety study type for ['tissue-based']"
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        process_toxcast(df)
+
+
+def test_a_brennan_study_type_outside_the_study_types_fails_naming_it() -> None:
+    df = _brennan('EFO_1').with_columns(pl.col('studies').struct.with_fields(type=pl.lit('in vivo')))
+    with pytest.raises(ValueError, match=re.escape("Brennan studies.type: no safety study type for ['in vivo']")):
+        process_brennan(df)
 
 
 def test_process_toxcast_maps_columns() -> None:
@@ -617,7 +640,7 @@ AE_ROWS = [
      'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
     (' nausea ', '', 'activation', 'EFO_X', 'ENSG1', '0042', 'Urban et al. (2012)', 'G1', 'UBERON_3', ''),
     ('', 'liver', 'inhibition_chronic', 'EFO_X', 'ENSG5', '456', 'Lynch et al. (2017)', 'G5', 'UBERON_4', ''),
-    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Other ref', 'G1', 'UBERON_5',
+    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Urban et al. (2012)', 'G1', 'UBERON_5',
      'https://x'),
     ('orphan', 'liver', 'activation_acute', 'EFO_X', '', '8', 'Bowes et al. (2012)', 'G', 'UBERON_6', ''),
     ('vomiting', 'gi', 'inhibition_developmental toxicity', 'EFO_X', 'ENSG4', '9', 'Lynch et al. (2017)', 'G4',
@@ -713,8 +736,8 @@ EXPECTED = [
     ('ENSG5', None, 'EFO_X', None, [('liver', 'UBERON_4', None, None, None)], 'Lynch et al. (2017)', '456', None,
      [(None, 'EFO_X', 'preclinical')]),
     ('ENSG1', 'crisis (known as \\cheese reaction\\)', 'EFO_B', [(None, None)],
-     [('cns', 'UBERON_5', None, None, None)], 'Other ref', '7', 'https://x',
-     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'Other ref')]),
+     [('cns', 'UBERON_5', None, None, None)], 'Urban et al. (2012)', '7', 'https://x',
+     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'clinical')]),
     ('ENSG4', 'vomiting', 'EFO_X', [('Inhibition/Decrease/Downregulation', 'developmental toxicity')],
      [('gi', 'UBERON_7', None, None, None)], 'Lynch et al. (2017)', '9', None,
      [('vomiting', 'EFO_X', 'preclinical')]),
@@ -808,7 +831,7 @@ def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
     assert [p.read_bytes() for p in first] == [p.read_bytes() for p in second]
 
     out = pl.read_parquet(first)
-    assert out.schema == pl.Schema({
+    built = pl.Schema({
         'targetId': pl.String,
         'event': pl.String,
         'eventId': pl.String,
@@ -819,6 +842,7 @@ def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
         'url': pl.String,
         'studies': pl.List(study),
     })
+    assert out.schema == conformed_schema(built, TargetSafetyEvent)
     got = sorted((_canonical(list(r)) for r in out.rows()), key=repr)
     assert got == sorted((_canonical(list(r)) for r in EXPECTED), key=repr)
 

@@ -122,4 +122,11 @@ def clingen(
         disease_label_lut_path=source['ontoma_disease_label_lut'],
         disease_id_lut_path=source['ontoma_disease_id_lut'],
     ).collect()
-    run_evidence(raw.lazy(), CLINGEN, disease=source['disease'], target=source['target'], destination=destination)
+    run_evidence(
+        raw.lazy(),
+        CLINGEN,
+        disease=source['disease'],
+        target=source['target'],
+        destination=destination,
+        model=EvidenceClingen,
+    )
