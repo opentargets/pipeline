@@ -18,6 +18,7 @@ It depends on `pydantic` and `polars` only. It imports neither pts nor pandera, 
 | `polars` | `to_polars_schema` |
 | `docs` | documentation JSON |
 | `discovery` | `discover_datasets()`: every concrete model under `ot_datamodels.outputs` |
+| `derive` | `from_output` and `row_of`: view columns copied from output columns |
 | `vocabularies` | the closed vocabularies stored as Enums, one `Literal` per vocabulary, with its source |
 | `outputs/` | one module per dataset (or family); `patterns.py` holds shared regexes |
 
@@ -70,6 +71,28 @@ No generator exists; write the model by hand.
    `StructModel` subclasses. Reuse `outputs/patterns.py` and `outputs/common.py`.
 3. `discover_datasets()` finds it; nothing is registered.
 4. Run the tests here, then pts's and pos's.
+
+## Deriving a view's columns
+
+A view column that copies an output column is derived from the output model, never
+retyped. A whole output is copied by subclassing it (`class TargetView(Target)`); a
+column by `from_output`, a nested row of chosen columns by `row_of`. Both return a type:
+bind it to a module-level name and annotate with it (`ty` rejects a call inside an
+annotation):
+
+```python
+Score = from_output(Evidence, 'score')
+HomologueRow = row_of(Homology, ['targetId', 'type'], name='HomologueRow')
+
+class AssociationView(DatasetModel):
+    rowScore: Score
+    homologues: list[HomologueRow]
+```
+
+The copy keeps the type, markers, constraints and description; the column may be
+renamed. Nullability is the one override (`nullable=True`, `row_of(..., nullable={...})`).
+`PrimaryKey` is dropped unless `from_output(..., primary_key=True)`; `row_of` always drops
+it. Computed columns are declared in the view model.
 
 ## Validation
 
