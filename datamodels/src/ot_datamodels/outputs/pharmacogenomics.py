@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, Reference, StructModel
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, RS_ID, VARIANT_ID
 
 
@@ -32,10 +32,15 @@ class VariantAnnotation(StructModel):
 class Drugs(StructModel):
     """`drugs[]`."""
 
-    drugFromSource: str = Field(min_length=1, description='List of drug identifiers from the original data source')
-    drugId: Annotated[str, Bioregistry('chembl'), Reference('drug_molecule', 'id')] | None = Field(
-        pattern=CHEMBL_ID, description='List of Open Targets drug identifiers'
+    drugFromSource: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+        min_length=1, description='List of drug identifiers from the original data source'
     )
+    drugId: (
+        Annotated[
+            str, Bioregistry('chembl'), Reference('drug_molecule', 'id'), ClickHouseType('LowCardinality(String)')
+        ]
+        | None
+    ) = Field(pattern=CHEMBL_ID, description='List of Open Targets drug identifiers')
 
 
 class Pharmacogenomics(DatasetModel):
@@ -94,16 +99,18 @@ class Pharmacogenomics(DatasetModel):
         'drugs': [{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}],
     }
 
-    datasourceId: Literal['clinpgx'] = Field(description='Identifier for the data provider')
+    datasourceId: Annotated[Literal['clinpgx'], ClickHouseType('LowCardinality(String)')] = Field(
+        description='Identifier for the data provider'
+    )
     datasourceVersion: str = Field(pattern=ISO_DATE, description='Data provider version number')
-    datatypeId: str = Field(
+    datatypeId: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID,
         description=('Classification of the type of pharmacogenomic data (e.g. clinical_annotation)'),
     )
     directionality: str | None = Field(
         min_length=1, description=('Indicates wether the genetic variant increases or decreases drug response')
     )
-    evidenceLevel: str = Field(
+    evidenceLevel: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description='Strength of the scientific support for the variant/drug response'
     )
     genotype: str = Field(min_length=1, description='Genetic variant configuration')
@@ -119,7 +126,9 @@ class Pharmacogenomics(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] = Field(
         description='List of PubMed or preprint reference identifiers'
     )
-    pgxCategory: str = Field(min_length=1, description='Classification of the drug response type (e.g. Toxicity)')
+    pgxCategory: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+        min_length=1, description='Classification of the drug response type (e.g. Toxicity)'
+    )
     phenotypeFromSourceId: Annotated[str, Reference('disease', 'id')] | None = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier result of mapping phenotypeText'
     )

@@ -19,7 +19,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_TRANSCRIPT_ID, ONTOLOGY_ID, RS_ID
 
 #: `{chromosome}_{position}_{ref}_{alt}`, or `OTVAR_{chromosome}_{position}_{md5}` for a long variant.
@@ -47,7 +47,9 @@ class VariantEffect(StructModel):
         Field(description='Method name used to predict the effect of the variant')
     )
     assessment: str | None = Field(min_length=1, description='Textual assessment of the variant effect')
-    score: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(description='Score of the variant effect')
+    score: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
+        description='Score of the variant effect'
+    )
     assessmentFlag: str | None = Field(
         pattern=LOFTEE_FLAGS, description='Flagging if the variant effect is considered pathogenic'
     )
@@ -76,8 +78,12 @@ class TranscriptConsequences(StructModel):
     )
     isEnsemblCanonical: bool = Field(description='Flagging if the transcript is the canonical transcript for the gene')
     codons: str | None = Field(min_length=1, description='Affected codon in the transcript')
-    distanceFromFootprint: int = Field(ge=0, description='Distance of the variant from the transcript')
-    distanceFromTss: int = Field(description='Distance of the variant from the transcription start site')
+    distanceFromFootprint: Annotated[int, ClickHouseType('Int32')] = Field(
+        ge=0, description='Distance of the variant from the transcript'
+    )
+    distanceFromTss: Annotated[int, ClickHouseType('Int32')] = Field(
+        description='Distance of the variant from the transcription start site'
+    )
     appris: str | None = Field(min_length=1, description='Appris annotation of the transcript')
     maneSelect: str | None = Field(min_length=1, description='MANE annotation of the transcript')
     targetId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
@@ -87,10 +93,10 @@ class TranscriptConsequences(StructModel):
         description='Ensembl VEP predicted impact of the variant on the transcript'
     )
     lofteePrediction: Literal['HC', 'LC'] | None = Field(description='Loss-of-function prediction based on LOFTEE')
-    consequenceScore: Annotated[float, PolarsDtype(pl.Float32)] = Field(
+    consequenceScore: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
         ge=0.0, le=1.0, description='Score assigned to transcript based on Ensembl VEP consequence'
     )
-    transcriptIndex: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    transcriptIndex: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0, description='Index of the transcript in the list of transcripts around the gene'
     )
     approvedSymbol: str | None = Field(min_length=1, description='HGNC gene symbol')
@@ -185,7 +191,9 @@ class Variant(DatasetModel):
         ),
     )
     chromosome: Chromosome = Field(description='Chromosome on which the variant is located')
-    position: Annotated[int, PolarsDtype(pl.Int32)] = Field(ge=0, description="Variant's position on the chromosome")
+    position: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
+        ge=0, description="Variant's position on the chromosome"
+    )
     referenceAllele: str = Field(pattern=ALLELE, description='Reference allele for the variant')
     alternateAllele: str = Field(pattern=ALLELE, description='Alternate allele for the variant')
     variantEffect: list[VariantEffect] = Field(

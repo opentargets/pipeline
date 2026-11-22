@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import MD5_HEX, VARIANT_ID
 
 
@@ -63,7 +63,7 @@ class CredibleSetVariant(DatasetModel):
             'Frequency of the effect allele, from the study or otherwise from gnomAD for the study populations'
         ),
     )
-    sampleSize: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    sampleSize: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
         ge=0, description='Sample size of the association of the variant'
     )
     reportedBeta: float | None = Field(description='Effect size of the variant as reported by the study')
@@ -97,26 +97,29 @@ class CredibleSetVariant(DatasetModel):
         description=('Direction of the rescaled effect relative to the effect allele: 1 or -1')
     )
     qualityControls: list[
-        Literal[
-            'Allele frequency reported by the study',
-            'Allele frequency taken from gnomAD',
-            'Allele frequency is missing from the study and from gnomAD',
-            'Allele frequency reported by the study is not in [0, 1]',
-            'Rescaled effect derived from the conditional effect',
-            'Rescaled effect derived from the marginal effect',
-            'Variant in LD with the lead has no statistics in the locus',
-            'Variant identifier is not a valid chromosome_position_ref_alt',
-            'Variant appears more than once in its credible set',
-            'Credible set of the variant is excluded',
-            'Credible set identifier is not a 32-character hexadecimal md5',
-            'Variant is outside the 95% coverage of the credible set',
-            'Credible set PIPs do not sum to the expected coverage, or a PIP is not in (0, 1]',
-            'Reported and conditional effects have opposite signs',
-            'Only one of the reported beta and standard error is present',
-            'Only one of the conditional beta and standard error is present',
-            'P-value mantissa or exponent is missing',
-            'Credible set of the variant is not among the credible sets of its source',
-            'Chromosome of the variant differs from the credible set chromosome',
+        Annotated[
+            Literal[
+                'Allele frequency reported by the study',
+                'Allele frequency taken from gnomAD',
+                'Allele frequency is missing from the study and from gnomAD',
+                'Allele frequency reported by the study is not in [0, 1]',
+                'Rescaled effect derived from the conditional effect',
+                'Rescaled effect derived from the marginal effect',
+                'Variant in LD with the lead has no statistics in the locus',
+                'Variant identifier is not a valid chromosome_position_ref_alt',
+                'Variant appears more than once in its credible set',
+                'Credible set of the variant is excluded',
+                'Credible set identifier is not a 32-character hexadecimal md5',
+                'Variant is outside the 95% coverage of the credible set',
+                'Credible set PIPs do not sum to the expected coverage, or a PIP is not in (0, 1]',
+                'Reported and conditional effects have opposite signs',
+                'Only one of the reported beta and standard error is present',
+                'Only one of the conditional beta and standard error is present',
+                'P-value mantissa or exponent is missing',
+                'Credible set of the variant is not among the credible sets of its source',
+                'Chromosome of the variant differs from the credible set chromosome',
+            ],
+            ClickHouseType('LowCardinality(String)'),
         ]
     ] = Field(
         description=(

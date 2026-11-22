@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 
 
@@ -17,11 +17,13 @@ class MutatedSamples(StructModel):
     functionalConsequenceId: Annotated[str, Reference('so', 'id')] | None = Field(
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
-    numberMutatedSamples: int = Field(
+    numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=0, description='Number of samples of the IntOGen cohort in which the target is mutated'
     )
-    numberSamplesTested: int = Field(ge=0, description='Number of samples of the IntOGen cohort tested')
-    numberSamplesWithMutationType: int | None = Field(
+    numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, description='Number of samples of the IntOGen cohort tested'
+    )
+    numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] | None = Field(
         description=('Number of samples of the IntOGen cohort with a mutation of the given type in the target')
     )
 

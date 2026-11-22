@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_PROTEIN_ID, ENSEMBL_TRANSCRIPT_ID
 
 
@@ -35,9 +35,9 @@ class Exons(StructModel):
         min_length=1, description='Ensembl identifier of the exon (ENSE###)'
     )
     chromosome: str = Field(min_length=1, description='Chromosome on which the exon is located')
-    start: int = Field(ge=0, description='Genomic start position of the exon')
-    end: int = Field(ge=0, description='Genomic end position of the exon')
-    strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic start position of the exon')
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic end position of the exon')
+    strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
         description=('Strand orientation of the exon: 1 for the forward strand, -1 for the reverse strand')
     )
 
@@ -79,7 +79,9 @@ class Transcript(DatasetModel):
     transcriptId: Annotated[str, Bioregistry('ensembl'), PrimaryKey()] = Field(
         pattern=ENSEMBL_TRANSCRIPT_ID, description='Ensembl identifier of the transcript (ENST###)'
     )
-    biotype: str = Field(min_length=1, description='Biotype classification of the transcript')
+    biotype: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+        min_length=1, description='Biotype classification of the transcript'
+    )
     proteinId: Annotated[str, Bioregistry('ensembl')] | None = Field(
         pattern=ENSEMBL_PROTEIN_ID,
         description=('Ensembl protein identifier for the transcript (ENSP###); null for non-coding transcripts'),
@@ -101,12 +103,14 @@ class Transcript(DatasetModel):
         description=('Flag indicating if the transcript is the Ensembl canonical transcript for the gene')
     )
     chromosome: str = Field(min_length=1, description='Chromosome on which the transcript is located')
-    start: int = Field(ge=0, description='Genomic start position of the transcript')
-    end: int = Field(ge=0, description='Genomic end position of the transcript')
-    strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, description='Genomic start position of the transcript'
+    )
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic end position of the transcript')
+    strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
         description=('Strand orientation of the transcript: 1 for the forward strand, -1 for the reverse strand')
     )
-    transcriptionStartSite: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    transcriptionStartSite: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0,
         description=(
             "Transcription Start Site (TSS) genomic position, derived from the transcript's strand and coordinates"

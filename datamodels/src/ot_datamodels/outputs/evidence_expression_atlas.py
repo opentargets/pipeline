@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 
 
@@ -71,7 +71,7 @@ class EvidenceExpressionAtlas(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description=('PubMed identifiers of the publications describing the Expression Atlas experiment')
     )
-    log2FoldChangePercentileRank: int = Field(
+    log2FoldChangePercentileRank: Annotated[int, ClickHouseType('Int32')] = Field(
         ge=0,
         description=(
             'Percentile rank of the absolute log 2 fold change of the target among '

@@ -143,3 +143,17 @@ class PolarsDtype:
     """
 
     dtype: pl.DataType | type[pl.DataType]
+
+
+@dataclass(frozen=True)
+class ClickHouseType:
+    """The ClickHouse type a primitive is stored as, where it differs from what the model implies.
+
+    The type of the non-null value: a nullable column wraps it in `Nullable` itself. Read by the
+    ClickHouse DDL generation only; pts ignores it.
+
+    Attributes:
+        type: the ClickHouse type, e.g. `UInt32` or `LowCardinality(String)`.
+    """
+
+    type: str

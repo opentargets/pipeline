@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID
 
 
@@ -43,22 +43,22 @@ class TargetPrioritisation(DatasetModel):
     targetId: Annotated[str, Reference('target', 'id'), PrimaryKey()] = Field(
         pattern=ENSEMBL_GENE_ID, description='Unique identifier for the target, typically an Ensembl gene ID'
     )
-    isInMembrane: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    isInMembrane: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description=('Indicates if the target protein is located in the cell or plasma membrane')
     )
-    isSecreted: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    isSecreted: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description=('Indicates if the target protein is secreted or predicted to be secreted')
     )
-    hasSafetyEvent: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    hasSafetyEvent: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('Int8')] | None = Field(
         description='Indicates if there are known safety events associated with the target'
     )
-    hasPocket: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    hasPocket: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description=('Indicates if the target has predicted binding pockets suitable for small molecule binding')
     )
-    hasLigand: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    hasLigand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description='Indicates if the target binds at least one high-quality ligand'
     )
-    hasSmallMoleculeBinder: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    hasSmallMoleculeBinder: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description='Indicates if the target has at least one small molecule binder'
     )
     geneticConstraint: float | None = Field(
@@ -72,13 +72,13 @@ class TargetPrioritisation(DatasetModel):
     mouseOrthologMaxIdentityPercentage: float | None = Field(
         ge=0.0, le=1.0, description='Maximum percentage identity between the target and its mouse ortholog'
     )
-    isCancerDriverGene: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    isCancerDriverGene: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('Int8')] | None = Field(
         description='Indicates if the target is identified as a cancer driver gene'
     )
     mouseKOScore: float | None = Field(
         description=('Represents the phenotypic score from mouse knockout models for the target')
     )
-    hasHighQualityChemicalProbes: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    hasHighQualityChemicalProbes: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
         ge=0, description=('Indicates if there are high-quality chemical probes available for the target')
     )
     maxClinicalStage: float | None = Field(

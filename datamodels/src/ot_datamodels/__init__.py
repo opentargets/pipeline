@@ -9,6 +9,7 @@
 
 from ot_datamodels.base import (
     Bioregistry,
+    ClickHouseType,
     DatasetModel,
     Note,
     PolarsDtype,
@@ -22,6 +23,7 @@ from ot_datamodels.spec import SchemaDefinitionError
 
 __all__ = [
     'Bioregistry',
+    'ClickHouseType',
     'DatasetModel',
     'Note',
     'PolarsDtype',

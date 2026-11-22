@@ -8,16 +8,22 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, MD5_HEX
 
 
 class Features(StructModel):
     """`features[]`."""
 
-    name: str = Field(min_length=1, description='Name of the feature used in Locus-to-Gene (L2G) prediction')
-    value: Annotated[float, PolarsDtype(pl.Float32)] = Field(ge=0.0, description='Value of the feature')
-    shapValue: Annotated[float, PolarsDtype(pl.Float32)] = Field(description='SHAP value of the feature')
+    name: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+        min_length=1, description='Name of the feature used in Locus-to-Gene (L2G) prediction'
+    )
+    value: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
+        ge=0.0, description='Value of the feature'
+    )
+    shapValue: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
+        description='SHAP value of the feature'
+    )
 
 
 class L2gPrediction(DatasetModel):
@@ -50,4 +56,6 @@ class L2gPrediction(DatasetModel):
         ge=0.0, le=1.0, description=('Locus-to-Gene (L2G) score prediction for the given credibleSetId-geneId pair')
     )
     features: list[Features] = Field(description='List of Locus-to-Gene (L2G) feature values')
-    shapBaseValue: Annotated[float, PolarsDtype(pl.Float32)] = Field(ge=0.0, le=1.0, description='SHAP base value')
+    shapBaseValue: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
+        ge=0.0, le=1.0, description='SHAP base value'
+    )

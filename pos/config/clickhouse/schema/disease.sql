@@ -4,8 +4,6 @@ CREATE TABLE if not exists disease_log (
     `therapeuticAreas` Array (LowCardinality (String)),
     `description` Nullable (String),
     `dbXRefs` Array (String),
-    `directLocationIds` Array (String),
-    `indirectLocationIds` Array (String),
     `obsoleteTerms` Array (String),
     `synonyms` Tuple (
         `hasExactSynonym` Array (Nullable (String)),

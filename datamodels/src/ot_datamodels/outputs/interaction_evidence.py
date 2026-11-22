@@ -7,18 +7,18 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, Reference, StructModel
 
 
 class InteractionResources(StructModel):
     """`interactionResources`."""
 
-    databaseVersion: str = Field(
+    databaseVersion: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description='Version of the source database providing interaction evidence'
     )
-    sourceDatabase: Literal['intact', 'reactome', 'signor', 'string'] = Field(
-        description='Name of the source database reporting the interaction evidence'
-    )
+    sourceDatabase: Annotated[
+        Literal['intact', 'reactome', 'signor', 'string'], ClickHouseType('LowCardinality(String)')
+    ] = Field(description='Name of the source database reporting the interaction evidence')
 
 
 class HostOrganismTissue(StructModel):
@@ -101,8 +101,8 @@ class InteractionEvidence(DatasetModel):
     pubmedId: str | None = Field(
         min_length=1, description='PubMed ID of the publication supporting the interaction evidence'
     )
-    interactionId: Annotated[int, Reference('interaction', 'interactionId')] = Field(
-        description='Identifier of the molecular interaction this evidence supports'
+    interactionId: Annotated[int, Reference('interaction', 'interactionId'), ClickHouseType('UInt64')] = Field(
+        ge=0, description='Identifier of the molecular interaction this evidence supports'
     )
     expansionMethodMiIdentifier: Annotated[str, Bioregistry('mi')] | None = Field(
         pattern=r'^MI:\d{4}$', description='Molecular Interactions (MI) identifier for the expansion method used'

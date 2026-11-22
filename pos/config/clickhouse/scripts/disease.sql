@@ -39,8 +39,6 @@ CREATE TABLE IF NOT EXISTS disease_mergetree ENGINE = MergeTree ORDER BY tuple()
     therapeuticAreas,
     description,
     dbXRefs,
-    directLocationIds,
-    indirectLocationIds,
     obsoleteTerms,
     CAST(
       tupleToNameValuePairs(synonyms),

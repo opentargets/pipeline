@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ONTOLOGY_ID
 
 
@@ -31,27 +31,30 @@ class ClinicalIndication(DatasetModel):
     }
 
     id: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the clinical indication')
-    maxClinicalStage: Literal[
-        'WITHDRAWAL',
-        'APPROVAL',
-        'PHASE_4',
-        'PREAPPROVAL',
-        'PHASE_3',
-        'PHASE_2_3',
-        'PHASE_2',
-        'PHASE_1_2',
-        'PHASE_1',
-        'EARLY_PHASE_1',
-        'IND',
-        'PRECLINICAL',
-        'UNKNOWN',
+    maxClinicalStage: Annotated[
+        Literal[
+            'WITHDRAWAL',
+            'APPROVAL',
+            'PHASE_4',
+            'PREAPPROVAL',
+            'PHASE_3',
+            'PHASE_2_3',
+            'PHASE_2',
+            'PHASE_1_2',
+            'PHASE_1',
+            'EARLY_PHASE_1',
+            'IND',
+            'PRECLINICAL',
+            'UNKNOWN',
+        ],
+        ClickHouseType('LowCardinality(String)'),
     ] = Field(description='Maximum clinical stage reached for this drug-disease indication')
     clinicalReportIds: list[Annotated[Annotated[str, Reference('clinical_report', 'id')], Field(min_length=1)]] = Field(
         description='List of clinical report identifiers associated with this indication'
     )
-    drugId: Annotated[str, Reference('drug_molecule', 'id')] = Field(
+    drugId: Annotated[str, Reference('drug_molecule', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=CHEMBL_ID, description='Open Targets molecule identifier'
     )
-    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )

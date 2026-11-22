@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ONTOLOGY_ID
 
@@ -107,20 +107,23 @@ class ClinicalReport(DatasetModel):
     }
 
     id: Annotated[str, PrimaryKey()] = Field(min_length=1, description='Unique identifier for the clinical report')
-    clinicalStage: Literal[
-        'WITHDRAWAL',
-        'APPROVAL',
-        'PHASE_4',
-        'PREAPPROVAL',
-        'PHASE_3',
-        'PHASE_2_3',
-        'PHASE_2',
-        'PHASE_1_2',
-        'PHASE_1',
-        'EARLY_PHASE_1',
-        'IND',
-        'PRECLINICAL',
-        'UNKNOWN',
+    clinicalStage: Annotated[
+        Literal[
+            'WITHDRAWAL',
+            'APPROVAL',
+            'PHASE_4',
+            'PREAPPROVAL',
+            'PHASE_3',
+            'PHASE_2_3',
+            'PHASE_2',
+            'PHASE_1_2',
+            'PHASE_1',
+            'EARLY_PHASE_1',
+            'IND',
+            'PRECLINICAL',
+            'UNKNOWN',
+        ],
+        ClickHouseType('LowCardinality(String)'),
     ] = Field(description='Clinical stage of the report')
     origin: str = Field(
         pattern=ONTOLOGY_ID,
@@ -134,7 +137,7 @@ class ClinicalReport(DatasetModel):
             'Kind of evidence the report describes: INDICATION for a drug/disease claim, SAFETY for a drug warning'
         )
     )
-    source: str = Field(
+    source: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description=('Source database or registry from which the clinical report was obtained')
     )
     provider: Literal['AACT', 'ChEMBL', 'EMA', 'FDA', 'PMDA', 'TTD'] = Field(

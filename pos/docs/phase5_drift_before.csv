@@ -1,0 +1,627 @@
+category,dataset,model,field,model_type,model_clickhouse,ddl_type,model_nullable,ddl_nullable,serving_read
+no_model,aotf,"","","","","","","",no
+low_cardinality,baseline_expression,baseline_expression,targetId,String,"",LowCardinality(String),false,false,named:baseline_expression.sql
+literal_vs_string,baseline_expression,baseline_expression,datasourceId,String,"",String,false,false,pass:baseline_expression.sql
+literal_vs_string,baseline_expression,baseline_expression,datatypeId,String,"",String,false,false,pass:baseline_expression.sql
+literal_vs_string,baseline_expression,baseline_expression,unit,String,"",String,false,false,pass:baseline_expression.sql
+column_order,baseline_expression,baseline_expression,"","celltypeBiosampleId, tissueBiosampleId, targetId, datasourceId, datatypeId, unit, celltypeBiosampleFromSource, min, q1, median, q3, max, distribution_score, specificity_score, tissueBiosampleFromSource, targetFromSourceId, tissueBiosampleParentId, celltypeBiosampleParentId, qualityControls","","targetId, targetFromSourceId, tissueBiosampleId, tissueBiosampleParentId, tissueBiosampleFromSource, celltypeBiosampleId, celltypeBiosampleParentId, celltypeBiosampleFromSource, min, q1, median, q3, max, distribution_score, specificity_score, datasourceId, datatypeId, unit, qualityControls","","",pass:baseline_expression.sql
+column_order,biosample,biosample,"","biosampleId, biosampleName, description, xrefs, synonyms, parents, ancestors, descendants, children","","biosampleId, biosampleName, description, xrefs, synonyms, parents, ancestors, children, descendants","","",pass:biosample.sql
+low_cardinality,colocalisation,colocalisation,colocalisationMethod,String,"",LowCardinality(String),false,false,named:colocalisation.sql
+literal_vs_string,colocalisation,colocalisation,colocalisationMethod,String,"",LowCardinality(String),false,false,named:colocalisation.sql
+type,colocalisation,colocalisation,numberColocalisingVariants,Int64,"",UInt32,false,false,named:colocalisation.sql
+type,credible_set_variant,credible_set_variant,sampleSize,Nullable(Int32),"",Nullable(UInt32),true,true,named:credible_sets.sql
+low_cardinality,credible_set_variant,credible_set_variant,qualityControls[],String,"",LowCardinality(String),false,false,named:credible_sets.sql
+literal_vs_string,credible_set_variant,credible_set_variant,qualityControls[],String,"",LowCardinality(String),false,false,named:credible_sets.sql
+type,credible_sets,credible_set,locusStart,Int32,"",UInt32,false,false,named:credible_sets.sql
+type,credible_sets,credible_set,locusEnd,Int32,"",UInt32,false,false,named:credible_sets.sql
+type,credible_sets,credible_set,confidence,Int8,"",UInt8,false,false,named:credible_sets.sql
+low_cardinality,credible_sets,credible_set,qualityControls[],String,"",LowCardinality(String),false,false,named:credible_sets.sql
+literal_vs_string,credible_sets,credible_set,qualityControls[],String,"",LowCardinality(String),false,false,named:credible_sets.sql
+model_only,disease,disease,code,String,"","",false,"",no
+low_cardinality,disease,disease,parents[],String,"",LowCardinality(String),false,false,named:disease.sql
+model_only,disease,disease,exactSynonyms,Array(String),"","",false,"",no
+model_only,disease,disease,relatedSynonyms,Array(String),"","",false,"",no
+model_only,disease,disease,narrowSynonyms,Array(String),"","",false,"",no
+model_only,disease,disease,broadSynonyms,Array(String),"","",false,"",no
+model_only,disease,disease,obsoleteXRefs,Array(String),"","",false,"",no
+low_cardinality,disease,disease,ancestors[],String,"",LowCardinality(String),false,false,named:aotf.sql;named:disease.sql
+low_cardinality,disease,disease,therapeuticAreas[],String,"",LowCardinality(String),false,false,named:aotf.sql;named:disease.sql
+struct_field_missing,disease,disease,ontology/leaf,Bool,"","",false,"",no
+struct_field_missing,disease,disease,ontology/sources,"Tuple(url String, name String)","","",false,"",no
+nullability,disease,disease,synonyms/hasExactSynonym[],String,"",Nullable(String),false,true,named:disease.sql
+nullability,disease,disease,synonyms/hasRelatedSynonym[],String,"",Nullable(String),false,true,named:disease.sql
+nullability,disease,disease,synonyms/hasNarrowSynonym[],String,"",Nullable(String),false,true,named:disease.sql
+nullability,disease,disease,synonyms/hasBroadSynonym[],String,"",Nullable(String),false,true,named:disease.sql
+ddl_only,disease,disease,directLocationIds,"","",Array(String),"",false,named:disease.sql
+ddl_only,disease,disease,indirectLocationIds,"","",Array(String),"",false,named:disease.sql
+column_order,disease,disease,"","id, name, description, dbXRefs, parents, obsoleteTerms, children, ancestors, therapeuticAreas, descendants, ontology, synonyms","","id, name, therapeuticAreas, description, dbXRefs, obsoleteTerms, synonyms, parents, children, ancestors, descendants, ontology","","",no
+literal_vs_string,disease_hpo,disease_phenotype,evidence[]/aspect,String,"",Nullable(String),false,true,named:disease_hpo.sql
+nullability,disease_hpo,disease_phenotype,evidence[]/aspect,String,"",Nullable(String),false,true,named:disease_hpo.sql
+nullability,disease_hpo,disease_phenotype,evidence[]/bioCuration,String,"",Nullable(String),false,true,named:disease_hpo.sql
+literal_vs_string,disease_hpo,disease_phenotype,evidence[]/evidenceType,String,"",Nullable(String),false,true,named:disease_hpo.sql
+nullability,disease_hpo,disease_phenotype,evidence[]/evidenceType,String,"",Nullable(String),false,true,named:disease_hpo.sql
+struct_field_missing,disease_hpo,disease_phenotype,evidence[]/qualifier,Nullable(String),"","",true,"",no
+literal_vs_string,disease_hpo,disease_phenotype,evidence[]/resource,String,"",String,false,false,named:disease_hpo.sql
+column_order,disease_hpo,disease_phenotype,"","disease, phenotype, evidence","","phenotype, disease, evidence","","",no
+model_only,drug,drug_molecule,canonicalSmiles,Nullable(String),"","",true,"",no
+model_only,drug,drug_molecule,inchiKey,Nullable(String),"","",true,"",no
+literal_vs_string,drug,drug_molecule,synonyms[]/source,String,"",String,false,false,pass:drug.sql
+literal_vs_string,drug,drug_molecule,tradeNames[]/source,String,"",String,false,false,pass:drug.sql
+list_nullability,drug,drug_molecule,crossReferences,"Array(Tuple(source String, ids Array(String)))","","Array(Tuple(source String, ids Array(String)))",true,false,pass:drug.sql
+literal_vs_string,drug,drug_molecule,crossReferences[]/source,String,"",String,false,false,pass:drug.sql
+list_nullability,drug,drug_molecule,childChemblIds,Array(String),"",Array(String),true,false,pass:drug.sql
+literal_vs_string,drug,drug_molecule,maximumClinicalStage,String,"",String,false,false,pass:drug.sql
+nullability,drug,drug_molecule,description,String,"",Nullable(String),false,true,pass:drug.sql
+column_order,drug,drug_molecule,"","id, molblock, drugType, name, parentId, synonyms, tradeNames, crossReferences, childChemblIds, maximumClinicalStage, description","","id, name, synonyms, tradeNames, childChemblIds, drugType, crossReferences, parentId, maximumClinicalStage, description, molblock","","",pass:drug.sql
+nullability,drug_warnings,drug_warning,country,String,"",Nullable(String),false,true,named:drug_warnings.sql
+type,drug_warnings,drug_warning,id,Int64,"",Nullable(UInt32),false,true,named:drug_warnings.sql
+nullability,drug_warnings,drug_warning,id,Int64,"",Nullable(UInt32),false,true,named:drug_warnings.sql
+type,drug_warnings,drug_warning,year,Nullable(Int32),"",Nullable(UInt16),true,true,named:drug_warnings.sql
+column_order,drug_warnings,drug_warning,"","chemblIds, toxicityClass, country, description, id, references, warningType, year, efoTerm, efoId, efoIdForWarningClass","","toxicityClass, chemblIds, country, description, id, references, warningType, year, efoTerm, efoId, efoIdForWarningClass","","",no
+open_vs_enum,enhancer_to_gene,enhancer_to_gene,chromosome,String,"","Enum8('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')",false,false,named:enhancer_to_gene.sql
+type,enhancer_to_gene,enhancer_to_gene,start,Int64,"",UInt32,false,false,named:enhancer_to_gene.sql
+type,enhancer_to_gene,enhancer_to_gene,end,Int64,"",UInt32,false,false,named:enhancer_to_gene.sql
+low_cardinality,enhancer_to_gene,enhancer_to_gene,resourceScore[]/name,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+literal_vs_string,enhancer_to_gene,enhancer_to_gene,resourceScore[]/name,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+type,enhancer_to_gene,enhancer_to_gene,resourceScore[]/value,Float32,"",Float64,false,false,pass:enhancer_to_gene.sql
+low_cardinality,enhancer_to_gene,enhancer_to_gene,datasourceId,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+literal_vs_string,enhancer_to_gene,enhancer_to_gene,datasourceId,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+low_cardinality,enhancer_to_gene,enhancer_to_gene,intervalType,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+literal_vs_string,enhancer_to_gene,enhancer_to_gene,intervalType,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+low_cardinality,enhancer_to_gene,enhancer_to_gene,biosampleName,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+low_cardinality,enhancer_to_gene,enhancer_to_gene,biosampleId,String,"",LowCardinality(String),false,false,pass:enhancer_to_gene.sql
+model_only,enhancer_to_gene,enhancer_to_gene,intervalId,String,"","",false,"",no
+literal_vs_string,enhancer_to_gene,enhancer_to_gene,qualityControls[],String,"",String,false,false,pass:enhancer_to_gene.sql
+column_order,enhancer_to_gene,enhancer_to_gene,"","chromosome, start, end, geneId, score, distanceToTss, resourceScore, datasourceId, intervalType, pmid, biosampleName, biosampleFromSourceId, biosampleId, studyId, qualityControls","","chromosome, start, end, geneId, biosampleName, biosampleId, biosampleFromSourceId, intervalType, distanceToTss, score, resourceScore, datasourceId, pmid, studyId, qualityControls","","",pass:enhancer_to_gene.sql
+nullability,evidence,evidence_cancer_biomarkers,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,drugFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,drugResponse,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,biomarkerName,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_cancer_biomarkers,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+list_nullability,evidence,evidence_cancer_biomarkers,urls,"Array(Tuple(niceName String, url String))","","Array(Tuple(url Nullable(String), niceName Nullable(String)))",true,false,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,urls[]/niceName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,urls[]/url,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_cancer_biomarkers,urls[],"niceName, url","","url, niceName","","",pass:evidence.sql
+list_nullability,evidence,evidence_cancer_biomarkers,biomarkers/geneExpression,"Array(Tuple(id String, name String))","","Array(Tuple(name Nullable(String), id Nullable(String)))",true,false,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,biomarkers/geneExpression[]/id,String,"",Nullable(String),false,true,named:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,biomarkers/geneExpression[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_cancer_biomarkers,biomarkers/geneExpression[],"id, name","","name, id","","",pass:evidence.sql
+list_nullability,evidence,evidence_cancer_biomarkers,biomarkers/geneticVariation,"Array(Tuple(functionalConsequenceId Nullable(String), id Nullable(String), name String))","","Array(Tuple(id Nullable(String), name Nullable(String), functionalConsequenceId Nullable(String)))",true,false,pass:evidence.sql
+nullability,evidence,evidence_cancer_biomarkers,biomarkers/geneticVariation[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_cancer_biomarkers,biomarkers/geneticVariation[],"functionalConsequenceId, id, name","","id, name, functionalConsequenceId","","",pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,mutatedSamples[]/functionalConsequenceId,String,"",Nullable(String),false,true,pass:evidence.sql
+type,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberMutatedSamples,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberMutatedSamples,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+type,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberSamplesTested,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberSamplesTested,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+type,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberSamplesWithMutationType,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,mutatedSamples[]/numberSamplesWithMutationType,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_cancer_gene_census,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_cancer_gene_census,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_cancer_gene_census,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_cancer_gene_census,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_cancer_gene_census,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_clingen,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_clingen,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,urls[]/url,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_clingen,urls[],"niceName, url","","url, niceName","","",pass:evidence.sql
+nullability,evidence,evidence_clingen,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clingen,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,clinicalReportId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_clinical_precedence,clinicalStage,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,clinicalStage,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_clinical_precedence,trialStopReasonCategories,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_clinical_precedence,trialStopReasonCategories[],String,"",String,false,false,pass:evidence.sql
+list_nullability,evidence,evidence_clinical_precedence,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,drugFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,drugId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_clinical_precedence,datatypeId,String,"",String,false,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_clinical_precedence,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_clinical_precedence,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_clinical_precedence,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,targetFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_crispr,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_crispr,diseaseCellLines[]/id,String,"",Nullable(String),false,true,named:evidence.sql
+nullability,evidence,evidence_crispr,diseaseCellLines[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,diseaseCellLines[]/tissue,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,diseaseCellLines[]/tissueId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,publicationDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,projectId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,crisprScreenLibrary,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,studyOverview,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,cellType,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_crispr_screen,geneticBackground,Nullable(String),"","",true,"",no
+list_nullability,evidence,evidence_crispr_screen,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_crispr_screen,literature[],String,"",String,false,false,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,contrast,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_crispr_screen,statisticalTestTail,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,statisticalTestTail,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_crispr_screen,phenotypicConsequenceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_encore,biomarkerList[],"description, name","","name, description","","",pass:evidence.sql
+literal_vs_string,evidence,evidence_encore,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_encore,datatypeId,String,"",String,false,false,pass:evidence.sql
+nullability,evidence,evidence_encore,diseaseCellLines[]/id,String,"",Nullable(String),false,true,named:evidence.sql
+nullability,evidence,evidence_encore,diseaseCellLines[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,diseaseCellLines[]/tissue,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,diseaseCellLines[]/tissueId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,geneticInteractionScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,geneticInteractionType,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,interactingTargetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,interactingTargetRole,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,phenotypicConsequenceLogFoldChange,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,phenotypicConsequencePValue,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,projectId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,releaseVersion,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,statisticalMethod,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,targetRole,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,validationReadouts[]/hsaValue,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,validationReadouts[]/isValidated,Bool,"",Nullable(Bool),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,validationReadouts[]/readoutMethodName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,validationReadouts[]/screen,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_encore,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_europepmc,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_europepmc,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_europepmc,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_europepmc,datatypeId,String,"",String,false,false,pass:evidence.sql
+nullability,evidence,evidence_europepmc,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+type,evidence,evidence_europepmc,textMiningSentences[]/dEnd,Int64,"",UInt32,false,false,pass:evidence.sql
+type,evidence,evidence_europepmc,textMiningSentences[]/dStart,Int64,"",UInt32,false,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_europepmc,textMiningSentences[]/section,String,"",String,false,false,pass:evidence.sql
+type,evidence,evidence_europepmc,textMiningSentences[]/tEnd,Int64,"",UInt32,false,false,pass:evidence.sql
+type,evidence,evidence_europepmc,textMiningSentences[]/tStart,Int64,"",UInt32,false,false,pass:evidence.sql
+struct_order,evidence,evidence_europepmc,textMiningSentences[],"dEnd, dStart, section, tEnd, tStart, text","","dEnd, tEnd, dStart, tStart, section, text","","",pass:evidence.sql
+list_nullability,evidence,evidence_europepmc,pmcIds,Array(String),"",Array(String),true,false,pass:evidence.sql
+type,evidence,evidence_europepmc,publicationYear,Nullable(Int64),"",Nullable(UInt16),true,true,pass:evidence.sql
+nullability,evidence,evidence_eva,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_eva,alleleOrigins,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva,datasourceId,String,"",String,false,false,named:evidence.sql
+list_nullability,evidence,evidence_eva,allelicRequirements,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_eva,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva,variantFunctionalConsequenceId,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_eva,variantFromSourceId,String,"","",false,"",no
+nullability,evidence,evidence_eva,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_eva,variantHgvsId,Nullable(String),"","",true,"",no
+list_nullability,evidence,evidence_eva,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_eva,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva,directionOnTrait,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva_somatic,alleleOrigins[],String,"",String,false,false,pass:evidence.sql
+list_nullability,evidence,evidence_eva_somatic,allelicRequirements,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,variantFunctionalConsequenceId,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_eva_somatic,variantFromSourceId,String,"","",false,"",no
+nullability,evidence,evidence_eva_somatic,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_eva_somatic,variantHgvsId,String,"","",false,"",no
+list_nullability,evidence,evidence_eva_somatic,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_eva_somatic,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva_somatic,directionOnTrait,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_eva_somatic,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_expression_atlas,biosamplesFromSource,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,contrast,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_expression_atlas,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+type,evidence,evidence_expression_atlas,log2FoldChangePercentileRank,Int64,"",Nullable(Int32),false,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,log2FoldChangePercentileRank,Int64,"",Nullable(Int32),false,true,pass:evidence.sql
+model_only,evidence,evidence_expression_atlas,log2FoldChangeValue,Float64,"","",false,"",no
+nullability,evidence,evidence_expression_atlas,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_expression_atlas,studyOverview,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_gene2phenotype,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene2phenotype,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene2phenotype,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_gene2phenotype,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene2phenotype,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene2phenotype,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_gene_burden,allelicRequirements,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,pValueMantissa,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+type,evidence,evidence_gene_burden,pValueExponent,Int64,"",Nullable(Int32),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,pValueExponent,Int64,"",Nullable(Int32),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene_burden,ancestry,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+list_nullability,evidence,evidence_gene_burden,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+type,evidence,evidence_gene_burden,studySampleSize,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,studySampleSize,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+type,evidence,evidence_gene_burden,studyCases,Nullable(Int64),"",Nullable(UInt32),true,true,pass:evidence.sql
+type,evidence,evidence_gene_burden,studyCasesWithQualifyingVariants,Nullable(Int64),"",Nullable(UInt32),true,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,statisticalMethod,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,statisticalMethodOverview,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_gene_burden,urls,"Array(Tuple(niceName String, url String))","","Array(Tuple(url Nullable(String), niceName Nullable(String)))",true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene_burden,urls[]/niceName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,urls[]/niceName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,urls[]/url,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_gene_burden,urls[],"niceName, url","","url, niceName","","",pass:evidence.sql
+model_only,evidence,evidence_gene_burden,sex,Array(String),"","",true,"",no
+nullability,evidence,evidence_gene_burden,publicationDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene_burden,directionOnTrait,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gene_burden,directionOnTarget,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gene_burden,directionOnTarget,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_genomics_england,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_genomics_england,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_genomics_england,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_genomics_england,studyOverview,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_genomics_england,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_genomics_england,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_genomics_england,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+list_nullability,evidence,evidence_genomics_england,allelicRequirements,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_gwas_credible_sets,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gwas_credible_sets,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_gwas_credible_sets,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_gwas_credible_sets,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+model_only,evidence,evidence_gwas_credible_sets,curationDate,Nullable(String),"","",true,"",no
+nullability,evidence,evidence_gwas_credible_sets,studyLocusId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_gwas_credible_sets,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_impc,targetInModelMgiId,String,"","",false,"",no
+nullability,evidence,evidence_impc,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,biologicalModelGeneticBackground,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,biologicalModelAllelicComposition,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,targetInModel,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_impc,targetInModelEnsemblId,String,"","",false,"",no
+list_nullability,evidence,evidence_impc,diseaseModelAssociatedHumanPhenotypes,"Array(Tuple(id String, label String))","","Array(Tuple(id String, label String))",true,false,pass:evidence.sql
+list_nullability,evidence,evidence_impc,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_impc,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_impc,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_impc,directionOnTarget,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_impc,directionOnTarget,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_intogen,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_intogen,cohortId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,cohortShortName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,cohortDescription,String,"",Nullable(String),false,true,pass:evidence.sql
+type,evidence,evidence_intogen,mutatedSamples[]/numberMutatedSamples,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,mutatedSamples[]/numberMutatedSamples,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+type,evidence,evidence_intogen,mutatedSamples[]/numberSamplesTested,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,mutatedSamples[]/numberSamplesTested,Int64,"",Nullable(UInt32),false,true,pass:evidence.sql
+type,evidence,evidence_intogen,mutatedSamples[]/numberSamplesWithMutationType,Nullable(Int64),"",Nullable(UInt32),true,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_intogen,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_intogen,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_intogen,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_intogen,directionOnTarget,Nullable(String),"",Nullable(String),true,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_orphanet,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_orphanet,alleleOrigins[],String,"",String,false,false,pass:evidence.sql
+literal_vs_string,evidence,evidence_orphanet,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_orphanet,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_orphanet,targetFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_orphanet,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_orphanet,directionOnTrait,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,projectId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,projectDescription,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,releaseVersion,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,studyId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,contrast,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,cellType,String,"",Nullable(String),false,true,pass:evidence.sql
+model_only,evidence,evidence_ot_crispr,log2FoldChangeValue,Float64,"","",false,"",no
+nullability,evidence,evidence_ot_crispr,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,statisticalTestTail,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_ot_crispr,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_ot_crispr,datatypeId,String,"",String,false,false,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,assays[]/description,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,assays[]/isHit,Bool,"",Nullable(Bool),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,assays[]/shortName,String,"",Nullable(String),false,true,pass:evidence.sql
+struct_order,evidence,evidence_ot_crispr_validation,biomarkerList[],"description, name","","name, description","","",pass:evidence.sql
+literal_vs_string,evidence,evidence_ot_crispr_validation,datasourceId,String,"",String,false,false,named:evidence.sql
+literal_vs_string,evidence,evidence_ot_crispr_validation,datatypeId,String,"",String,false,false,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseCellLines[]/id,String,"",Nullable(String),false,true,named:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseCellLines[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseCellLines[]/tissue,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseCellLines[]/tissueId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,primaryProjectHit,Bool,"",Nullable(Bool),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,primaryProjectId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,projectId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,releaseDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,releaseVersion,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,resourceScore,Float64,"",Nullable(Float64),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,studyOverview,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_ot_crispr_validation,evidenceDate,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_reactome,datasourceId,String,"",String,false,false,named:evidence.sql
+nullability,evidence,evidence_reactome,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_reactome,literature,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_reactome,pathways[]/id,String,"",Nullable(String),false,true,named:evidence.sql
+nullability,evidence,evidence_reactome,pathways[]/name,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,reactionId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,reactionName,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_reactome,targetModulation,String,"",Nullable(String),false,true,pass:evidence.sql
+list_nullability,evidence,evidence_reactome,variantAminoacidDescriptions,Array(String),"",Array(String),true,false,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_uniprot_literature,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_literature,targetModulation,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,targetFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,diseaseFromSourceMappedId,String,"",Nullable(String),false,true,pass:evidence.sql
+literal_vs_string,evidence,evidence_uniprot_variants,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,confidence,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,diseaseFromSource,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,diseaseFromSourceId,String,"",Nullable(String),false,true,pass:evidence.sql
+nullability,evidence,evidence_uniprot_variants,targetModulation,String,"",Nullable(String),false,true,pass:evidence.sql
+ddl_only,evidence,"",variantFunctionalConsequenceFromQtlId,"","",Nullable(String),"",true,pass:evidence.sql
+ddl_only,evidence,"",publicationFirstAuthor,"","",Nullable(String),"",true,pass:evidence.sql
+ddl_only,evidence,"",geneticInteractionFDR,"","",Nullable(Float64),"",true,pass:evidence.sql
+ddl_only,evidence,"",warningMessage,"","",Nullable(String),"",true,pass:evidence.sql
+low_cardinality,go,go,namespace,String,"",LowCardinality(String),false,false,pass:go.sql
+low_cardinality,interaction,interaction,intABiologicalRole,String,"",LowCardinality(String),false,false,named:interaction.sql
+low_cardinality,interaction,interaction,intBBiologicalRole,String,"",LowCardinality(String),false,false,named:interaction.sql
+low_cardinality,interaction,interaction,speciesA/mnemonic,String,"",LowCardinality(String),false,false,named:interaction.sql
+literal_vs_string,interaction,interaction,speciesA/mnemonic,String,"",LowCardinality(String),false,false,named:interaction.sql
+low_cardinality,interaction,interaction,speciesA/scientificName,String,"",LowCardinality(String),false,false,named:interaction.sql
+literal_vs_string,interaction,interaction,speciesA/scientificName,String,"",LowCardinality(String),false,false,named:interaction.sql
+type,interaction,interaction,speciesA/taxonId,Int64,"",UInt32,false,false,named:interaction.sql
+low_cardinality,interaction,interaction,speciesB/mnemonic,String,"",LowCardinality(String),false,false,named:interaction.sql
+low_cardinality,interaction,interaction,speciesB/scientificName,Nullable(String),"",Nullable(LowCardinality(String)),true,true,named:interaction.sql
+type,interaction,interaction,speciesB/taxonId,Int64,"",Nullable(UInt32),false,true,named:interaction.sql
+nullability,interaction,interaction,speciesB/taxonId,Int64,"",Nullable(UInt32),false,true,named:interaction.sql
+type,interaction,interaction,count,Int64,"",UInt8,false,false,named:interaction.sql
+type,interaction,interaction,interactionId,Int64,"",UInt64,false,false,named:interaction.sql
+column_order,interaction,interaction,"","sourceDatabase, targetA, intA, intABiologicalRole, targetB, intB, intBBiologicalRole, speciesA, speciesB, count, scoring, interactionId","","interactionId, intA, targetA, intB, targetB, intABiologicalRole, intBBiologicalRole, scoring, count, sourceDatabase, speciesA, speciesB","","",pass:interaction.sql
+low_cardinality,interaction_evidence,interaction_evidence,interactionResources/databaseVersion,String,"",LowCardinality(String),false,false,named:interaction.sql
+low_cardinality,interaction_evidence,interaction_evidence,interactionResources/sourceDatabase,String,"",LowCardinality(String),false,false,named:interaction.sql
+literal_vs_string,interaction_evidence,interaction_evidence,interactionResources/sourceDatabase,String,"",LowCardinality(String),false,false,named:interaction.sql
+nullability,interaction_evidence,interaction_evidence,interactionScore,Nullable(Float64),"",Float64,true,false,no
+type,interaction_evidence,interaction_evidence,interactionId,Int64,"",UInt64,false,false,named:interaction.sql
+type,interaction_evidence,interaction_evidence,hostOrganismTaxId,Nullable(Int64),"",Nullable(UInt32),true,true,named:interaction.sql
+struct_nullability,interaction_evidence,interaction_evidence,hostOrganismTissue,"Tuple(fullName Nullable(String), shortName Nullable(String), xrefs Array(String))","","Tuple(fullName Nullable(String), shortName Nullable(String), xrefs Array(String))",true,false,no
+list_nullability,interaction_evidence,interaction_evidence,hostOrganismTissue/xrefs,Array(String),"",Array(String),true,false,no
+list_nullability,interaction_evidence,interaction_evidence,participantDetectionMethodA,"Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))","","Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))",true,false,named:interaction.sql
+list_nullability,interaction_evidence,interaction_evidence,participantDetectionMethodB,"Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))","","Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))",true,false,named:interaction.sql
+column_order,interaction_evidence,interaction_evidence,"","interactionResources, interactionScore, interactionDetectionMethodShortName, interactionDetectionMethodMiIdentifier, evidenceScore, interactionIdentifier, pubmedId, interactionId, expansionMethodMiIdentifier, expansionMethodShortName, hostOrganismScientificName, hostOrganismTaxId, hostOrganismTissue, interactionTypeMiIdentifier, interactionTypeShortName, participantDetectionMethodA, participantDetectionMethodB","","interactionId, evidenceScore, expansionMethodMiIdentifier, expansionMethodShortName, hostOrganismScientificName, hostOrganismTaxId, hostOrganismTissue, interactionDetectionMethodMiIdentifier, interactionDetectionMethodShortName, interactionIdentifier, interactionResources, interactionScore, interactionTypeMiIdentifier, interactionTypeShortName, participantDetectionMethodA, participantDetectionMethodB, pubmedId","","",no
+model_only,hpo,disease_hpo,dbXRefs,Array(String),"","",true,"",no
+model_only,hpo,disease_hpo,parents,Array(String),"","",true,"",no
+model_only,hpo,disease_hpo,obsoleteTerms,Array(String),"","",true,"",no
+ddl_only,hpo,disease_hpo,namespace,"","",Array(String),"",false,pass:hpo.sql
+low_cardinality,l2g_predictions,l2g_prediction,features[]/name,String,"",LowCardinality(String),false,false,named:l2g_predictions.sql
+type,l2g_predictions,l2g_prediction,features[]/value,Float32,"",Float64,false,false,named:l2g_predictions.sql
+type,l2g_predictions,l2g_prediction,features[]/shapValue,Float32,"",Float64,false,false,named:l2g_predictions.sql
+type,l2g_predictions,l2g_prediction,shapBaseValue,Float32,"",Float64,false,false,named:l2g_predictions.sql
+nullability,literature_entity_lut,literature_entity_lut,date,Nullable(Date),"",Date,true,false,named:literature_entity_lut.sql
+type,literature_entity_lut,literature_entity_lut,year,Nullable(Int32),"",UInt16,true,false,named:literature_entity_lut.sql
+nullability,literature_entity_lut,literature_entity_lut,year,Nullable(Int32),"",UInt16,true,false,named:literature_entity_lut.sql
+type,literature_entity_lut,literature_entity_lut,month,Nullable(Int32),"",UInt8,true,false,named:literature_entity_lut.sql
+nullability,literature_entity_lut,literature_entity_lut,month,Nullable(Int32),"",UInt8,true,false,named:literature_entity_lut.sql
+type,literature_entity_lut,literature_entity_lut,day,Nullable(Int32),"",UInt8,true,false,no
+nullability,literature_entity_lut,literature_entity_lut,day,Nullable(Int32),"",UInt8,true,false,no
+kind,literature_entity_lut,literature_entity_lut,keywordType,String,"",FixedString(2),false,false,no
+nullability,mechanism_of_action,drug_mechanism_of_action,actionType,String,"",Nullable(String),false,true,named:mechanism_of_action.sql
+struct_order,mechanism_of_action,drug_mechanism_of_action,references[],"source, ids, urls","","ids, source, urls","","",named:mechanism_of_action.sql
+nullability,mechanism_of_action,drug_mechanism_of_action,targetName,String,"",Nullable(String),false,true,named:mechanism_of_action.sql
+nullability,mechanism_of_action,drug_mechanism_of_action,targetType,String,"",Nullable(String),false,true,named:mechanism_of_action.sql
+literal_vs_string,mechanism_of_action,drug_mechanism_of_action,curation,String,"",String,false,false,named:mechanism_of_action.sql
+column_order,mechanism_of_action,drug_mechanism_of_action,"","mechanismOfAction, actionType, chemblIds, references, targetName, targetType, targets, curation","","chemblIds, targets, mechanismOfAction, actionType, targetType, targetName, curation, references","","",no
+nullability,mouse_phenotypes,mouse_phenotype,targetInModelEnsemblId,String,"",Nullable(String),false,true,named:mouse_phenotypes.sql
+list_nullability,mouse_phenotypes,mouse_phenotype,biologicalModels[]/literature,Array(String),"",Array(String),true,false,named:mouse_phenotypes.sql
+column_order,mouse_phenotypes,mouse_phenotype,"","targetInModel, targetInModelMgiId, targetInModelEnsemblId, targetFromSourceId, modelPhenotypeId, modelPhenotypeLabel, biologicalModels, modelPhenotypeClasses","","biologicalModels, modelPhenotypeClasses, modelPhenotypeId, modelPhenotypeLabel, targetFromSourceId, targetInModel, targetInModelEnsemblId, targetInModelMgiId","","",no
+no_model,association_time_series,"","","","","","","",no
+low_cardinality,pharmacovigilance,pharmacovigilance,event,String,"",LowCardinality(String),false,false,named:pharmacovigilance.sql
+type,pharmacovigilance,pharmacovigilance,count,Int64,"",UInt32,false,false,named:pharmacovigilance.sql
+low_cardinality,pharmacovigilance,pharmacovigilance,meddraCode,String,"",LowCardinality(String),false,false,named:pharmacovigilance.sql
+literal_vs_string,pharmacovigilance,pharmacovigilance,meddraCode,String,"",LowCardinality(String),false,false,named:pharmacovigilance.sql
+column_order,pharmacovigilance,pharmacovigilance,"","chembl_id, event, count, llr, critval, meddraCode","","chembl_id, count, critval, event, llr, meddraCode","","",no
+nullability,otar_projects,otar,projects[]/status,String,"",Nullable(String),false,true,pass:otar_projects.sql
+nullability,otar_projects,otar,projects[]/project_name,String,"",Nullable(String),false,true,pass:otar_projects.sql
+nullability,otar_projects,otar,projects[]/integrates_data_PPP,Bool,"",Nullable(Bool),false,true,pass:otar_projects.sql
+struct_order,otar_projects,otar,projects[],"otar_code, status, project_name, integrates_data_PPP, reference","","otar_code, status, project_name, reference, integrates_data_PPP","","",pass:otar_projects.sql
+low_cardinality,pharmacogenomics,pharmacogenomics,datasourceId,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+literal_vs_string,pharmacogenomics,pharmacogenomics,datasourceId,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+model_only,pharmacogenomics,pharmacogenomics,datasourceVersion,String,"","",false,"",no
+low_cardinality,pharmacogenomics,pharmacogenomics,datatypeId,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+model_only,pharmacogenomics,pharmacogenomics,directionality,Nullable(String),"","",true,"",no
+low_cardinality,pharmacogenomics,pharmacogenomics,evidenceLevel,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,genotype,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,genotypeAnnotationText,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+low_cardinality,pharmacogenomics,pharmacogenomics,pgxCategory,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+list_nullability,pharmacogenomics,pharmacogenomics,variantAnnotation,"Array(Tuple(baseAlleleOrGenotype String, comparisonAlleleOrGenotype Nullable(String), directionality Nullable(String), effect Nullable(String), effectDescription String, effectType String, entity Nullable(String), id String, literature String))","","Array(Tuple(baseAlleleOrGenotype Nullable(String), comparisonAlleleOrGenotype Nullable(String), directionality Nullable(String), effect Nullable(String), effectDescription Nullable(String), effectType Nullable(String), entity Nullable(String), literature Nullable(String)))",true,false,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,variantAnnotation[]/baseAlleleOrGenotype,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,variantAnnotation[]/effectDescription,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,variantAnnotation[]/effectType,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+struct_field_missing,pharmacogenomics,pharmacogenomics,variantAnnotation[]/id,String,"","",false,"",no
+nullability,pharmacogenomics,pharmacogenomics,variantAnnotation[]/literature,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,studyId,String,"",Nullable(String),false,true,pass:pharmacogenomics.sql
+low_cardinality,pharmacogenomics,pharmacogenomics,drugs[]/drugFromSource,String,"",LowCardinality(String),false,false,pass:pharmacogenomics.sql
+low_cardinality,pharmacogenomics,pharmacogenomics,drugs[]/drugId,Nullable(String),"",LowCardinality(String),true,false,pass:pharmacogenomics.sql
+nullability,pharmacogenomics,pharmacogenomics,drugs[]/drugId,Nullable(String),"",LowCardinality(String),true,false,pass:pharmacogenomics.sql
+struct_order,pharmacogenomics,pharmacogenomics,drugs[],"drugFromSource, drugId","","drugId, drugFromSource","","",pass:pharmacogenomics.sql
+column_order,pharmacogenomics,pharmacogenomics,"","datasourceId, datatypeId, evidenceLevel, genotype, genotypeAnnotationText, genotypeId, haplotypeFromSourceId, haplotypeId, literature, pgxCategory, phenotypeFromSourceId, phenotypeText, variantAnnotation, studyId, targetFromSourceId, variantFunctionalConsequenceId, variantRsId, variantId, isDirectTarget, drugs","","datasourceId, datatypeId, drugs, evidenceLevel, genotype, genotypeAnnotationText, genotypeId, haplotypeFromSourceId, haplotypeId, literature, pgxCategory, phenotypeFromSourceId, phenotypeText, variantAnnotation, studyId, targetFromSourceId, variantFunctionalConsequenceId, variantRsId, variantId, isDirectTarget","","",pass:pharmacogenomics.sql
+no_model,protein_coding_coords,"","","","","","","",no
+literal_vs_string,w2v,literature_vector,category,String,"",String,false,false,named:w2v.sql
+list_nullability,studies,study,traitFromSourceMappedIds,Array(String),"",Array(String),true,false,pass:studies.sql
+model_only,studies,study,biosampleId,Nullable(String),"","",true,"",no
+low_cardinality,studies,study,publicationJournal,Nullable(String),"",Nullable(LowCardinality(String)),true,true,pass:studies.sql
+list_nullability,studies,study,backgroundTraitFromSourceMappedIds,Array(String),"",Array(String),true,false,pass:studies.sql
+model_only,studies,study,backgroundDiseaseIds,Array(String),"","",false,"",no
+type,studies,study,nCases,Nullable(Int32),"",Nullable(UInt32),true,true,pass:studies.sql
+type,studies,study,nControls,Nullable(Int32),"",Nullable(UInt32),true,true,pass:studies.sql
+type,studies,study,nSamples,Nullable(Int32),"",Nullable(UInt32),true,true,pass:studies.sql
+list_nullability,studies,study,cohorts,Array(String),"",Array(String),true,false,pass:studies.sql
+list_nullability,studies,study,ldPopulationStructure,"Array(Tuple(ldPopulation String, relativeSampleSize Nullable(Float64)))","","Array(Tuple(ldPopulation LowCardinality(String), relativeSampleSize Nullable(Float64)))",true,false,pass:studies.sql
+low_cardinality,studies,study,ldPopulationStructure[]/ldPopulation,String,"",LowCardinality(String),false,false,pass:studies.sql
+list_nullability,studies,study,discoverySamples,"Array(Tuple(sampleSize Int32, ancestry String))","","Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))",true,false,pass:studies.sql
+type,studies,study,discoverySamples[]/sampleSize,Int32,"",UInt32,false,false,pass:studies.sql
+low_cardinality,studies,study,discoverySamples[]/ancestry,String,"",LowCardinality(String),false,false,pass:studies.sql
+struct_order,studies,study,discoverySamples[],"sampleSize, ancestry","","ancestry, sampleSize","","",pass:studies.sql
+list_nullability,studies,study,replicationSamples,"Array(Tuple(sampleSize Nullable(Int32), ancestry String))","","Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))",true,false,pass:studies.sql
+type,studies,study,replicationSamples[]/sampleSize,Nullable(Int32),"",UInt32,true,false,pass:studies.sql
+nullability,studies,study,replicationSamples[]/sampleSize,Nullable(Int32),"",UInt32,true,false,pass:studies.sql
+low_cardinality,studies,study,replicationSamples[]/ancestry,String,"",LowCardinality(String),false,false,pass:studies.sql
+struct_order,studies,study,replicationSamples[],"sampleSize, ancestry","","ancestry, sampleSize","","",pass:studies.sql
+literal_vs_string,studies,study,qualityControls[],String,"",String,false,false,pass:studies.sql
+low_cardinality,studies,study,condition,Nullable(String),"",Nullable(LowCardinality(String)),true,true,pass:studies.sql
+list_nullability,studies,study,sumstatQCValues,"Array(Tuple(QCCheckName String, QCCheckValue Float32))","","Array(Tuple(QCCheckName String, QCCheckValue Float64))",true,false,pass:studies.sql
+type,studies,study,sumstatQCValues[]/QCCheckValue,Float32,"",Float64,false,false,pass:studies.sql
+column_order,studies,study,"","studyId, projectId, studyType, traitFromSource, traitFromSourceMappedIds, diseaseIds, geneId, biosampleFromSourceId, pubmedId, publicationTitle, publicationFirstAuthor, publicationDate, publicationJournal, backgroundTraitFromSourceMappedIds, initialSampleSize, nCases, nControls, nSamples, cohorts, ldPopulationStructure, discoverySamples, replicationSamples, qualityControls, analysisFlags, summarystatsLocation, hasSumstats, condition, sumstatQCValues","","studyId, condition, projectId, studyType, traitFromSource, geneId, biosampleFromSourceId, nSamples, summarystatsLocation, hasSumstats, cohorts, initialSampleSize, traitFromSourceMappedIds, diseaseIds, publicationJournal, publicationDate, ldPopulationStructure, backgroundTraitFromSourceMappedIds, qualityControls, replicationSamples, nControls, pubmedId, publicationFirstAuthor, publicationTitle, discoverySamples, nCases, analysisFlags, sumstatQCValues","","",pass:studies.sql
+low_cardinality,so,so,id,String,"",LowCardinality(String),false,false,named:so.sql
+low_cardinality,so,so,label,String,"",LowCardinality(String),false,false,named:so.sql
+nullability,target_essentiality,target_essentiality,isEssential,Bool,"",Nullable(Bool),false,true,pass:target_essentiality.sql
+nullability,target_essentiality,target_essentiality,depMapEssentiality[]/tissueName,String,"",Nullable(String),false,true,pass:target_essentiality.sql
+nullability,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/depmapId,String,"",Nullable(String),false,true,pass:target_essentiality.sql
+nullability,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/cellLineName,String,"",Nullable(String),false,true,pass:target_essentiality.sql
+nullability,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/diseaseFromSource,String,"",Nullable(String),false,true,pass:target_essentiality.sql
+literal_vs_string,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/mutation,Nullable(String),"",Nullable(String),true,true,pass:target_essentiality.sql
+type,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/geneEffect,Float32,"",Nullable(Float64),false,true,pass:target_essentiality.sql
+nullability,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/geneEffect,Float32,"",Nullable(Float64),false,true,pass:target_essentiality.sql
+type,target_essentiality,target_essentiality,depMapEssentiality[]/screens[]/expression,Nullable(Float32),"",Nullable(Float64),true,true,pass:target_essentiality.sql
+struct_order,target_essentiality,target_essentiality,depMapEssentiality[]/screens[],"depmapId, cellLineName, diseaseFromSource, diseaseCellLineId, mutation, geneEffect, expression","","cellLineName, depmapId, diseaseCellLineId, diseaseFromSource, expression, geneEffect, mutation","","",pass:target_essentiality.sql
+struct_order,target_essentiality,target_essentiality,depMapEssentiality[],"tissueId, tissueName, screens","","screens, tissueId, tissueName","","",pass:target_essentiality.sql
+type,target_prioritisation,target_prioritisation,isInMembrane,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,isSecreted,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,hasSafetyEvent,Nullable(Int32),"",Nullable(Int8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,hasPocket,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,hasLigand,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,hasSmallMoleculeBinder,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,isCancerDriverGene,Nullable(Int32),"",Nullable(Int8),true,true,named:target_prioritisation.sql
+type,target_prioritisation,target_prioritisation,hasHighQualityChemicalProbes,Nullable(Int32),"",Nullable(UInt8),true,true,named:target_prioritisation.sql
+column_order,target_prioritisation,target_prioritisation,"","targetId, isInMembrane, isSecreted, hasSafetyEvent, hasPocket, hasLigand, hasSmallMoleculeBinder, geneticConstraint, paralogMaxIdentityPercentage, mouseOrthologMaxIdentityPercentage, isCancerDriverGene, mouseKOScore, hasHighQualityChemicalProbes, maxClinicalStage, tissueSpecificity, tissueDistribution, celltypeSpecificity, celltypeDistribution","","targetId, geneticConstraint, hasHighQualityChemicalProbes, hasLigand, hasPocket, hasSafetyEvent, hasSmallMoleculeBinder, isCancerDriverGene, isInMembrane, isSecreted, maxClinicalStage, mouseKOScore, mouseOrthologMaxIdentityPercentage, paralogMaxIdentityPercentage, tissueDistribution, tissueSpecificity, celltypeSpecificity, celltypeDistribution","","",no
+no_model,targets,"","","","","","","",no
+low_cardinality,transcript,transcript,biotype,String,"",LowCardinality(String),false,false,named:transcript.sql
+list_nullability,transcript,transcript,uniprotSwissprotIds,Array(String),"",Array(String),true,false,named:transcript.sql
+list_nullability,transcript,transcript,uniprotTremblIds,Array(String),"",Array(String),true,false,named:transcript.sql
+list_nullability,transcript,transcript,uniprotIsoformIds,Array(String),"",Array(String),true,false,named:transcript.sql
+list_nullability,transcript,transcript,alphafoldIds,Array(String),"",Array(String),true,false,named:transcript.sql
+list_nullability,transcript,transcript,dbXrefs,"Array(Tuple(id String, source String))","","Array(Tuple(id String, source String))",true,false,named:transcript.sql
+literal_vs_string,transcript,transcript,dbXrefs[]/source,String,"",String,false,false,named:transcript.sql
+open_vs_enum,transcript,transcript,chromosome,String,"","Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')",false,false,named:transcript.sql
+type,transcript,transcript,start,Int64,"",UInt32,false,false,named:transcript.sql
+type,transcript,transcript,end,Int64,"",UInt32,false,false,named:transcript.sql
+open_vs_enum,transcript,transcript,strand,Int32,"","Enum8('-1' = -1, '0' = 0, '1' = 1)",false,false,named:transcript.sql
+kind,transcript,transcript,strand,Int32,"","Enum8('-1' = -1, '0' = 0, '1' = 1)",false,false,named:transcript.sql
+type,transcript,transcript,transcriptionStartSite,Int32,"",UInt32,false,false,named:transcript.sql
+literal_vs_string,transcript,transcript,flags[]/label,String,"",Nullable(String),false,true,named:transcript.sql
+nullability,transcript,transcript,flags[]/label,String,"",Nullable(String),false,true,named:transcript.sql
+nullability,transcript,transcript,flags[]/value,String,"",Nullable(String),false,true,named:transcript.sql
+open_vs_enum,transcript,transcript,exons[]/chromosome,String,"","Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')",false,false,named:transcript.sql
+type,transcript,transcript,exons[]/start,Int64,"",UInt32,false,false,named:transcript.sql
+type,transcript,transcript,exons[]/end,Int64,"",UInt32,false,false,named:transcript.sql
+open_vs_enum,transcript,transcript,exons[]/strand,Int32,"","Enum8('-1' = -1, '0' = 0, '1' = 1)",false,false,named:transcript.sql
+kind,transcript,transcript,exons[]/strand,Int32,"","Enum8('-1' = -1, '0' = 0, '1' = 1)",false,false,named:transcript.sql
+type,variants,variant,position,Int32,"",UInt32,false,false,pass:variants.sql
+literal_vs_string,variants,variant,variantEffect[]/method,String,"",Nullable(String),false,true,pass:variants.sql
+nullability,variants,variant,variantEffect[]/method,String,"",Nullable(String),false,true,pass:variants.sql
+type,variants,variant,variantEffect[]/score,Nullable(Float32),"",Nullable(Float64),true,true,pass:variants.sql
+nullability,variants,variant,variantEffect[]/normalisedScore,Float64,"",Nullable(Float64),false,true,pass:variants.sql
+type,variants,variant,transcriptConsequences[]/distanceFromFootprint,Int64,"",Int32,false,false,pass:variants.sql
+type,variants,variant,transcriptConsequences[]/distanceFromTss,Int64,"",Int32,false,false,pass:variants.sql
+struct_field_missing,variants,variant,transcriptConsequences[]/appris,Nullable(String),"","",true,"",no
+struct_field_missing,variants,variant,transcriptConsequences[]/maneSelect,Nullable(String),"","",true,"",no
+nullability,variants,variant,transcriptConsequences[]/targetId,String,"",Nullable(String),false,true,pass:variants.sql
+literal_vs_string,variants,variant,transcriptConsequences[]/impact,String,"",Nullable(String),false,true,pass:variants.sql
+nullability,variants,variant,transcriptConsequences[]/impact,String,"",Nullable(String),false,true,pass:variants.sql
+literal_vs_string,variants,variant,transcriptConsequences[]/lofteePrediction,Nullable(String),"",Nullable(String),true,true,pass:variants.sql
+type,variants,variant,transcriptConsequences[]/consequenceScore,Float32,"",Float64,false,false,pass:variants.sql
+type,variants,variant,transcriptConsequences[]/transcriptIndex,Int32,"",UInt32,false,false,pass:variants.sql
+struct_field_missing,variants,variant,transcriptConsequences[]/approvedSymbol,Nullable(String),"","",true,"",no
+struct_field_missing,variants,variant,transcriptConsequences[]/biotype,String,"","",false,"",no
+nullability,variants,variant,transcriptConsequences[]/transcriptId,String,"",Nullable(String),false,true,pass:variants.sql
+struct_order,variants,variant,transcriptConsequences[],"variantFunctionalConsequenceIds, aminoAcidChange, uniprotAccessions, isEnsemblCanonical, codons, distanceFromFootprint, distanceFromTss, targetId, impact, lofteePrediction, consequenceScore, transcriptIndex, transcriptId","","variantFunctionalConsequenceIds, aminoAcidChange, uniprotAccessions, isEnsemblCanonical, codons, distanceFromFootprint, distanceFromTss, targetId, impact, transcriptId, lofteePrediction, transcriptIndex, consequenceScore","","",pass:variants.sql
+nullability,variants,variant,alleleFrequencies[]/populationName,String,"",Nullable(String),false,true,pass:variants.sql
+nullability,variants,variant,dbXrefs[]/id,String,"",Nullable(String),false,true,pass:variants.sql
+literal_vs_string,variants,variant,dbXrefs[]/source,String,"",Nullable(String),false,true,pass:variants.sql
+nullability,variants,variant,dbXrefs[]/source,String,"",Nullable(String),false,true,pass:variants.sql
+column_order,variants,variant,"","variantId, chromosome, position, referenceAllele, alternateAllele, variantEffect, mostSevereConsequenceId, transcriptConsequences, rsIds, hgvsId, alleleFrequencies, dbXrefs, variantDescription","","variantId, chromosome, position, referenceAllele, alternateAllele, variantEffect, mostSevereConsequenceId, transcriptConsequences, rsIds, dbXrefs, alleleFrequencies, hgvsId, variantDescription","","",pass:variants.sql
+low_cardinality,clinical_indication,clinical_indication,maxClinicalStage,String,"",LowCardinality(String),false,false,named:clinical_indication.sql
+literal_vs_string,clinical_indication,clinical_indication,maxClinicalStage,String,"",LowCardinality(String),false,false,named:clinical_indication.sql
+low_cardinality,clinical_indication,clinical_indication,drugId,String,"",LowCardinality(String),false,false,named:clinical_indication.sql
+low_cardinality,clinical_indication,clinical_indication,diseaseId,String,"",LowCardinality(String),false,false,named:clinical_indication.sql
+column_order,clinical_indication,clinical_indication,"","id, maxClinicalStage, clinicalReportIds, drugId, diseaseId","","id, drugId, diseaseId, maxClinicalStage, clinicalReportIds","","",no
+low_cardinality,clinical_report,clinical_report,clinicalStage,String,"",LowCardinality(String),false,false,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,clinicalStage,String,"",LowCardinality(String),false,false,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,type,String,"",Nullable(String),false,true,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,type,String,"",Nullable(String),false,true,pass:clinical_report.sql
+low_cardinality,clinical_report,clinical_report,source,String,"",LowCardinality(String),false,false,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,provider,String,"",String,false,false,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,drugs,"Array(Tuple(drugFromSource String, drugId Nullable(String)))","","Array(Tuple(drugFromSource String, drugId String))",true,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,drugs[]/drugId,Nullable(String),"",String,true,false,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,countries,Array(String),"",Array(String),true,false,pass:clinical_report.sql
+struct_nullability,clinical_report,clinical_report,trialSponsor,"Tuple(agencyClass String, name String)","","Tuple(agencyClass Nullable(String), name Nullable(String))",true,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,trialSponsor/agencyClass,String,"",Nullable(String),false,true,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,trialSponsor/name,String,"",Nullable(String),false,true,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,diseases,"Array(Tuple(diseaseFromSource String, diseaseId Nullable(String)))","","Array(Tuple(diseaseFromSource String, diseaseId String))",true,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,diseases[]/diseaseId,Nullable(String),"",String,true,false,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,trialLiterature,"Array(Tuple(id Nullable(String), type String))","","Array(Tuple(id String, type String))",true,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,trialLiterature[]/id,Nullable(String),"",String,true,false,named:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,trialLiterature[]/type,String,"",String,false,false,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,sideEffects,"Array(Tuple(diseaseId String, diseaseFromSource String))","","Array(Tuple(diseaseId Nullable(String), diseaseFromSource Nullable(String)))",true,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,sideEffects[]/diseaseId,String,"",Nullable(String),false,true,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,sideEffects[]/diseaseFromSource,String,"",Nullable(String),false,true,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,trialStudyType,Nullable(String),"",Nullable(String),true,true,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,qualityControls,Array(String),"",Array(String),true,false,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,qualityControls[],String,"",String,false,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,title,String,"",Nullable(String),false,true,pass:clinical_report.sql
+list_nullability,clinical_report,clinical_report,trialStopReasonCategories,Array(String),"",Array(String),true,false,pass:clinical_report.sql
+literal_vs_string,clinical_report,clinical_report,trialStopReasonCategories[],String,"",String,false,false,pass:clinical_report.sql
+nullability,clinical_report,clinical_report,url,String,"",Nullable(String),false,true,pass:clinical_report.sql
+column_order,clinical_report,clinical_report,"","id, clinicalStage, origin, type, source, provider, drugs, countries, trialDescription, phaseFromSource, trialOfficialTitle, trialSponsor, diseases, trialLiterature, sideEffects, trialPhase, trialWhyStopped, trialStudyType, qualityControls, trialPrimaryPurpose, title, trialNumberOfArms, trialOverallStatus, year, trialStopReasonCategories, url, trialStartDate","","id, source, clinicalStage, origin, phaseFromSource, provider, type, title, trialStudyType, trialDescription, trialNumberOfArms, trialStartDate, trialLiterature, trialOverallStatus, trialWhyStopped, trialPrimaryPurpose, trialPhase, trialStopReasonCategories, trialSponsor, qualityControls, diseases, drugs, countries, year, sideEffects, trialOfficialTitle, url","","",pass:clinical_report.sql
+low_cardinality,clinical_target,clinical_target,drugId,String,"",LowCardinality(String),false,false,named:clinical_target.sql
+low_cardinality,clinical_target,clinical_target,targetId,String,"",LowCardinality(String),false,false,named:clinical_target.sql
+struct_nullability,clinical_target,clinical_target,diseases[],"Tuple(diseaseFromSource String, diseaseId Nullable(String))","","Tuple(diseaseFromSource String, diseaseId String)",true,false,named:clinical_target.sql
+nullability,clinical_target,clinical_target,diseases[]/diseaseId,Nullable(String),"",String,true,false,named:clinical_target.sql
+low_cardinality,clinical_target,clinical_target,maxClinicalStage,String,"",LowCardinality(String),false,false,named:clinical_target.sql
+literal_vs_string,clinical_target,clinical_target,maxClinicalStage,String,"",LowCardinality(String),false,false,named:clinical_target.sql
+column_order,clinical_target,clinical_target,"","id, drugId, targetId, diseases, clinicalReportIds, maxClinicalStage","","id, drugId, targetId, diseases, maxClinicalStage, clinicalReportIds","","",no
