@@ -564,7 +564,7 @@ not serve; the API's `AggregationType` reads `association_time_series`, built fr
 - `evidence.sql` `ORDER BY` `datasourceId` (and any sort key on an Enum column) now sorts by the Enum's order (the \
 API's `Datasource` order), not alphabetically.
 - Served via the hand-written `targets` table; type unchanged until piece 3: `homology.homologyType`, \
-`homology.isHighConfidence` (String → Bool in the model), `target_tractability.modality`, \
+`target_tractability.modality`, \
 `target.genomicLocation.chromosome`, `target.go[].evidence`, `target.go[].aspect`, \
 `target.constraint[].constraintType`. pts `target_view` keeps writing what `targets.sql` expects.
 """

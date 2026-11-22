@@ -273,6 +273,7 @@ evidence,variantFunctionalConsequenceId,nullability,evidence union (piece 2),Nul
 evidence,variantHgvsId,model_only,API addition (piece 2),,Nullable(String),eva: nulls 20/3670754 | eva_somatic: nulls 0/8875,pass:evidence.sql,open
 evidence,warningMessage,ddl_only,API removal (piece 2),Nullable(String),,absent: strict validation clean on every member with output,pass:evidence.sql,open
 go,namespace,low_cardinality,ClickHouse follows model; String → Enum,LowCardinality(String),"Enum8('biological_process' = 1, 'molecular_function' = 2, 'cellular_component' = 3)",nulls 0/48340; distinct biological_process · cellular_component · molecular_function,pass:go.sql,open
+homology,isHighConfidence,api_follow_up,"`isHighConfidence` String → Bool: changes in BigQuery, the published parquet and croissant; ClickHouse `targets` keeps `'1'`/`'0'` via pts `target_view` until piece 3",,,,,open
 hpo,dbXRefs,model_only,API addition (piece 2),,Array(String),nulls 25636/32180,pass:hpo.sql,open
 hpo,namespace,ddl_only,API removal (piece 2),Array(String),,absent: strict validation clean,pass:hpo.sql,open
 hpo,obsoleteTerms,model_only,API addition (piece 2),,Array(String),nulls 29153/32180,pass:hpo.sql,open
