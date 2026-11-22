@@ -74,8 +74,31 @@ def register() -> list[dict[str, str]]:
         return list(reader)
 
 
+#: The header each reader of a committed `docs/*.csv` expects.
+DOCS_HEADERS = {
+    'phase5_api_follow_ups.csv': ['dataset', 'field', 'follow_up'],
+    'phase5_cast_back.csv': ['dataset', 'field', 'table', 'path', 'served'],
+    'phase5_drift_before.csv': schema_drift.COLUMNS,
+    'phase5_landing_before.csv': ['dataset', 'field', 'ddl_type', 'position'],
+    'phase5_register.csv': COLUMNS,
+    'phase5_register_piece1.csv': COLUMNS,
+    'phase5_sql_edits.csv': ['dataset', 'field', 'edit', 'table', 'served'],
+}
+
+
+@pytest.mark.parametrize('path', sorted((ROOT / 'docs').glob('*.csv')), ids=lambda p: p.name)
+def test_docs_csv_parses(path):
+    """Every committed `docs/*.csv` has the header its reader expects and that many cells on every row."""
+    assert path.name in DOCS_HEADERS, f'{path.name}: no expected header in DOCS_HEADERS'
+    with path.open(newline='') as fh:
+        rows = list(csv.reader(fh))
+    assert rows and rows[0] == list(DOCS_HEADERS[path.name]), f'{path.name}: header {rows[:1]}'
+    short = [i for i, r in enumerate(rows[1:], 2) if len(r) != len(rows[0])]
+    assert not short, f'{path.name}: lines {short} have the wrong number of cells'
+
+
 CONFIG = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-SUPERSEDED = 'superseded by ppp_only'
+SUPERSEDED ='superseded by ppp_only'
 SUPERSEDED_SQL = 'superseded by serving_sql'
 
 
