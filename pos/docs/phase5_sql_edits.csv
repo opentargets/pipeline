@@ -1,3 +1,1 @@
 dataset,field,edit,table,served
-literature_entity_lut,month,"serving SQL: ifNull(month, 0): a sort key cannot be Nullable; null served as 0, as before",literature_entity_lut,UInt8
-literature_entity_lut,year,"serving SQL: ifNull(year, 0): a sort key cannot be Nullable; null served as 0, as before",literature_entity_lut,UInt16

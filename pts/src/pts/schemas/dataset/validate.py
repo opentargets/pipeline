@@ -129,7 +129,7 @@ def validation_report(path: str, model: type[DatasetModel]) -> pl.DataFrame:
             )
             summaries.append(summary)
         if hashes is not None:
-            if set(key) <= set(stored.columns):  # as stored, as `_duplicate_keys` reads the key again
+            if set(key) <= set(stored.columns):  # hash the stored key, not the Enum-cast frame
                 hashes.add(stored.select(_key_hash(key)).to_series())
             else:
                 hashes = None  # the missing key column is reported above; the key cannot be checked

@@ -24,7 +24,8 @@ def test_clickhouse_load_fails_on_no_parquet(tmp_path, monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
     spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets)
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
+        product='platform',
     )
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     with pytest.raises(ClickhouseLoadError, match=r'dataset t in .*release_data/output/t'):
@@ -42,7 +43,8 @@ def test_clickhouse_load_optional_runs_scripts_on_no_parquet(tmp_path, monkeypat
     client = MagicMock()
     monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
     spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets)
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
+        product='platform',
     )
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
@@ -74,7 +76,8 @@ def test_clickhouse_load_runs_split_statements(tmp_path, monkeypatch):
     )
 
     spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets)
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
+        product='platform',
     )
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
@@ -103,7 +106,8 @@ def test_clickhouse_load_derived_runs_scripts_without_input(tmp_path, monkeypatc
     inserted = []
     monkeypatch.setattr(clickhouse_load, 'insert_file', lambda *a, **kw: inserted.append(a))
     spec = ClickhouseLoadSpec(
-        name='clickhouse_load d', dataset='d', data_dir_parent='release_data', dataset_config_path=str(datasets)
+        name='clickhouse_load d', dataset='d', data_dir_parent='release_data', dataset_config_path=str(datasets),
+        product='platform',
     )
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
@@ -140,7 +144,8 @@ def _two_file_task(tmp_path, monkeypatch, failures):
     monkeypatch.setattr(clickhouse_load, 'insert_file', insert)
     client.command.side_effect = lambda sql: events.append(('command', sql))
     spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets)
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
+        product='platform',
     )
     return ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path))), events
 

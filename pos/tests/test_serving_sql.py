@@ -35,6 +35,8 @@ with (ROOT / 'docs' / 'phase5_sql_edits.csv').open(newline='') as _fh:
     SQL_EDITS = list(csv.DictReader(_fh))
 with (ROOT / 'docs' / 'phase5_cast_back.csv').open(newline='') as _fh:
     CAST_BACK = list(csv.DictReader(_fh))
+with (ROOT / 'docs' / 'phase5_derived_changes.csv').open(newline='') as _fh:
+    DERIVED = list(csv.DictReader(_fh))
 # read at import: the autouse fixture clears POS_* before each test
 SERVER = os.environ.get('POS_TEST_CLICKHOUSE', 'localhost:8123')
 REQUIRE = os.environ.get('POS_REQUIRE_CLICKHOUSE') == '1'
@@ -134,6 +136,11 @@ def test_serving_sql(product):
             found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
             assert found is not None, f'phase5_cast_back.csv: {entry}: no {entry["path"]}'
             assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_cast_back.csv: {entry}'
+        for entry in DERIVED:
+            served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': entry['field']})
+            assert len(served.result_rows) == 1, f'phase5_derived_changes.csv: {entry}: no column'
+            found = parse_type(served.result_rows[0][0])
+            assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_derived_changes.csv: {entry}'
 
 
 def _as_strings(dtype):
