@@ -60,6 +60,9 @@ UNLANDED = frozenset({'model_only', 'struct_field_missing'})
 NOTES = {
     ('interaction', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
     ('interaction_evidence', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
+    ('clinical_report', 'provider', 'literal_vs_string'): (
+        'the API `Provider` enum lacks FDA (DailyMed rows) and spells ChEMBL `CHEMBL`: add FDA'
+    ),
 }
 
 
@@ -276,9 +279,11 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
         added = _marker_added([r for r in rows if r['model'] not in no_output])
         return 'marker' if added else 'ClickHouse follows model'
     if category == 'open_vs_enum':
-        return 'marker' if _marker_added(rows) else 'open string (piece 2)'
+        if _marker_added(rows):
+            return 'marker'
+        return 'Enum in the model' if after and parse_type(after).name.startswith('Enum') else 'open string (piece 2)'
     if category == 'literal_vs_string':
-        return 'String kept, no Enum'
+        return 'String → Enum' if after and parse_type(after).name.startswith('Enum') else 'String kept, no Enum'
     if category == 'list_nullability':
         return 'null list loads as [] (model unchanged)'
     if category == 'struct_nullability':
@@ -489,11 +494,25 @@ locations; the API served empty arrays). The API drops them; disease locations c
 `publicationJournal` and `condition`, interaction `speciesB.scientificName`.
 - Fields of a nullable struct stay Nullable (clinical_report `trialSponsor/*`, clinical_target `diseases[]`): a \
 Tuple cannot be NULL, so a non-null field would turn a null struct into `''`.
-- The 3 `chromosome` Enums stay open strings (API open); `transcript.strand` and `exons[].strand` get an Enum8 marker.
+- The 3 `chromosome` Enums stay open strings (API open); `transcript.strand` and `exons[].strand` get an Enum8 marker. \
+Superseded by the Enums below.
 - Rows with no 2612-3 evidence take `after` from the model; check those datasets' next outputs first (otar, the \
 assays and validationReadouts of ot_crispr_validation and encore, the encore struct order).
 - Model-nullable scalars all have nulls in the data, so they stay nullable and ClickHouse becomes Nullable.
 - `struct_order` rows are `open` where served (Tuple field order is part of the type); `column_order` is `none`.
+"""
+
+
+ENUMS = """
+## Enums (David, 2026-11-22)
+
+Closed vocabularies are Enums in the models (`ot_datamodels.vocabularies`), so ClickHouse gets an `Enum8` in the \
+vocabulary's order: today's ClickHouse Enums (chromosome, study type, interaction source, fine-mapping method), Open \
+Targets' own vocabularies (datasource, datatype, clinical stage, provider, origin...) and fixed external standards \
+(ClinicalTrials.gov, GO, HPO, ChEMBL, Ensembl, gnomAD, ClinPGx). A column that becomes an Enum has a row with \
+follow-up `open` where served. `homology.isHighConfidence` becomes a Bool; homology reaches ClickHouse only through \
+`view/target_view` (`targets`: no model yet, hand-written `Nullable(String)`), so it has no row here. \
+The API's `Provider` enum lacks `FDA`, which `clinical_report` has (DailyMed): add it (`clinical_report.provider` row).
 """
 
 
@@ -528,7 +547,7 @@ def note(rows: list[dict[str, str]], changes: Changes) -> str:
     frame = pl.DataFrame(rows)
     counts = frame.group_by('outcome').agg(rows=pl.len(), open=(pl.col('API follow-up') == 'open').sum())
     n_open = sum(r['API follow-up'] == 'open' for r in rows)
-    out = [NOTE_HEAD, HINTS, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
+    out = [NOTE_HEAD, HINTS, ENUMS, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
            '| --- | --- | --- | --- | --- | --- |']  # fmt: skip
     for o, r in changes:
         after = f'`{o["after"]}` → `{r["after"]}`' if r['after'] else f'`{o["after"]}` → empty'
