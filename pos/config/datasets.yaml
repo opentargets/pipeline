@@ -97,8 +97,8 @@ clickhouse:
     table: evidence_log
     input_dir: output
     models: 'evidence_*'
-    # the members with no 2612-3 output; each member gets its own table, then all load into evidence_log
-    optional_models: [evidence_encore, evidence_ot_crispr, evidence_ot_crispr_validation]
+    # each member gets its own table, then all load into evidence_log; list here the members allowed to have no output
+    optional_models: []
     postload_script: config/clickhouse/scripts/evidence.sql
   go:
     table: gene_ontology_log

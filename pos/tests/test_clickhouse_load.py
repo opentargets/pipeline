@@ -394,3 +394,40 @@ def test_evidence_retry_truncates_every_table(tmp_path, monkeypatch):
     with pytest.raises(OperationalError):
         _run(task)
     assert not any(e[1].startswith('DROP') for e in events)
+
+
+def test_failing_member_file_names_its_source_and_types(tmp_path, monkeypatch):
+    parts = {'evidence_a': 1, 'evidence_b': 1}
+    errors = [DatabaseError('code: 70'), DatabaseError('code: 70')]
+    task, _ = _generated_task(tmp_path, monkeypatch, EVIDENCE, parts, insert_fail={'evidence_b_log': errors})
+    create = 'CREATE TABLE IF NOT EXISTS `evidence_b_log` (`id` String, `extra` String) ENGINE = Log'
+    with pytest.raises(ClickhouseLoadError) as raised:
+        _run(task)
+    message = str(raised.value)
+    assert 'loading evidence_b into evidence_b_log failed on ' in message
+    assert 'release_data/output/evidence_b/part-0.parquet' in message
+    assert create in message
+
+
+def test_models_matching_nothing_fail_before_connecting(tmp_path, monkeypatch):
+    datasets = EVIDENCE.replace("'evidence_*'", "'evidence_none_*'")
+    task, events = _generated_task(tmp_path, monkeypatch, datasets, {})
+    with pytest.raises(ValueError, match=r"evidence_log: models 'evidence_none_\*' matches no model for platform"):
+        _run(task)
+    assert events == []
+
+
+def test_scripts_log_every_statement(tmp_path, monkeypatch, info):
+    pre = tmp_path / 'pre.sql'
+    pre.write_text('CREATE TABLE d ENGINE = Log AS SELECT 1;\n')
+    post = tmp_path / 'post.sql'
+    post.write_text('CREATE TABLE e ENGINE = Log AS SELECT * FROM d;\nDROP TABLE d;\n')
+    datasets = (
+        f'clickhouse:\n  d:\n    table: d\n    derived: true\n    preload_script: {pre}\n    postload_script: {post}\n'
+    )
+    task, events = _generated_task(tmp_path, monkeypatch, datasets, {})
+    _run(task)
+    statements = ['CREATE TABLE d ENGINE = Log AS SELECT 1', 'CREATE TABLE e ENGINE = Log AS SELECT * FROM d',
+                  'DROP TABLE d']  # fmt: skip
+    assert [e[1] for e in events] == statements
+    assert [line for line in info if line in statements] == statements

@@ -50,15 +50,17 @@ class ClickhouseLoad(Task):
             self._post_load_sql = self._entry.get('postload_script')
             self._models = self._entry.get('models')
             self._optional_models = set(self._entry.get('optional_models', []))
+            self._file: Path | None = None  # the file being inserted
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
 
     @report
     def run(self) -> Task:
         if self._models is not None:
+            ddl = dict(ddl_for(self._entry, self.spec.product))
             member_files = self._member_files()
             client = self._connect()
-            self._load_members(client, member_files)
+            self._load_members(client, ddl, member_files)
         else:
             files = [] if self._derived else self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
             client = self._connect()
@@ -102,13 +104,18 @@ class ClickhouseLoad(Task):
                 found[name] = files
         return found
 
-    def _load_members(self, client, member_files: dict[str, list[Path]]) -> None:
+    def _load_members(self, client, ddl: dict[str, str], member_files: dict[str, list[Path]]) -> None:
         """Each member into its own table, then all of them into the union table; the member tables are dropped."""
-        ddl = dict(ddl_for(self._entry, self.spec.product))
         loaded = [m for m in members(self._models, self.spec.product) if m.dataset_name in member_files]
         for model in loaded:
-            self._create(client, ddl[member_table(model)])
-            self._load(client, member_table(model), member_files[model.dataset_name])
+            table, create = member_table(model), ddl[member_table(model)]
+            self._create(client, create)
+            try:
+                self._load(client, table, member_files[model.dataset_name])
+            except ClickHouseError as e:
+                raise ClickhouseLoadError(
+                    f'loading {model.dataset_name} into {table} failed on {self._file}: {e}; its table: {create}'
+                ) from e
         self._create(client, ddl[self._table_name])
         inserts = []
         for model in loaded:
@@ -151,15 +158,17 @@ class ClickhouseLoad(Task):
         count = client.command(f'SELECT count() FROM {quote_identifier(table)}')  # noqa: S608 quoted identifier
         logger.info(f'{table}: {count} rows')
 
-    @staticmethod
-    def _insert(client, table: str, files: list[Path]) -> None:
+    def _insert(self, client, table: str, files: list[Path]) -> None:
         for file in files:
+            self._file = file
             logger.debug(f'Inserting file {file} into Clickhouse table {table}')
             insert_file(client, table, str(file), fmt='Parquet', settings=INSERT_SETTINGS)
 
     def _get_parquet_path(self) -> Path:
         return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')
 
-    def _execute_script(self, client, script: str) -> None:
+    @staticmethod
+    def _execute_script(client, script: str) -> None:
         for sql in split_statements(Path(script).read_text()):
+            logger.info(sql)
             client.query(sql)

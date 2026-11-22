@@ -301,6 +301,8 @@ def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
     if 'models' not in entry:
         return [union]
     found = members(entry['models'], product)
+    if not found:
+        raise ValueError(f'{entry["table"]}: models {entry["models"]!r} matches no model for {product}')
     return [(member_table(m), create_table(member_table(m), columns(m))) for m in found] + [union]
 
 

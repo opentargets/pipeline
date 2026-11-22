@@ -256,6 +256,8 @@ def test_ddl_for(monkeypatch):
         ('u_log', create_table('u_log', union_columns([MemberA, MemberB]))),
     ]
     assert ddl_for({'table': 'v', 'preload_script': 'v.sql'}, 'platform') == []
+    with pytest.raises(ValueError, match=r"^p_log: models 'toy_\*' matches no model for platform$"):
+        ddl_for({'table': 'p_log', 'models': 'toy_*'}, 'platform')
 
 
 def test_pos_ddl_prints_one_dataset(monkeypatch, capsys):
