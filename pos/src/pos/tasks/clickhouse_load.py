@@ -81,12 +81,13 @@ class ClickhouseLoad(Task):
             files = [] if self._derived else self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
             client = self._connect()
             ddl = ddl_for(self._entry, self.spec.product)
-            if ddl:
-                self._create(client, ddl[0][1])
+            create = ddl[0][1] if ddl else None
+            if create is not None:
+                self._create(client, create)
             else:
                 self._execute_script(client, self._pre_load_sql)
             if not self._derived:
-                self._load(client, self._table_name, files)
+                self._load_named(client, self.spec.dataset, self._table_name, files, create)
         if self._post_load_sql is not None:
             self._execute_script(client, self._post_load_sql)
         return self
@@ -126,12 +127,7 @@ class ClickhouseLoad(Task):
         for model in loaded:
             table, create = member_table(model), ddl[member_table(model)]
             self._create(client, create)
-            try:
-                self._load(client, table, member_files[model.dataset_name])
-            except ClickHouseError as e:
-                raise ClickhouseLoadError(
-                    f'loading {model.dataset_name} into {table} failed on {self._file}: {e}; its table: {create}'
-                ) from e
+            self._load_named(client, model.dataset_name, table, member_files[model.dataset_name], create)
         self._create(client, ddl[self._table_name])
         inserts = union_inserts(self._table_name, loaded)
         try:
@@ -153,6 +149,14 @@ class ClickhouseLoad(Task):
     def _create(client, sql: str) -> None:
         logger.info(sql)
         client.command(sql)
+
+    def _load_named(self, client, name: str, table: str, files: list[Path], create: str | None) -> None:
+        """`_load`; an error the retry does not clear names the dataset, the file and the generated table."""
+        try:
+            self._load(client, table, files)
+        except ClickHouseError as e:
+            its_table = f'; its table: {create}' if create is not None else ''
+            raise ClickhouseLoadError(f'loading {name} into {table} failed on {self._file}: {e}{its_table}') from e
 
     def _load(self, client, table: str, files: list[Path]) -> None:
         """Insert the files; on an error truncate the table and insert them all once more."""

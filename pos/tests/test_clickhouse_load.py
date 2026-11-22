@@ -156,9 +156,14 @@ def test_clickhouse_load_truncates_and_reloads_every_file_after_a_failed_insert(
 
 def test_clickhouse_load_fails_when_the_reload_fails_too(tmp_path, monkeypatch):
     task, events = _two_file_task(tmp_path, monkeypatch, [DatabaseError('code: 159'), DatabaseError('code: 159')])
-    with pytest.raises(DatabaseError):
+    with pytest.raises(ClickhouseLoadError) as raised:
         ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
     assert [e for e in events if e[0] == 'command'] == [('command', 'TRUNCATE TABLE `t_log`')]
+    message = str(raised.value)
+    assert 'loading t into t_log failed on ' in message
+    assert 'release_data/output/t/part-1.parquet' in message
+    assert 'its table' not in message
+    assert isinstance(raised.value.__cause__, DatabaseError)
 
 
 # generated DDL
@@ -369,7 +374,7 @@ def test_platform_skips_ppp_models(tmp_path, monkeypatch):
     assert any(e[1].startswith('CREATE TABLE IF NOT EXISTS `evidence_log`') and '`assays`' in e[1] for e in events)
 
 
-def test_evidence_retry_truncates_every_table(tmp_path, monkeypatch):
+def test_evidence_retry_truncates_and_reloads_only_the_failing_table(tmp_path, monkeypatch):
     parts = {'evidence_a': 2, 'evidence_b': 1}
     task, events = _generated_task(tmp_path, monkeypatch, EVIDENCE, parts,
                                    insert_fail={'evidence_b_log': [OperationalError('timed out')]})  # fmt: skip
@@ -407,6 +412,18 @@ def test_failing_member_file_names_its_source_and_types(tmp_path, monkeypatch):
     assert 'loading evidence_b into evidence_b_log failed on ' in message
     assert 'release_data/output/evidence_b/part-0.parquet' in message
     assert create in message
+
+
+def test_failing_model_file_names_its_source_and_types(tmp_path, monkeypatch):
+    datasets = 'clickhouse:\n  toy:\n    table: toy_log\n    input_dir: output/toy\n    model: toy\n'
+    errors = [DatabaseError('code: 70'), DatabaseError('code: 70')]
+    task, _ = _generated_task(tmp_path, monkeypatch, datasets, {'toy': 1}, insert_fail={'toy_log': errors})
+    with pytest.raises(ClickhouseLoadError) as raised:
+        _run(task)
+    message = str(raised.value)
+    assert 'loading toy into toy_log failed on ' in message
+    assert 'release_data/output/toy/part-0.parquet' in message
+    assert 'CREATE TABLE IF NOT EXISTS `toy_log` (`id` String) ENGINE = Log' in message
 
 
 def test_models_matching_nothing_fail_before_connecting(tmp_path, monkeypatch):
