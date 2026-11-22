@@ -9,9 +9,12 @@ import pytest
 import yaml
 from loguru import logger
 from ot_datamodels.discovery import discover_datasets
+from otter.scratchpad.model import Scratchpad
+from otter.tasks.explode import ExplodeSpec
 
 from pos import core
 from pos.run import PRODUCTS, parse_release_uri
+from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
 ROOT = Path(__file__).parents[1]
 CONFIG = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
@@ -148,14 +151,14 @@ def load(tmp_path, monkeypatch):
     lines: list[str] = []
     sink = logger.add(lambda m: lines.append(str(m)), level='INFO')
 
-    def _load(step: str, run: str = 'platform-2612-3', scratch: bool = False):
+    def _load(step: str, run: str = 'platform-2612-3', scratch: bool = False, config: Path | None = None):
         if scratch:
             monkeypatch.setenv('POS_SCRATCH', '1')
         else:
             monkeypatch.delenv('POS_SCRATCH', raising=False)
-        config = str(ROOT / 'config' / 'config.yaml')
         uri = f'gs://open-targets-pipeline-runs/do/{run}'
-        argv = ['pos', '-s', step, '-c', config, '-w', str(tmp_path / 'work'), '-r', uri]
+        config = config or ROOT / 'config' / 'config.yaml'
+        argv = ['pos', '-s', step, '-c', str(config), '-w', str(tmp_path / 'work'), '-r', uri]
         monkeypatch.setattr(sys, 'argv', argv)
         runner = core.setup()
         return runner, [runner.task_registry.build(s).spec for s in runner.specs]
@@ -211,6 +214,48 @@ def test_every_clickhouse_load_passes_the_product():
     loads = [s for s in _specs(CONFIG['steps']['backend_clickhouse']) if s['name'].startswith('clickhouse_load ')]
     assert loads
     assert all(s.get('product') == '${product}' for s in loads)
+
+
+def _built_loads(runner) -> list[ClickhouseLoadSpec]:
+    """Every `clickhouse_load` spec of the step as the registry builds it, explode children as `explode` makes them."""
+    built = []
+    for spec in runner.specs:
+        top = runner.task_registry.build(spec).spec
+        if not isinstance(top, ExplodeSpec):
+            built.append(top)
+            continue
+        for each in top.foreach:
+            for child in top.do:
+                pad = Scratchpad({})
+                pad.store(top.each_placeholder, each)
+                built.append(runner.task_registry.build(child.model_validate(pad.replace_dict(child.model_dump()))).spec)
+    return [s for s in built if isinstance(s, ClickhouseLoadSpec)]
+
+
+def test_every_clickhouse_load_builds_with_the_product(load):
+    _load, _ = load
+    for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
+        runner, _ = _load('backend_clickhouse', run=run)
+        loads = _built_loads(runner)
+        assert len(loads) > 30
+        assert {s.product for s in loads} == {product}
+
+
+@pytest.mark.parametrize('where', ['top', 'explode'])
+def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
+    config = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
+    tasks = config['steps']['backend_clickhouse']
+    if where == 'explode':
+        (explode,) = [t for t in tasks if t['name'].startswith('explode ')]
+        tasks = explode['do']
+    first = next(t for t in tasks if t['name'].startswith('clickhouse_load '))
+    del first['product']
+    path = tmp_path / 'config.yaml'
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    _load, lines = load
+    with pytest.raises(SystemExit):
+        _built_loads(_load('backend_clickhouse', config=path)[0])
+    assert any('product: Field required' in line for line in lines)
 
 
 def test_clickhouse_entries_have_one_ddl_source():
