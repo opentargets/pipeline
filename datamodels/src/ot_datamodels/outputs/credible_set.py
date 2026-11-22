@@ -87,7 +87,13 @@ class CredibleSet(DatasetModel):
         min_length=1, description='Identifier of the study of the credible set'
     )
     studyType: Annotated[
-        Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'], PolarsDtype(pl.Enum)
+        Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'],
+        PolarsDtype(pl.Enum),
+        # the served numbering, not the Literal's order
+        ClickHouseType(
+            "Enum8('tuqtl' = 1, 'pqtl' = 2, 'eqtl' = 3, 'sqtl' = 4, 'sctuqtl' = 5, 'scpqtl' = 6, "
+            "'sceqtl' = 7, 'scsqtl' = 8, 'gwas' = 9)"
+        ),
     ] = Field(description='Type of the study of the credible set (e.g., gwas, eqtl, pqtl)')
     leadVariantId: Annotated[str, Reference('variant', 'variantId')] = Field(
         pattern=VARIANT_ID, description='Lead variant of the credible set'
