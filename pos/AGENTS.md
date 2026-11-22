@@ -203,7 +203,9 @@ column order change from `docs/phase5_landing_before.csv` to the generated Platf
 `column_order` rows). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
 add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
-to `open` if the ClickHouse type changes and a serving script reads the column. Do not regenerate the file.
+to `open` if the ClickHouse type changes and a serving script reads the column. Regenerate the file with
+`scripts/build_register.py` from the committed inputs in `docs/` (API changes that are no schema diff go in
+`docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 
 ## Croissant
 

@@ -19,6 +19,8 @@ row. The builder reads no landing DDL. `docs/phase5_sql_edits.csv` lists the
 serving-script edits a generated type forced (`dataset, field, edit, table, served`): one `serving_sql` row each,
 `before` the landing type at 19920e46, `after` the type `table` serves (`tests/test_serving_sql.py` checks it).
 Where `after` is the landing type, the other rows of that field are `superseded by serving_sql`, follow-up `none`.
+`docs/phase5_api_follow_ups.csv` lists the API changes that are no schema diff (`dataset, field, follow_up`): one
+`api_follow_up` row each, outcome the text, follow-up `open`.
 `docs/phase5_cast_back.csv` lists the landing-only changes a serving script casts back (`dataset, field, table,
 path, served`; `tests/test_serving_sql.py` checks the type at `path` in `table`): where `served` is the landing
 type, the `type_unrecorded` row's follow-up is `none`.
@@ -60,9 +62,6 @@ UNLANDED = frozenset({'model_only', 'struct_field_missing'})
 NOTES = {
     ('interaction', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
     ('interaction_evidence', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
-    ('clinical_report', 'provider', 'literal_vs_string'): (
-        'the API `Provider` enum lacks FDA (DailyMed rows) and spells ChEMBL `CHEMBL`: add FDA'
-    ),
 }
 
 
@@ -90,6 +89,8 @@ for _r in _FROZEN:
     LANDING_ORDER.setdefault(_r['dataset'], []).append(_r['field'])
 with (DOCS / 'phase5_sql_edits.csv').open(newline='') as _fh:
     SQL_EDITS = list(csv.DictReader(_fh))
+with (DOCS / 'phase5_api_follow_ups.csv').open(newline='') as _fh:
+    API_FOLLOW_UPS = list(csv.DictReader(_fh))
 with (DOCS / 'phase5_cast_back.csv').open(newline='') as _fh:
     CAST_BACK = {(r['dataset'], r['field']): r for r in csv.DictReader(_fh)}
 
@@ -323,6 +324,12 @@ def sql_edit(edit: dict[str, str], evidence: Evidence) -> dict[str, str]:
     return dict(zip(COLUMNS, values, strict=True))
 
 
+def follow_up_row(entry: dict[str, str]) -> dict[str, str]:
+    """The `api_follow_up` row of one API change that is no schema diff."""
+    values = (entry['dataset'], entry['field'], 'api_follow_up', entry['follow_up'], '', '', '', '', 'open')
+    return dict(zip(COLUMNS, values, strict=True))
+
+
 def same(a: str, b: str) -> bool:
     return canonical(parse_type(a)) == canonical(parse_type(b))
 
@@ -417,6 +424,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             groups[dataset, col, 'ppp_only'] = [m | cells for m in ms]
     no_output = evidence.no_output
     out = [sql_edit(e, evidence) for e in SQL_EDITS]
+    out += [follow_up_row(f) for f in API_FOLLOW_UPS]
     for (dataset, path, category), rows in groups.items():
         first = rows[0]
         read = first['serving_read']
@@ -482,6 +490,7 @@ column).
 - `serving read`: `named:<script>` names the column, `pass:<script>` reads it through `SELECT *`; for a \
 column not loaded today, the read it would get once loaded.
 - `serving_sql`: a serving-script edit a generated type forced; `after` is the type the serving table serves.
+- `api_follow_up`: an API change that is no schema diff; the outcome says what.
 - `API follow-up`: `open` when the ClickHouse type changes from `before` to `after` and a serving script reads \
 the column (column order excepted); else `none`.
 """
@@ -522,7 +531,9 @@ Targets' own vocabularies (datasource, datatype, clinical stage, provider, origi
 (ClinicalTrials.gov, GO, HPO, ChEMBL, Ensembl, gnomAD, ClinPGx). A column that becomes an Enum has a row with \
 follow-up `open` where served, and its outcome says `String → Enum`.
 
-- `Provider`: the API enum lacks `FDA`, which `clinical_report` has (DailyMed): add it (`clinical_report.provider` row).
+- API enums that disagree with the data's vocabulary (`Provider` lacks `FDA` and spells `CHEMBL`; `Chromosome` is \
+`chr`-prefixed; `AggregationType` lacks `datatypeId`) have an `api_follow_up` row each, from \
+`pos/docs/phase5_api_follow_ups.csv`.
 - `evidence.sql` `ORDER BY` `datasourceId` (and any sort key on an Enum column) now sorts by the Enum's order (the \
 API's `Datasource` order), not alphabetically.
 - Served via the hand-written `targets` table; type unchanged until piece 3: `homology.homologyType`, \

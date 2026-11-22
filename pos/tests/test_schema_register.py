@@ -21,6 +21,7 @@ CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
 SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
 SQL_EDITS = ROOT / 'docs' / 'phase5_sql_edits.csv'
+FOLLOW_UPS = ROOT / 'docs' / 'phase5_api_follow_ups.csv'
 CAST_BACK = ROOT / 'docs' / 'phase5_cast_back.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
 ORDER = {'struct_order', 'column_order'}
@@ -114,6 +115,9 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
     kept = {(r['dataset'], r['field']) for r in register if r['category'] == 'serving_sql' and not _changed(r)}
     cast_back = _cast_back()
     for row, key in zip(register, keys, strict=True):
+        if row['category'] == 'api_follow_up':
+            assert row['API follow-up'] == 'open', key
+            continue
         served = row['serving read'] != 'no' and row['category'] != 'column_order'
         superseded = row['outcome'] in {SUPERSEDED, SUPERSEDED_SQL}
         if row['outcome'] == SUPERSEDED_SQL:
@@ -127,10 +131,10 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
 
 def test_after_matches_the_generator(register):
     """`after` is the generated Platform type; empty where the generated table lacks the column."""
-    tables = {d: _platform(d) for d in {r['dataset'] for r in register}}
+    tables = {d: _platform(d) for d in {r['dataset'] for r in register if r['category'] != 'api_follow_up'}}
     for row in register:
         key = (row['dataset'], row['field'], row['category'])
-        if row['category'] == 'serving_sql':
+        if row['category'] in {'serving_sql', 'api_follow_up'}:
             continue
         cols = tables[row['dataset']]
         found = type_at(cols, row['field']) if cols is not None else None
@@ -177,6 +181,17 @@ def test_every_sql_edit_has_a_row(register):
     for key, edit in edits.items():
         assert rows[key]['outcome'] == edit['edit'], key
         assert rows[key]['after'] == edit['served'], key
+
+
+def test_every_api_follow_up_has_a_row(register):
+    """One open `api_follow_up` row per line of `phase5_api_follow_ups.csv`, the text its outcome."""
+    with FOLLOW_UPS.open(newline='') as fh:
+        entries = {(e['dataset'], e['field']): e['follow_up'] for e in csv.DictReader(fh)}
+    rows = {(r['dataset'], r['field']): r for r in register if r['category'] == 'api_follow_up'}
+    assert sorted(rows) == sorted(entries)
+    for key, text in entries.items():
+        assert rows[key]['outcome'] == text, key
+        assert rows[key]['API follow-up'] == 'open', key
 
 
 def test_every_landing_change_has_a_row(register):
