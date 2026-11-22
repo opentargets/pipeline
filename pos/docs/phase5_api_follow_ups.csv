@@ -1,9 +1,7 @@
 dataset,field,follow_up
 clinical_report,provider,"API `Provider` enum lacks `FDA` (DailyMed rows) and spells ChEMBL `CHEMBL`; data and Enum say `ChEMBL`"
 colocalisation,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
-credible_sets,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT` (also the `leadChromosome` of the credible-set views)"
+credible_sets,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT` (also the `leadChromosome` of the credible-set views, `CredibleSetColocalisation.leadChromosome` and `EvidenceGwasCredibleSets.leadChromosome`)"
 credible_set_variant,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
 enhancer_to_gene,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
-variants,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
-association_by_datatype_direct,aggregationType,API `AggregationType` enum lacks `datatypeId`
-association_by_datatype_indirect,aggregationType,API `AggregationType` enum lacks `datatypeId`
+variants,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT` (also `EvidenceEva.variantChromosome`)"

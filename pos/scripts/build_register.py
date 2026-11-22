@@ -63,6 +63,13 @@ NOTES = {
     ('interaction', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
     ('interaction_evidence', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
 }
+#: Outcome text a row's generated type adds.
+OUTCOME_NOTES = {
+    ('evidence', 'datasourceId', 'literal_vs_string'): (
+        '`evidence_by_variant` and `evidence_by_disease_and_target` (`ORDER BY (datasourceId, …)`) sort in the '
+        "API's `Datasource` order"
+    ),
+}
 
 
 def _load_drift():
@@ -459,6 +466,8 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             if category not in ORDER and becomes_enum(before, after) and 'Enum' not in result:
                 result = f'{result}; String → Enum'
             follow_up = api_follow_up(category, before, after, read)
+        if (dataset, path, category) in OUTCOME_NOTES:
+            result = f'{result}; {OUTCOME_NOTES[dataset, path, category]}'
         values = (dataset, path, category, result, before, after, text, read, follow_up)
         out.append(dict(zip(COLUMNS, values, strict=True)))
     out += unrecorded(out, evidence)
@@ -532,8 +541,11 @@ Targets' own vocabularies (datasource, datatype, clinical stage, provider, origi
 follow-up `open` where served, and its outcome says `String → Enum`.
 
 - API enums that disagree with the data's vocabulary (`Provider` lacks `FDA` and spells `CHEMBL`; `Chromosome` is \
-`chr`-prefixed; `AggregationType` lacks `datatypeId`) have an `api_follow_up` row each, from \
+`chr`-prefixed) have an `api_follow_up` row each, from \
 `pos/docs/phase5_api_follow_ups.csv`.
+- No API change for `aggregationType`: `datatypeId` is only in `association_by_datatype_*`, which ClickHouse does \
+not serve; the API's `AggregationType` reads `association_time_series`, built from `association_by_datasource_*` \
+(`overall`, `datasourceId`).
 - `evidence.sql` `ORDER BY` `datasourceId` (and any sort key on an Enum column) now sorts by the Enum's order (the \
 API's `Datasource` order), not alphabetically.
 - Served via the hand-written `targets` table; type unchanged until piece 3: `homology.homologyType`, \
