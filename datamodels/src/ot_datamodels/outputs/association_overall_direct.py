@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
+from ot_datamodels.vocabularies import AggregationType, OverallAggregationValue, enum_of
 
 
 class Timeseries(StructModel):
@@ -61,8 +62,12 @@ class AssociationOverallDirect(DatasetModel):
     targetId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id'), PrimaryKey()] = Field(
         pattern=ENSEMBL_GENE_ID, description='Unique identifier for the target'
     )
-    aggregationType: Literal['overall'] = Field(description='How evidence data was aggregated: overall')
-    aggregationValue: Literal['None'] = Field(description='For overall association this column is empty')
+    aggregationType: Annotated[Literal['overall'], enum_of(AggregationType)] = Field(
+        description='How evidence data was aggregated: overall'
+    )
+    aggregationValue: Annotated[OverallAggregationValue, PolarsDtype(pl.Enum)] = Field(
+        description='For overall association this column is empty'
+    )
     associationScore: float = Field(
         ge=0.0, le=1.0, description=('Current disease/target association score of evidence from any datasource')
     )

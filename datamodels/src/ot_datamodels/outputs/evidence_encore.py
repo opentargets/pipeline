@@ -10,6 +10,7 @@ from pydantic import Field
 from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import Biomarker
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class DiseaseCellLines(StructModel):
@@ -84,8 +85,10 @@ class EvidenceEncore(DatasetModel):
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
     biomarkerList: list[Biomarker] = Field(description='List of biomarkers associated with the biological model')
-    datasourceId: Literal['encore'] = Field(description='Identifer of the evidence source')
-    datatypeId: Literal['ot_partner'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['encore'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['ot_partner'], enum_of(Datatype)] = Field(description='Type of the evidence')
     diseaseCellLines: list[DiseaseCellLines] = Field(description='Cancer cell lines used to generate evidence')
     diseaseFromSource: str = Field(min_length=1, description='Disease label from the original source')
     geneticInteractionScore: float = Field(

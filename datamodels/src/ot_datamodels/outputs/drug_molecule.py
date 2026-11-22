@@ -5,10 +5,12 @@ Generated from the 26.12 release output (19,402 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.outputs.patterns import CHEMBL_ID
+from ot_datamodels.vocabularies import ChemblMoleculeType, ClinicalStage
 
 
 class Synonyms(StructModel):
@@ -110,9 +112,8 @@ class DrugMolecule(DatasetModel):
             'bonds, and spatial coordinates'
         ),
     )
-    drugType: str = Field(
-        min_length=1,
-        description=("Classification of the molecule's therapeutic category or chemical class (e.g. Antibody)"),
+    drugType: Annotated[ChemblMoleculeType, PolarsDtype(pl.Enum)] = Field(
+        description="Classification of the molecule's therapeutic category or chemical class (e.g. Antibody)"
     )
     name: str = Field(min_length=1, description='Generic name of the drug molecule')
     parentId: str | None = Field(
@@ -125,21 +126,7 @@ class DrugMolecule(DatasetModel):
     childChemblIds: list[Annotated[str, Field(pattern=CHEMBL_ID)]] | None = Field(
         description='List of Open Targets molecule identifiers of derivative compounds'
     )
-    maximumClinicalStage: Literal[
-        'WITHDRAWAL',
-        'APPROVAL',
-        'PHASE_4',
-        'PREAPPROVAL',
-        'PHASE_3',
-        'PHASE_2_3',
-        'PHASE_2',
-        'PHASE_1_2',
-        'PHASE_1',
-        'EARLY_PHASE_1',
-        'IND',
-        'PRECLINICAL',
-        'UNKNOWN',
-    ] = Field(
-        description=("Display name of the highest clinical stage reached by the drug (e.g. 'approved', 'phase III')")
+    maximumClinicalStage: Annotated[ClinicalStage, PolarsDtype(pl.Enum)] = Field(
+        description="Display name of the highest clinical stage reached by the drug (e.g. 'approved', 'phase III')"
     )
     description: str = Field(min_length=1, description="Summary of the drug's clinical development")

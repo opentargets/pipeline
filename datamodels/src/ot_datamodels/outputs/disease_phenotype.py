@@ -3,19 +3,21 @@
 Generated from the 26.12 release output (168,445 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
+from ot_datamodels.vocabularies import HpoAspect, HpoEvidenceCode, HpoResource, HpoSex
 
 
 class Evidence(StructModel):
     """`evidence[]`."""
 
-    aspect: Literal['C', 'H', 'I', 'M', 'P'] = Field(
-        description=('The category of biological information being provided (e.g., clinical, genetic, etc.)')
+    aspect: Annotated[HpoAspect, PolarsDtype(pl.Enum)] = Field(
+        description='The category of biological information being provided (e.g., clinical, genetic, etc.)'
     )
     bioCuration: str = Field(min_length=1, description='Indicates whether the evidence has been manually curated')
     diseaseFromSourceId: str = Field(
@@ -23,7 +25,7 @@ class Evidence(StructModel):
     )
     diseaseFromSource: str = Field(min_length=1, description='The disease name as recorded in the original source')
     diseaseName: str = Field(min_length=1, description='Standardised disease name')
-    evidenceType: Literal['IEA', 'PCS', 'TAS'] = Field(
+    evidenceType: Annotated[HpoEvidenceCode, PolarsDtype(pl.Enum)] = Field(
         description='The type of evidence supporting the disease-phenotype relationship'
     )
     frequency: str | None = Field(
@@ -40,8 +42,12 @@ class Evidence(StructModel):
     references: list[Annotated[Annotated[str, Bioregistry('pubmed')], Field(min_length=1)]] = Field(
         description='References or citations supporting the evidence'
     )
-    sex: str | None = Field(min_length=1, description='Indicates if the association is specific to a biological sex')
-    resource: Literal['HPO'] = Field(description='The data source from which the evidence was obtained')
+    sex: Annotated[HpoSex, PolarsDtype(pl.Enum)] | None = Field(
+        description='Indicates if the association is specific to a biological sex'
+    )
+    resource: Annotated[HpoResource, PolarsDtype(pl.Enum)] = Field(
+        description='The data source from which the evidence was obtained'
+    )
 
 
 class DiseasePhenotype(DatasetModel):

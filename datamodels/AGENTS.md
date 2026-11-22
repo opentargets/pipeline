@@ -18,6 +18,7 @@ It depends on `pydantic` and `polars` only. It imports neither pts nor pandera, 
 | `polars` | `to_polars_schema` |
 | `docs` | documentation JSON |
 | `discovery` | `discover_datasets()`: every concrete model under `ot_datamodels.outputs` |
+| `vocabularies` | the closed vocabularies stored as Enums, one `Literal` per vocabulary, with its source |
 | `outputs/` | one module per dataset (or family); `patterns.py` holds shared regexes |
 
 ## What a model may state
@@ -32,15 +33,21 @@ Only a strict subset of Pydantic is supported (`spec`); anything outside it rais
 - **Markers:** `PrimaryKey` (validated as unique), `Reference` (a foreign key,
   recorded but not enforced), `Bioregistry` and `Note` (documentation only),
   `PolarsDtype` (a narrower dtype such as `Int32`, or `pl.Enum` for a stored Enum
-  whose categories are the `Literal`'s values in order), `ClickHouseType` (the
+  whose categories are the `Literal`'s values in order, or `pl.Enum([...])` for the Enum of a
+  whole vocabulary holding the `Literal`'s values in the same order), `ClickHouseType` (the
   ClickHouse type of the non-null value, where it differs from the dtype; read by pos's
   DDL generation from phase 5 piece 2, ignored by pts; `LowCardinality` on a nullable
   field is emitted as `LowCardinality(Nullable(..))`).
 - **Row checks:** rules across columns of one row go in `row_checks`, as `RowCheck`s.
   Rules across datasets cannot be in a model, since a model sees only its own dataset.
 - **Closed vocabularies:** a `Literal` only where the list holds by construction (an
-  enum in the code, constants the code writes, a small stable standard vocabulary).
-  Input data passed through stays open: a non-empty string, or a pattern.
+  enum in the code, constants the code writes, a fixed standard vocabulary).
+  Input data passed through stays open: a non-empty string, or a pattern. A vocabulary
+  consumers filter, join or order on is an Enum: its `Literal` lives in `vocabularies`
+  (complete, ordered, its source cited) and a field uses it as
+  `Annotated[Vocabulary, PolarsDtype(pl.Enum)]`, or `Annotated[Literal['eva'], enum_of(Datasource)]`
+  for part of one. A new value is a model change; ClickHouse numbers the Enum in that order, so append
+  where the order does not matter.
 
 A model states what holds for the data's meaning, not for one release's values: the
 next release must not fail because a new value appeared. Numbers are bounded at

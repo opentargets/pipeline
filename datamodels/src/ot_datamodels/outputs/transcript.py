@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_PROTEIN_ID, ENSEMBL_TRANSCRIPT_ID
+from ot_datamodels.vocabularies import Chromosome, TranscriptFlagValue
 
 
 class DbXrefs(StructModel):
@@ -25,7 +26,9 @@ class Flags(StructModel):
     label: Literal['appris', 'ensembl_canonical', 'gencode_primary', 'mane'] = Field(
         description=('Category of the transcript flag (e.g. mane, appris, gencode_primary, ensembl_canonical)')
     )
-    value: str = Field(min_length=1, description='Value of the transcript flag within its category')
+    value: Annotated[TranscriptFlagValue, PolarsDtype(pl.Enum)] = Field(
+        description='Value of the transcript flag within its category'
+    )
 
 
 class Exons(StructModel):
@@ -34,7 +37,9 @@ class Exons(StructModel):
     exonId: Annotated[str, Bioregistry('ensembl')] = Field(
         min_length=1, description='Ensembl identifier of the exon (ENSE###)'
     )
-    chromosome: str = Field(min_length=1, description='Chromosome on which the exon is located')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
+        description='Chromosome on which the exon is located'
+    )
     start: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=0, le=4294967295, description='Genomic start position of the exon'
     )
@@ -106,7 +111,9 @@ class Transcript(DatasetModel):
     isEnsemblCanonical: bool = Field(
         description=('Flag indicating if the transcript is the Ensembl canonical transcript for the gene')
     )
-    chromosome: str = Field(min_length=1, description='Chromosome on which the transcript is located')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
+        description='Chromosome on which the transcript is located'
+    )
     start: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=0, le=4294967295, description='Genomic start position of the transcript'
     )

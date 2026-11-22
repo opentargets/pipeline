@@ -3,13 +3,15 @@
 Generated from the 26.12 release output (16,853 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID
+from ot_datamodels.vocabularies import ClinicalStage
 
 
 class ClinicalTarget(DatasetModel):
@@ -45,21 +47,6 @@ class ClinicalTarget(DatasetModel):
     clinicalReportIds: list[Annotated[Annotated[str, Reference('clinical_report', 'id')], Field(min_length=1)]] = Field(
         description=('List of clinical report identifiers associated with this target-drug pair')
     )
-    maxClinicalStage: Annotated[
-        Literal[
-            'WITHDRAWAL',
-            'APPROVAL',
-            'PHASE_4',
-            'PREAPPROVAL',
-            'PHASE_3',
-            'PHASE_2_3',
-            'PHASE_2',
-            'PHASE_1_2',
-            'PHASE_1',
-            'EARLY_PHASE_1',
-            'IND',
-            'PRECLINICAL',
-            'UNKNOWN',
-        ],
-        ClickHouseType('LowCardinality(String)'),
-    ] = Field(description='Maximum clinical stage reached for this target-drug pair')
+    maxClinicalStage: Annotated[ClinicalStage, PolarsDtype(pl.Enum)] = Field(
+        description='Maximum clinical stage reached for this target-drug pair'
+    )

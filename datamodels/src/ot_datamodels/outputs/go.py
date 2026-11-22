@@ -5,10 +5,11 @@ Generated from the 26.12 release output (48,340 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PrimaryKey
-from ot_datamodels.outputs.patterns import ONTOLOGY_ID
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey
+from ot_datamodels.vocabularies import GoNamespace
 
 
 class Go(DatasetModel):
@@ -41,11 +42,8 @@ class Go(DatasetModel):
         min_length=1, description='Primary Gene Ontology term identifier'
     )
     label: str = Field(min_length=1, description='Human-readable name of the GO term')
-    namespace: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        pattern=ONTOLOGY_ID,
-        description=(
-            'Ontology branch the term belongs to: biological_process, molecular_function, or cellular_component'
-        ),
+    namespace: Annotated[GoNamespace, PolarsDtype(pl.Enum)] = Field(
+        description='Ontology branch the term belongs to: biological_process, molecular_function, or cellular_component'
     )
     altIds: list[Annotated[str, Field(min_length=1)]] = Field(
         description='List of alternative/secondary GO IDs that are synonyms for this term'

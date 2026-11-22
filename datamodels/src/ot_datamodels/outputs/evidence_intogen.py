@@ -5,10 +5,12 @@ Generated from the 26.12 release output (4,223 rows) and its croissant metadata.
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class MutatedSamples(StructModel):
@@ -76,8 +78,10 @@ class EvidenceIntogen(DatasetModel):
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
     targetFromSourceId: str = Field(min_length=1, description='Gene symbol of the target as reported by IntOGen')
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
-    datasourceId: Literal['intogen'] = Field(description='Identifer of the evidence source')
+    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['intogen'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
     cohortId: str = Field(min_length=1, description='IntOGen identifier of the studied cohort')
     cohortShortName: str = Field(min_length=1, description='IntOGen short name of the studied cohort')
     cohortDescription: str = Field(
@@ -115,8 +119,10 @@ class EvidenceIntogen(DatasetModel):
             'relationship, derived from the log10 of the IntOGen combined q-value'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

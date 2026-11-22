@@ -10,14 +10,13 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID
+from ot_datamodels.vocabularies import LdPopulation, StudyType
 
 
 class LdPopulationStructure(StructModel):
     """`ldPopulationStructure[]`."""
 
-    ldPopulation: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Population identifier'
-    )
+    ldPopulation: Annotated[LdPopulation, PolarsDtype(pl.Enum)] = Field(description='Population identifier')
     relativeSampleSize: float | None = Field(
         ge=0.0, le=1.0, description='Fraction of the total sample represented by the population'
     )
@@ -114,8 +113,8 @@ class Study(DatasetModel):
         min_length=1,
         description=('Identifier of the source project collection that the study information is derived from'),
     )
-    studyType: Literal['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'] = Field(
-        description=('Field specifying if study contains phenotype/disease or molecular genetic associations')
+    studyType: Annotated[StudyType, PolarsDtype(pl.Enum)] = Field(
+        description='Field specifying if study contains phenotype/disease or molecular genetic associations'
     )
     traitFromSource: str = Field(
         min_length=1, description=('Molecular or phenotypic trait, derived from source, analysed in the study')

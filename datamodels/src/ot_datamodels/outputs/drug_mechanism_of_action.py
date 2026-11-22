@@ -3,12 +3,14 @@
 Generated from the 26.12 release output (8,375 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID
+from ot_datamodels.vocabularies import ChemblActionType, ChemblTargetType, MechanismCuration
 
 
 class References(StructModel):
@@ -49,21 +51,21 @@ class DrugMechanismOfAction(DatasetModel):
     }
 
     mechanismOfAction: str = Field(min_length=1, description='Drug pharmacological action')
-    actionType: str = Field(
-        min_length=1, description=('Classification of how the drug interacts with its target (e.g., ACTIVATOR)')
+    actionType: Annotated[ChemblActionType, PolarsDtype(pl.Enum)] = Field(
+        description='Classification of how the drug interacts with its target (e.g., ACTIVATOR)'
     )
     chemblIds: list[Annotated[Annotated[str, Reference('drug_molecule', 'id')], Field(pattern=CHEMBL_ID)]] = Field(
         description='List of Open Targets molecule identifiers'
     )
     references: list[References] = Field(description='List of sources documenting the mechanism information')
     targetName: str = Field(min_length=1, description='Specific biological entity on which the drug has an effect')
-    targetType: str = Field(
-        min_length=1, description=("Classification of the target's biological category (e.g., protein complex)")
+    targetType: Annotated[ChemblTargetType, PolarsDtype(pl.Enum)] = Field(
+        description="Classification of the target's biological category (e.g., protein complex)"
     )
     targets: list[Annotated[Annotated[str, Reference('target', 'id')], Field(pattern=ENSEMBL_GENE_ID)]] = Field(
         description='List of Open Targets target identifiers'
     )
-    curation: Literal['electronic', 'manual'] = Field(
+    curation: Annotated[MechanismCuration, PolarsDtype(pl.Enum)] = Field(
         description=(
             'How the mechanism was curated: manual (ChEMBL) or electronic '
             '(inferred by a language model from ClinicalTrials.gov trial text or '

@@ -5,10 +5,12 @@ Generated from the 26.12 release output (909,884 rows) and its croissant metadat
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import ClinicalStage, Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class EvidenceClinicalPrecedence(DatasetModel):
@@ -57,22 +59,8 @@ class EvidenceClinicalPrecedence(DatasetModel):
     clinicalReportId: Annotated[str, Reference('clinical_report', 'id')] = Field(
         min_length=1, description='Identifier of the clinical report'
     )
-    clinicalStage: Literal[
-        'WITHDRAWAL',
-        'APPROVAL',
-        'PHASE_4',
-        'PREAPPROVAL',
-        'PHASE_3',
-        'PHASE_2_3',
-        'PHASE_2',
-        'PHASE_1_2',
-        'PHASE_1',
-        'EARLY_PHASE_1',
-        'IND',
-        'PRECLINICAL',
-        'UNKNOWN',
-    ] = Field(
-        description=("Clinical stage of the drug-disease pair in the clinical report (e.g. 'PHASE_1', 'PHASE_3')")
+    clinicalStage: Annotated[ClinicalStage, PolarsDtype(pl.Enum)] = Field(
+        description="Clinical stage of the drug-disease pair in the clinical report (e.g. 'PHASE_1', 'PHASE_3')"
     )
     trialWhyStopped: str | None = Field(min_length=1, description='Reason why the trial was stopped, as reported')
     trialStopReasonCategories: (
@@ -107,8 +95,10 @@ class EvidenceClinicalPrecedence(DatasetModel):
     drugId: Annotated[str, Bioregistry('chembl'), Reference('drug_molecule', 'id')] = Field(
         pattern=CHEMBL_ID, description='Open Targets drug identifier'
     )
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: Literal['clinical'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['clinical_precedence'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['clinical'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
@@ -123,8 +113,10 @@ class EvidenceClinicalPrecedence(DatasetModel):
             'the reason the trial was stopped'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] = Field(description='Predicted direction of effect on the trait')
-    directionOnTarget: Literal['GoF', 'LoF'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] = Field(
+        description='Predicted direction of effect on the trait'
+    )
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] | None = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target based '
             'on the type of drug mechanism of action'

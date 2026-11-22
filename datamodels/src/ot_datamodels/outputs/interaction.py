@@ -3,20 +3,22 @@
 Generated from the 26.12 release output (12,067,375 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels.vocabularies import InteractionSource, SpeciesMnemonic, SpeciesScientificName
 
 
 class SpeciesA(StructModel):
     """`speciesA`."""
 
-    mnemonic: Annotated[Literal['human'], ClickHouseType('LowCardinality(String)')] = Field(
+    mnemonic: Annotated[SpeciesMnemonic, PolarsDtype(pl.Enum)] = Field(
         description='Short mnemonic name of the species associated with target A'
     )
-    scientificName: Annotated[Literal['Homo sapiens'], ClickHouseType('LowCardinality(String)')] = Field(
+    scientificName: Annotated[SpeciesScientificName, PolarsDtype(pl.Enum)] = Field(
         description='Scientific name of the species associated with target A'
     )
     taxonId: Annotated[int, ClickHouseType('UInt32')] = Field(
@@ -65,7 +67,7 @@ class Interaction(DatasetModel):
         'interactionId': 1561581066758384050,
     }
 
-    sourceDatabase: Literal['intact', 'reactome', 'signor', 'string'] = Field(
+    sourceDatabase: Annotated[InteractionSource, PolarsDtype(pl.Enum)] = Field(
         description='Source database reporting the molecular interaction'
     )
     targetA: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(

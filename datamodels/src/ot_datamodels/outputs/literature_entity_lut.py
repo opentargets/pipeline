@@ -4,12 +4,13 @@ Generated from the 26.12 release output (193,220,592 rows) and its croissant met
 """
 
 import datetime
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
 
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype
+from ot_datamodels.vocabularies import LiteratureKeywordType
 
 
 class LiteratureEntityLut(DatasetModel):
@@ -47,7 +48,7 @@ class LiteratureEntityLut(DatasetModel):
         min_length=1, description='Unique identifier for the keyword associated with the literature entry'
     )
     relevance: float = Field(ge=0.0, description='Relevance score of the keyword within the literature entry')
-    keywordType: Annotated[Literal['CD', 'DS', 'GP'], ClickHouseType('FixedString(2)')] = Field(
+    keywordType: Annotated[LiteratureKeywordType, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Type of keyword identified in the literature entry. Values: DS: '
             'disease/syndrome, GP: gene/protein, CD: chemical/drug'

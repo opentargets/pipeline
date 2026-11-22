@@ -5,10 +5,12 @@ Generated from the 26.12 release output (55,611 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
 
 class Urls(StructModel):
@@ -87,8 +89,10 @@ class EvidenceGeneBurden(DatasetModel):
         description=('Ensembl gene identifier or gene symbol of the target as reported by the burden study'),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['gene_burden'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description="Genetic model of the burden test (e.g. 'dominant', 'recessive')"
     )
@@ -204,10 +208,10 @@ class EvidenceGeneBurden(DatasetModel):
             'relationship, derived from the log10 of the burden test p-value'
         ),
     )
-    directionOnTrait: Literal['risk', 'protect'] | None = Field(
+    directionOnTrait: Annotated[DirectionOnTrait, PolarsDtype(pl.Enum)] | None = Field(
         description='Predicted direction of effect on the trait'
     )
-    directionOnTarget: Literal['GoF', 'LoF'] = Field(
+    directionOnTarget: Annotated[DirectionOnTarget, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Gain or loss of function effect of the evidence on the target '
             'resulting from genetic variants, pharmacological modulation, or other '

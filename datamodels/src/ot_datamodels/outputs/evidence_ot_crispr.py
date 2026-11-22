@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class EvidenceOtCrispr(DatasetModel):
@@ -75,8 +76,10 @@ class EvidenceOtCrispr(DatasetModel):
         description=('Score provided by datasource indicating strength of target-disease association'),
     )
     statisticalTestTail: str = Field(min_length=1, description='End of the distribution the target was picked from')
-    datasourceId: Literal['ot_crispr'] = Field(description='Identifer of the evidence source')
-    datatypeId: Literal['ot_partner'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['ot_crispr'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['ot_partner'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'

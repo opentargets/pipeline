@@ -21,6 +21,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_TRANSCRIPT_ID, ONTOLOGY_ID, RS_ID
+from ot_datamodels.vocabularies import Appris, Chromosome, GnomadPopulation, LofteePrediction, VariantEffectMethod
 
 #: `{chromosome}_{position}_{ref}_{alt}`, or `OTVAR_{chromosome}_{position}_{md5}` for a long variant.
 VARIANT_ID = r'^((\d+|X|Y|MT)_\d+_[ACGTN]+_[ACGTN]+|OTVAR_(\d+|X|Y|MT)_\d+_[0-9a-f]{32})$'
@@ -31,20 +32,12 @@ ALLELE = r'^[ACGTN]+$'
 #: Comma-separated LOFTEE flags.
 LOFTEE_FLAGS = r'^[0-9A-Z_]+(,[0-9A-Z_]+)*$'
 
-Chromosome = Literal[
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
-    '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT',
-]  # fmt: skip
-
-#: A gnomAD genetic ancestry group's adjusted (`_adj`) frequency: the groups themselves are gnomAD's to change.
-GNOMAD_POPULATION = r'^[a-z]+_adj$'
-
 
 class VariantEffect(StructModel):
     """`variantEffect[]`."""
 
-    method: Literal['AlphaMissense', 'FoldX', 'GERP', 'GPN-Star', 'LOFTEE', 'LossOfFunctionCuration', 'SIFT', 'VEP'] = (
-        Field(description='Method name used to predict the effect of the variant')
+    method: Annotated[VariantEffectMethod, PolarsDtype(pl.Enum)] = Field(
+        description='Method name used to predict the effect of the variant'
     )
     assessment: str | None = Field(min_length=1, description='Textual assessment of the variant effect')
     score: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
@@ -84,7 +77,7 @@ class TranscriptConsequences(StructModel):
     distanceFromTss: Annotated[int, ClickHouseType('Int32')] = Field(
         ge=-2147483648, le=2147483647, description='Distance of the variant from the transcription start site'
     )
-    appris: str | None = Field(min_length=1, description='Appris annotation of the transcript')
+    appris: Annotated[Appris, PolarsDtype(pl.Enum)] | None = Field(description='Appris annotation of the transcript')
     maneSelect: str | None = Field(min_length=1, description='MANE annotation of the transcript')
     targetId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Target target identifier of the transcript'
@@ -92,7 +85,9 @@ class TranscriptConsequences(StructModel):
     impact: Literal['HIGH', 'LOW', 'MODERATE', 'MODIFIER'] = Field(
         description='Ensembl VEP predicted impact of the variant on the transcript'
     )
-    lofteePrediction: Literal['HC', 'LC'] | None = Field(description='Loss-of-function prediction based on LOFTEE')
+    lofteePrediction: Annotated[LofteePrediction, PolarsDtype(pl.Enum)] | None = Field(
+        description='Loss-of-function prediction based on LOFTEE'
+    )
     consequenceScore: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
         ge=0.0, le=1.0, description='Score assigned to transcript based on Ensembl VEP consequence'
     )
@@ -109,7 +104,7 @@ class TranscriptConsequences(StructModel):
 class AlleleFrequencies(StructModel):
     """`alleleFrequencies[]`."""
 
-    populationName: str = Field(pattern=GNOMAD_POPULATION, description='Name of the population')
+    populationName: Annotated[GnomadPopulation, PolarsDtype(pl.Enum)] = Field(description='Name of the population')
     alleleFrequency: float | None = Field(
         ge=0.0, le=1.0, description='Frequency of the alternate allele in the population'
     )
@@ -190,7 +185,9 @@ class Variant(DatasetModel):
             '{chromosome}-{position}-{referenceAllele}-{alternateAllele}'
         ),
     )
-    chromosome: Chromosome = Field(description='Chromosome on which the variant is located')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
+        description='Chromosome on which the variant is located'
+    )
     position: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0, description="Variant's position on the chromosome"
     )

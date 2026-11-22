@@ -10,6 +10,7 @@ from pydantic import Field
 from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import Biomarker
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class Assays(StructModel):
@@ -95,8 +96,10 @@ class EvidenceOtCrisprValidation(DatasetModel):
     assays: list[Assays] = Field(description='Assays used in the study')
     assessments: list[str] = Field(description='Short name of the assay')
     biomarkerList: list[Biomarker] = Field(description='List of biomarkers associated with the biological model')
-    datasourceId: Literal['ot_crispr_validation'] = Field(description='Identifer of the evidence source')
-    datatypeId: Literal['ot_validation_lab'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['ot_crispr_validation'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['ot_validation_lab'], enum_of(Datatype)] = Field(description='Type of the evidence')
     diseaseCellLines: list[DiseaseCellLines] = Field(description='Cancer cell lines used to generate evidence')
     diseaseFromSource: str = Field(min_length=1, description='Disease label from the original source')
     primaryProjectHit: bool = Field(description='If a given target was found to be a hit in the primary project')

@@ -10,12 +10,15 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
+from ot_datamodels.vocabularies import Chromosome, ConstraintType, GoAspect, GoEvidenceCode
 
 
 class GenomicLocation(StructModel):
     """`genomicLocation`."""
 
-    chromosome: str = Field(min_length=1, description='Chromosome on which the target located')
+    chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
+        description='Chromosome on which the target located'
+    )
     start: int = Field(ge=0, description='Genomic start position of the target gene')
     end: int = Field(ge=0, description='Genomic end position of the target gene')
     strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
@@ -32,8 +35,10 @@ class Go(StructModel):
     source: str = Field(
         min_length=1, description='Source database and identifer from which the ontology term was sourced'
     )
-    evidence: str = Field(min_length=1, description='Evidence supporting the GO annotation')
-    aspect: Literal['C', 'F', 'P'] = Field(
+    evidence: Annotated[GoEvidenceCode, PolarsDtype(pl.Enum)] = Field(
+        description='Evidence supporting the GO annotation'
+    )
+    aspect: Annotated[GoAspect, PolarsDtype(pl.Enum)] = Field(
         description=(
             'Type of the GO annotation: molecular function (F), biological process (P) and cellular localisation (C)'
         )
@@ -123,7 +128,9 @@ class ObsoleteLabel(StructModel):
 class Constraint(StructModel):
     """`constraint[]`."""
 
-    constraintType: Literal['lof', 'mis', 'syn'] = Field(description='Type of constraint applied to the target')
+    constraintType: Annotated[ConstraintType, PolarsDtype(pl.Enum)] = Field(
+        description='Type of constraint applied to the target'
+    )
     score: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
         description='Constraint score indicating gene intolerance'
     )

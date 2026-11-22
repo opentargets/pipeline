@@ -5,10 +5,12 @@ Generated from the 26.12 release output (4,387 rows) and its croissant metadata.
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ONTOLOGY_ID
+from ot_datamodels.vocabularies import SafetyStudyType
 
 
 class Effects(StructModel):
@@ -35,9 +37,7 @@ class Studies(StructModel):
 
     description: str | None = Field(min_length=1, description='Description of the safety study')
     name: str | None = Field(min_length=1, description='Name of the safety study')
-    type: Literal['biochemical', 'cell-based', 'clinical', 'preclinical'] | None = Field(
-        description='Type of safety study'
-    )
+    type: Annotated[SafetyStudyType, PolarsDtype(pl.Enum)] | None = Field(description='Type of safety study')
 
 
 class TargetSafetyEvent(DatasetModel):

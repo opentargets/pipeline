@@ -5,10 +5,12 @@ Generated from the 26.12 release output (28,772,039 rows) and its croissant meta
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, EuropePmcSection, enum_of
 
 
 class TextMiningSentences(StructModel):
@@ -20,9 +22,9 @@ class TextMiningSentences(StructModel):
     dStart: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=0, le=4294967295, description='Start position of the disease label in the sentence'
     )
-    section: Literal[
-        'abstract', 'appendix', 'case', 'concl', 'discuss', 'figure', 'intro', 'other', 'results', 'table', 'title'
-    ] = Field(description='Section of the publication the sentence was extracted from')
+    section: Annotated[EuropePmcSection, PolarsDtype(pl.Enum)] = Field(
+        description='Section of the publication the sentence was extracted from'
+    )
     tEnd: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=0, le=4294967295, description='End position of the target label in the sentence'
     )
@@ -82,8 +84,10 @@ class EvidenceEuropepmc(DatasetModel):
         description=('Ensembl gene identifier of the target recognised by Europe PMC text mining'),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datasourceId: Literal['europepmc'] = Field(description='Identifer of the evidence source')
-    datatypeId: Literal['literature'] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Literal['europepmc'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Literal['literature'], enum_of(Datatype)] = Field(description='Type of the evidence')
     resourceScore: float = Field(
         ge=0.0,
         description=('Sum of the Europe PMC text-mining scores of the target-disease co-mentions in the publication'),

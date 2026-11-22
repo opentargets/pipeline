@@ -5,10 +5,12 @@ Generated from the 26.12 release output (42,560 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
+from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
 
 class EvidenceGenomicsEngland(DatasetModel):
@@ -66,8 +68,10 @@ class EvidenceGenomicsEngland(DatasetModel):
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description=('Mode of inheritance of the gene as curated in the Genomics England PanelApp panel')
     )
-    datasourceId: str = Field(pattern=ONTOLOGY_ID, description='Identifer of the evidence source')
-    datatypeId: str = Field(pattern=ONTOLOGY_ID, description='Type of the evidence')
+    datasourceId: Annotated[Literal['genomics_england'], enum_of(Datasource)] = Field(
+        description='Identifer of the evidence source'
+    )
+    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
