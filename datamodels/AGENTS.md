@@ -32,7 +32,10 @@ Only a strict subset of Pydantic is supported (`spec`); anything outside it rais
 - **Markers:** `PrimaryKey` (validated as unique), `Reference` (a foreign key,
   recorded but not enforced), `Bioregistry` and `Note` (documentation only),
   `PolarsDtype` (a narrower dtype such as `Int32`, or `pl.Enum` for a stored Enum
-  whose categories are the `Literal`'s values in order).
+  whose categories are the `Literal`'s values in order), `ClickHouseType` (the
+  ClickHouse type of the non-null value, where it differs from the dtype; read by pos's
+  DDL generation from phase 5 piece 2, ignored by pts; `LowCardinality` on a nullable
+  field is emitted as `LowCardinality(Nullable(..))`).
 - **Row checks:** rules across columns of one row go in `row_checks`, as `RowCheck`s.
   Rules across datasets cannot be in a model, since a model sees only its own dataset.
 - **Closed vocabularies:** a `Literal` only where the list holds by construction (an

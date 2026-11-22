@@ -422,6 +422,8 @@ def _classify(
                 bioregistry = prefix
             case PolarsDtype(dtype=override) if dtype is None:
                 dtype = override
+            case ClickHouseType(type=name) if not name.strip():
+                raise SchemaDefinitionError(f'{path}: ClickHouseType must not be empty')
             case ClickHouseType(type=name) if clickhouse is None:
                 clickhouse = name
             case Reference() | Bioregistry() | PolarsDtype() | ClickHouseType():

@@ -326,6 +326,12 @@ def test_clickhouse_type_twice_rejected() -> None:
         _node(Annotated[int, ClickHouseType('UInt32'), ClickHouseType('UInt64')])
 
 
+@pytest.mark.parametrize('empty', ['', '  '])
+def test_clickhouse_type_empty_rejected(empty: str) -> None:
+    with pytest.raises(SchemaDefinitionError, match='ClickHouseType must not be empty'):
+        _node(Annotated[int, ClickHouseType(empty)])
+
+
 def test_clickhouse_type_with_polars_dtype() -> None:
     node = _node(Annotated[int, PolarsDtype(pl.UInt32), ClickHouseType('UInt32')])
 
