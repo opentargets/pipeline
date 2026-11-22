@@ -62,9 +62,9 @@ disease,,column_order,model order (piece 2),"id, name, therapeuticAreas, descrip
 disease,ancestors[],low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/398399,named:aotf.sql;named:disease.sql,none
 disease,broadSynonyms,model_only,API addition (piece 2),,Array(String),nulls 0/46288,no,none
 disease,code,model_only,API addition (piece 2),,String,nulls 0/46288,no,none
-disease,directLocationIds,ddl_only,API removal (piece 2),Array(String),,absent: strict validation clean,named:disease.sql,open
+disease,directLocationIds,ddl_only,API removal (dropped),Array(String),,absent: strict validation clean,named:disease.sql,open
 disease,exactSynonyms,model_only,API addition (piece 2),,Array(String),nulls 0/46288,no,none
-disease,indirectLocationIds,ddl_only,API removal (piece 2),Array(String),,absent: strict validation clean,named:disease.sql,open
+disease,indirectLocationIds,ddl_only,API removal (dropped),Array(String),,absent: strict validation clean,named:disease.sql,open
 disease,narrowSynonyms,model_only,API addition (piece 2),,Array(String),nulls 0/46288,no,none
 disease,obsoleteXRefs,model_only,API addition (piece 2),,Array(String),nulls 0/46288,no,none
 disease,ontology/leaf,struct_field_missing,API addition (piece 2),,Bool,nulls 0/46288; distinct False,named:disease.sql,open
@@ -253,7 +253,7 @@ interaction,,column_order,model order (piece 2),"interactionId, intA, targetA, i
 interaction,count,type,marker,UInt8,UInt8,"nulls 0/12067375; min 1, max 227",named:interaction.sql,none
 interaction,intABiologicalRole,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/12067375; 24 distinct,named:interaction.sql,none
 interaction,intBBiologicalRole,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/12067375; 25 distinct,named:interaction.sql,none
-interaction,interactionId,type,ClickHouse follows model,UInt64,Int64,"nulls 0/12067375; min -9223371889341859790, max 9223370703374749214",named:interaction.sql,open
+interaction,interactionId,type,marker,UInt64,UInt64,"nulls 0/12067375; min -9223371889341859790, max 9223370703374749214; pts clears the top bit from 26.12, so ids are >= 0",named:interaction.sql,none
 interaction,speciesA/mnemonic,literal_vs_string,"String kept, no Enum",LowCardinality(String),LowCardinality(String),nulls 0/12067375; distinct human,named:interaction.sql,none
 interaction,speciesA/mnemonic,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/12067375; distinct human,named:interaction.sql,none
 interaction,speciesA/scientificName,literal_vs_string,"String kept, no Enum",LowCardinality(String),LowCardinality(String),nulls 0/12067375; distinct Homo sapiens,named:interaction.sql,none
@@ -267,7 +267,7 @@ interaction_evidence,,column_order,model order (piece 2),"interactionId, evidenc
 interaction_evidence,hostOrganismTaxId,type,ClickHouse follows model,Nullable(UInt32),Nullable(Int64),"nulls 20119908/22620749; min -4, max 1007065",named:interaction.sql,open
 interaction_evidence,hostOrganismTissue,struct_nullability,null struct: Tuple fields Nullable (model unchanged),"Tuple(fullName Nullable(String), shortName Nullable(String), xrefs Array(String))","Tuple(fullName Nullable(String), shortName Nullable(String), xrefs Array(String))",nulls 20119908/22620749,no,none
 interaction_evidence,hostOrganismTissue/xrefs,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),nulls 22571763/22620749,no,none
-interaction_evidence,interactionId,type,ClickHouse follows model,UInt64,Int64,"nulls 0/22620749; min -9223371889341859790, max 9223370703374749214",named:interaction.sql,open
+interaction_evidence,interactionId,type,marker,UInt64,UInt64,"nulls 0/22620749; min -9223371889341859790, max 9223370703374749214; pts clears the top bit from 26.12, so ids are >= 0",named:interaction.sql,none
 interaction_evidence,interactionResources/databaseVersion,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/22620749; distinct 12.5 · 253 · 98 · Not Available,named:interaction.sql,none
 interaction_evidence,interactionResources/sourceDatabase,literal_vs_string,"String kept, no Enum",LowCardinality(String),LowCardinality(String),nulls 0/22620749; distinct intact · reactome · signor · string,named:interaction.sql,none
 interaction_evidence,interactionResources/sourceDatabase,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/22620749; distinct intact · reactome · signor · string,named:interaction.sql,none

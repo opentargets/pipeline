@@ -121,7 +121,11 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
         if key in drift:
             _check_against_drift(row, drift[key])
             continue
-        # no longer a disagreement: only a model change may have removed it
+        # no longer a disagreement: a model change, or a DDL-only column dropped from the landing DDL
+        if row['outcome'] == 'API removal (dropped)':
+            assert row['category'] == 'ddl_only', f'{key}: only a DDL-only column can be dropped'
+            assert not any(row['field'] in n for n in _nodes(row['dataset'])), f'{key}: the model has it'
+            continue
         assert row['outcome'] in MODEL_CHANGES, f'{key}: stale row, not in drift() and not a model change'
         nodes = [n[row['field']] for n in _nodes(row['dataset']) if row['field'] in n]
         assert nodes, f'{key}: no model of {row["dataset"]} has {row["field"]}'

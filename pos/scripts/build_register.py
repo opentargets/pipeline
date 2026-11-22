@@ -36,6 +36,11 @@ POS = Path(__file__).resolve().parents[1]
 COLUMNS = ('dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up')
 ORDER = frozenset({'struct_order', 'column_order'})
 UNLANDED = frozenset({'model_only', 'struct_field_missing'})
+#: Evidence that predates a pts change in this PR.
+NOTES = {
+    ('interaction', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
+    ('interaction_evidence', 'interactionId', 'type'): 'pts clears the top bit from 26.12, so ids are >= 0',
+}
 
 
 def _load_drift():
@@ -50,7 +55,11 @@ def _load_drift():
 sd = _load_drift()
 MODELS = discover_datasets()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
-SCRIPTS = sd._scripts(POS / 'config' / 'clickhouse' / 'scripts')
+CLICKHOUSE = POS / 'config' / 'clickhouse'
+SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
+#: DDL-only columns still in the landing DDL; one gone from it was dropped in piece 1.
+CURRENT = sd.drift(POS / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLICKHOUSE / 'scripts')
+LANDED = {(r['dataset'], r['field']) for r in CURRENT.iter_rows(named=True) if r['category'] == 'ddl_only'}
 
 
 def render(t: Any) -> str:
@@ -216,6 +225,8 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
         return 'model order (piece 2)' if evidenced else 'no evidence; unchanged'
     if category in UNLANDED:
         return 'API addition (piece 2)' if evidenced else 'no evidence; unchanged'
+    if category == 'ddl_only' and (dataset, path) not in LANDED:
+        return 'API removal (dropped)'
     if category == 'ddl_only':
         return 'API removal (piece 2)' if rows[0]['serving_read'] != 'no' else 'removal (piece 2)'
     if not evidenced:
@@ -273,6 +284,8 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             text = ''
         else:
             text = evidence.text(dataset, rows, path)
+        if (dataset, path, category) in NOTES:
+            text = f'{text}; {NOTES[dataset, path, category]}'
         values = (
             dataset,
             path,
@@ -316,12 +329,12 @@ the column (column order excepted); else `none`.
 
 
 HINTS = """
-## Decisions pending (David)
+## Decisions (David, 2026-11-22)
 
-- `interactionId`: UInt64 in ClickHouse, negative in the data. Following the model (Int64) changes the value the API \
-sees for every negative id; or keep a deliberate `UInt64` marker and accept the wraparound.
-- `directLocationIds` / `indirectLocationIds`: `disease.sql` names them but pts drops them (the API serves empty \
-arrays today). Drop them from `disease.sql` and the API, or keep them as derived empty arrays in the pos SQL.
+- `interactionId`: pts clears the hash's top bit, so ids are non-negative Int64; the models say `ge=0` and keep a \
+`UInt64` marker. Every id changes from 2612-3; the polars port had already changed them all since the last release.
+- `directLocationIds` / `indirectLocationIds`: dropped from the disease landing DDL and `disease.sql` (pts writes no \
+locations; the API served empty arrays). The API drops them; disease locations come back as their own dataset (#240).
 
 ## Piece 2 hints
 
