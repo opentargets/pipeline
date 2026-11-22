@@ -165,9 +165,10 @@ builder's docstring says where the evidence is. The register's companion note in
 (`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
 
 `tests/test_schema_register.py` requires a register row for every snapshot row and for every disagreement
-`drift()` finds now. If it fails with "new schema drift", a later model or DDL change opened a disagreement:
+`drift()` finds now, and checks each `after` against the Platform table `pos.clickhouse_ddl` generates (empty
+where that table lacks the column). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
 add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
-serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`) and set the follow-up
+serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. Do not regenerate the file.
 
 ## Croissant

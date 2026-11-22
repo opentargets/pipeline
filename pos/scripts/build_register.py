@@ -9,18 +9,21 @@ Usage, from `pos/`::
 changes (e9133802), so that rows since resolved by a model change keep their register row. `evidence_dir` holds the
 `validation/` and `profile/` parquet files of `pts.schemas.dataset.profile` from the 2612-3 run:
 `gs://open-targets-pos-scratch/phase5/2612-3/{validation,profile}/` (7-day lifecycle, so copy them locally first).
-`--note` also writes the register as a Markdown note.
+`--note` also writes the register as a Markdown note. The rows whose `after` differs from the piece 1 register
+(`PIECE1`) are printed and listed in the note.
 
-One row per `(dataset, field, category)`, evidence models merged. `before` is the landing DDL type, `after` the
-type generated from the current model: its `ClickHouseType` or dtype; for the evidence union, nullable if any
-member is nullable or lacks it; a field of a nullable struct stays Nullable. `API follow-up` is `open` when the
-type changes and a serving script reads the column (column order excepted).
+One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
+PPP models have. `before` is the landing DDL type, `after` the type `pos.clickhouse_ddl` generates for the Platform
+table (evidence: `union_columns` of the Platform members), empty where that table lacks the column. `API follow-up`
+is `open` when the type changes and a serving script reads the column (column order excepted).
 """
 
 import argparse
 import csv
 import importlib.util
+import io
 import json
+import subprocess
 import sys
 from dataclasses import replace
 from functools import cache
@@ -31,9 +34,12 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec, walk
 
-from pos.clickhouse_ddl import CHType, column_type, parse_type, render
+from pos.clickhouse_ddl import CHType, columns, members, parse_table, parse_type, render, union_columns
 
 POS = Path(__file__).resolve().parents[1]
+#: The commit holding the piece 1 register.
+PIECE1 = '19920e46'
+PPP_ONLY = 'API removal (Platform; PPP only)'
 COLUMNS = ('dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up')
 ORDER = frozenset({'struct_order', 'column_order'})
 UNLANDED = frozenset({'model_only', 'struct_field_missing'})
@@ -80,61 +86,55 @@ def nodes(model: str) -> dict[str, Node]:
     return dict(walk(dataset_spec(MODELS[model])))
 
 
-def members(dataset: str) -> list[str]:
-    return [m.dataset_name for m in sd._models_for(CONFIG[dataset], MODELS) or []]
+@cache
+def platform_table(dataset: str) -> CHType | None:
+    """The generated Platform landing table as one Tuple; None for a table with no model."""
+    entry = CONFIG[dataset]
+    if 'glob_pattern' in entry:
+        cols = union_columns(members(entry['glob_pattern'].split('/')[0], 'platform'))
+    else:
+        models = sd._models_for(entry, MODELS)
+        if not models:
+            return None
+        (model,) = models
+        cols = columns(model)
+    return CHType('Tuple', fields=tuple(cols))
 
 
-def forced(model: str, path: str) -> bool:
-    """Whether a nullable struct encloses `path` without a list in between."""
-    ns = nodes(model)
-    parts = path.split('/')
-    parts[-1] = parts[-1].removesuffix('[]')
-    force = False
-    for i in range(1, len(parts)):
-        ancestor = '/'.join(parts[:i])
-        if ancestor.endswith('[]'):
-            force = False
-        node = ns[ancestor]
-        if node.kind == 'struct' and node.nullable:
-            force = True
-    return force
+def at(t: CHType | None, path: str) -> CHType | None:
+    """The type at `a`, `a/b` or `a[]/b` (`t` itself for ''); None if the path is absent."""
+    for part in path.split('/') if path else []:
+        name, lists = part, 0
+        while name.endswith('[]'):
+            name, lists = name[:-2], lists + 1
+        t = dict(t.fields).get(name) if t is not None else None
+        for _ in range(lists):
+            t = t.element if t is not None else None
+    return t
 
 
-def union_nullable(models: list[str], path: str) -> bool:
-    """Evidence union: nullable if any member is nullable there or lacks it (a list crossed absorbs absence)."""
-    top = path.split('/', maxsplit=1)[0].removesuffix('[]')
-    crosses_list = '[]' in path
-    for m in models:
-        ns = nodes(m)
-        if top not in ns:
-            if not crosses_list:
-                return True
-            continue
-        if path not in ns or ns[path].nullable or forced(m, path):
-            return True
-    return False
+def after_type(dataset: str, path: str) -> str:
+    t = at(platform_table(dataset), path)
+    return render(t, quote_fields=False) if t is not None else ''
 
 
-def union_type(node: Node, path: str, union: list[str]) -> CHType:
-    """A member's type with the evidence union's nullability; the non-null type is that member's."""
-    if node.kind == 'list':
-        assert node.element is not None
-        return CHType('Array', element=union_type(node.element, f'{path}[]', union))
-    if node.kind == 'struct':
-        fields = tuple((f.name, union_type(f.node, f'{path}/{f.name}', union)) for f in node.fields)
-        return CHType('Tuple', fields=fields)
-    return replace(column_type(node), nullable=union_nullable(union, path))
+def after_order(dataset: str, path: str, before: str) -> str:
+    """The generated order of the fields named in `before`."""
+    t = at(platform_table(dataset), path)
+    kept = set(before.split(', '))
+    return ', '.join(n for n, _ in t.fields if n in kept) if t is not None else ''
 
 
-def after_type(dataset: str, path: str, no_output: set[str]) -> str:
-    ms = members(dataset)
-    having = [m for m in ms if path in nodes(m)]
-    if not having:
-        return ''
-    rep = next((m for m in having if m not in no_output), having[0])
-    node = nodes(rep)[path]
-    t = union_type(node, path, ms) if len(ms) > 1 else column_type(node, forced(rep, path))
-    return render(t, quote_fields=False)
+def ppp_only(dataset: str) -> dict[str, list[dict[str, str]]]:
+    """Columns of the dataset's models absent from the Platform table -> one `{'model': ...}` per model."""
+    table = platform_table(dataset)
+    platform = {n for n, _ in table.fields} if table is not None else set()
+    found: dict[str, list[dict[str, str]]] = {}
+    for model in sd._models_for(CONFIG[dataset], MODELS) or []:
+        for f in dataset_spec(model).fields:
+            if f.name not in platform:
+                found.setdefault(f.name, []).append({'model': model.dataset_name})
+    return found
 
 
 class Evidence:
@@ -202,6 +202,8 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
     evidenced = {r['model'] for r in rows if r['model']} - no_output
     if category == 'no_model':
         return 'no model (piece 3)'
+    if category == 'ppp_only':
+        return PPP_ONLY
     if category == 'column_order':
         return 'model order (piece 2)'
     if category == 'struct_order':
@@ -244,22 +246,32 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for r in drift.iter_rows(named=True):
         groups.setdefault((r['dataset'], r['field'], r['category']), []).append(r)
+    for dataset, entry in CONFIG.items():
+        if 'glob_pattern' not in entry:
+            continue
+        ddl = parse_table((CLICKHOUSE / 'schema' / Path(entry['preload_script']).name).read_text())
+        serving = sd._serving(entry, SCRIPTS)
+        for col, ms in ppp_only(dataset).items():
+            d = ddl.get(col)
+            cells = {'ddl_type': sd.render(d) if d else '', 'serving_read': serving.read(col, landed=d is not None)}
+            groups[dataset, col, 'ppp_only'] = [m | cells for m in ms]
     no_output = evidence.no_output
     out = []
     for (dataset, path, category), rows in groups.items():
         first = rows[0]
         read = first['serving_read']
         if category in ORDER:
-            before, after = first['ddl_type'], first['model_type']
+            before = first['ddl_type']
+            after = after_order(dataset, path, before)
         elif category == 'no_model':
             before = after = ''
         elif category in UNLANDED:
-            before, after = '', after_type(dataset, path, no_output)
+            before, after = '', after_type(dataset, path)
             read = sd._serving(CONFIG[dataset], SCRIPTS).read(path, landed=True)
         elif category == 'ddl_only':
             before, after = first['ddl_type'], ''
         else:
-            before, after = first['ddl_type'], after_type(dataset, path, no_output)
+            before, after = first['ddl_type'], after_type(dataset, path)
         if category == 'ddl_only':
             where = ' on every member with output' if dataset == 'evidence' else ''
             text = f'absent: strict validation clean{where}'
@@ -298,12 +310,14 @@ Every schema change of phase 5 piece 1 ([[POS-Phase5-Drift-Design]]), one row pe
 dataset models and the ClickHouse landing DDL, after evidence models are merged (one row per \
 `(dataset, field, category)`). Data evidence: [[POS-Phase5-Evidence]] (run `do/platform-2612-3`). \
 The same rows are in `pos/docs/phase5_register.csv`, written by `pos/scripts/build_register.py`; \
-`pos/tests/test_schema_register.py` checks every row against `drift()`.
+`pos/tests/test_schema_register.py` checks every `after` against the generator.
 
 - `before`: today's landing DDL type (column or struct field order for the order rows); empty for a column \
 not loaded today.
-- `after`: the type piece 2 will generate from the model (marker or dtype; evidence: nullable if any \
-member is nullable or lacks it; fields of a nullable struct stay Nullable); empty for a removal.
+- `after`: the type `pos.clickhouse_ddl` generates for the Platform table (marker or dtype; fields of a nullable \
+struct stay Nullable; evidence: `union_columns` of the Platform evidence models, Nullable where any is nullable or \
+lacks the column); empty where the generated Platform table lacks the column (a removal, or a `ppp_only` evidence \
+column).
 - `serving read`: `named:<script>` names the column, `pass:<script>` reads it through `SELECT *`; for a \
 column not loaded today, the read it would get once loaded.
 - `API follow-up`: `open` when the ClickHouse type changes from `before` to `after` and a serving script reads \
@@ -328,8 +342,6 @@ locations; the API served empty arrays). The API drops them; disease locations c
 `publicationJournal` and `condition`, interaction `speciesB.scientificName`.
 - Fields of a nullable struct stay Nullable (clinical_report `trialSponsor/*`, clinical_target `diseases[]`): a \
 Tuple cannot be NULL, so a non-null field would turn a null struct into `''`.
-- The evidence-union types come from the first member with output; derive the real union and expect a test \
-failure where it disagrees.
 - The 3 `chromosome` Enums stay open strings (API open); `transcript.strand` and `exons[].strand` get an Enum8 marker.
 - Rows with no 2612-3 evidence take `after` from the model; check those datasets' next outputs first (otar, the \
 assays and validationReadouts of ot_crispr_validation and encore, the encore struct order).
@@ -342,12 +354,42 @@ def _cell(value: str) -> str:
     return value.replace('|', '\\|').replace('\n', ' ')
 
 
+PIECE2 = """
+## Piece 2
+
+`after` is now the generated Platform type. The Platform evidence table drops the 15 columns only PPP models have \
+(`ppp_only` rows, outcome `API removal (Platform; PPP only)`); their other rows keep their piece 1 outcome with an \
+empty `after`. Rows whose `after` changed from the piece 1 register:
+"""
+
+
+def previous() -> dict[tuple[str, str, str], dict[str, str]]:
+    """The piece 1 register rows, by key."""
+    text = subprocess.run(['git', 'show', f'{PIECE1}:pos/docs/phase5_register.csv'], cwd=POS, check=True,
+                          capture_output=True, text=True).stdout  # fmt: skip
+    return {(r['dataset'], r['field'], r['category']): r for r in csv.DictReader(io.StringIO(text))}
+
+
+def after_changes(rows: list[dict[str, str]]) -> list[tuple[dict[str, str], dict[str, str]]]:
+    """(piece 1 row, row) for each row whose `after` changed."""
+    old = previous()
+    keyed = ((old.get((r['dataset'], r['field'], r['category'])), r) for r in rows)
+    return [(o, r) for o, r in keyed if o is not None and o['after'] != r['after']]
+
+
 def note(rows: list[dict[str, str]]) -> str:
     frame = pl.DataFrame(rows)
     counts = frame.group_by('outcome').agg(rows=pl.len(), open=(pl.col('API follow-up') == 'open').sum())
     n_open = sum(r['API follow-up'] == 'open' for r in rows)
-    out = [NOTE_HEAD, HINTS, '## Summary', '', f'{len(rows)} rows, {n_open} with API follow-up `open`.', '',
-           '| outcome | rows | open |', '| --- | --- | --- |']  # fmt: skip
+    out = [NOTE_HEAD, HINTS, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
+           '| --- | --- | --- | --- | --- | --- |']  # fmt: skip
+    for o, r in after_changes(rows):
+        after = f'`{o["after"]}` → `{r["after"]}`' if r['after'] else f'`{o["after"]}` → empty'
+        values = [r['dataset'], f'`{r["field"]}`' if r['field'] else '', r['category'], r['outcome'], after,
+                  f'{o["API follow-up"]} → {r["API follow-up"]}']  # fmt: skip
+        out.append(f'| {" | ".join(_cell(v) for v in values)} |')
+    out += ['', '## Summary', '', f'{len(rows)} rows, {n_open} with API follow-up `open`.', '',
+            '| outcome | rows | open |', '| --- | --- | --- |']  # fmt: skip
     out += [f'| {r["outcome"]} | {r["rows"]} | {r["open"]} |' for r in counts.sort('outcome').iter_rows(named=True)]
     out += ['', '## Register', '', f'| {" | ".join(COLUMNS)} |', f'|{" --- |" * len(COLUMNS)}']
     for r in rows:
@@ -374,6 +416,9 @@ def main() -> None:
         writer.writerows(rows)
     if args.note:
         args.note.write_text(note(rows))
+    for o, r in after_changes(rows):
+        sys.stdout.write(f'{r["dataset"]}\t{r["field"]}\t{r["category"]}\t{o["after"]} -> {r["after"]}\t'
+                         f'{o["API follow-up"]} -> {r["API follow-up"]}\n')  # fmt: skip
     opened = sum(r['API follow-up'] == 'open' for r in rows)
     sys.stdout.write(f'{len(rows)} rows, {opened} open\n')
 

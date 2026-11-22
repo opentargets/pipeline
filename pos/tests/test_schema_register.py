@@ -3,7 +3,6 @@
 import csv
 import importlib.util
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,18 +13,21 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
 
+from pos.clickhouse_ddl import CHType, columns, members, parse_type, render, union_columns
+
 ROOT = Path(__file__).parents[1]
 CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
 SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
-#: Outcomes that are a model change, so their disagreement leaves drift().
-MODEL_CHANGES = {'marker', 'model nullable'}
-#: Categories whose serving read is the one the column would have once loaded.
-UNLANDED = {'model_only', 'struct_field_missing'}
-#: Categories whose `before` is not a landing DDL cell.
-NOT_LANDED = {*UNLANDED, 'no_model'}
 ORDER = {'struct_order', 'column_order'}
+#: Evidence columns only PPP models have.
+PPP_ONLY = (
+    'assays', 'assessments', 'biomarkerList', 'cellLineBackground', 'geneticInteractionScore',
+    'geneticInteractionType', 'interactingTargetFromSourceId', 'interactingTargetRole',
+    'phenotypicConsequenceLogFoldChange', 'phenotypicConsequencePValue', 'primaryProjectHit', 'primaryProjectId',
+    'projectDescription', 'targetRole', 'validationReadouts',
+)  # fmt: skip
 
 
 def _load_script():
@@ -41,13 +43,10 @@ schema_drift = _load_script()
 
 
 @pytest.fixture(scope='module')
-def drift() -> dict[tuple[str, str, str], dict[str, str]]:
-    """(dataset, field, category) -> the drift row; evidence models share the DDL cells, the first is kept."""
+def drift() -> set[tuple[str, str, str]]:
+    """(dataset, field, category) of every disagreement drift() finds now."""
     frame = schema_drift.drift(ROOT / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLICKHOUSE / 'scripts')
-    rows: dict[tuple[str, str, str], dict[str, str]] = {}
-    for r in frame.iter_rows(named=True):
-        rows.setdefault((r['dataset'], r['field'], r['category']), r)
-    return rows
+    return {(r['dataset'], r['field'], r['category']) for r in frame.iter_rows(named=True)}
 
 
 @pytest.fixture(scope='module')
@@ -65,11 +64,29 @@ def register() -> list[dict[str, str]]:
         return list(reader)
 
 
-def _nodes(dataset: str) -> list[dict]:
-    """The `walk` nodes of each model the landing table is loaded from."""
+def _platform_table(dataset: str) -> CHType | None:
+    """The generated Platform landing table of a dataset as one Tuple; None for a table with no model."""
+    if dataset == 'evidence':
+        return CHType('Tuple', fields=tuple(union_columns(members('evidence_*', 'platform'))))
     entry = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse'][dataset]
-    models = schema_drift._models_for(entry, discover_datasets()) or []
-    return [dict(walk(dataset_spec(m))) for m in models]
+    models = schema_drift._models_for(entry, discover_datasets())
+    if not models:
+        return None
+    (model,) = models
+    return CHType('Tuple', fields=tuple(columns(model)))
+
+
+def _at(table: CHType | None, path: str) -> CHType | None:
+    """The type at `a`, `a/b` or `a[]/b` (the table itself for ''); None if the path is absent."""
+    t = table
+    for part in path.split('/') if path else []:
+        name, lists = part, 0
+        while name.endswith('[]'):
+            name, lists = name[:-2], lists + 1
+        t = dict(t.fields).get(name) if t is not None else None
+        for _ in range(lists):
+            t = t.element if t is not None else None
+    return t
 
 
 def _changed(row: dict[str, str]) -> bool:
@@ -77,28 +94,7 @@ def _changed(row: dict[str, str]) -> bool:
     before, after = row['before'], row['after']
     if row['category'] in ORDER or not before or not after:
         return before != after
-    return schema_drift.parse_type(before) != schema_drift.parse_type(after)
-
-
-def _in_nullable_struct(dataset: str, path: str) -> bool:
-    """Whether an ancestor of `path` in a model of the dataset is a nullable struct."""
-    parts = path.split('/')
-    ancestors = ['/'.join(parts[:i]) for i in range(1, len(parts))]
-    return any(n[a].kind == 'struct' and n[a].nullable for n in _nodes(dataset) for a in ancestors if a in n)
-
-
-def _check_against_drift(row: dict[str, str], found: dict[str, str]) -> None:
-    key = (row['dataset'], row['field'], row['category'])
-    if row['category'] not in NOT_LANDED:
-        assert row['before'] == found['ddl_type'], f'{key}: before should be {found["ddl_type"]}'
-    if row['category'] not in UNLANDED:
-        assert row['serving read'] == found['serving_read'], f'{key}: serving read is {found["serving_read"]}'
-    checkable = row['after'] and row['category'] not in ORDER and row['dataset'] != 'evidence'
-    if checkable and not _in_nullable_struct(row['dataset'], row['field']):
-        after = schema_drift.parse_type(row['after'])
-        if after.name not in {'Array', 'Tuple'}:
-            nullable = found['model_nullable'] == 'true'
-            assert after.nullable == nullable, f'{key}: after should be {"" if nullable else "non-"}nullable'
+    return parse_type(before) != parse_type(after)
 
 
 def test_register_covers_every_disagreement(drift, snapshot, register):
@@ -106,35 +102,44 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
     assert len(keys) == len(set(keys)), 'duplicate register rows'
     unregistered = sorted(snapshot - set(keys))
     assert not unregistered, f'snapshot rows with no register row: {unregistered}'
-    new = sorted(set(drift) - snapshot - set(keys))
+    new = sorted(drift - snapshot - set(keys))
     assert not new, (
         f'new schema drift with no register row: {new}. Add a row by hand to pos/docs/phase5_register.csv '
         f'with columns {", ".join(COLUMNS)} (outcome says what changed; before/after are ClickHouse types; '
         f'evidence a short data summary; serving read from schema_drift.py; API follow-up open or none).'
     )
-
     for row, key in zip(register, keys, strict=True):
         served = row['serving read'] != 'no' and row['category'] != 'column_order'
         expected = 'open' if served and _changed(row) else 'none'
         assert row['API follow-up'] == expected, f'{key}: API follow-up should be {expected}'
 
-        if key in drift:
-            _check_against_drift(row, drift[key])
-            continue
-        # no longer a disagreement: a model change, or a DDL-only column dropped from the landing DDL
-        if row['outcome'] == 'API removal (dropped)':
-            assert row['category'] == 'ddl_only', f'{key}: only a DDL-only column can be dropped'
-            assert not any(row['field'] in n for n in _nodes(row['dataset'])), f'{key}: the model has it'
-            continue
-        assert row['outcome'] in MODEL_CHANGES, f'{key}: stale row, not in drift() and not a model change'
-        nodes = [n[row['field']] for n in _nodes(row['dataset']) if row['field'] in n]
-        assert nodes, f'{key}: no model of {row["dataset"]} has {row["field"]}'
-        if row['outcome'] == 'marker':
-            marked = [replace(schema_drift.parse_type(n.clickhouse), nullable=False) for n in nodes if n.clickhouse]
-            after = replace(schema_drift.parse_type(row['after']), nullable=False)
-            assert after in marked, f'{key}: no such marker'
+
+def test_after_matches_the_generator(register):
+    """`after` is the generated Platform type; empty where the generated table lacks the column."""
+    tables = {d: _platform_table(d) for d in {r['dataset'] for r in register}}
+    for row in register:
+        key = (row['dataset'], row['field'], row['category'])
+        found = _at(tables[row['dataset']], row['field'])
+        if row['category'] in ORDER:
+            kept = set(row['before'].split(', '))
+            expected = ', '.join(n for n, _ in found.fields if n in kept) if found is not None else ''
+        elif row['category'] in {'ddl_only', 'no_model'} or found is None:
+            expected = ''
         else:
-            assert any(n.nullable for n in nodes), f'{key}: not nullable in the model'
+            expected = render(found, quote_fields=False)
+        assert row['after'] == expected, f'{key}: after should be {expected!r}'
+
+
+def test_ppp_only_columns_are_platform_removals(register):
+    rows = {r['field']: r for r in register if r['dataset'] == 'evidence' and r['category'] == 'ppp_only'}
+    assert sorted(rows) == sorted(PPP_ONLY)
+    for field, row in rows.items():
+        assert row['outcome'] == 'API removal (Platform; PPP only)', field
+        assert row['after'] == '', field
+        assert row['API follow-up'] == 'open', field
+    platform = _platform_table('evidence')
+    assert platform is not None
+    assert not set(PPP_ONLY) & {n for n, _ in platform.fields}, 'a PPP-only column is in the Platform table'
 
 
 def test_every_clickhouse_marker_parses():
@@ -142,4 +147,4 @@ def test_every_clickhouse_marker_parses():
     for name, model in discover_datasets().items():
         for path, node in walk(dataset_spec(model)):
             if node.clickhouse:
-                assert schema_drift.parse_type(node.clickhouse), f'{name}.{path}: {node.clickhouse}'
+                assert parse_type(node.clickhouse), f'{name}.{path}: {node.clickhouse}'
