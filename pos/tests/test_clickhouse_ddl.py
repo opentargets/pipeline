@@ -21,6 +21,7 @@ from pos.clickhouse_ddl import (
     ddl_for,
     landing_columns,
     members,
+    model_type,
     parse_table,
     parse_type,
     render,
@@ -195,6 +196,7 @@ def test_enum_labels_round_trip():
     t = columns(Quoted)[0][1]
     assert render(t) == r"Enum8('it\'s' = 1, 'back\\slash' = 2)"
     assert parse_type(render(t)) == t
+    assert model_type(dataset_spec(Quoted).fields[0].node) == t
 
 
 BigLiteral = Literal[tuple(f'v{i}' for i in range(128))]  # ty: ignore[invalid-type-form]

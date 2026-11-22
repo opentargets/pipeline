@@ -21,7 +21,7 @@ from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec
 
 from pos import clickhouse_ddl as ddl
-from pos.clickhouse_ddl import _ENUMS, CHType, model_type, parse_table, parse_type
+from pos.clickhouse_ddl import ENUMS, CHType, model_type, parse_table, parse_type
 
 CATEGORIES = (
     'model_only',
@@ -83,14 +83,14 @@ def _type_categories(node: Node, d: CHType) -> list[str]:
         if m.low_cardinality != d.low_cardinality:
             cats.append('low_cardinality')
         a, b = replace(m, low_cardinality=False), replace(d, low_cardinality=False)
-        if b.name in _ENUMS:
+        if b.name in ENUMS:
             if allowed_str:
                 if set(allowed) != _enum_labels(b):
                     cats.append('type')
             elif allowed:
                 if set(allowed) != _enum_values(b):
                     cats.append('type')
-            elif a.name not in _ENUMS:
+            elif a.name not in ENUMS:
                 cats.append('open_vs_enum')
                 if a.name != 'String':
                     cats.append('kind')
