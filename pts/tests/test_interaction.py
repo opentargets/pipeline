@@ -408,9 +408,10 @@ def test_aggregate_counts_evidence_and_takes_the_maximum_score() -> None:
     assert out.row(0, named=True)['scoring'] == 0.74
 
 
-def test_interaction_id_is_a_signed_64_bit_integer() -> None:
+def test_interaction_id_is_a_non_negative_64_bit_integer() -> None:
     out = with_interaction_id(key_frame())
     assert out.schema['interactionId'] == pl.Int64
+    assert (out['interactionId'] >= 0).all()
 
 
 @pytest.mark.parametrize(
@@ -423,10 +424,10 @@ def test_interaction_id_distinguishes_every_key_column(overrides: dict) -> None:
 
 
 def test_interaction_id_is_pinned() -> None:
-    """XXH64 (seed 0) of the key columns joined by \\x1f, nulls as \\x00, structs flattened."""
+    """XXH64 (seed 0) of the key columns joined by \\x1f, nulls as \\x00, structs flattened, top bit cleared."""
     df = pl.concat([key_frame(), key_frame(sourceDatabase='string', targetB=None, speciesB=MOUSE)])
     assert df.select(interaction_id(df.schema))['interactionId'].to_list() == [
-        -4777012063784892725,
+        4446359973069883083,
         3524803122290032628,
     ]
 

@@ -73,6 +73,7 @@ DIMENSION_COLUMNS = [
 
 ID_SEPARATOR = '\x1f'
 ID_NULL = '\x00'
+ID_MASK = (1 << 63) - 1
 
 # struct fields in alphabetical order, as spark's json inference produced them
 _ORGANISM = pl.Struct({'mnemonic': pl.String, 'scientific_name': pl.String, 'taxon_id': pl.Int64})
@@ -177,13 +178,11 @@ def _id_part(column: str, dtype: pl.DataType) -> pl.Expr:
 
 
 def interaction_id(schema: pl.Schema) -> pl.Expr:
-    """Return a signed 64-bit xxhash64 over the interaction key columns."""
+    """Return xxhash64 over the interaction key columns, top bit cleared: a non-negative Int64."""
     parts = [_id_part(c, schema[c]) for c in INTERACTION_KEY]
     return (
-        plh
-        .concat_str(parts, separator=ID_SEPARATOR)
-        .nchash.xxhash64(seed=0)
-        .reinterpret(signed=True)
+        (plh.concat_str(parts, separator=ID_SEPARATOR).nchash.xxhash64(seed=0) & pl.lit(ID_MASK, pl.UInt64))
+        .cast(pl.Int64)
         .alias('interactionId')
     )
 
