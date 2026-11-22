@@ -89,6 +89,7 @@ class Colocalisation(DatasetModel):
     ] = Field(description='Method used to estimate colocalisation (e.g., coloc)')
     numberColocalisingVariants: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=1,
+        le=4294967295,
         description='Number of variants shared by the two colocalising credible sets',
     )
     h3: float = Field(

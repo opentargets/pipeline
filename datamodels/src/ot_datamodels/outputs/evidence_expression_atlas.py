@@ -73,6 +73,7 @@ class EvidenceExpressionAtlas(DatasetModel):
     )
     log2FoldChangePercentileRank: Annotated[int, ClickHouseType('Int32')] = Field(
         ge=0,
+        le=2147483647,
         description=(
             'Percentile rank of the absolute log 2 fold change of the target among '
             'the differentially expressed genes of the contrast'

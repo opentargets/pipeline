@@ -35,13 +35,13 @@ class LiteratureEntityLut(DatasetModel):
     pmcid: str | None = Field(min_length=1, description='PubMed Central ID (PMCID) of the literature entry')
     date: datetime.date | None = Field(description='Date of publication in YYYY-MM-DD format')
     year: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt16')] | None = Field(
-        ge=0, description='Year of publication'
+        ge=0, le=65535, description='Year of publication'
     )
     month: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description='Month of publication'
+        ge=0, le=255, description='Month of publication'
     )
     day: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, description='Day of publication'
+        ge=0, le=255, description='Day of publication'
     )
     keywordId: str = Field(
         min_length=1, description='Unique identifier for the keyword associated with the literature entry'

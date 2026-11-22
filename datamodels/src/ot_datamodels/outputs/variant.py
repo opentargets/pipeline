@@ -79,10 +79,10 @@ class TranscriptConsequences(StructModel):
     isEnsemblCanonical: bool = Field(description='Flagging if the transcript is the canonical transcript for the gene')
     codons: str | None = Field(min_length=1, description='Affected codon in the transcript')
     distanceFromFootprint: Annotated[int, ClickHouseType('Int32')] = Field(
-        ge=0, description='Distance of the variant from the transcript'
+        ge=0, le=2147483647, description='Distance of the variant from the transcript'
     )
     distanceFromTss: Annotated[int, ClickHouseType('Int32')] = Field(
-        description='Distance of the variant from the transcription start site'
+        ge=-2147483648, le=2147483647, description='Distance of the variant from the transcription start site'
     )
     appris: str | None = Field(min_length=1, description='Appris annotation of the transcript')
     maneSelect: str | None = Field(min_length=1, description='MANE annotation of the transcript')

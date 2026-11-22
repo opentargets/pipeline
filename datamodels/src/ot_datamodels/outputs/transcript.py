@@ -35,8 +35,12 @@ class Exons(StructModel):
         min_length=1, description='Ensembl identifier of the exon (ENSE###)'
     )
     chromosome: str = Field(min_length=1, description='Chromosome on which the exon is located')
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic start position of the exon')
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic end position of the exon')
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Genomic start position of the exon'
+    )
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Genomic end position of the exon'
+    )
     strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
         description=('Strand orientation of the exon: 1 for the forward strand, -1 for the reverse strand')
     )
@@ -104,9 +108,11 @@ class Transcript(DatasetModel):
     )
     chromosome: str = Field(min_length=1, description='Chromosome on which the transcript is located')
     start: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Genomic start position of the transcript'
+        ge=0, le=4294967295, description='Genomic start position of the transcript'
     )
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Genomic end position of the transcript')
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Genomic end position of the transcript'
+    )
     strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
         description=('Strand orientation of the transcript: 1 for the forward strand, -1 for the reverse strand')
     )

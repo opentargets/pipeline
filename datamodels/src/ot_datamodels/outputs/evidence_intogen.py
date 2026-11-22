@@ -18,13 +18,15 @@ class MutatedSamples(StructModel):
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
     numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Number of samples of the IntOGen cohort in which the target is mutated'
+        ge=0, le=4294967295, description='Number of samples of the IntOGen cohort in which the target is mutated'
     )
     numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Number of samples of the IntOGen cohort tested'
+        ge=0, le=4294967295, description='Number of samples of the IntOGen cohort tested'
     )
     numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] | None = Field(
-        description=('Number of samples of the IntOGen cohort with a mutation of the given type in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of samples of the IntOGen cohort with a mutation of the given type in the target'),
     )
 
 

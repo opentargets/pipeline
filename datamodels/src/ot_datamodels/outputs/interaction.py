@@ -20,7 +20,7 @@ class SpeciesA(StructModel):
         description='Scientific name of the species associated with target A'
     )
     taxonId: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='NCBI taxon ID of the species associated with target A'
+        ge=0, le=4294967295, description='NCBI taxon ID of the species associated with target A'
     )
 
 
@@ -86,7 +86,7 @@ class Interaction(DatasetModel):
     speciesA: SpeciesA = Field(description='Taxonomic annotation of target A')
     speciesB: SpeciesB = Field(description='Taxonomic annotation of target B')
     count: Annotated[int, ClickHouseType('UInt8')] = Field(
-        ge=0, description='Number of interaction occurrences reported in the source databases'
+        ge=0, le=255, description='Number of interaction occurrences reported in the source databases'
     )
     scoring: float | None = Field(ge=0.0, le=1.0, description='Scoring or confidence value assigned to the interaction')
     interactionId: Annotated[int, PrimaryKey(), ClickHouseType('UInt64')] = Field(

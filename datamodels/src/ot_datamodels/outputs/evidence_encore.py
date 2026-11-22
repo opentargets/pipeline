@@ -44,6 +44,7 @@ class EvidenceEncore(DatasetModel):
         'breast cancers'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
+    products: ClassVar[tuple[str, ...]] = ('ppp',)
     example: ClassVar[dict] = {
         'targetFromSourceId': 'CHEK1',
         'diseaseFromSourceMappedId': 'EFO_1001951',

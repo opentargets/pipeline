@@ -41,7 +41,7 @@ class Pharmacovigilance(DatasetModel):
         min_length=1, description='Reported adverse drug reaction associated with the drug'
     )
     count: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description='Number of occurrences of the adverse event in the dataset'
+        ge=0, le=4294967295, description='Number of occurrences of the adverse event in the dataset'
     )
     llr: float = Field(
         ge=0.0,

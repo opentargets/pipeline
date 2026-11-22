@@ -46,6 +46,11 @@ A model states what holds for the data's meaning, not for one release's values: 
 next release must not fail because a new value appeared. Numbers are bounded at
 natural limits (`[0, 1]`, `>= 0`), never at the observed min/max.
 
+`products` (default `('platform', 'ppp')`) names the products a dataset is loaded for; set
+`('ppp',)` on a PPP-only dataset so pos keeps it out of the Platform schema. An integer
+`ClickHouseType` narrower than the dtype, or unsigned, needs `ge`/`le` inside its range, so a value
+that would wrap in ClickHouse fails pts validation.
+
 ## Adding a dataset
 
 No generator exists; write the model by hand.

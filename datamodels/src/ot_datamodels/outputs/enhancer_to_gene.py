@@ -51,8 +51,12 @@ class EnhancerToGene(DatasetModel):
     }
 
     chromosome: str = Field(min_length=1, description='Chromosome the interval is located on')
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Basepair position of the interval start')
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, description='Basepair position of the interval end')
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Basepair position of the interval start'
+    )
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Basepair position of the interval end'
+    )
     geneId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target the interval is linked with'
     )

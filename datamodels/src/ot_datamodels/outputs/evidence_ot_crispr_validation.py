@@ -20,8 +20,6 @@ class Assays(StructModel):
     shortName: str = Field(min_length=1, description='Short name of the assay')
 
 
-
-
 class DiseaseCellLines(StructModel):
     """`diseaseCellLines[]`."""
 
@@ -45,6 +43,7 @@ class EvidenceOtCrisprValidation(DatasetModel):
         'experimental project, such as Project Score'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
+    products: ClassVar[tuple[str, ...]] = ('ppp',)
     example: ClassVar[dict] = {
         'targetFromSourceId': 'YAP1',
         'diseaseFromSourceMappedId': 'EFO_0000305',

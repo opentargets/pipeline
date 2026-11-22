@@ -18,13 +18,19 @@ class MutatedSamples(StructModel):
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
     numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease with a mutation of any type in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease with a mutation of any type in the target'),
     )
     numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease screened for mutations in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease screened for mutations in the target'),
     )
     numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, description=('Number of COSMIC samples of the disease with a mutation of the given type in the target')
+        ge=0,
+        le=4294967295,
+        description=('Number of COSMIC samples of the disease with a mutation of the given type in the target'),
     )
 
 
