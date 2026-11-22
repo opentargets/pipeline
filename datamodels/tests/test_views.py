@@ -35,7 +35,7 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'target_view': TargetView,
 }
 
-#: today's pts schema of each view
+#: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
 PTS_SCHEMAS = {
     'association_otf': ASSOCIATION_OTF,
     'association_timeseries': ASSOCIATION_TIMESERIES,
@@ -43,8 +43,8 @@ PTS_SCHEMAS = {
     'target_view': TARGET_VIEW,
 }
 
-#: columns whose dtype differs from today's pts schema: Enums where pts writes strings, and the bool
-#: `homologues[].isHighConfidence` pts writes as '1'/'0'
+#: columns whose dtype differs from the frozen pre-piece-3 baseline: Enums the baseline holds as strings, and
+#: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
     'association_otf': {'datasourceId', 'datatypeId'},
     'association_timeseries': {'aggregationType'},
@@ -160,7 +160,7 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
 def _as_pts_writes(
     dtype: pl.DataType | pl.datatypes.DataTypeClass, path: str = ''
 ) -> pl.DataType | pl.datatypes.DataTypeClass:
-    """`dtype` as today's pts writes it: every Enum a string, `isHighConfidence` a string."""
+    """`dtype` as the frozen pre-piece-3 baseline holds it: every Enum a string, `isHighConfidence` a string."""
     if isinstance(dtype, pl.Enum) or path.endswith('/isHighConfidence'):
         return pl.String()
     if isinstance(dtype, pl.List):
@@ -171,7 +171,7 @@ def _as_pts_writes(
 
 
 @pytest.mark.parametrize('name', sorted(VIEWS))
-def test_view_matches_today_s_pts_schema(name: str) -> None:
+def test_view_matches_the_pre_piece_3_pts_schema(name: str) -> None:
     schema, pts = to_polars_schema(VIEWS[name]), PTS_SCHEMAS[name]
 
     assert list(schema) == list(pts)
@@ -261,7 +261,7 @@ def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
     assert sources <= set(get_args(v.CodingVariantDatasource))
 
 
-#: the ClickHouseType markers declared on view columns, from today's landing SQL
+#: the ClickHouseType markers declared on view columns, from the hand-written landing SQL before piece 3
 MARKERS = {
     ('coding_variant', 'datasources[]/datasourceCount'): 'UInt32',
     ('coding_variant', 'datasources[]/datasourceNiceName'): 'LowCardinality(String)',
