@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 
 
@@ -26,10 +26,10 @@ class Screens(StructModel):
         min_length=1, description='Cell model passport identifier of a cell line modelling a disease'
     )
     mutation: Literal['damaging', 'hotspot'] | None = Field(description='Background mutation in the tested cell line')
-    geneEffect: Annotated[float, PolarsDtype(pl.Float32)] = Field(
+    geneEffect: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
         description='Gene effect score indicating the impact of gene knockout'
     )
-    expression: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
+    expression: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
         ge=0.0, description='Gene expression level in the corresponding cell line'
     )
 

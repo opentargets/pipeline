@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import MD5_HEX, VARIANT_ID
 
 
@@ -77,10 +77,10 @@ class CredibleSet(DatasetModel):
         ],
         PolarsDtype(pl.Enum),
     ] = Field(description='Chromosome of the credible set')
-    locusStart: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    locusStart: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0, description='Start of the fine-mapped region of the credible set'
     )
-    locusEnd: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    locusEnd: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
         ge=0, description='End of the fine-mapped region of the credible set'
     )
     studyId: Annotated[str, Reference('study', 'studyId')] = Field(
@@ -96,7 +96,7 @@ class CredibleSet(DatasetModel):
         description=('Method used for fine-mapping of the credible set (PICS, SuSiE or SuSiE-inf)')
     )
     logBayesFactor: float | None = Field(ge=0.0, description='Log Bayes factor of the entire credible set')
-    confidence: Annotated[int, PolarsDtype(pl.Int8)] = Field(
+    confidence: Annotated[int, PolarsDtype(pl.Int8), ClickHouseType('UInt8')] = Field(
         ge=0,
         description=(
             'Confidence class of the credible set, from its fine-mapping method '
@@ -112,33 +112,36 @@ class CredibleSet(DatasetModel):
         ge=0.0, description='Minimum pairwise LD r2 between the variants of the credible set'
     )
     qualityControls: list[
-        Literal[
-            'Explained by a more significant variant in the same window',
-            'Explained by a more significant variant in high LD',
-            'Study does not have population annotation to resolve LD',
-            'Variant not found in LD reference',
-            'Study locus finemapped without in-sample LD reference',
-            'Subsignificant p-value',
-            'Composite association',
-            'Variant inconsistency',
-            'Palindrome alleles - cannot harmonize',
-            'Study locus from curated top hit',
-            'Trans QTL',
-            'Lead variant is replicated in an independent study',
-            'Study not found in the study index',
-            'Curated top hit is flagged because summary statistics are available for study',
-            'MHC region',
-            'Chromosome not in 1:22, X, Y or MT',
-            'PICS results from summary statistics available for this same study',
-            'Study locus in region explained by a SuSiE credible set',
-            'Credible set identifier repeated within its source',
-            'Credible set identifier also in another source, whose copy is kept',
-            'Credible set has a variant with an excluding quality flag',
-            'Credible set identifier is not a 32-character hexadecimal md5',
-            'Chromosome of the lead variant differs from the credible set chromosome',
-            'Fine-mapping method is not supported',
-            'Study type of the source is not a supported study type',
-            'Study type of the credible set differs from the study index',
-            'Lead variant of the credible set has no row among its variants',
+        Annotated[
+            Literal[
+                'Explained by a more significant variant in the same window',
+                'Explained by a more significant variant in high LD',
+                'Study does not have population annotation to resolve LD',
+                'Variant not found in LD reference',
+                'Study locus finemapped without in-sample LD reference',
+                'Subsignificant p-value',
+                'Composite association',
+                'Variant inconsistency',
+                'Palindrome alleles - cannot harmonize',
+                'Study locus from curated top hit',
+                'Trans QTL',
+                'Lead variant is replicated in an independent study',
+                'Study not found in the study index',
+                'Curated top hit is flagged because summary statistics are available for study',
+                'MHC region',
+                'Chromosome not in 1:22, X, Y or MT',
+                'PICS results from summary statistics available for this same study',
+                'Study locus in region explained by a SuSiE credible set',
+                'Credible set identifier repeated within its source',
+                'Credible set identifier also in another source, whose copy is kept',
+                'Credible set has a variant with an excluding quality flag',
+                'Credible set identifier is not a 32-character hexadecimal md5',
+                'Chromosome of the lead variant differs from the credible set chromosome',
+                'Fine-mapping method is not supported',
+                'Study type of the source is not a supported study type',
+                'Study type of the credible set differs from the study index',
+                'Lead variant of the credible set has no row among its variants',
+            ],
+            ClickHouseType('LowCardinality(String)'),
         ]
     ] = Field(description=('Quality control flags of the credible set, including TRANS_QTL and REPLICATED'))

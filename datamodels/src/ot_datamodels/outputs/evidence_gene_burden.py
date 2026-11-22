@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 
 
@@ -94,7 +94,9 @@ class EvidenceGeneBurden(DatasetModel):
     )
     diseaseFromSource: str = Field(min_length=1, description='Trait or phenotype label as reported by the burden study')
     pValueMantissa: float = Field(ge=0.0, description='Mantissa of the p-value of the burden test')
-    pValueExponent: int = Field(description='Exponent of the p-value of the burden test')
+    pValueExponent: Annotated[int, ClickHouseType('Int32')] = Field(
+        description='Exponent of the p-value of the burden test'
+    )
     beta: float | None = Field(description='Effect size of the gene burden on a quantitative trait')
     betaConfidenceIntervalLower: float | None = Field(
         description='Lower value of the confidence interval of the effect size'
@@ -153,9 +155,13 @@ class EvidenceGeneBurden(DatasetModel):
     releaseVersion: str | None = Field(
         min_length=1, description="Release version of the source data (e.g. FinnGen 'R12')"
     )
-    studySampleSize: int = Field(ge=0, description='Total number of samples in the burden analysis')
-    studyCases: int | None = Field(ge=0, description='Number of cases in the burden analysis of a binary trait')
-    studyCasesWithQualifyingVariants: int | None = Field(
+    studySampleSize: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, description='Total number of samples in the burden analysis'
+    )
+    studyCases: Annotated[int, ClickHouseType('UInt32')] | None = Field(
+        ge=0, description='Number of cases in the burden analysis of a binary trait'
+    )
+    studyCasesWithQualifyingVariants: Annotated[int, ClickHouseType('UInt32')] | None = Field(
         ge=0, description='Number of cases carrying at least one qualifying variant in the target'
     )
     statisticalMethod: str = Field(

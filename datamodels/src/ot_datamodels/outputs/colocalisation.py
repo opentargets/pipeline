@@ -21,7 +21,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, Note, PrimaryKey, Reference, RowCheck
+from ot_datamodels import ClickHouseType, DatasetModel, Note, PrimaryKey, Reference, RowCheck
 
 #: Rounding slack allowed on a sum of probabilities.
 _TOLERANCE = 1e-9
@@ -85,8 +85,9 @@ class Colocalisation(DatasetModel):
     colocalisationMethod: Annotated[
         Literal['COLOC_PIP_ECAVIAR'],
         Note('both methods are run on every pair, and reported in one row'),
+        ClickHouseType('LowCardinality(String)'),
     ] = Field(description='Method used to estimate colocalisation (e.g., coloc)')
-    numberColocalisingVariants: int = Field(
+    numberColocalisingVariants: Annotated[int, ClickHouseType('UInt32')] = Field(
         ge=1,
         description='Number of variants shared by the two colocalising credible sets',
     )

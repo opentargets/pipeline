@@ -7,18 +7,18 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, Reference, StructModel
 
 
 class InteractionResources(StructModel):
     """`interactionResources`."""
 
-    databaseVersion: str = Field(
+    databaseVersion: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         min_length=1, description='Version of the source database providing interaction evidence'
     )
-    sourceDatabase: Literal['intact', 'reactome', 'signor', 'string'] = Field(
-        description='Name of the source database reporting the interaction evidence'
-    )
+    sourceDatabase: Annotated[
+        Literal['intact', 'reactome', 'signor', 'string'], ClickHouseType('LowCardinality(String)')
+    ] = Field(description='Name of the source database reporting the interaction evidence')
 
 
 class HostOrganismTissue(StructModel):

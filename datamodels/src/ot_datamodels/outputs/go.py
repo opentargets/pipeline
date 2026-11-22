@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PrimaryKey
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 
 
@@ -41,7 +41,7 @@ class Go(DatasetModel):
         min_length=1, description='Primary Gene Ontology term identifier'
     )
     label: str = Field(min_length=1, description='Human-readable name of the GO term')
-    namespace: str = Field(
+    namespace: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID,
         description=(
             'Ontology branch the term belongs to: biological_process, molecular_function, or cellular_component'
