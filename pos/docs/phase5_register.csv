@@ -260,7 +260,7 @@ interaction,speciesA/scientificName,literal_vs_string,"String kept, no Enum",Low
 interaction,speciesA/scientificName,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/12067375; distinct Homo sapiens,named:interaction.sql,none
 interaction,speciesA/taxonId,type,marker,UInt32,UInt32,"nulls 0/12067375; min 9606, max 9606; distinct 9606",named:interaction.sql,none
 interaction,speciesB/mnemonic,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/12067375,named:interaction.sql,none
-interaction,speciesB/scientificName,low_cardinality,marker,Nullable(LowCardinality(String)),Nullable(LowCardinality(String)),nulls 33/12067375,named:interaction.sql,none
+interaction,speciesB/scientificName,low_cardinality,marker,Nullable(LowCardinality(String)),LowCardinality(Nullable(String)),nulls 33/12067375,named:interaction.sql,none
 interaction,speciesB/taxonId,nullability,ClickHouse non-null,Nullable(UInt32),Int64,"nulls 0/12067375; min -2, max 3052342",named:interaction.sql,open
 interaction,speciesB/taxonId,type,ClickHouse follows model,Nullable(UInt32),Int64,"nulls 0/12067375; min -2, max 3052342",named:interaction.sql,open
 interaction_evidence,,column_order,model order (piece 2),"interactionId, evidenceScore, expansionMethodMiIdentifier, expansionMethodShortName, hostOrganismScientificName, hostOrganismTaxId, hostOrganismTissue, interactionDetectionMethodMiIdentifier, interactionDetectionMethodShortName, interactionIdentifier, interactionResources, interactionScore, interactionTypeMiIdentifier, interactionTypeShortName, participantDetectionMethodA, participantDetectionMethodB, pubmedId","interactionResources, interactionScore, interactionDetectionMethodShortName, interactionDetectionMethodMiIdentifier, evidenceScore, interactionIdentifier, pubmedId, interactionId, expansionMethodMiIdentifier, expansionMethodShortName, hostOrganismScientificName, hostOrganismTaxId, hostOrganismTissue, interactionTypeMiIdentifier, interactionTypeShortName, participantDetectionMethodA, participantDetectionMethodB",,no,none
@@ -307,8 +307,8 @@ pharmacogenomics,datatypeId,low_cardinality,marker,LowCardinality(String),LowCar
 pharmacogenomics,directionality,model_only,API addition (piece 2),,Nullable(String),nulls 26453/33485; 10 distinct,pass:pharmacogenomics.sql,open
 pharmacogenomics,drugs[],struct_order,model order (piece 2),"drugId, drugFromSource","drugFromSource, drugId",nulls 0/33713,pass:pharmacogenomics.sql,open
 pharmacogenomics,drugs[]/drugFromSource,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/33713,pass:pharmacogenomics.sql,none
-pharmacogenomics,drugs[]/drugId,low_cardinality,marker,LowCardinality(String),Nullable(LowCardinality(String)),nulls 4094/33713,pass:pharmacogenomics.sql,open
-pharmacogenomics,drugs[]/drugId,nullability,ClickHouse nullable,LowCardinality(String),Nullable(LowCardinality(String)),nulls 4094/33713,pass:pharmacogenomics.sql,open
+pharmacogenomics,drugs[]/drugId,low_cardinality,marker,LowCardinality(String),LowCardinality(Nullable(String)),nulls 4094/33713,pass:pharmacogenomics.sql,open
+pharmacogenomics,drugs[]/drugId,nullability,ClickHouse nullable,LowCardinality(String),LowCardinality(Nullable(String)),nulls 4094/33713,pass:pharmacogenomics.sql,open
 pharmacogenomics,evidenceLevel,low_cardinality,marker,LowCardinality(String),LowCardinality(String),"nulls 0/33485; distinct 1A, 1B, 2A, 2B, 3, 4",pass:pharmacogenomics.sql,none
 pharmacogenomics,genotype,nullability,ClickHouse non-null,Nullable(String),String,nulls 0/33485,pass:pharmacogenomics.sql,open
 pharmacogenomics,genotypeAnnotationText,nullability,ClickHouse non-null,Nullable(String),String,nulls 0/33485,pass:pharmacogenomics.sql,open
@@ -333,7 +333,7 @@ studies,backgroundDiseaseIds,model_only,API addition (piece 2),,Array(String),nu
 studies,backgroundTraitFromSourceMappedIds,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),nulls 3964701/3972254,pass:studies.sql,none
 studies,biosampleId,model_only,API addition (piece 2),,Nullable(String),nulls 168166/3972254,pass:studies.sql,open
 studies,cohorts,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),nulls 3700435/3972254,pass:studies.sql,none
-studies,condition,low_cardinality,marker,Nullable(LowCardinality(String)),Nullable(LowCardinality(String)),nulls 171119/3972254; 49 distinct,pass:studies.sql,none
+studies,condition,low_cardinality,marker,Nullable(LowCardinality(String)),LowCardinality(Nullable(String)),nulls 171119/3972254; 49 distinct,pass:studies.sql,none
 studies,discoverySamples,list_nullability,null list loads as [] (model unchanged),"Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))","Array(Tuple(sampleSize UInt32, ancestry LowCardinality(String)))",nulls 3682045/3972254,pass:studies.sql,open
 studies,discoverySamples[],struct_order,model order (piece 2),"ancestry, sampleSize","sampleSize, ancestry",nulls 0/345213,pass:studies.sql,open
 studies,discoverySamples[]/ancestry,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/345213; 18 distinct,pass:studies.sql,none
@@ -343,7 +343,7 @@ studies,ldPopulationStructure[]/ldPopulation,low_cardinality,marker,LowCardinali
 studies,nCases,type,marker,Nullable(UInt32),Nullable(UInt32),"nulls 3804091/3972254; min 0, max 906935",pass:studies.sql,none
 studies,nControls,type,marker,Nullable(UInt32),Nullable(UInt32),"nulls 3804091/3972254; min 0, max 11541775",pass:studies.sql,none
 studies,nSamples,type,marker,Nullable(UInt32),Nullable(UInt32),"nulls 605/3972254; min 6, max 11891160",pass:studies.sql,none
-studies,publicationJournal,low_cardinality,marker,Nullable(LowCardinality(String)),Nullable(LowCardinality(String)),nulls 3687319/3972254,pass:studies.sql,none
+studies,publicationJournal,low_cardinality,marker,Nullable(LowCardinality(String)),LowCardinality(Nullable(String)),nulls 3687319/3972254,pass:studies.sql,none
 studies,qualityControls[],literal_vs_string,"String kept, no Enum",String,String,"nulls 0/4061619; distinct Harmonized summary statistics are not available or empty, Sample size is null or equal to zero, Study has non empty or zero nCases, nControls & nSamples with matching sum, Study has non empty or zero nCases, nControls & nSamples with non matching sum, Study has non empty or zero nSamples with empty nCases and nControls, Study has only cases or only controls, The number of SNPs in the study is below the expected threshold",pass:studies.sql,none
 studies,replicationSamples,list_nullability,null list loads as [] (model unchanged),"Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))","Array(Tuple(sampleSize Nullable(UInt32), ancestry LowCardinality(String)))",nulls 3806439/3972254,pass:studies.sql,open
 studies,replicationSamples[],struct_order,model order (piece 2),"ancestry, sampleSize","sampleSize, ancestry",nulls 0/34906,pass:studies.sql,open

@@ -3,6 +3,7 @@
 import csv
 import importlib.util
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,9 @@ COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'eviden
 MODEL_CHANGES = {'marker', 'model nullable'}
 #: Categories whose serving read is the one the column would have once loaded.
 UNLANDED = {'model_only', 'struct_field_missing'}
+#: Categories whose `before` is not a landing DDL cell.
+NOT_LANDED = {*UNLANDED, 'no_model'}
+ORDER = {'struct_order', 'column_order'}
 
 
 def _load_script():
@@ -36,10 +40,13 @@ schema_drift = _load_script()
 
 
 @pytest.fixture(scope='module')
-def drift() -> dict[tuple[str, str, str], str]:
-    """(dataset, field, category) -> serving_read, evidence models merged."""
+def drift() -> dict[tuple[str, str, str], dict[str, str]]:
+    """(dataset, field, category) -> the drift row; evidence models share the DDL cells, the first is kept."""
     frame = schema_drift.drift(ROOT / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLICKHOUSE / 'scripts')
-    return {(r['dataset'], r['field'], r['category']): r['serving_read'] for r in frame.iter_rows(named=True)}
+    rows: dict[tuple[str, str, str], dict[str, str]] = {}
+    for r in frame.iter_rows(named=True):
+        rows.setdefault((r['dataset'], r['field'], r['category']), r)
+    return rows
 
 
 @pytest.fixture(scope='module')
@@ -57,6 +64,35 @@ def _nodes(dataset: str) -> list[dict]:
     return [dict(walk(dataset_spec(m))) for m in models]
 
 
+def _changed(row: dict[str, str]) -> bool:
+    """Whether the ClickHouse type (or the struct field order) differs between `before` and `after`."""
+    before, after = row['before'], row['after']
+    if row['category'] in ORDER or not before or not after:
+        return before != after
+    return schema_drift.parse_type(before) != schema_drift.parse_type(after)
+
+
+def _in_nullable_struct(dataset: str, path: str) -> bool:
+    """Whether an ancestor of `path` in a model of the dataset is a nullable struct."""
+    parts = path.split('/')
+    ancestors = ['/'.join(parts[:i]) for i in range(1, len(parts))]
+    return any(n[a].kind == 'struct' and n[a].nullable for n in _nodes(dataset) for a in ancestors if a in n)
+
+
+def _check_against_drift(row: dict[str, str], found: dict[str, str]) -> None:
+    key = (row['dataset'], row['field'], row['category'])
+    if row['category'] not in NOT_LANDED:
+        assert row['before'] == found['ddl_type'], f'{key}: before should be {found["ddl_type"]}'
+    if row['category'] not in UNLANDED:
+        assert row['serving read'] == found['serving_read'], f'{key}: serving read is {found["serving_read"]}'
+    checkable = row['after'] and row['category'] not in ORDER and row['dataset'] != 'evidence'
+    if checkable and not _in_nullable_struct(row['dataset'], row['field']):
+        after = schema_drift.parse_type(row['after'])
+        if after.name not in {'Array', 'Tuple'}:
+            nullable = found['model_nullable'] == 'true'
+            assert after.nullable == nullable, f'{key}: after should be {"" if nullable else "non-"}nullable'
+
+
 def test_register_covers_every_disagreement(drift, register):
     keys = [(r['dataset'], r['field'], r['category']) for r in register]
     assert len(keys) == len(set(keys)), 'duplicate register rows'
@@ -64,20 +100,20 @@ def test_register_covers_every_disagreement(drift, register):
     assert not missing, f'disagreements with no register row: {missing}'
 
     for row, key in zip(register, keys, strict=True):
-        changed = row['before'] != row['after'] and row['category'] != 'column_order'
-        served = row['serving read'] != 'no'
-        expected = 'open' if changed and served else 'none'
+        served = row['serving read'] != 'no' and row['category'] != 'column_order'
+        expected = 'open' if served and _changed(row) else 'none'
         assert row['API follow-up'] == expected, f'{key}: API follow-up should be {expected}'
 
         if key in drift:
-            if row['category'] not in UNLANDED:
-                assert row['serving read'] == drift[key], f'{key}: serving read is {drift[key]}'
+            _check_against_drift(row, drift[key])
             continue
         # no longer a disagreement: only a model change may have removed it
         assert row['outcome'] in MODEL_CHANGES, f'{key}: stale row, not in drift() and not a model change'
         nodes = [n[row['field']] for n in _nodes(row['dataset']) if row['field'] in n]
         assert nodes, f'{key}: no model of {row["dataset"]} has {row["field"]}'
         if row['outcome'] == 'marker':
-            assert any(n.clickhouse and n.clickhouse in row['after'] for n in nodes), f'{key}: no marker'
+            marked = [replace(schema_drift.parse_type(n.clickhouse), nullable=False) for n in nodes if n.clickhouse]
+            after = replace(schema_drift.parse_type(row['after']), nullable=False)
+            assert after in marked, f'{key}: no such marker'
         else:
             assert any(n.nullable for n in nodes), f'{key}: not nullable in the model'
