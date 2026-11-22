@@ -20,6 +20,7 @@ from pos.clickhouse_ddl import (
     create_table,
     ddl_for,
     landing_columns,
+    member_table,
     members,
     model_type,
     parse_table,
@@ -336,3 +337,10 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
+    for product in ('platform', 'ppp'):
+        found = members(entries['evidence']['models'], product)
+        assert found, product
+        tables = [(member_table(m), columns(m)) for m in found]
+        tables.append((entries['evidence']['table'], union_columns(found)))
+        for table, cols in tables:
+            assert list(parse_table(create_table(table, cols)).items()) == cols, (product, table)
