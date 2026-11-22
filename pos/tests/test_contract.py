@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from pos.clickhouse_ddl import members
+
 ROOT = Path(__file__).parents[1]
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
 PTS_PREFIXES = ('output', 'view', 'export')
@@ -95,3 +97,14 @@ def test_every_input_is_accounted_for():
                 continue
             path = entry['input_dir']
             assert path.split('/')[0] in PTS_PREFIXES or path.startswith(POS_WRITTEN), f'{section}/{name}: {path}'
+
+
+@pytest.mark.parametrize('name', [n for n, e in DATASETS['clickhouse'].items() if 'models' in e])
+def test_every_pts_member_output_has_a_model(name):
+    """Every pts output a `models` glob matches is a member, so a new one with no model fails, not skipped."""
+    entry = DATASETS['clickhouse'][name]
+    pattern = f'{entry["input_dir"]}/{entry["models"]}'
+    written = {d.split('/', 1)[1] for d in PTS_DESTINATIONS if '*' not in d and fnmatch(d, pattern)}
+    assert written, f'{name}: pts writes nothing matching {pattern}'
+    modelled = {m.dataset_name for m in members(entry['models'], 'ppp')}
+    assert not written - modelled, f'{name}: pts outputs with no model: {sorted(written - modelled)}'
