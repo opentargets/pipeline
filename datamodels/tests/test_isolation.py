@@ -11,6 +11,7 @@ import ot_datamodels, ot_datamodels.outputs, ot_datamodels.discovery
 assert 'pandera' not in sys.modules, 'pandera imported'
 assert 'pts' not in sys.modules, 'pts imported'
 assert 'colocalisation' in ot_datamodels.discovery.discover_datasets()
+assert 'target_view' in ot_datamodels.discovery.discover_models()
 """
 
 

@@ -4,15 +4,22 @@ Every module under `ot_datamodels.outputs` is imported, and every concrete `Data
 defined there is a dataset. Nothing has to be listed anywhere: adding a module with a model is
 enough for the test suite and the documentation to pick it up. Struct models and shared bases in
 the same package are ignored, since they are not concrete datasets.
+
+Views (`ot_datamodels.views`) are found the same way but are not release outputs: `discover_datasets()`
+returns the outputs only, `discover_models()` the outputs and the views.
 """
 
 import importlib
 import pkgutil
+from collections.abc import Sequence
 
 from ot_datamodels.base import DatasetModel
 
 #: The package holding every output dataset model.
 OUTPUTS_PACKAGE = 'ot_datamodels.outputs'
+
+#: The package holding every view model.
+VIEWS_PACKAGE = 'ot_datamodels.views'
 
 
 def discover_datasets(package: str = OUTPUTS_PACKAGE) -> dict[str, type[DatasetModel]]:
@@ -35,6 +42,22 @@ def discover_datasets(package: str = OUTPUTS_PACKAGE) -> dict[str, type[DatasetM
             raise ValueError(msg)
         datasets[model.dataset_name] = model
     return datasets
+
+
+def discover_models(packages: Sequence[str] = (OUTPUTS_PACKAGE, VIEWS_PACKAGE)) -> dict[str, type[DatasetModel]]:
+    """Every concrete dataset model under each of `packages`, by dataset name: the outputs and the views.
+
+    Raises:
+        ValueError: if two models declare the same dataset name, in one package or across them.
+    """
+    models: dict[str, type[DatasetModel]] = {}
+    for package in packages:
+        for name, model in discover_datasets(package).items():
+            if name in models:
+                msg = f'dataset {name!r} is declared twice: {_qualname(models[name])} and {_qualname(model)}'
+                raise ValueError(msg)
+            models[name] = model
+    return models
 
 
 def _subclasses(cls: type[DatasetModel]) -> list[type[DatasetModel]]:

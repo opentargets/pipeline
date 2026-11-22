@@ -6,14 +6,15 @@ from pathlib import Path
 import pytest
 
 from ot_datamodels import DatasetModel, Reference
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_datasets, discover_models
 from ot_datamodels.docs import write_docs
 from ot_datamodels.spec import Node, dataset_spec, walk
 
 DATASETS = discover_datasets()
+MODELS = discover_models()
 REFERENCES = [
     (model, path, node)
-    for model in sorted(DATASETS.values(), key=lambda model: model.dataset_name)
+    for model in sorted(MODELS.values(), key=lambda model: model.dataset_name)
     for path, node in walk(dataset_spec(model))
     if node.reference is not None
 ]
@@ -77,7 +78,7 @@ INTEGER_RANGES = {
 }
 INTEGER_MARKERS = [
     (model, path, node)
-    for model in sorted(DATASETS.values(), key=lambda model: model.dataset_name)
+    for model in sorted(MODELS.values(), key=lambda model: model.dataset_name)
     for path, node in walk(dataset_spec(model))
     if node.clickhouse in INTEGER_RANGES
 ]

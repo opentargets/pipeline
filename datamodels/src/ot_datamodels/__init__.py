@@ -4,7 +4,7 @@
 * `spec` -- the field tree every other module reads, and the supported subset of Pydantic.
 * `polars` -- the Polars schema of a dataset (`to_polars_schema`).
 * `docs` -- documentation JSON.
-* `discovery` -- every dataset model under `ot_datamodels.outputs`, without a registry.
+* `discovery` -- every dataset model under `ot_datamodels.outputs` (and `ot_datamodels.views`), without a registry.
 * `derive` -- view columns copied from output columns (`from_output`, `row_of`).
 """
 

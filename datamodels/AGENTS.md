@@ -17,10 +17,11 @@ It depends on `pydantic` and `polars` only. It imports neither pts nor pandera, 
 | `spec` | the field tree every reader uses, and the supported subset of Pydantic |
 | `polars` | `to_polars_schema` |
 | `docs` | documentation JSON |
-| `discovery` | `discover_datasets()`: every concrete model under `ot_datamodels.outputs` |
+| `discovery` | `discover_datasets()`: every concrete model under `ot_datamodels.outputs`; `discover_models()`: those and the views |
 | `derive` | `from_output` and `row_of`: view columns copied from output columns |
 | `vocabularies` | the closed vocabularies stored as Enums, one `Literal` per vocabulary, with its source |
 | `outputs/` | one module per dataset (or family); `patterns.py` holds shared regexes |
+| `views/` | one module per pts view (`view/<name>`); not release outputs, so not in `discover_datasets()` |
 
 ## What a model may state
 
@@ -92,7 +93,9 @@ class AssociationView(DatasetModel):
 The copy keeps the type, markers, constraints and description; the column may be
 renamed. Nullability is the one override (`nullable=True`, `row_of(..., nullable={...})`).
 `PrimaryKey` is dropped unless `from_output(..., primary_key=True)`; `row_of` always drops
-it. Computed columns are declared in the view model.
+it. Computed columns are declared in the view model. A list element cannot carry a description, so a
+list of copied values (`transcriptIds`) is declared and `tests/test_views.py` checks it against the
+output; that test lists every derived value of every view.
 
 ## Validation
 
