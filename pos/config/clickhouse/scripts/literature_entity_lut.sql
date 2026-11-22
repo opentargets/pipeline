@@ -1,9 +1,9 @@
 CREATE TABLE IF NOT EXISTS literature_entity_lut ENGINE = MergeTree ()
 ORDER BY (
         keywordId, year, month, relevance
-    ) AS (
-        SELECT -- a sort key cannot be Nullable
-            pmid, pmcid, keywordId, relevance, date, ifNull(year, 0) AS year, ifNull(month, 0) AS month
+    ) SETTINGS allow_nullable_key = 1 AS (
+        SELECT
+            pmid, pmcid, keywordId, relevance, date, year, month
         FROM literature_entity_lut_log
     );
 
