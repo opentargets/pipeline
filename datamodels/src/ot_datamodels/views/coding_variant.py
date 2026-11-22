@@ -80,7 +80,7 @@ class CodingVariant(DatasetModel):
     referenceAminoAcid: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
         description='Reference amino acid of the change, empty when it has none'
     )
-    aminoAcidPosition: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    aminoAcidPosition: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         description='Position of the amino acid change in the protein'
     )
     alternateAminoAcid: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
