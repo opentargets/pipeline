@@ -5,10 +5,9 @@ Generated from the 26.12 release output (1,302 rows) and its croissant metadata.
 
 from typing import Annotated, ClassVar, Literal
 
-import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import (
     CHEMBL_ID,
     DIGITS,
@@ -122,7 +121,7 @@ class EvidenceCancerBiomarkers(DatasetModel):
     datasourceId: Annotated[Literal['cancer_biomarkers'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['affected_pathway'], enum_of(Datatype)] = Field(description='Type of the evidence')
     drugFromSource: str = Field(
         min_length=1,
         description=('Drug or drug family associated with the biomarker, as reported by the Cancer Genome Interpreter'),

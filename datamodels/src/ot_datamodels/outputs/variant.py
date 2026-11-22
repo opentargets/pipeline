@@ -10,8 +10,8 @@ hand, checked against the same release:
   method-specific and unbounded.
 * `variantEffect[].assessmentFlag` holds LOFTEE flags, comma-separated: its shape is checked, not the
   combinations seen, since LOFTEE has more flags than one release shows.
-* `alleleFrequencies[].populationName` is a gnomAD adjusted (`_adj`) ancestry group: its shape is checked,
-  not the groups, which gnomAD changes between versions (it only looks like an ontology id by accident).
+* `alleleFrequencies[].populationName` is a gnomAD adjusted (`_adj`) ancestry group, from the closed
+  `GnomadPopulation` vocabulary: a new gnomAD version's groups are a model change.
 """
 
 from typing import Annotated, ClassVar, Literal

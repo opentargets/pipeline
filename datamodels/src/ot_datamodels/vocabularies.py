@@ -3,6 +3,7 @@
 A field uses one as `Annotated[Vocabulary, PolarsDtype(pl.Enum)]`: the categories, and the generated
 ClickHouse `Enum8` numbering, follow the order here. A field restricted to part of a vocabulary keeps its
 own `Literal` and stores the whole vocabulary's Enum: `Annotated[Literal['eva'], enum_of(Datasource)]`.
+Where order carries no meaning, a new value is appended, so no existing value is renumbered.
 
 Order: the ClickHouse Enum order where one existed, else the API's GraphQL enum, else the standard's
 published order, else sorted.
@@ -18,7 +19,6 @@ __all__ = [
     'AggregationType',
     'Appris',
     'AssociationDatatype',
-    'BaselineExpressionDatasource',
     'ChemblActionType',
     'ChemblActivityOutcome',
     'ChemblAssayType',
@@ -39,8 +39,10 @@ __all__ = [
     'DirectionOnTrait',
     'EnrichmentApproach',
     'EuropePmcSection',
-    'EvidenceDatasource',
+    'ExpressionDatasource',
+    'ExpressionDatatype',
     'FineMappingMethod',
+    'GeneBurdenSex',
     'GnomadPopulation',
     'GoAspect',
     'GoEvidenceCode',
@@ -51,6 +53,7 @@ __all__ = [
     'HpoResource',
     'HpoSex',
     'InteractionSource',
+    'IntervalDatasource',
     'IntervalType',
     'LdPopulation',
     'LiteratureKeywordType',
@@ -61,18 +64,22 @@ __all__ = [
     'PgxCategory',
     'PgxEffectType',
     'PgxEvidenceLevel',
+    'PharmacogenomicsDatasource',
+    'PharmacogenomicsDatatype',
     'Provider',
     'SafetyStudyType',
     'SpeciesMnemonic',
     'SpeciesScientificName',
     'StudyType',
     'TractabilityModality',
+    'TranscriptFlagLabel',
     'TranscriptFlagValue',
     'TrialAgencyClass',
     'TrialOverallStatus',
     'TrialPhase',
     'TrialPrimaryPurpose',
     'TrialReferenceType',
+    'TrialStopReasonCategory',
     'TrialStudyType',
     'VariantEffectMethod',
     'enum_of',
@@ -96,8 +103,9 @@ FineMappingMethod = Literal['PICS', 'SuSiE', 'SuSiE-inf']
 
 # B: Open Targets' own vocabularies
 
-# API `Datasource` order, then the datasources it lacks (PPP evidence, pts `association` datasource_weights)
-EvidenceDatasource = Literal[
+# Evidence datasources: API `Datasource` order, then those it lacks (PPP evidence, from pts `association`
+# datasource_weights); append new ones
+Datasource = Literal[
     'clinical_precedence',
     'gwas_credible_sets',
     'gene_burden',
@@ -122,9 +130,20 @@ EvidenceDatasource = Literal[
     'ot_crispr',
     'ot_crispr_validation',
 ]
-BaselineExpressionDatasource = Literal['DICE', 'PRIDE', 'gtex', 'tabula_sapiens']
-# every `datasourceId`: evidence, pharmacogenomics, baseline expression, enhancer-to-gene
-Datasource = Literal[EvidenceDatasource, 'clinpgx', BaselineExpressionDatasource, 'E2G']
+# Evidence datatypes, sorted: the evidence `datatypeId`s and pts `association` datasource_weights; append new ones
+Datatype = Literal[
+    'affected_pathway',
+    'animal_model',
+    'clinical',
+    'genetic_association',
+    'genetic_literature',
+    'known_drug',
+    'literature',
+    'ot_partner',
+    'ot_validation_lab',
+    'rna_expression',
+    'somatic_mutation',
+]
 # pts `association` datasource_weights
 AssociationDatatype = Literal[
     'affected_pathway',
@@ -138,24 +157,14 @@ AssociationDatatype = Literal[
     'rna_expression',
     'somatic_mutation',
 ]
-# every `datatypeId`, sorted: association datatypes, evidence-only ones, pharmacogenomics, baseline expression
-Datatype = Literal[
-    'affected_pathway',
-    'animal_model',
-    'bulk rna-seq',
-    'clinical',
-    'clinical_annotation',
-    'genetic_association',
-    'genetic_literature',
-    'known_drug',
-    'literature',
-    'mass-spectrometry proteomics',
-    'ot_partner',
-    'ot_validation_lab',
-    'rna_expression',
-    'scrna-seq',
-    'somatic_mutation',
-]
+# baseline expression's sources and assay types
+ExpressionDatasource = Literal['DICE', 'PRIDE', 'gtex', 'tabula_sapiens']
+ExpressionDatatype = Literal['bulk rna-seq', 'mass-spectrometry proteomics', 'scrna-seq']
+# enhancer-to-gene interval source
+IntervalDatasource = Literal['E2G']
+# pharmacogenomics provider and data type
+PharmacogenomicsDatasource = Literal['clinpgx']
+PharmacogenomicsDatatype = Literal['clinical_annotation']
 # API `AggregationType`, then datatypeId
 AggregationType = Literal['overall', 'datasourceId', 'datatypeId']
 OverallAggregationValue = Literal['None']
@@ -199,6 +208,32 @@ EuropePmcSection = Literal[
     'abstract', 'appendix', 'case', 'concl', 'discuss', 'figure', 'intro', 'other', 'results', 'table', 'title'
 ]
 SafetyStudyType = Literal['biochemical', 'cell-based', 'clinical', 'preclinical']
+# labels of the opentargets/clinical_trial_stop_reasons classifier (rev 5594f9e5, config.json id2label), then
+# pts's `Uncategorised` (clinical_mira/stop_reasons.py)
+TrialStopReasonCategory = Literal[
+    'Another_Study',
+    'Business_Administrative',
+    'Covid19',
+    'Endpoint_Met',
+    'Ethical_Reason',
+    'Insufficient_Data',
+    'Insufficient_Enrollment',
+    'Interim_Analysis',
+    'Invalid_Reason',
+    'Logistics_Resources',
+    'Negative',
+    'No_Context',
+    'Regulatory',
+    'Safety_Sideeffects',
+    'Study_Design',
+    'Study_Staff_Moved',
+    'Success',
+    'Uncategorised',
+]
+# pts `transcript` flag labels (_STATIC_FLAGS, then appris)
+TranscriptFlagLabel = Literal['appris', 'ensembl_canonical', 'gencode_primary', 'mane']
+# gene burden sample sex, as the gene burden sources write it
+GeneBurdenSex = Literal['men', 'women']
 # API `TrialStudyType`; ClinicalTrials.gov StudyType
 TrialStudyType = Literal['INTERVENTIONAL', 'OBSERVATIONAL', 'EXPANDED_ACCESS']
 # ClinicalTrials.gov ReferenceType, https://clinicaltrials.gov/api/v2/studies/enums (2026-11-22)

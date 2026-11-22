@@ -47,7 +47,8 @@ Only a strict subset of Pydantic is supported (`spec`); anything outside it rais
   (complete, ordered, its source cited) and a field uses it as
   `Annotated[Vocabulary, PolarsDtype(pl.Enum)]`, or `Annotated[Literal['eva'], enum_of(Datasource)]`
   for part of one. A new value is a model change; ClickHouse numbers the Enum in that order, so append
-  where the order does not matter.
+  where the order does not matter. `Datasource` and `Datatype` hold the evidence (and association)
+  values only; another dataset's sources get a vocabulary of their own (`ExpressionDatasource`, ...).
 
 A model states what holds for the data's meaning, not for one release's values: the
 next release must not fail because a new value appeared. Numbers are bounded at

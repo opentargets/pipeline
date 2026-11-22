@@ -78,7 +78,7 @@ class EvidenceIntogen(DatasetModel):
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
     targetFromSourceId: str = Field(min_length=1, description='Gene symbol of the target as reported by IntOGen')
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['somatic_mutation'], enum_of(Datatype)] = Field(description='Type of the evidence')
     datasourceId: Annotated[Literal['intogen'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )

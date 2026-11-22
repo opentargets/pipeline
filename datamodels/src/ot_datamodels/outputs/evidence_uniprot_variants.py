@@ -5,10 +5,9 @@ Generated from the 26.12 release output (34,765 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
-import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, RS_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -52,7 +51,7 @@ class EvidenceUniprotVariants(DatasetModel):
     datasourceId: Annotated[Literal['uniprot_variants'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     diseaseFromSource: str = Field(min_length=1, description='Disease name as curated by UniProt')
     diseaseFromSourceId: str = Field(min_length=1, description='OMIM identifier of the disease as curated by UniProt')
     literature: list[str] = Field(description='PubMed identifiers cited by UniProt for the disease-causing variant')

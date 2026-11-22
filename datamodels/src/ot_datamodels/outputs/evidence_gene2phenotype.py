@@ -78,7 +78,7 @@ class EvidenceGene2phenotype(DatasetModel):
     datasourceId: Annotated[Literal['gene2phenotype'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_literature'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'

@@ -10,7 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_PROTEIN_ID, ENSEMBL_TRANSCRIPT_ID
-from ot_datamodels.vocabularies import Chromosome, TranscriptFlagValue
+from ot_datamodels.vocabularies import Chromosome, TranscriptFlagLabel, TranscriptFlagValue
 
 
 class DbXrefs(StructModel):
@@ -23,7 +23,7 @@ class DbXrefs(StructModel):
 class Flags(StructModel):
     """`flags[]`."""
 
-    label: Literal['appris', 'ensembl_canonical', 'gencode_primary', 'mane'] = Field(
+    label: Annotated[TranscriptFlagLabel, PolarsDtype(pl.Enum)] = Field(
         description=('Category of the transcript flag (e.g. mane, appris, gencode_primary, ensembl_canonical)')
     )
     value: Annotated[TranscriptFlagValue, PolarsDtype(pl.Enum)] = Field(

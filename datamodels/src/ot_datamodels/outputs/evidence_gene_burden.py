@@ -10,7 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
-from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
+from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, GeneBurdenSex, enum_of
 
 
 class Urls(StructModel):
@@ -92,7 +92,7 @@ class EvidenceGeneBurden(DatasetModel):
     datasourceId: Annotated[Literal['gene_burden'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description="Genetic model of the burden test (e.g. 'dominant', 'recessive')"
     )
@@ -183,7 +183,7 @@ class EvidenceGeneBurden(DatasetModel):
     urls: list[Urls] | None = Field(
         description=("Links to the burden result in the source portal (e.g. 'AstraZeneca PheWAS Portal')")
     )
-    sex: list[Annotated[str, Field(min_length=1)]] | None = Field(
+    sex: list[Annotated[GeneBurdenSex, PolarsDtype(pl.Enum)]] | None = Field(
         description='Sex of the samples included in the burden analysis'
     )
     diseaseFromSourceId: str | None = Field(

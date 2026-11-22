@@ -54,7 +54,7 @@ class EvidenceOrphanet(DatasetModel):
     datasourceId: Annotated[Literal['orphanet'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     alleleOrigins: list[Literal['germline', 'somatic']] = Field(
         description=('Origin of the variant allele; germline and somatic for all Orphanet associations')
     )

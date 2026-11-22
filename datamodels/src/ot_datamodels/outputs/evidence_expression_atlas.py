@@ -5,10 +5,9 @@ Generated from the 26.12 release output (238,857 rows) and its croissant metadat
 
 from typing import Annotated, ClassVar, Literal
 
-import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -71,7 +70,7 @@ class EvidenceExpressionAtlas(DatasetModel):
     datasourceId: Annotated[Literal['expression_atlas'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['rna_expression'], enum_of(Datatype)] = Field(description='Type of the evidence')
     literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description=('PubMed identifiers of the publications describing the Expression Atlas experiment')
     )

@@ -79,7 +79,7 @@ class EvidenceCancerGeneCensus(DatasetModel):
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target as reported by COSMIC'
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['somatic_mutation'], enum_of(Datatype)] = Field(description='Type of the evidence')
     studyId: str | None = Field(pattern=DIGITS, description='COSMIC identifier of the study reporting the mutations')
     mutatedSamples: list[MutatedSamples] = Field(
         description=('Counts of COSMIC samples with mutations in the target, by mutation type')

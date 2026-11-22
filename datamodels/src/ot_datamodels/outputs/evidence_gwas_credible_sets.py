@@ -5,10 +5,9 @@ Generated from the 26.12 release output (3,462,426 rows) and its croissant metad
 
 from typing import Annotated, ClassVar, Literal
 
-import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, MD5_HEX, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -46,7 +45,7 @@ class EvidenceGwasCredibleSets(DatasetModel):
         description=('Ensembl gene identifier of the target prioritised by the locus-to-gene model'),
     )
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     datasourceId: Annotated[Literal['gwas_credible_sets'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )

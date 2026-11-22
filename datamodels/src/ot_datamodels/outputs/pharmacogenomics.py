@@ -3,14 +3,20 @@
 Generated from the 26.12 release output (33,485 rows) and its croissant metadata.
 """
 
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import polars as pl
 from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, RS_ID, VARIANT_ID
-from ot_datamodels.vocabularies import Datasource, Datatype, PgxCategory, PgxEffectType, PgxEvidenceLevel, enum_of
+from ot_datamodels.vocabularies import (
+    PgxCategory,
+    PgxEffectType,
+    PgxEvidenceLevel,
+    PharmacogenomicsDatasource,
+    PharmacogenomicsDatatype,
+)
 
 
 class VariantAnnotation(StructModel):
@@ -103,11 +109,11 @@ class Pharmacogenomics(DatasetModel):
         'drugs': [{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}],
     }
 
-    datasourceId: Annotated[Literal['clinpgx'], enum_of(Datasource)] = Field(
+    datasourceId: Annotated[PharmacogenomicsDatasource, PolarsDtype(pl.Enum)] = Field(
         description='Identifier for the data provider'
     )
     datasourceVersion: str = Field(pattern=ISO_DATE, description='Data provider version number')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(
+    datatypeId: Annotated[PharmacogenomicsDatatype, PolarsDtype(pl.Enum)] = Field(
         description='Classification of the type of pharmacogenomic data (e.g. clinical_annotation)'
     )
     directionality: str | None = Field(

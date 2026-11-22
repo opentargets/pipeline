@@ -10,7 +10,15 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
-from ot_datamodels.vocabularies import ClinicalStage, Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
+from ot_datamodels.vocabularies import (
+    ClinicalStage,
+    Datasource,
+    Datatype,
+    DirectionOnTarget,
+    DirectionOnTrait,
+    TrialStopReasonCategory,
+    enum_of,
+)
 
 
 class EvidenceClinicalPrecedence(DatasetModel):
@@ -63,26 +71,9 @@ class EvidenceClinicalPrecedence(DatasetModel):
         description="Clinical stage of the drug-disease pair in the clinical report (e.g. 'PHASE_1', 'PHASE_3')"
     )
     trialWhyStopped: str | None = Field(min_length=1, description='Reason why the trial was stopped, as reported')
-    trialStopReasonCategories: (
-        list[
-            Literal[
-                'Another_Study',
-                'Business_Administrative',
-                'Covid19',
-                'Insufficient_Enrollment',
-                'Invalid_Reason',
-                'Logistics_Resources',
-                'Negative',
-                'No_Context',
-                'Regulatory',
-                'Safety_Sideeffects',
-                'Study_Design',
-                'Study_Staff_Moved',
-                'Uncategorised',
-            ]
-        ]
-        | None
-    ) = Field(description='Categorised reason(s) why the trial was stopped')
+    trialStopReasonCategories: list[Annotated[TrialStopReasonCategory, PolarsDtype(pl.Enum)]] | None = Field(
+        description='Categorised reason(s) why the trial was stopped'
+    )
     studyStartDate: str | None = Field(
         pattern=ISO_DATE, description='Start date of the clinical trial in a YYYY-MM-DD format'
     )

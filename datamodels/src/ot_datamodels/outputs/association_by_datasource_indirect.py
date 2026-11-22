@@ -10,7 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
-from ot_datamodels.vocabularies import AggregationType, Datasource, EvidenceDatasource, enum_of
+from ot_datamodels.vocabularies import AggregationType, Datasource, enum_of
 
 
 class Timeseries(StructModel):
@@ -68,7 +68,7 @@ class AssociationByDatasourceIndirect(DatasetModel):
     aggregationType: Annotated[Literal['datasourceId'], enum_of(AggregationType)] = Field(
         description='Evidence column used to aggregate data: datasourceId'
     )
-    aggregationValue: Annotated[EvidenceDatasource, enum_of(Datasource), PrimaryKey()] = Field(
+    aggregationValue: Annotated[Datasource, PolarsDtype(pl.Enum), PrimaryKey()] = Field(
         description='Datasource identifier of the group: eg. gwas_credible_set'
     )
     associationScore: float = Field(

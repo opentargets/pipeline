@@ -22,6 +22,7 @@ from ot_datamodels.vocabularies import (
     TrialPhase,
     TrialPrimaryPurpose,
     TrialReferenceType,
+    TrialStopReasonCategory,
     TrialStudyType,
 )
 
@@ -191,25 +192,8 @@ class ClinicalReport(DatasetModel):
     year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Year the report was registered or published'
     )
-    trialStopReasonCategories: (
-        list[
-            Literal[
-                'Another_Study',
-                'Business_Administrative',
-                'Covid19',
-                'Insufficient_Enrollment',
-                'Invalid_Reason',
-                'Logistics_Resources',
-                'Negative',
-                'No_Context',
-                'Regulatory',
-                'Safety_Sideeffects',
-                'Study_Design',
-                'Study_Staff_Moved',
-                'Uncategorised',
-            ]
-        ]
-        | None
-    ) = Field(description='Categories describing reasons why the trial was stopped')
+    trialStopReasonCategories: list[Annotated[TrialStopReasonCategory, PolarsDtype(pl.Enum)]] | None = Field(
+        description='Categories describing reasons why the trial was stopped'
+    )
     url: str = Field(min_length=1, description='URL linking to the source record')
     trialStartDate: datetime.date | None = Field(description='Start date of the clinical trial')

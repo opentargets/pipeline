@@ -65,7 +65,7 @@ class EvidenceEva(DatasetModel):
         description=("Origin(s) of the variant allele as reported in ClinVar (e.g. 'germline')")
     )
     datasourceId: Annotated[Literal['eva'], enum_of(Datasource)] = Field(description='Identifer of the evidence source')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['genetic_association'], enum_of(Datatype)] = Field(description='Type of the evidence')
     allelicRequirements: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description='Mode(s) of inheritance reported in the ClinVar submissions'
     )

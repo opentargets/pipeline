@@ -5,10 +5,9 @@ Generated from the 26.12 release output (21,631 rows) and its croissant metadata
 
 from typing import Annotated, ClassVar, Literal
 
-import polars as pl
 from pydantic import Field
 
-from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -54,7 +53,7 @@ class EvidenceCrisprScreen(DatasetModel):
     targetFromSourceId: str = Field(min_length=1, description='Gene symbol of the target as reported by CRISPRbrain')
     diseaseFromSourceMappedId: str = Field(pattern=ONTOLOGY_ID, description='Mapped Open Targets disease identifier')
     studyId: str = Field(min_length=1, description='Name of the CRISPRbrain screen')
-    datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datatypeId: Annotated[Literal['affected_pathway'], enum_of(Datatype)] = Field(description='Type of the evidence')
     datasourceId: Annotated[Literal['crispr_screen'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )

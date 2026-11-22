@@ -5,11 +5,12 @@ Generated from the 26.12 release output (83,290,030 rows) and its croissant meta
 
 from typing import Annotated, ClassVar, Literal
 
+import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, Reference
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
-from ot_datamodels.vocabularies import BaselineExpressionDatasource, Datasource, Datatype, enum_of
+from ot_datamodels.vocabularies import ExpressionDatasource, ExpressionDatatype
 
 
 class BaselineExpression(DatasetModel):
@@ -52,13 +53,8 @@ class BaselineExpression(DatasetModel):
     targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Unique identifier for the target'
     )
-    datasourceId: Annotated[BaselineExpressionDatasource, enum_of(Datasource)] = Field(
-        description='Origin of expression data'
-    )
-    datatypeId: Annotated[
-        Literal['bulk rna-seq', 'mass-spectrometry proteomics', 'scrna-seq'],
-        enum_of(Datatype),
-    ] = Field(description='Type of expression data')
+    datasourceId: Annotated[ExpressionDatasource, PolarsDtype(pl.Enum)] = Field(description='Origin of expression data')
+    datatypeId: Annotated[ExpressionDatatype, PolarsDtype(pl.Enum)] = Field(description='Type of expression data')
     unit: Literal['CPM(pseudobulk sum[counts])', 'PPB (iBAQ)', 'TPM'] = Field(
         description='Unit for the target expression'
     )

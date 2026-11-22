@@ -70,9 +70,12 @@ FIELDS: dict[str, Any] = {
     'target.constraint[]/constraintType': v.ConstraintType,
     'drug_mechanism_of_action.curation': v.MechanismCuration,
     **{f'evidence_{e}.datasourceId': v.Datasource for e in EVIDENCE},
-    **{f'{d}.datasourceId': v.Datasource for d in ('baseline_expression', 'enhancer_to_gene', 'pharmacogenomics')},
+    'baseline_expression.datasourceId': v.ExpressionDatasource,
+    'baseline_expression.datatypeId': v.ExpressionDatatype,
+    'enhancer_to_gene.datasourceId': v.IntervalDatasource,
+    'pharmacogenomics.datasourceId': v.PharmacogenomicsDatasource,
+    'pharmacogenomics.datatypeId': v.PharmacogenomicsDatatype,
     **{f'evidence_{e}.datatypeId': v.Datatype for e in EVIDENCE},
-    **{f'{d}.datatypeId': v.Datatype for d in ('baseline_expression', 'pharmacogenomics')},
     **{
         f'evidence_{e}.directionOnTarget': v.DirectionOnTarget
         for e in (
@@ -151,7 +154,36 @@ FIELDS: dict[str, Any] = {
     'clinical_report.trialPrimaryPurpose': v.TrialPrimaryPurpose,
     'transcript.flags[]/value': v.TranscriptFlagValue,
     'drug_warning.warningType': v.ChemblWarningType,
+    'clinical_report.trialStopReasonCategories[]': v.TrialStopReasonCategory,
+    'evidence_clinical_precedence.trialStopReasonCategories[]': v.TrialStopReasonCategory,
+    'chembl_bioactivity.actionTypes[]': v.ChemblActionType,
+    'evidence_gene_burden.sex[]': v.GeneBurdenSex,
+    'transcript.flags[]/label': v.TranscriptFlagLabel,
 }
+
+#: API `Datasource`, in its order (platform-api-nextgen schema.graphql)
+API_DATASOURCES = [
+    'clinical_precedence',
+    'gwas_credible_sets',
+    'gene_burden',
+    'eva',
+    'genomics_england',
+    'gene2phenotype',
+    'uniprot_literature',
+    'uniprot_variants',
+    'orphanet',
+    'clingen',
+    'cancer_gene_census',
+    'intogen',
+    'eva_somatic',
+    'cancer_biomarkers',
+    'crispr_screen',
+    'crispr',
+    'reactome',
+    'europepmc',
+    'expression_atlas',
+    'impc',
+]
 
 
 def _values(vocabulary: Any) -> list[str]:
@@ -184,12 +216,12 @@ def test_api_backed_vocabularies_follow_the_api_order() -> None:
     assert _values(v.Provider) == ['ChEMBL', 'TTD', 'AACT', 'EMA', 'PMDA', 'FDA']
     assert _values(v.Origin) == ['CLINICAL_TRIAL', 'DRUG_LABEL', 'REGULATORY_AGENCY', 'CURATED_RESOURCE']
     assert _values(v.TrialStudyType) == ['INTERVENTIONAL', 'OBSERVATIONAL', 'EXPANDED_ACCESS']
-    assert _values(v.AggregationType)[:2] == ['overall', 'datasourceId']
-    assert _values(v.Datasource)[:2] == ['clinical_precedence', 'gwas_credible_sets']
+    assert _values(v.AggregationType) == ['overall', 'datasourceId', 'datatypeId']
+    assert _values(v.Datasource)[: len(API_DATASOURCES)] == API_DATASOURCES
 
 
-def test_datasource_holds_every_evidence_datasource() -> None:
-    assert set(EVIDENCE) <= set(_values(v.EvidenceDatasource)) <= set(_values(v.Datasource))
+def test_datasource_is_exactly_the_evidence_datasources() -> None:
+    assert sorted(_values(v.Datasource)) == sorted(EVIDENCE)
     assert set(_values(v.AssociationDatatype)) <= set(_values(v.Datatype))
 
 
@@ -215,9 +247,12 @@ def test_a_vocabulary_field_stores_its_enum(path: str) -> None:
     assert set(node.constraints.allowed) <= set(values)
 
 
-def test_an_evidence_model_allows_only_its_own_datasource() -> None:
+def test_an_evidence_model_allows_only_its_own_datasource_and_datatype() -> None:
     for e in EVIDENCE:
         assert NODES[f'evidence_{e}.datasourceId'].constraints.allowed == (e,)
+        allowed = NODES[f'evidence_{e}.datatypeId'].constraints.allowed
+        assert allowed is not None
+        assert len(allowed) == 1, e
 
 
 def test_credible_set_study_type_takes_its_numbering_from_the_vocabulary() -> None:

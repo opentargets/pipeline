@@ -10,7 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, MD5_HEX, ONTOLOGY_ID
-from ot_datamodels.vocabularies import Chromosome, Datasource, IntervalType, enum_of
+from ot_datamodels.vocabularies import Chromosome, IntervalDatasource, IntervalType
 
 
 class ResourceScore(StructModel):
@@ -73,7 +73,7 @@ class EnhancerToGene(DatasetModel):
         ge=0, description='Distance of the interval from the transcription start site of the gene'
     )
     resourceScore: list[ResourceScore] = Field(description='List of contributing score components')
-    datasourceId: Annotated[Literal['E2G'], enum_of(Datasource)] = Field(
+    datasourceId: Annotated[IntervalDatasource, PolarsDtype(pl.Enum)] = Field(
         description='Identifier of the interval datasource'
     )
     intervalType: Annotated[IntervalType, PolarsDtype(pl.Enum)] = Field(description='Type of the interval')
