@@ -85,7 +85,7 @@ INTEGER_MARKERS = [
 
 @pytest.mark.parametrize(('model', 'path', 'node'), INTEGER_MARKERS)
 def test_integer_markers_have_bounds(model: type[DatasetModel], path: str, node: Node) -> None:
-    """A value outside the marker type's range would wrap in ClickHouse, so pts must reject it."""
+    """An integer marker whose range does not cover its dtype's has bounds inside the marker's range."""
     assert node.clickhouse is not None
     low, high = INTEGER_RANGES[node.clickhouse]
     dtype_low, dtype_high = INTEGER_RANGES[str(node.dtype)]

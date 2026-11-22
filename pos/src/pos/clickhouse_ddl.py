@@ -14,7 +14,7 @@ from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec
 
-_ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
+ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
 _ENUM8_MAX = 127
 _TOKEN = re.compile(r"\s*(?:`([^`]*)`|('(?:[^'\\]|\\.)*')|(-?\d+(?:\.\d+)?)|([A-Za-z_]\w*)|(\S))")
@@ -99,7 +99,7 @@ class _Parser:
             return CHType('Array', element=element)
         if name == 'Tuple':
             return CHType('Tuple', fields=tuple(self.items(self.tuple_field)))
-        if name in _ENUMS:
+        if name in ENUMS:
             return CHType(name, args=tuple(self.items(self.enum_entry)))
         name = _POLARS_NAMES.get(name, name)
         if self.at('('):
@@ -169,7 +169,7 @@ def canonical(t: CHType) -> CHType:
     """`t` with every Enum an `Enum8`/`Enum16` with explicit values; an entry with none takes the last value + 1."""
     element = canonical(t.element) if t.element is not None else None
     fields = tuple((n, canonical(f)) for n, f in t.fields)
-    if t.name not in _ENUMS:
+    if t.name not in ENUMS:
         return replace(t, element=element, fields=fields)
     entries, value = [], 0
     for entry in t.args:
@@ -185,28 +185,29 @@ def canonical(t: CHType) -> CHType:
 # models
 
 
-def model_type(node: Node) -> CHType:
+def _quote(label: str) -> str:
+    return "'" + label.replace('\\', '\\\\').replace("'", "\\'") + "'"
+
+
+def model_type(node: Node, path: str = '') -> CHType:
     """The ClickHouse type derived from a node's polars dtype, ignoring any `ClickHouseType`."""
     if node.kind == 'list':
         assert node.element is not None
-        return CHType('Array', element=model_type(node.element))
+        return CHType('Array', element=model_type(node.element, f'{path}[]'))
     if node.kind == 'struct':
-        return CHType('Tuple', fields=tuple((f.name, model_type(f.node)) for f in node.fields))
-    dtype = node.dtype
-    if isinstance(dtype, pl.Enum):
-        return CHType('Enum', nullable=node.nullable, args=tuple(f"'{c}'" for c in dtype.categories))
-    name = type(dtype).__name__
-    return CHType(_POLARS_NAMES.get(name, name), nullable=node.nullable)
-
-
-def _quote(label: str) -> str:
-    return "'" + label.replace('\\', '\\\\').replace("'", "\\'") + "'"
+        return CHType('Tuple', fields=tuple((f.name, model_type(f.node, f'{path}/{f.name}')) for f in node.fields))
+    return replace(_dtype_type(node, path), nullable=node.nullable)
 
 
 def _primitive(node: Node, path: str) -> CHType:
     """The non-null type of a primitive: its marker, else its dtype."""
     if node.clickhouse:
         return replace(parse_type(node.clickhouse), nullable=False)
+    return _dtype_type(node, path)
+
+
+def _dtype_type(node: Node, path: str) -> CHType:
+    """The non-null type of a primitive's polars dtype."""
     dtype = node.dtype
     if isinstance(dtype, pl.Enum):
         categories = dtype.categories.to_list()

@@ -34,7 +34,7 @@ class ClickhouseLoadSpec(Spec):
     clickhouse_port: int = 8123
     data_dir_parent: str
     dataset_config_path: str = 'config/datasets.yaml'
-    product: str = 'platform'
+    product: str
 
 
 def union_inserts(table: str, loaded: list[type[DatasetModel]]) -> list[str]:
