@@ -50,8 +50,21 @@ jobs:
         working-directory: ${{ matrix.package }}
         run: uv sync --locked --all-groups --all-extras
 
+      - name: Start ClickHouse
+        if: matrix.package == 'pos'
+        run: |
+          docker run -d --name clickhouse -p 8123:8123 -e CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7
+          for _ in $(seq 60); do
+            curl -sf http://localhost:8123/ping && exit 0
+            sleep 1
+          done
+          docker logs clickhouse
+          exit 1
+
       - name: Run tests
         working-directory: ${{ matrix.package }}
+        env:
+          POS_REQUIRE_CLICKHOUSE: ${{ matrix.package == 'pos' && '1' || '' }}
         run: uv run --frozen pytest -rxs
 
       - name: run ty # better to do it here because we have deps installed
