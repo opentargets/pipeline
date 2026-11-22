@@ -21,6 +21,7 @@ CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
 SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
 SQL_EDITS = ROOT / 'docs' / 'phase5_sql_edits.csv'
+DERIVED = ROOT / 'docs' / 'phase5_derived_changes.csv'
 FOLLOW_UPS = ROOT / 'docs' / 'phase5_api_follow_ups.csv'
 CAST_BACK = ROOT / 'docs' / 'phase5_cast_back.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
@@ -78,6 +79,7 @@ def register() -> list[dict[str, str]]:
 DOCS_HEADERS = {
     'phase5_api_follow_ups.csv': ['dataset', 'field', 'follow_up'],
     'phase5_cast_back.csv': ['dataset', 'field', 'table', 'path', 'served'],
+    'phase5_derived_changes.csv': ['dataset', 'field', 'table', 'served', 'note'],
     'phase5_drift_before.csv': schema_drift.COLUMNS,
     'phase5_landing_before.csv': ['dataset', 'field', 'ddl_type', 'position'],
     'phase5_register.csv': COLUMNS,
@@ -98,7 +100,7 @@ def test_docs_csv_parses(path):
 
 
 CONFIG = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-SUPERSEDED ='superseded by ppp_only'
+SUPERSEDED = 'superseded by ppp_only'
 SUPERSEDED_SQL = 'superseded by serving_sql'
 
 
@@ -154,10 +156,11 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
 
 def test_after_matches_the_generator(register):
     """`after` is the generated Platform type; empty where the generated table lacks the column."""
-    tables = {d: _platform(d) for d in {r['dataset'] for r in register if r['category'] != 'api_follow_up'}}
+    no_table = {'api_follow_up', 'derived_type'}
+    tables = {d: _platform(d) for d in {r['dataset'] for r in register if r['category'] not in no_table}}
     for row in register:
         key = (row['dataset'], row['field'], row['category'])
-        if row['category'] in {'serving_sql', 'api_follow_up'}:
+        if row['category'] in {'serving_sql', 'api_follow_up', 'derived_type'}:
             continue
         cols = tables[row['dataset']]
         found = type_at(cols, row['field']) if cols is not None else None
@@ -214,6 +217,18 @@ def test_every_api_follow_up_has_a_row(register):
     assert sorted(rows) == sorted(entries)
     for key, text in entries.items():
         assert rows[key]['outcome'] == text, key
+        assert rows[key]['API follow-up'] == 'open', key
+
+
+def test_every_derived_change_has_a_row(register):
+    """One open `derived_type` row per line of `phase5_derived_changes.csv`."""
+    with DERIVED.open(newline='') as fh:
+        entries = {(e['dataset'], e['field']): e for e in csv.DictReader(fh)}
+    rows = {(r['dataset'], r['field']): r for r in register if r['category'] == 'derived_type'}
+    assert sorted(rows) == sorted(entries)
+    for key, entry in entries.items():
+        assert rows[key]['after'] == entry['served'], key
+        assert entry['note'] in rows[key]['outcome'], key
         assert rows[key]['API follow-up'] == 'open', key
 
 

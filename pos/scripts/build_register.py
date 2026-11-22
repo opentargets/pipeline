@@ -24,6 +24,9 @@ Where `after` is the landing type, the other rows of that field are `superseded 
 `docs/phase5_cast_back.csv` lists the landing-only changes a serving script casts back (`dataset, field, table,
 path, served`; `tests/test_serving_sql.py` checks the type at `path` in `table`): where `served` is the landing
 type, the `type_unrecorded` row's follow-up is `none`.
+`docs/phase5_derived_changes.csv` lists the columns a serving script builds from an Enum column (`dataset, field, table,
+served, note`, `note` the source column; `tests/test_serving_sql.py` checks the type): one `derived_type` row each,
+before `Array(String)`, follow-up `open`.
 
 One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
 PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up `none`. `before` is the
@@ -100,6 +103,8 @@ with (DOCS / 'phase5_api_follow_ups.csv').open(newline='') as _fh:
     API_FOLLOW_UPS = list(csv.DictReader(_fh))
 with (DOCS / 'phase5_cast_back.csv').open(newline='') as _fh:
     CAST_BACK = {(r['dataset'], r['field']): r for r in csv.DictReader(_fh)}
+with (DOCS / 'phase5_derived_changes.csv').open(newline='') as _fh:
+    DERIVED_CHANGES = list(csv.DictReader(_fh))
 
 
 def changed(category: str, before: str, after: str) -> bool:
@@ -337,6 +342,15 @@ def follow_up_row(entry: dict[str, str]) -> dict[str, str]:
     return dict(zip(COLUMNS, values, strict=True))
 
 
+def derived_row(entry: dict[str, str]) -> dict[str, str]:
+    """The `derived_type` row of one serving-script column built from an Enum column."""
+    dataset, field, source = entry['dataset'], entry['field'], entry['note']
+    read = sd._serving(CONFIG[dataset], SCRIPTS).read(field, landed=True)
+    values = (dataset, field, 'derived_type', f'derived from Enum column {source}', 'Array(String)', entry['served'],
+              '', read, 'open')  # fmt: skip
+    return dict(zip(COLUMNS, values, strict=True))
+
+
 def same(a: str, b: str) -> bool:
     return canonical(parse_type(a)) == canonical(parse_type(b))
 
@@ -432,6 +446,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     no_output = evidence.no_output
     out = [sql_edit(e, evidence) for e in SQL_EDITS]
     out += [follow_up_row(f) for f in API_FOLLOW_UPS]
+    out += [derived_row(d) for d in DERIVED_CHANGES]
     for (dataset, path, category), rows in groups.items():
         first = rows[0]
         read = first['serving_read']
