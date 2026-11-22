@@ -306,16 +306,10 @@ def test_parse_table_reads_columns_in_order():
     assert list(columns)[-1] == 'legacy'
 
 
-def test_real_config_has_every_landing_table():
+def test_real_config_has_no_hand_written_landing_table():
     frame = schema_drift.drift(
         ROOT / 'config' / 'datasets.yaml',
         ROOT / 'config' / 'clickhouse' / 'schema',
         ROOT / 'config' / 'clickhouse' / 'scripts',
     )
-    assert set(frame['category']) <= set(schema_drift.CATEGORIES) | {'no_model'}
-    assert set(frame.filter(pl.col('category') == 'no_model')['dataset']) == {
-        'aotf',
-        'association_time_series',
-        'protein_coding_coords',
-        'targets',
-    }
+    assert frame.is_empty(), frame

@@ -245,7 +245,7 @@ class FakeClient:
 def _generated_task(tmp_path, monkeypatch, datasets: str, parts: dict[str, int], *, product: str = 'platform',
                     fail: dict | None = None, insert_fail: dict | None = None):  # fmt: skip
     """A load of `datasets` with `parts[dir]` parquet files under `release_data/output/<dir>`."""
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: MODELS)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: MODELS)
     tmp_path.mkdir(exist_ok=True)
     config = tmp_path / 'datasets.yaml'
     config.write_text(datasets)

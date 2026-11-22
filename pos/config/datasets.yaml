@@ -1,7 +1,7 @@
 ---
 # input_dir is relative to the synced release data; croissant is written by ot_croissant.
 # A clickhouse entry with `model:` (or `models:`, a glob) gets its landing table from the ot_datamodels model
-# (`pos-ddl <dataset>` prints it); `engine:` defaults to Log. The rest run their `preload_script`.
+# (`pos-ddl <dataset>` prints it); `engine:` defaults to Log. Derived entries run their `preload_script`.
 opensearch:
   croissant:
     index: downloads
@@ -40,7 +40,7 @@ clickhouse:
   aotf:
     table: associations_otf_log
     input_dir: view/association_otf
-    preload_script: config/clickhouse/schema/aotf.sql
+    model: association_otf
     postload_script: config/clickhouse/scripts/aotf.sql
   baseline_expression:
     table: baseline_expression_log
@@ -143,7 +143,7 @@ clickhouse:
   association_time_series:
     table: association_time_series_log
     input_dir: view/association_timeseries
-    preload_script: config/clickhouse/schema/association_time_series.sql
+    model: association_timeseries
     postload_script: config/clickhouse/scripts/association_time_series.sql
   pharmacovigilance:
     table: pharmacovigilance_log
@@ -165,7 +165,7 @@ clickhouse:
   protein_coding_coords:
     table: protein_coding_coords_log
     input_dir: view/coding_variant
-    preload_script: config/clickhouse/schema/protein_coding_coords.sql
+    model: coding_variant
     postload_script: config/clickhouse/scripts/protein_coding_coords.sql
   w2v:
     table: ml_w2v_log
@@ -195,7 +195,7 @@ clickhouse:
   targets:
     table: targets_log
     input_dir: view/target_view
-    preload_script: config/clickhouse/schema/targets.sql
+    model: target_view
     postload_script: config/clickhouse/scripts/targets.sql
   transcript:
     table: transcript_log

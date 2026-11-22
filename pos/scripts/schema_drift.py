@@ -4,7 +4,8 @@ Usage: `uv run python scripts/schema_drift.py <out.csv>` from `pos/`. Reads code
 
 Compares the entries with a hand-written `preload_script`: a landing table maps to its entry's `model`, or to
 every model matching its `models` glob; an entry with neither is listed as `no_model`. Entries generated from
-their model (`model`/`models` and no `preload_script`) have no hand-written DDL and are skipped.
+their model (`model`/`models` and no `preload_script`) have no hand-written DDL and are skipped: since piece 3 that
+is every landing table, so the drift is empty. `dataset_rows` compares an entry with any landing columns.
 """
 
 import re
@@ -17,7 +18,7 @@ from pathlib import Path
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
 from pos import clickhouse_ddl as ddl
@@ -251,14 +252,14 @@ def _models_for(entry: dict, models: dict[str, type[DatasetModel]]) -> list[type
     return [model] if model else None
 
 
-def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts: tuple[tuple[str, str], ...],
-                  models: dict[str, type[DatasetModel]]) -> Iterator[dict[str, str]]:  # fmt: skip
+def dataset_rows(dataset: str, entry: dict, ddl: dict[str, CHType], scripts: tuple[tuple[str, str], ...],
+                 models: dict[str, type[DatasetModel]]) -> Iterator[dict[str, str]]:  # fmt: skip
+    """The disagreements of one entry's model(s) with the landing columns `ddl`; `no_model` if it has none."""
     serving = _serving(entry, scripts)
     matched = _models_for(entry, models)
     if matched is None:
         yield dict.fromkeys(COLUMNS, '') | {'category': 'no_model', 'dataset': dataset, 'serving_read': 'no'}
         return
-    ddl = parse_table((schema_dir / Path(entry['preload_script']).name).read_text())
     union = len(matched) > 1 or 'models' in entry
     rows: list[dict[str, str]] = []
     for model in matched:
@@ -283,20 +284,27 @@ def _dataset_rows(dataset: str, entry: dict, schema_dir: Path, scripts: tuple[tu
     yield from rows
 
 
+def _ddl(schema_dir: Path, entry: dict, models: dict[str, type[DatasetModel]]) -> dict[str, CHType]:
+    """The entry's hand-written landing columns; none read for an entry with no model."""
+    if _models_for(entry, models) is None:
+        return {}
+    return parse_table((schema_dir / Path(entry['preload_script']).name).read_text())
+
+
 def drift(datasets_yaml: Path, schema_dir: Path, scripts_dir: Path, *,
           models: dict[str, type[DatasetModel]] | None = None) -> pl.DataFrame:  # fmt: skip
     """One row per disagreement between each hand-written landing table and its model(s); `no_model` for the rest.
 
     Only entries with a `preload_script` have hand-written DDL; derived entries are skipped.
     """
-    models = discover_datasets() if models is None else models
+    models = discover_models() if models is None else models
     config = yaml.safe_load(datasets_yaml.read_text())['clickhouse']
     scripts = _scripts(scripts_dir)
     rows = [
         row
         for dataset, entry in config.items()
         if 'preload_script' in entry and not entry.get('derived')
-        for row in _dataset_rows(dataset, entry, schema_dir, scripts, models)
+        for row in dataset_rows(dataset, entry, _ddl(schema_dir, entry, models), scripts, models)
     ]
     return pl.DataFrame(rows, schema=dict.fromkeys(COLUMNS, pl.String))
 

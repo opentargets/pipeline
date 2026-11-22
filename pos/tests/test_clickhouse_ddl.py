@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
 
 from pos import clickhouse_ddl
@@ -233,14 +233,14 @@ class PppOnly(DatasetModel):
 
 def test_members_filters_product(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     assert members('*_*', 'platform') == [MemberA, MemberB]
     assert members('*_*', 'ppp') == [MemberA, MemberB, PppOnly]
 
 
 def test_landing_columns(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     glob = {'input_dir': 'output', 'models': 'member_*'}
     assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
     assert landing_columns({'input_dir': 'output/x', 'model': 'toy_ppp'}, 'platform') == columns(PppOnly)
@@ -250,7 +250,7 @@ def test_landing_columns(monkeypatch):
 
 def test_ddl_for(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     one = {'table': 't_log', 'model': 'toy_ppp', 'engine': 'MergeTree ORDER BY id'}
     assert ddl_for(one, 'platform') == [('t_log', create_table('t_log', columns(PppOnly), 'MergeTree ORDER BY id'))]
     union = {'table': 'u_log', 'models': 'member_*'}
@@ -293,7 +293,7 @@ def test_pos_ddl_all_prints_every_modelled_entry(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '`disease_log`' in out
     assert '`evidence_log`' in out
-    assert '`targets_log`' not in out  # hand-written
+    assert '`targets_log`' in out
 
 
 def test_type_at():
@@ -328,7 +328,7 @@ def test_create_table_quotes_identifiers():
 
 def test_every_entry_round_trips():
     entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    models = discover_datasets()
+    models = discover_models()
     checked = 0
     for name, entry in entries.items():
         if 'model' not in entry:
@@ -337,6 +337,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
+    views = {entries[n]['model'] for n in ('aotf', 'association_time_series', 'protein_coding_coords', 'targets')}
+    assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
         found = members(entries['evidence']['models'], product)
         assert found, product

@@ -46,21 +46,21 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
-  `config/clickhouse/` holds the serving SQL (`scripts/`), the hand-written landing DDL of
-  the datasets with no model (`schema/`) and the server config (`config.d/`, `users.d/`);
-  `config/opensearch/` the index settings.
+  `config/clickhouse/` holds the serving SQL (`scripts/`) and the server config (`config.d/`,
+  `users.d/`); `config/opensearch/` the index settings.
 
 ## ClickHouse landing tables
 
-A ClickHouse dataset with an `ot_datamodels` model gets `model: <dataset_name>` in
+Every ClickHouse landing table has an `ot_datamodels` model (`discover_models()`: the outputs
+and the `view/` models in `ot_datamodels.views`) and gets `model: <dataset_name>` in
 `config/datasets.yaml`, not a `preload_script`: `clickhouse_load` builds its landing table
 from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the default `Log`.
 `evidence` has `models: 'evidence_*'`: each member for the run's product loads into
 `evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
 columns), and the member tables are dropped. A member with no parquet fails the load unless
 it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
-load. Only datasets with no model (`view/` inputs) keep a `schema/` file; a config test
-checks each entry has exactly one of `model`, `models`, `preload_script`.
+load. Only `derived` entries (built from loaded tables) have a `preload_script`, under `scripts/`; a config
+test checks each entry has exactly one of `model`, `models`, `preload_script`.
 
 Print the generated DDL:
 
@@ -189,11 +189,13 @@ checks the served type there.
 ## Schema drift and the change register (phase 5)
 
 `scripts/schema_drift.py` lists every disagreement between the dataset models and the hand-written ClickHouse
-landing DDL (entries with a `preload_script`; generated entries are skipped). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
+landing DDL (entries with a `preload_script`; generated entries are skipped, so since piece 3 it is empty). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
 category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
 column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
 `docs/phase5_drift_before.csv` (the drift before the piece 1 model changes), `docs/phase5_landing_before.csv` (the
-hand-written landing DDL at the end of piece 1), the generator and the 2612-3 evidence; it reads no landing DDL. The
+hand-written landing DDL at the end of piece 1, and of the four view tables until piece 3), the generator and the
+2612-3 evidence; it reads no landing DDL. A table the snapshot lists as `no_model` that has a model now (the views)
+gets the drift of its model against its frozen columns. The
 builder's docstring says where the evidence is. The register's companion note in the vault
 (`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
 
