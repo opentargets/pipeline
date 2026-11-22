@@ -3,6 +3,7 @@
 import csv
 import importlib.util
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,13 +14,14 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
 
-from pos.clickhouse_ddl import landing_columns, members, parse_type, render, type_at
+from pos.clickhouse_ddl import canonical, landing_columns, members, parse_type, render, type_at
 
 ROOT = Path(__file__).parents[1]
 CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
 SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
 SQL_EDITS = ROOT / 'docs' / 'phase5_sql_edits.csv'
+CAST_BACK = ROOT / 'docs' / 'phase5_cast_back.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
 ORDER = {'struct_order', 'column_order'}
 #: Evidence columns only PPP models have.
@@ -31,16 +33,17 @@ PPP_ONLY = (
 )  # fmt: skip
 
 
-def _load_script():
-    spec = importlib.util.spec_from_file_location('schema_drift', ROOT / 'scripts' / 'schema_drift.py')
+def _load_script(name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / 'scripts' / f'{name}.py')
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules['schema_drift'] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-schema_drift = _load_script()
+schema_drift = _load_script('schema_drift')
+build_register = _load_script('build_register')
 
 
 @pytest.fixture(scope='module')
@@ -72,6 +75,7 @@ def register() -> list[dict[str, str]]:
 
 CONFIG = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
 SUPERSEDED = 'superseded by ppp_only'
+SUPERSEDED_SQL = 'superseded by serving_sql'
 
 
 def _platform(dataset: str):
@@ -84,7 +88,16 @@ def _changed(row: dict[str, str]) -> bool:
     before, after = row['before'], row['after']
     if row['category'] in ORDER or not before or not after:
         return before != after
-    return parse_type(before) != parse_type(after)
+    return not _same(before, after)
+
+
+def _same(a: str, b: str) -> bool:
+    return canonical(parse_type(a)) == canonical(parse_type(b))
+
+
+def _cast_back() -> dict[tuple[str, str], dict[str, str]]:
+    with CAST_BACK.open(newline='') as fh:
+        return {(r['dataset'], r['field']): r for r in csv.DictReader(fh)}
 
 
 def test_register_covers_every_disagreement(drift, snapshot, register):
@@ -98,9 +111,16 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
         f'with columns {", ".join(COLUMNS)} (outcome says what changed; before/after are ClickHouse types; '
         f'evidence a short data summary; serving read from schema_drift.py; API follow-up open or none).'
     )
+    kept = {(r['dataset'], r['field']) for r in register if r['category'] == 'serving_sql' and not _changed(r)}
+    cast_back = _cast_back()
     for row, key in zip(register, keys, strict=True):
         served = row['serving read'] != 'no' and row['category'] != 'column_order'
-        superseded = row['outcome'] == SUPERSEDED
+        superseded = row['outcome'] in {SUPERSEDED, SUPERSEDED_SQL}
+        if row['outcome'] == SUPERSEDED_SQL:
+            assert key[:2] in kept, f'{key}: superseded by serving_sql, but no serving_sql row keeps the type'
+        entry = cast_back.get(key[:2])
+        if row['category'] == 'type_unrecorded' and entry is not None and _same(entry['served'], row['before']):
+            superseded = True
         expected = 'open' if served and _changed(row) and not superseded else 'none'
         assert row['API follow-up'] == expected, f'{key}: API follow-up should be {expected}'
 
@@ -157,6 +177,43 @@ def test_every_sql_edit_has_a_row(register):
     for key, edit in edits.items():
         assert rows[key]['outcome'] == edit['edit'], key
         assert rows[key]['after'] == edit['served'], key
+
+
+def test_every_landing_change_has_a_row(register):
+    """Each type change from the frozen landing DDL to the generated table, Enum values included, has a row showing
+    it (or, for a nullability change, a `struct_nullability` row above it); each column order change a
+    `column_order` row."""
+    rows: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for r in register:
+        rows.setdefault((r['dataset'], r['field']), []).append(r)
+    shallow = build_register.shallow
+    changes = build_register.landing_changes()
+    missing = []
+    for dataset, path, before, after in changes:
+        shown = any(
+            r['category'] not in ORDER and r['before'] and r['after']
+            and (shallow(parse_type(r['before'])), shallow(parse_type(r['after']))) == (shallow(before), shallow(after))
+            for r in rows.get((dataset, path), [])
+        )  # fmt: skip
+        nullability = replace(shallow(before), nullable=False) == replace(shallow(after), nullable=False)
+        above = [path[:i] for i, c in enumerate(path) if c in '/[']
+        structs = any(r['category'] == 'struct_nullability' for a in above for r in rows.get((dataset, a), []))
+        if not shown and not (nullability and structs):
+            missing.append((dataset, path, render(before), render(after)))
+    assert not missing, f'landing type changes with no register row: {missing}'
+    assert ('credible_sets', 'studyType') not in {(d, p) for d, p, _, _ in changes}
+    for dataset, (before, after) in build_register.order_changes().items():
+        order = [r for r in rows.get((dataset, ''), []) if r['category'] == 'column_order']
+        assert [(r['before'], r['after']) for r in order] == [(before, after)], f'{dataset}: column_order row'
+
+
+def test_cast_back_rows(register):
+    """A landing-only change a serving script casts back to the landing type has follow-up `none`."""
+    rows = {(r['dataset'], r['field']): r for r in register if r['category'] == 'type_unrecorded'}
+    for key, entry in _cast_back().items():
+        assert key in rows, f'{key}: phase5_cast_back.csv entry with no type_unrecorded row'
+        assert _same(entry['served'], rows[key]['before']), key
+        assert rows[key]['API follow-up'] == 'none', key
 
 
 def test_every_clickhouse_marker_parses():

@@ -165,6 +165,23 @@ def _name(name: str) -> str:
     return f'`{name}`'
 
 
+def canonical(t: CHType) -> CHType:
+    """`t` with every Enum an `Enum8`/`Enum16` with explicit values; an entry with none takes the last value + 1."""
+    element = canonical(t.element) if t.element is not None else None
+    fields = tuple((n, canonical(f)) for n, f in t.fields)
+    if t.name not in _ENUMS:
+        return replace(t, element=element, fields=fields)
+    entries, value = [], 0
+    for entry in t.args:
+        label, _, given = entry.partition(' = ')
+        value = int(given) if given else value + 1
+        entries.append(f'{label} = {value}')
+    name = t.name
+    if name == 'Enum':
+        name = 'Enum8' if all(-128 <= int(e.rsplit(' = ', 1)[1]) <= _ENUM8_MAX for e in entries) else 'Enum16'
+    return replace(t, name=name, args=tuple(entries))
+
+
 # models
 
 

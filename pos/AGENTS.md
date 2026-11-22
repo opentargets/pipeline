@@ -181,7 +181,9 @@ order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
 skips). Locally: `docker run -d --rm --name pos-test-clickhouse -p 8123:8123 -e
 CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7`. A serving-script edit a
 generated type forces goes in `docs/phase5_sql_edits.csv`, which `scripts/build_register.py`
-turns into a `serving_sql` register row.
+turns into a `serving_sql` register row. A landing-only type change a serving script casts back
+to the landing type goes in `docs/phase5_cast_back.csv` (`path` in the served `table`); the test
+checks the served type there.
 
 ## Schema drift and the change register (phase 5)
 
@@ -196,7 +198,9 @@ builder's docstring says where the evidence is. The register's companion note in
 
 `tests/test_schema_register.py` requires a register row for every snapshot row and for every disagreement
 `drift()` finds now, and checks each `after` against the Platform table `pos.clickhouse_ddl` generates (empty
-where that table lacks the column). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
+where that table lacks the column). It also requires a row showing every type change (Enum values included) and
+column order change from `docs/phase5_landing_before.csv` to the generated Platform tables (`type_unrecorded` and
+`column_order` rows). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
 add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. Do not regenerate the file.

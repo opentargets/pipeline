@@ -15,7 +15,7 @@ import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import ClickHouseError
 
-from pos.clickhouse_ddl import ddl_for, members
+from pos.clickhouse_ddl import canonical, ddl_for, members, parse_type, type_at
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.tasks.clickhouse_load import member_drops, union_inserts
@@ -25,6 +25,8 @@ STEP = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['b
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
 with (ROOT / 'docs' / 'phase5_sql_edits.csv').open(newline='') as _fh:
     SQL_EDITS = list(csv.DictReader(_fh))
+with (ROOT / 'docs' / 'phase5_cast_back.csv').open(newline='') as _fh:
+    CAST_BACK = list(csv.DictReader(_fh))
 # read at import: the autouse fixture clears POS_* before each test
 SERVER = os.environ.get('POS_TEST_CLICKHOUSE', 'localhost:8123')
 REQUIRE = os.environ.get('POS_REQUIRE_CLICKHOUSE') == '1'
@@ -109,5 +111,12 @@ def test_serving_sql(product):
         for edit in SQL_EDITS:
             served = client.query(query, parameters={'d': database, 't': edit['table'], 'c': edit['field']})
             assert served.result_rows == [(edit['served'],)], f'phase5_sql_edits.csv: {edit}'
+        for entry in CAST_BACK:
+            column = entry['path'].split('/', 1)[0].removesuffix('[]')
+            served = client.query(query, parameters={'d': database, 't': entry['table'], 'c': column})
+            assert len(served.result_rows) == 1, f'phase5_cast_back.csv: {entry}: no column {column}'
+            found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
+            assert found is not None, f'phase5_cast_back.csv: {entry}: no {entry["path"]}'
+            assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_cast_back.csv: {entry}'
     finally:
         admin.command(f'DROP DATABASE IF EXISTS {database} SYNC')

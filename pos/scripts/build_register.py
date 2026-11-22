@@ -12,10 +12,16 @@ changes (e9133802), so that rows since resolved by a model change keep their reg
 `--note` also writes the register as a Markdown note. The rows whose `after` differs from the piece 1 register
 (`--previous`, default `docs/phase5_register_piece1.csv`, the register at 19920e46) are printed and listed in the
 note. `docs/phase5_landing_before.csv` holds the hand-written landing DDL columns at 19920e46 (`dataset, field,
-ddl_type`, written with `schema_drift.render`): it decides whether a DDL-only column was dropped in piece 1 and
-gives the `before` of the `ppp_only` rows. The builder reads no landing DDL. `docs/phase5_sql_edits.csv` lists the
+ddl_type, position`, written with `schema_drift.render`): it decides whether a DDL-only column was dropped in piece 1,
+gives the `before` of the `ppp_only` rows, and is compared with the generated Platform tables, Enum values included:
+a type change no row shows gets a `type_unrecorded` row, an order change of the shared columns a `column_order`
+row. The builder reads no landing DDL. `docs/phase5_sql_edits.csv` lists the
 serving-script edits a generated type forced (`dataset, field, edit, table, served`): one `serving_sql` row each,
 `before` the landing type at 19920e46, `after` the type `table` serves (`tests/test_serving_sql.py` checks it).
+Where `after` is the landing type, the other rows of that field are `superseded by serving_sql`, follow-up `none`.
+`docs/phase5_cast_back.csv` lists the landing-only changes a serving script casts back (`dataset, field, table,
+path, served`; `tests/test_serving_sql.py` checks the type at `path` in `table`): where `served` is the landing
+type, the `type_unrecorded` row's follow-up is `none`.
 
 One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
 PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up `none`. `before` is the
@@ -29,6 +35,7 @@ import csv
 import importlib.util
 import json
 import sys
+from collections.abc import Iterable
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
@@ -38,12 +45,14 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec, walk
 
-from pos.clickhouse_ddl import CHType, landing_columns, parse_type, render, type_at
+from pos.clickhouse_ddl import CHType, canonical, landing_columns, parse_type, render, type_at
 
 POS = Path(__file__).resolve().parents[1]
 DOCS = POS / 'docs'
 PPP_ONLY = 'API removal (Platform; PPP only)'
 SUPERSEDED = 'superseded by ppp_only'
+SUPERSEDED_SQL = 'superseded by serving_sql'
+UNRECORDED = 'type_unrecorded'
 COLUMNS = ('dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up')
 ORDER = frozenset({'struct_order', 'column_order'})
 UNLANDED = frozenset({'model_only', 'struct_field_missing'})
@@ -70,16 +79,23 @@ CLICKHOUSE = POS / 'config' / 'clickhouse'
 SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
 
 with (DOCS / 'phase5_landing_before.csv').open(newline='') as _fh:
-    LANDING = {(r['dataset'], r['field']): r['ddl_type'] for r in csv.DictReader(_fh)}
+    _FROZEN = sorted(csv.DictReader(_fh), key=lambda r: (r['dataset'], int(r['position'])))
+LANDING = {(r['dataset'], r['field']): r['ddl_type'] for r in _FROZEN}
+#: dataset -> its landing columns at 19920e46, in DDL order.
+LANDING_ORDER: dict[str, list[str]] = {}
+for _r in _FROZEN:
+    LANDING_ORDER.setdefault(_r['dataset'], []).append(_r['field'])
 with (DOCS / 'phase5_sql_edits.csv').open(newline='') as _fh:
     SQL_EDITS = list(csv.DictReader(_fh))
+with (DOCS / 'phase5_cast_back.csv').open(newline='') as _fh:
+    CAST_BACK = {(r['dataset'], r['field']): r for r in csv.DictReader(_fh)}
 
 
 def changed(category: str, before: str, after: str) -> bool:
     """Whether the column's ClickHouse type (or, for struct order, its field order) changes."""
     if category in ORDER or not before or not after:
         return before != after
-    return parse_type(before) != parse_type(after)
+    return canonical(parse_type(before)) != canonical(parse_type(after))
 
 
 def api_follow_up(category: str, before: str, after: str, read: str) -> str:
@@ -114,6 +130,55 @@ def after_order(dataset: str, path: str, before: str) -> str:
     t = at(dataset, path)
     kept = set(before.split(', '))
     return ', '.join(n for n, _ in t.fields if n in kept) if t is not None else ''
+
+
+def _paths(cols: Iterable[tuple[str, CHType]]) -> dict[str, CHType]:
+    """Every column and nested field by its register path (`a`, `a/b`, `a[]`, `a[]/b`)."""
+    out: dict[str, CHType] = {}
+
+    def visit(t: CHType, path: str) -> None:
+        out[path] = t
+        if t.element is not None:
+            visit(t.element, f'{path}[]')
+        for n, f in t.fields:
+            visit(f, f'{path}/{n}')
+
+    for name, t in cols:
+        visit(t, name)
+    return out
+
+
+def shallow(t: CHType) -> CHType:
+    """What a path's register row records: a primitive's type, Enum values explicit; an Array's or Tuple's flags."""
+    if t.name in {'Array', 'Tuple'}:
+        return replace(t, element=None, fields=())
+    return canonical(t)
+
+
+def landing_changes() -> list[tuple[str, str, CHType, CHType]]:
+    """(dataset, path, before, after) of each field typed differently in the frozen and the generated table."""
+    out = []
+    for dataset, fields in sorted(LANDING_ORDER.items()):
+        cols = platform_table(dataset)
+        if cols is None:
+            continue
+        before = _paths((f, parse_type(LANDING[dataset, f])) for f in fields)
+        after = _paths(cols)
+        common = sorted(before.keys() & after.keys())
+        out += [(dataset, p, before[p], after[p]) for p in common if shallow(before[p]) != shallow(after[p])]
+    return out
+
+
+def order_changes() -> dict[str, tuple[str, str]]:
+    """Dataset -> (before, after) order of the columns of both the frozen and the generated table, where it differs."""
+    out = {}
+    for dataset, fields in sorted(LANDING_ORDER.items()):
+        generated = [n for n, _ in platform_table(dataset) or ()]
+        before = [f for f in fields if f in generated]
+        after = [n for n in generated if n in fields]
+        if before != after:
+            out[dataset] = (', '.join(before), ', '.join(after))
+    return out
 
 
 @cache
@@ -245,6 +310,86 @@ def sql_edit(edit: dict[str, str], evidence: Evidence) -> dict[str, str]:
     return dict(zip(COLUMNS, values, strict=True))
 
 
+def same(a: str, b: str) -> bool:
+    return canonical(parse_type(a)) == canonical(parse_type(b))
+
+
+@cache
+def kept_by_sql_edit() -> frozenset[tuple[str, str]]:
+    """(dataset, field) of each serving-script edit that serves the landing type."""
+    kept = (e for e in SQL_EDITS if same(e['served'], LANDING[e['dataset'], e['field']]))
+    return frozenset((e['dataset'], e['field']) for e in kept)
+
+
+def cast_back(dataset: str, path: str, before: CHType) -> dict[str, str] | None:
+    """The `phase5_cast_back.csv` entry of a field whose serving table serves the landing type."""
+    entry = CAST_BACK.get((dataset, path))
+    return entry if entry is not None and canonical(parse_type(entry['served'])) == canonical(before) else None
+
+
+def _ancestors(path: str) -> list[str]:
+    """`a`, `a[]` and `a[]/b` for `a[]/b/c`."""
+    return [path[:i] for i in range(1, len(path)) if path[i] == '/' or path.startswith('[]', i)]
+
+
+def _recorded(rows: dict[tuple[str, str], list[dict[str, str]]], dataset: str, path: str, before: CHType,
+              after: CHType) -> bool:  # fmt: skip
+    """Whether a row at the path shows the change, or a `struct_nullability` row above it a nullability change."""
+    for r in rows.get((dataset, path), []):
+        if r['category'] in ORDER or not r['before'] or not r['after']:
+            continue
+        if shallow(parse_type(r['before'])) == shallow(before) and shallow(parse_type(r['after'])) == shallow(after):
+            return True
+    if replace(shallow(before), nullable=False) != replace(shallow(after), nullable=False):
+        return False
+    return any(r['category'] == 'struct_nullability' for a in _ancestors(path) for r in rows.get((dataset, a), []))
+
+
+def describe(before: CHType, after: CHType) -> str:
+    """The change from `before` to `after`, in words."""
+    b, a = shallow(before), shallow(after)
+    word_b, word_a = ('Enum' if t.name.startswith('Enum') else t.name for t in (b, a))
+    parts = []
+    if word_b == word_a == 'Enum':
+        labels = [sorted(e.rsplit(' = ', 1)[0] for e in t.args) for t in (b, a)]
+        parts.append('Enum renumbered' if labels[0] == labels[1] else 'Enum labels changed')
+    elif (b.name, b.args) != (a.name, a.args):
+        parts.append(f'{word_b} → {word_a}')
+    if b.nullable != a.nullable:
+        parts.append('ClickHouse nullable' if a.nullable else 'ClickHouse non-null')
+    if b.low_cardinality != a.low_cardinality:
+        parts.append('LowCardinality added' if a.low_cardinality else 'LowCardinality dropped')
+    return '; '.join(parts)
+
+
+def unrecorded(rows: list[dict[str, str]], evidence: Evidence) -> list[dict[str, str]]:
+    """A `type_unrecorded` row per landing type change no row shows, a `column_order` row per unrecorded order."""
+    keyed: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for r in rows:
+        keyed.setdefault((r['dataset'], r['field']), []).append(r)
+    out = []
+    for dataset, path, b, a in landing_changes():
+        if _recorded(keyed, dataset, path, b, a):
+            continue
+        before, after = sd.render(b), after_type(dataset, path)
+        read = sd._serving(CONFIG[dataset], SCRIPTS).read(path, landed=True)
+        models = sd._models_for(CONFIG[dataset], MODELS) or []
+        text = evidence.text(dataset, [{'model': m.dataset_name} for m in models], path)
+        result, follow_up = describe(b, a), api_follow_up(UNRECORDED, before, after, read)
+        if (entry := cast_back(dataset, path, b)) is not None:
+            result, follow_up = f'{result}; landing only: {entry["table"]} casts back', 'none'
+        values = (dataset, path, UNRECORDED, result, before, after, text, read, follow_up)
+        out.append(dict(zip(COLUMNS, values, strict=True)))
+    for dataset, (before, after) in order_changes().items():
+        if any(r['category'] == 'column_order' for r in keyed.get((dataset, ''), [])):
+            continue
+        read = sd._serving(CONFIG[dataset], SCRIPTS).read('', landed=True)
+        values = (dataset, '', 'column_order', outcome('column_order', dataset, '', [], before, after, set()),
+                  before, after, '', read, api_follow_up('column_order', before, after, read))  # fmt: skip
+        out.append(dict(zip(COLUMNS, values, strict=True)))
+    return out
+
+
 def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for r in drift.iter_rows(named=True):
@@ -286,11 +431,14 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
         top = path.split('/', 1)[0].removesuffix('[]')
         if category != 'ppp_only' and top in ppp_only(dataset):
             result, follow_up = SUPERSEDED, 'none'
+        elif category != 'serving_sql' and (dataset, path) in kept_by_sql_edit():
+            result, follow_up = SUPERSEDED_SQL, 'none'
         else:
             result = outcome(category, dataset, path, rows, before, after, no_output)
             follow_up = api_follow_up(category, before, after, read)
         values = (dataset, path, category, result, before, after, text, read, follow_up)
         out.append(dict(zip(COLUMNS, values, strict=True)))
+    out += unrecorded(out, evidence)
     return sorted(out, key=lambda r: (r['dataset'], r['field'], r['category']))
 
 
@@ -358,7 +506,11 @@ PIECE2 = """
 
 `after` is now the generated Platform type. The Platform evidence table drops the 15 columns only PPP models have \
 (`ppp_only` rows, outcome `API removal (Platform; PPP only)`, which carry the API follow-up); the other rows under \
-those columns are `superseded by ppp_only`, follow-up `none`. Rows whose `after` changed from the piece 1 register:
+those columns are `superseded by ppp_only`, follow-up `none`. Rows of a field whose `serving_sql` edit serves the \
+landing type are `superseded by serving_sql`, follow-up `none`. `type_unrecorded` rows are type changes from the \
+landing DDL that no piece 1 row showed (an Enum against a closed `Literal`, Enum values); where a serving script \
+casts the column back to the landing type, the outcome says so and the follow-up is `none`. Rows whose `after` \
+changed from the piece 1 register:
 """
 
 Changes = list[tuple[dict[str, str], dict[str, str]]]

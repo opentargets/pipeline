@@ -14,6 +14,7 @@ from ot_datamodels.spec import dataset_spec
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
     CHType,
+    canonical,
     column_type,
     columns,
     create_table,
@@ -304,6 +305,17 @@ def test_type_at():
     assert type_at(cols, 'absent') is None
     assert type_at(cols, 'struct/absent') is None
     assert type_at(cols, 'absent[]/a') is None
+
+
+def test_canonical_numbers_enums():
+    numbered = parse_type("Enum8('a' = 1, 'b' = 2)")
+    assert canonical(parse_type("Enum('a', 'b')")) == numbered
+    assert canonical(numbered) == numbered
+    assert canonical(parse_type("Enum8('b' = 1, 'a' = 2)")) != numbered
+    assert canonical(parse_type("Enum('a' = 5, 'b')")) == parse_type("Enum8('a' = 5, 'b' = 6)")
+    assert canonical(parse_type("Enum('a' = 200)")) == parse_type("Enum16('a' = 200)")
+    nested = canonical(parse_type("Array(Tuple(x Nullable(Enum('a', 'b'))))"))
+    assert nested == parse_type("Array(Tuple(x Nullable(Enum8('a' = 1, 'b' = 2))))")
 
 
 def test_create_table_quotes_identifiers():
