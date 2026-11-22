@@ -44,9 +44,11 @@ def from_output(model: type[BaseModel], field: str, *, nullable: bool | None = N
         `Annotated[<the field's type>, *<its metadata>, Field(<its description, default, ...>)]`.
 
     Raises:
-        SchemaDefinitionError: if `model` has no such field.
+        SchemaDefinitionError: if `model` has no such field, or it has a `default_factory`.
     """
     info = _info(model, field)
+    if info.default_factory is not None:
+        raise SchemaDefinitionError(f'{model.__name__}.{field}: a default_factory cannot be copied')
     metadata = [item for item in info.metadata if not isinstance(item, PrimaryKey)]
     if primary_key:
         metadata.append(PrimaryKey())

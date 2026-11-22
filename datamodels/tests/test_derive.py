@@ -145,6 +145,12 @@ def test_from_output_rejects_an_unknown_field() -> None:
         from_output(_Out, 'nope')
 
 
+def test_from_output_rejects_a_default_factory() -> None:
+    model = create_model('_Factory', __base__=StructModel, tags=(list[str], Field(default_factory=list)))
+    with pytest.raises(SchemaDefinitionError, match=r'_Factory\.tags: a default_factory cannot be copied'):
+        from_output(model, 'tags')
+
+
 def test_row_of_projects_fields() -> None:
     assert issubclass(OutRow, StructModel)
     assert not issubclass(OutRow, DatasetModel)
