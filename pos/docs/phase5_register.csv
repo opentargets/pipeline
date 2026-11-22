@@ -114,8 +114,8 @@ enhancer_to_gene,datasourceId,literal_vs_string,String → Enum,LowCardinality(S
 enhancer_to_gene,datasourceId,low_cardinality,ClickHouse follows model; String → Enum,LowCardinality(String),Enum8('E2G' = 1),nulls 0/48799585; distinct E2G,pass:enhancer_to_gene.sql,open
 enhancer_to_gene,end,type,marker,UInt32,UInt32,"nulls 0/48799585; min 10859, max 248925639",named:enhancer_to_gene.sql,none
 enhancer_to_gene,intervalId,model_only,API addition (piece 2),,String,nulls 0/48799585,pass:enhancer_to_gene.sql,open
-enhancer_to_gene,intervalType,literal_vs_string,String → Enum,LowCardinality(String),"Enum8('genic' = 1, 'intergenic' = 2, 'promoter' = 3)",nulls 0/48799585; distinct genic · intergenic · promoter,pass:enhancer_to_gene.sql,open
-enhancer_to_gene,intervalType,low_cardinality,ClickHouse follows model; String → Enum,LowCardinality(String),"Enum8('genic' = 1, 'intergenic' = 2, 'promoter' = 3)",nulls 0/48799585; distinct genic · intergenic · promoter,pass:enhancer_to_gene.sql,open
+enhancer_to_gene,intervalType,literal_vs_string,String → Enum,LowCardinality(String),"Enum8('genic' = 1, 'intergenic' = 2, 'promoter' = 3, 'enhancer' = 4, 'intragenic' = 5)",nulls 0/48799585; distinct genic · intergenic · promoter,pass:enhancer_to_gene.sql,open
+enhancer_to_gene,intervalType,low_cardinality,ClickHouse follows model; String → Enum,LowCardinality(String),"Enum8('genic' = 1, 'intergenic' = 2, 'promoter' = 3, 'enhancer' = 4, 'intragenic' = 5)",nulls 0/48799585; distinct genic · intergenic · promoter,pass:enhancer_to_gene.sql,open
 enhancer_to_gene,qualityControls[],literal_vs_string,"String kept, no Enum",String,String,nulls 0/0; no values,pass:enhancer_to_gene.sql,none
 enhancer_to_gene,resourceScore[]/name,literal_vs_string,"String kept, no Enum",LowCardinality(String),LowCardinality(String),nulls 0/97599170; distinct DNase · HiC_contacts,pass:enhancer_to_gene.sql,none
 enhancer_to_gene,resourceScore[]/name,low_cardinality,marker,LowCardinality(String),LowCardinality(String),nulls 0/97599170; distinct DNase · HiC_contacts,pass:enhancer_to_gene.sql,none
