@@ -1,6 +1,7 @@
 """Tests for the target view transformer."""
 
 import json
+import re
 from pathlib import Path
 
 import polars as pl
@@ -384,8 +385,8 @@ def test_schema_is_published(tmp_path: Path):
     assert _run(tmp_path).schema == TARGET_VIEW
 
 
-def test_inputs_as_pts_writes_them_keep_the_types_of_targets_sql(tmp_path: Path):
-    """The inputs' Enums and homology's bool reach the view as the strings `targets.sql` loads."""
+def test_inputs_as_pts_writes_them_keep_the_published_types(tmp_path: Path):
+    """The inputs' Enums and homology's bool reach the view as `TARGET_VIEW`'s strings."""
     written = {name: _as_written(name, pl.DataFrame(ROWS.get(name, []), schema=INPUT_SCHEMAS[name])) for name in MODELS}
     assert isinstance(written['transcript'].schema['chromosome'], pl.Enum)
     assert isinstance(written['homology'].schema['homologyType'], pl.Enum)
@@ -423,3 +424,43 @@ def test_lists_sorted(tmp_path: Path):
 
 def test_alternative_genes_null(tmp_path: Path):
     assert _run(tmp_path)['alternativeGenes'].null_count() == len(ROWS['target']) + 1
+
+
+#: ClickHouse's hand-written `targets` table, loaded from the view.
+TARGETS_SQL = Path(__file__).resolve().parents[2] / 'pos' / 'config' / 'clickhouse' / 'schema' / 'targets.sql'
+
+#: The view fields whose inputs are Enums or a bool in their models.
+FROM_ENUMS = [
+    'chromosome',
+    'aspect',
+    'evidence',
+    'constraintType',
+    'homologyType',
+    'isHighConfidence',
+    'modality',
+    'type',
+]
+
+
+@pytest.mark.parametrize('field', FROM_ENUMS)
+def test_targets_sql_loads_as_a_string_every_field_the_view_writes_as_one(field: str):
+    """`targets.sql` is hand-written: every declaration of the field there is a String, as `TARGET_VIEW` has it."""
+    declared = re.findall(rf'`{field}`\s+([A-Za-z]+(?:\s*\([^()]*\))?)', TARGETS_SQL.read_text())
+    assert declared, f'targets.sql declares no `{field}`'
+    assert all(re.fullmatch(r'(?:Nullable|LowCardinality)?\s*\(?\s*String\s*\)?', d) for d in declared), declared
+    assert all(dtype == pl.String for dtype in _dtypes(TARGET_VIEW, field)), field
+
+
+def _dtypes(schema: pl.Schema | pl.Struct, field: str) -> list:
+    """The dtype of every field named `field`, at any depth."""
+    fields = schema.fields if isinstance(schema, pl.Struct) else [pl.Field(n, d) for n, d in schema.items()]
+    found = []
+    for f in fields:
+        dtype = f.dtype.inner if isinstance(f.dtype, pl.List) else f.dtype
+        while isinstance(dtype, pl.List):
+            dtype = dtype.inner
+        if f.name == field:
+            found.append(dtype)
+        if isinstance(dtype, pl.Struct):
+            found += _dtypes(dtype, field)
+    return found

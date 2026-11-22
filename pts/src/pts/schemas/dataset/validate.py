@@ -41,7 +41,7 @@ from ot_datamodels.spec import dataset_spec
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
 
-from pts.schemas.dataset.conform import strings_to_enums, targets, unknown_values
+from pts.schemas.dataset.conform import targets, unknown_values
 from pts.schemas.dataset.converter import to_pandera
 from pts.transformers.utils.dataset import list_parts
 
@@ -185,7 +185,7 @@ def _as_enums(frame: pl.DataFrame, model: type[DatasetModel], part: str) -> tupl
     A Spark-written part stores Enums as strings. A column holding a value outside its Enum is left uncast, and
     the summary has a row per value path holding such values.
     """
-    casts = targets(frame.schema, model, strings_to_enums)
+    casts, _ = targets(frame.schema, model, nulls=False)  # other differences are left to pandera
     rows = []
     for name, dtype in casts.items():
         try:

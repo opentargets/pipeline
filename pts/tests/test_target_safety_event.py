@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import polars as pl
+import pytest
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 
 from pts.schemas.dataset.conform import conformed_schema
@@ -179,8 +181,8 @@ def test_process_adverse_events_groups_effects_and_reads_text_as_spark() -> None
         (*base[:2], 'activation_general', *base[3:5], '0042', *base[6:]),
         (*base[:2], 'inhibition_acute', *base[3:5], '7', *base[6:]),
         (*base[:2], 'activation', *base[3:]),
-        (None, 's', 'activation_acute', 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
-        ('f', 's', None, 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None),
+        (None, 's', 'activation_acute', 'EFO_1', 'ENSG1', None, 'Lynch et al. (2017)', 'T', 'U', None),
+        ('f', 's', None, 'EFO_1', 'ENSG1', None, 'Lynch et al. (2017)', 'T', 'U', None),
     )
     out = process_adverse_events(df).sort('literature', 'event', nulls_last=True)
     rows = out.select('event', 'literature', 'effects', pl.col('study').struct.field('type')).rows()
@@ -193,9 +195,28 @@ def test_process_adverse_events_groups_effects_and_reads_text_as_spark() -> None
         ('e', '42', grouped, 'clinical'),
         ('e', '7', grouped, 'clinical'),
         ('e', None, grouped, 'clinical'),
-        ('f', None, [{'direction': None, 'dosing': None}], 'Unknown (2000)'),
-        (None, None, None, 'Unknown (2000)'),
+        ('f', None, [{'direction': None, 'dosing': None}], 'preclinical'),
+        (None, None, None, 'preclinical'),
     ]
+
+
+def test_an_adverse_event_reference_without_a_study_type_fails_naming_it() -> None:
+    row = ('e', 's', None, 'EFO_1', 'ENSG1', None, 'Unknown (2000)', 'T', 'U', None)
+    with pytest.raises(ValueError, match=re.escape("adverse events ref: no safety study type for ['Unknown (2000)']")):
+        process_adverse_events(_ae(row))
+
+
+def test_a_toxcast_assay_format_outside_the_study_types_fails_naming_it() -> None:
+    df = _strings(TC_COLUMNS, [('A', 'd', 'e', None, None, None, 'tissue-based', 'ESR1', None)])
+    expected = "ToxCast assay_format_type: no safety study type for ['tissue-based']"
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        process_toxcast(df)
+
+
+def test_a_brennan_study_type_outside_the_study_types_fails_naming_it() -> None:
+    df = _brennan('EFO_1').with_columns(pl.col('studies').struct.with_fields(type=pl.lit('in vivo')))
+    with pytest.raises(ValueError, match=re.escape("Brennan studies.type: no safety study type for ['in vivo']")):
+        process_brennan(df)
 
 
 def test_process_toxcast_maps_columns() -> None:

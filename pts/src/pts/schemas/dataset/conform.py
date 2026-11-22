@@ -1,10 +1,12 @@
 """Cast a dataset to its model's dtypes before it is written, so its closed vocabularies are stored as Enums.
 
-Only what differs from the model is cast, nested values included; a column or struct field the model does not
-declare is kept as it is, for validation to report. The cast is strict: a value outside an Enum raises.
+Only a string the model stores as an Enum, and a Null-typed value, are cast, nested values included; any other
+dtype difference raises rather than being cast, so a lossy cast cannot hide a writer's mistake. A column or
+struct field the model does not declare is kept as it is, for validation to report. The cast is strict: a value
+outside an Enum raises.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import overload
 
 import polars as pl
@@ -17,24 +19,21 @@ EXAMPLES = 5
 #: A dtype, as polars' stubs type a nested one: an instance or a bare class.
 Dtype = pl.DataType | pl.datatypes.DataTypeClass
 
-#: Whether a leaf of the dtype read is cast to the model's.
-LeafRule = Callable[[Dtype, Dtype], bool]
-
 
 @overload
 def conform(frame: pl.DataFrame, model: type[DatasetModel]) -> pl.DataFrame: ...
 @overload
 def conform(frame: pl.LazyFrame, model: type[DatasetModel]) -> pl.LazyFrame: ...
 def conform(frame: pl.DataFrame | pl.LazyFrame, model: type[DatasetModel]) -> pl.DataFrame | pl.LazyFrame:
-    """`frame` with every column cast to its dtype in `model`.
+    """`frame` with its strings cast to the Enums of `model`, and its Null-typed values to the model's dtypes.
 
     A `LazyFrame` is cast when it is collected or sunk; polars' error then names the column and the value.
 
     Raises:
-        ValueError: for a `DataFrame` with a value outside an Enum, naming the dataset, the value's path and
-            the values.
+        ValueError: if any other dtype differs from the model's, naming each path and both dtypes; for a
+            `DataFrame` with a value outside an Enum, naming the dataset, the value's path and the values.
     """
-    casts = targets(frame.collect_schema(), model)
+    casts = _casts(frame.collect_schema(), model)
     if not casts:
         return frame
     if isinstance(frame, pl.LazyFrame):
@@ -42,43 +41,33 @@ def conform(frame: pl.DataFrame | pl.LazyFrame, model: type[DatasetModel]) -> pl
     return _cast_eager(frame, casts, model)
 
 
-def _cast_eager(frame: pl.DataFrame, casts: dict[str, Dtype], model: type[DatasetModel]) -> pl.DataFrame:
-    try:
-        return frame.with_columns(pl.col(name).cast(dtype, strict=True) for name, dtype in casts.items())
-    except pl.exceptions.InvalidOperationError as error:
-        unknown = [
-            f'{path}: {values}'
-            for name, dtype in casts.items()
-            for path, values, _ in unknown_values(frame[name], dtype, name)
-        ]
-        detail = '; '.join(unknown) if unknown else str(error)
-        raise ValueError(f'{model.dataset_name} does not conform to {model.__name__}: {detail}') from error
+def conformed_schema(schema: pl.Schema, model: type[DatasetModel]) -> pl.Schema:
+    """The schema a frame of `schema` has once conformed to `model`.
+
+    Raises:
+        ValueError: as `conform` does, for a dtype it would not cast.
+    """
+    return pl.Schema({**schema, **_casts(schema, model)})
 
 
-def targets(schema: pl.Schema, model: type[DatasetModel], leaf: LeafRule | None = None) -> dict[str, Dtype]:
-    """The dtype each column of `schema` is cast to, for the columns that differ from `model`.
+def targets(schema: pl.Schema, model: type[DatasetModel], *, nulls: bool = True) -> tuple[dict[str, Dtype], list[str]]:
+    """The casts of the columns of `schema` that differ from `model`, and the differences no cast resolves.
 
     Args:
         schema: the dtypes read.
         model: the dataset model.
-        leaf: which differing leaves are cast; every one by default.
+        nulls: whether a Null-typed value is cast to the model's dtype; else only strings to Enums are.
+
+    Returns:
+        The dtype each differing column is cast to, and one `path: have != want` per other difference.
     """
     wanted = to_polars_schema(model)
     casts: dict[str, Dtype] = {}
+    differences: list[str] = []
     for name, have in schema.items():
-        if name in wanted and (dtype := _target(have, wanted[name], leaf or _any)) != have:
+        if name in wanted and (dtype := _target(have, wanted[name], name, differences, nulls=nulls)) != have:
             casts[name] = dtype
-    return casts
-
-
-def conformed_schema(schema: pl.Schema, model: type[DatasetModel]) -> pl.Schema:
-    """The schema a frame of `schema` has once conformed to `model`."""
-    return pl.Schema({**schema, **targets(schema, model)})
-
-
-def strings_to_enums(have: Dtype, want: Dtype) -> bool:
-    """A `LeafRule` casting only a string the model stores as an Enum."""
-    return isinstance(want, pl.Enum) and have == pl.String
+    return casts, differences
 
 
 def unknown_values(series: pl.Series, dtype: Dtype, path: str) -> Iterator[tuple[str, list[str], int]]:
@@ -120,28 +109,46 @@ def enums_as_strings(dtype: Dtype) -> Dtype:
     return dtype
 
 
-def _any(have: Dtype, want: Dtype) -> bool:
-    return True
+def _casts(schema: pl.Schema, model: type[DatasetModel]) -> dict[str, Dtype]:
+    casts, differences = targets(schema, model)
+    if differences:
+        raise ValueError(
+            f'{model.dataset_name} differs from {model.__name__} beyond its Enums: {"; ".join(differences)}'
+        )
+    return casts
 
 
-def _target(have: Dtype, want: Dtype, leaf: LeafRule) -> Dtype:
-    """`have` with each leaf the model declares replaced by the model's dtype, as `leaf` allows."""
+def _cast_eager(frame: pl.DataFrame, casts: dict[str, Dtype], model: type[DatasetModel]) -> pl.DataFrame:
+    try:
+        return frame.with_columns(pl.col(name).cast(dtype, strict=True) for name, dtype in casts.items())
+    except pl.exceptions.InvalidOperationError as error:
+        unknown = [
+            f'{path}: {values}'
+            for name, dtype in casts.items()
+            for path, values, _ in unknown_values(frame[name], dtype, name)
+        ]
+        detail = '; '.join(unknown) if unknown else str(error)
+        raise ValueError(f'{model.dataset_name} does not conform to {model.__name__}: {detail}') from error
+
+
+def _target(have: Dtype, want: Dtype, path: str, differences: list[str], *, nulls: bool) -> Dtype:
+    """`have` with each string the model stores as an Enum, and with `nulls` each Null, as the model's dtype.
+
+    Any other difference is added to `differences`, and that value kept as it is.
+    """
     if have == want:
         return have
     if isinstance(have, pl.Struct) and isinstance(want, pl.Struct):
         wanted = {field.name: field.dtype for field in want.fields}
         return pl.Struct([
-            pl.Field(f.name, _target(f.dtype, wanted[f.name], leaf) if f.name in wanted else f.dtype)
+            pl.Field(f.name, _target(f.dtype, wanted[f.name], f'{path}/{f.name}', differences, nulls=nulls))
+            if f.name in wanted
+            else f
             for f in have.fields
         ])
     if isinstance(have, pl.List) and isinstance(want, pl.List):
-        return pl.List(_target(have.inner, want.inner, leaf))
-    if have == pl.Null:
-        return want if leaf(have, want) else have
-    if _nested(have) or _nested(want):
-        return have
-    return want if leaf(have, want) else have
-
-
-def _nested(dtype: Dtype) -> bool:
-    return isinstance(dtype, pl.List | pl.Array | pl.Struct)
+        return pl.List(_target(have.inner, want.inner, f'{path}[]', differences, nulls=nulls))
+    if (nulls and have == pl.Null) or (have == pl.String and isinstance(want, pl.Enum)):
+        return want
+    differences.append(f'{path}: {have} != {want}')
+    return have

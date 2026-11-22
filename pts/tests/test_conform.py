@@ -8,7 +8,7 @@ import pytest
 from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, StructModel, to_polars_schema
 from pydantic import Field
 
-from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.conform import conform, conformed_schema, enums_as_strings
 from pts.schemas.dataset.validate import OUTSIDE_ENUM, validation_report
 
 Colour = Literal['red', 'green', 'blue']
@@ -39,10 +39,13 @@ class _Palette(DatasetModel):
     paints: list[_Paint] | None = Field(default=None)
 
 
+#: The palette's schema as Spark writes it: every Enum a string.
+STRINGS = pl.Schema({name: enums_as_strings(dtype) for name, dtype in to_polars_schema(_Palette).items()})
+
+
 def _strings(**overrides: object) -> pl.DataFrame:
-    """The palette as Spark writes it: every Enum a string, every integer an Int64."""
-    row = {**_Palette.example, **overrides}
-    return pl.DataFrame([{k: row[k] for k in _Palette.example}])
+    """The palette as Spark writes it: every Enum a string."""
+    return pl.DataFrame([{**_Palette.example, **overrides}], schema=STRINGS)
 
 
 def test_strings_become_the_models_enums_at_every_depth() -> None:
@@ -65,13 +68,32 @@ def test_a_frame_already_in_the_model_is_returned_as_it_is() -> None:
     assert conform(frame, _Palette) is frame
 
 
+def test_a_null_typed_column_takes_the_models_dtype() -> None:
+    conformed = conform(_strings().with_columns(shades=pl.lit(None)), _Palette)
+
+    assert conformed.schema['shades'] == pl.List(COLOUR)
+
+
 def test_an_undeclared_column_or_struct_field_is_kept() -> None:
-    frame = _strings(paint={'colour': 'blue', 'litres': 1, 'finish': 'matt'}).with_columns(extra=pl.lit('x'))
+    frame = _strings().with_columns(pl.col('paint').struct.with_fields(finish=pl.lit('matt')), extra=pl.lit('x'))
 
     conformed = conform(frame, _Palette)
 
     assert conformed['extra'].dtype == pl.String()
     assert conformed.schema['paint'] == pl.Struct({'colour': COLOUR, 'litres': pl.Int32, 'finish': pl.String})
+
+
+@pytest.mark.parametrize('lazy', [False, True], ids=['eager', 'lazy'])
+def test_any_other_dtype_difference_raises_naming_its_path_and_dtypes(lazy: bool) -> None:
+    """A Float64 where the model has Int32 would be truncated by a cast; it is the writer's to fix."""
+    frame = _strings().with_columns(
+        pl.col('paints').cast(pl.List(pl.Struct({'colour': pl.String, 'litres': pl.Float64}))),
+        pl.col('paint').cast(pl.Struct({'colour': pl.String, 'litres': pl.Int64})),
+    )
+    with pytest.raises(
+        ValueError, match=r'_palette .*paint/litres: Int64 != Int32; paints\[\]/litres: Float64 != Int32'
+    ):
+        conform(frame.lazy() if lazy else frame, _Palette)
 
 
 @pytest.mark.parametrize(
@@ -93,6 +115,10 @@ def test_a_lazy_value_outside_the_enum_raises_naming_the_column_and_value() -> N
         conform(_strings(shades=['mauve']).lazy(), _Palette).collect()
 
 
+def test_the_conformed_schema_is_the_written_one() -> None:
+    assert conformed_schema(STRINGS, _Palette) == to_polars_schema(_Palette)
+
+
 def _write(path: Path, frame: pl.DataFrame) -> str:
     path.mkdir(parents=True)
     frame.write_parquet(path / '00000000.parquet')
@@ -101,19 +127,11 @@ def _write(path: Path, frame: pl.DataFrame) -> str:
 
 def test_validation_holds_a_dataset_of_strings_to_the_enums(tmp_path: Path) -> None:
     """Spark writes plain strings: a dataset whose values are all in the Enums is valid."""
-    stored = _strings().with_columns(
-        pl.col('paint').cast(pl.Struct({'colour': pl.String, 'litres': pl.Int32})),
-        pl.col('paints').cast(pl.List(pl.Struct({'colour': pl.String, 'litres': pl.Int32}))),
-    )
-
-    assert validation_report(_write(tmp_path / 'ds', stored), _Palette).is_empty()
+    assert validation_report(_write(tmp_path / 'ds', _strings()), _Palette).is_empty()
 
 
 def test_validation_reports_a_string_outside_the_enum(tmp_path: Path) -> None:
-    stored = _strings(shades=['mauve', 'teal', 'red']).with_columns(
-        pl.col('paint').cast(pl.Struct({'colour': pl.String, 'litres': pl.Int32})),
-        pl.col('paints').cast(pl.List(pl.Struct({'colour': pl.String, 'litres': pl.Int32}))),
-    )
+    stored = _strings(shades=['mauve', 'teal', 'red'])
 
     report = validation_report(_write(tmp_path / 'ds', stored), _Palette)
 
@@ -123,6 +141,8 @@ def test_validation_reports_a_string_outside_the_enum(tmp_path: Path) -> None:
 
 def test_validation_does_not_cast_a_wrong_integer_type(tmp_path: Path) -> None:
     """Only strings are cast to Enums; any other dtype difference is still reported."""
-    report = validation_report(_write(tmp_path / 'ds', _strings()), _Palette)
+    stored = _strings().with_columns(pl.col('paint').cast(pl.Struct({'colour': pl.String, 'litres': pl.Int64})))
 
-    assert set(report['column']) == {'paint', 'paints'}
+    report = validation_report(_write(tmp_path / 'ds', stored), _Palette)
+
+    assert set(report['column']) == {'paint'}

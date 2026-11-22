@@ -352,8 +352,8 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
         handle.write(
             '#chr\tstart\tend\tTargetGeneEnsemblID\tCellType\tScore\tclass\tnormalizedDNase_prom.Feature\t3DContact.Feature\n'
         )
-        handle.write('chr1\t100\t200\tENSG1\tcell\t0.8\tintergenic\t1.5\t2.25\n')
-        handle.write('chr1\t201\t250\tENSG1\tcell\t0.1\tintergenic\t2.5\t3.25\n')
+        handle.write('chr1\t100\t200\tENSG1\tcell\t0.8\tenhancer\t1.5\t2.25\n')
+        handle.write('chr1\t201\t250\tENSG1\tcell\t0.1\tenhancer\t2.5\t3.25\n')
     target = (
         targets()
         .collect()
@@ -408,7 +408,8 @@ def test_entrypoint_reads_real_inputs_and_writes_valid_and_excluded(tmp_path, mi
     assert excluded['distanceToTss'].to_list() == [51]
     assert valid['qualityControls'].to_list() == [[]]
     assert excluded['qualityControls'].to_list() == [[QualityFlag.SCORE_OUTSIDE_BOUNDS.value]]
-    assert valid['intervalId'].to_list() == [hashlib.md5(b'1|100|200|ENSG1|study|intergenic').hexdigest()]
+    assert valid['intervalId'].to_list() == [hashlib.md5(b'1|100|200|ENSG1|study|enhancer').hexdigest()]
+    assert valid['intervalType'].cast(pl.String).to_list() == ['enhancer']
     assert excluded['resourceScore'].to_list() == [
         [{'name': 'DNase', 'value': 2.5}, {'name': 'HiC_contacts', 'value': 3.25}]
     ]

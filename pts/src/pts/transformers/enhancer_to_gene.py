@@ -1,12 +1,13 @@
 """Enhancer-to-gene annotation and validation."""
 
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any, Self, get_args
 
 import polars as pl
 import polars_hash as plh
 from loguru import logger
 from ot_datamodels.outputs.enhancer_to_gene import EnhancerToGene
+from ot_datamodels.vocabularies import IntervalType
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -235,8 +236,7 @@ def validate_biosample(frame: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.LazyF
 def validate_interval_type(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Flag unsupported types and multiple non-null types for the same region and gene."""
     logger.info('Validating enhancer-to-gene interval types')
-    types = ['promoter', 'enhancer', 'intragenic', 'intergenic', 'genic']
-    result = flag_rows(frame, ~pl.col('intervalType').is_in(types), QualityFlag.UNKNOWN_INTERVAL_TYPE)
+    result = flag_rows(frame, ~pl.col('intervalType').is_in(get_args(IntervalType)), QualityFlag.UNKNOWN_INTERVAL_TYPE)
     ambiguous = pl.col('intervalType').drop_nulls().n_unique().over(['chromosome', 'start', 'end', 'geneId']) > 1
     return flag_rows(result, ambiguous, QualityFlag.AMBIGUOUS_INTERVAL_TYPE)
 

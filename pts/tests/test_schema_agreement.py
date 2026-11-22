@@ -40,6 +40,7 @@ from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from pandera.config import ValidationDepth, config_context
 from pydantic import Field, ValidationError
 
+from pts.schemas.dataset.conform import enums_as_strings
 from pts.schemas.dataset.converter import to_base_pandera
 
 
@@ -203,17 +204,7 @@ def _series(name: str, value: Any, dtype: pl.DataType) -> pl.Series:
     try:
         return pl.Series(name, [value], dtype=dtype, strict=True)
     except pl.exceptions.InvalidOperationError:
-        return pl.Series(name, [value], dtype=_without_enums(dtype), strict=True)
-
-
-def _without_enums(dtype: pl.DataType) -> pl.DataType:
-    if isinstance(dtype, pl.Enum):
-        return pl.String()
-    if isinstance(dtype, pl.List):
-        return pl.List(_without_enums(dtype.inner))
-    if isinstance(dtype, pl.Struct):
-        return pl.Struct([pl.Field(f.name, _without_enums(f.dtype)) for f in dtype.fields])
-    return dtype
+        return pl.Series(name, [value], dtype=enums_as_strings(dtype), strict=True)
 
 
 def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:
