@@ -3,36 +3,39 @@
 Usage, from `pos/`::
 
     uv run python scripts/build_register.py <evidence_dir> docs/phase5_register.csv \
-        [--drift <drift.csv>] [--note <note.md>]
+        [--drift <drift.csv>] [--previous <register.csv>] [--note <note.md>]
 
-`--drift` defaults to `docs/phase5_drift_before.csv`: `scripts/schema_drift.py` output from before the piece 1 model
-changes (e9133802), so that rows since resolved by a model change keep their register row. `evidence_dir` holds the
-`validation/` and `profile/` parquet files of `pts.schemas.dataset.profile` from the 2612-3 run:
-`gs://open-targets-pos-scratch/phase5/2612-3/{validation,profile}/` (7-day lifecycle, so copy them locally first).
-`--note` also writes the register as a Markdown note. The rows whose `after` differs from the piece 1 register
-(`--previous`, default `docs/phase5_register_piece1.csv`, the register at 19920e46) are printed and listed in the
-note. `docs/phase5_landing_before.csv` holds the hand-written landing DDL columns at 19920e46 (`dataset, field,
-ddl_type, position`, written with `schema_drift.render`): it decides whether a DDL-only column was dropped in piece 1,
-gives the `before` of the `ppp_only` rows, and is compared with the generated Platform tables, Enum values included:
-a type change no row shows gets a `type_unrecorded` row, an order change of the shared columns a `column_order`
-row. The builder reads no landing DDL. `docs/phase5_sql_edits.csv` lists the
-serving-script edits a generated type forced (`dataset, field, edit, table, served`): one `serving_sql` row each,
-`before` the landing type at 19920e46, `after` the type `table` serves (`tests/test_serving_sql.py` checks it).
-Where `after` is the landing type, the other rows of that field are `superseded by serving_sql`, follow-up `none`.
-`docs/phase5_api_follow_ups.csv` lists the API changes that are no schema diff (`dataset, field, follow_up`): one
-`api_follow_up` row each, outcome the text, follow-up `open`.
-`docs/phase5_cast_back.csv` lists the landing-only changes a serving script casts back (`dataset, field, table,
-path, served`; `tests/test_serving_sql.py` checks the type at `path` in `table`): where `served` is the landing
-type, the `type_unrecorded` row's follow-up is `none`.
-`docs/phase5_derived_changes.csv` lists the columns a serving script builds from an Enum column (`dataset, field, table,
-served, note`, `note` the source column; `tests/test_serving_sql.py` checks the type): one `derived_type` row each,
-before `Array(String)`, follow-up `open`.
+Inputs:
 
-One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
-PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up `none`. `before` is the
-landing DDL type, `after` the type `pos.clickhouse_ddl` generates for the Platform table (evidence: `union_columns`
-of the Platform members), empty where that table lacks the column. `API follow-up` is `open` when the type changes
-and a serving script reads the column (column order excepted).
+- `evidence_dir`: the `validation/` and `profile/` parquet files of `pts.schemas.dataset.profile` for the 2612-3 run,
+  copied locally from `gs://open-targets-pos-scratch/phase5/2612-3/{validation,profile}/` (7-day lifecycle).
+- `--drift` (default `docs/phase5_drift_before.csv`): `scripts/schema_drift.py` output before the piece 1 model
+  changes.
+- `--previous` (default `docs/phase5_register_piece1.csv`): the piece 1 register; rows whose `after` differs from it
+  are printed and listed in the note.
+- `--note`: also write the register as a Markdown note.
+- `docs/phase5_landing_before.csv` (`dataset, field, ddl_type, position`, written with `schema_drift.render`): the
+  hand-written landing DDL columns at the end of piece 1. It decides whether a DDL-only column was dropped, gives the
+  `before` of the `ppp_only` rows, and is compared with the generated Platform tables, Enum values included: a type
+  change no row shows gets a `type_unrecorded` row, an order change of the shared columns a `column_order` row.
+- `docs/phase5_sql_edits.csv` (`dataset, field, edit, table, served`): serving-script edits a generated type forces.
+  One `serving_sql` row each, `before` the piece 1 landing type, `after` the type `table` serves
+  (`tests/test_serving_sql.py` checks it). Where `after` is the landing type, the field's other rows are
+  `superseded by serving_sql`, follow-up `none`.
+- `docs/phase5_api_follow_ups.csv` (`dataset, field, follow_up`): API changes that are no ClickHouse schema diff. One
+  `api_follow_up` row each, outcome the text, follow-up `open`.
+- `docs/phase5_cast_back.csv` (`dataset, field, table, path, served`; `tests/test_serving_sql.py` checks the type at
+  `path` in `table`): landing-only changes a serving script casts back. Where `served` is the landing type, the
+  `type_unrecorded` row's follow-up is `none`.
+- `docs/phase5_derived_changes.csv` (`dataset, field, table, served, note`, `note` the source column;
+  `tests/test_serving_sql.py` checks the type): columns a serving script builds from an Enum column. One
+  `derived_type` row each, before `Array(String)`, follow-up `open`.
+
+The builder reads no landing DDL. One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only`
+row per evidence column only PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up
+`none`. `before` is the landing DDL type, `after` the type `pos.clickhouse_ddl` generates for the Platform table
+(evidence: `union_columns` of the Platform members), empty where that table lacks the column. `API follow-up` is
+`open` when the type changes and a serving script reads the column (column order excepted).
 """
 
 import argparse
