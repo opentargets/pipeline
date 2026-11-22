@@ -25,12 +25,13 @@ import sys
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec, walk
+
+from pos.clickhouse_ddl import CHType, column_type, parse_type, render
 
 POS = Path(__file__).resolve().parents[1]
 COLUMNS = ('dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up')
@@ -62,28 +63,11 @@ CURRENT = sd.drift(POS / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLIC
 LANDED = {(r['dataset'], r['field']) for r in CURRENT.iter_rows(named=True) if r['category'] == 'ddl_only'}
 
 
-def render(t: Any) -> str:
-    """The type as ClickHouse accepts it: `LowCardinality(Nullable(...))`, never the reverse."""
-    if t.name == 'Array' and t.element is not None:
-        text = f'Array({render(t.element)})'
-    elif t.name == 'Tuple':
-        text = f'Tuple({", ".join(f"{n} {render(f)}" for n, f in t.fields)})'
-    elif t.args:
-        text = f'{t.name}({", ".join(t.args)})'
-    else:
-        text = t.name
-    if t.nullable:
-        text = f'Nullable({text})'
-    if t.low_cardinality:
-        text = f'LowCardinality({text})'
-    return text
-
-
 def changed(category: str, before: str, after: str) -> bool:
     """Whether the column's ClickHouse type (or, for struct order, its field order) changes."""
     if category in ORDER or not before or not after:
         return before != after
-    return sd.parse_type(before) != sd.parse_type(after)
+    return parse_type(before) != parse_type(after)
 
 
 def api_follow_up(category: str, before: str, after: str, read: str) -> str:
@@ -131,18 +115,15 @@ def union_nullable(models: list[str], path: str) -> bool:
     return False
 
 
-def generate(node: Node, force: bool, path: str, union: list[str] | None) -> Any:
-    """The ClickHouse type generated from a node: marker or dtype, Nullable inside a nullable struct."""
+def union_type(node: Node, path: str, union: list[str]) -> CHType:
+    """A member's type with the evidence union's nullability; the non-null type is that member's."""
     if node.kind == 'list':
         assert node.element is not None
-        return sd.CHType('Array', element=generate(node.element, False, f'{path}[]', union))
+        return CHType('Array', element=union_type(node.element, f'{path}[]', union))
     if node.kind == 'struct':
-        inner = force or node.nullable
-        fields = tuple((f.name, generate(f.node, inner, f'{path}/{f.name}', union)) for f in node.fields)
-        return sd.CHType('Tuple', fields=fields)
-    base = sd.parse_type(node.clickhouse) if node.clickhouse else replace(sd.model_type(node), nullable=False)
-    nullable = union_nullable(union, path) if union else node.nullable or force
-    return replace(base, nullable=nullable)
+        fields = tuple((f.name, union_type(f.node, f'{path}/{f.name}', union)) for f in node.fields)
+        return CHType('Tuple', fields=fields)
+    return replace(column_type(node), nullable=union_nullable(union, path))
 
 
 def after_type(dataset: str, path: str, no_output: set[str]) -> str:
@@ -151,7 +132,8 @@ def after_type(dataset: str, path: str, no_output: set[str]) -> str:
     if not having:
         return ''
     rep = next((m for m in having if m not in no_output), having[0])
-    return render(generate(nodes(rep)[path], forced(rep, path), path, ms if len(ms) > 1 else None))
+    node = nodes(rep)[path]
+    return render(union_type(node, path, ms) if len(ms) > 1 else column_type(node, forced(rep, path)))
 
 
 class Evidence:
@@ -208,8 +190,8 @@ def _marker_added(rows: list[dict[str, str]]) -> bool:
         node = nodes(r['model']).get(r['field'])
         if node is None or not node.clickhouse:
             return False
-        marker = replace(sd.parse_type(node.clickhouse), nullable=False)
-        if marker != replace(sd.parse_type(r['ddl_type']), nullable=False):
+        marker = replace(parse_type(node.clickhouse), nullable=False)
+        if marker != replace(parse_type(r['ddl_type']), nullable=False):
             return False
     return True
 
@@ -248,7 +230,7 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
             return 'model nullable'
         if dataset == 'evidence':
             return 'evidence union (piece 2)'
-        old, new = sd.parse_type(before).nullable, sd.parse_type(after).nullable
+        old, new = parse_type(before).nullable, parse_type(after).nullable
         if new and not old:
             return 'ClickHouse nullable'
         if old and not new:
