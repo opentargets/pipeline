@@ -508,15 +508,15 @@ def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
     assert pl.read_parquet(tmp_path / 'out').to_dicts() == EXPECTED
 
 
-def test_writes_its_model(tmp_path: Path) -> None:
-    """On a variant with one consequence and one ClinVar evidence, with real identifiers, the view passes its model."""
+def write_one_clinvar_variant(tmp_path: Path, aa: str) -> None:
+    """The view of a variant with one consequence (change `aa`) and one ClinVar evidence, at `tmp_path / 'out'`."""
     target, variant, disease = 'ENSG00000141510', '17_7674220_C_T', 'MONDO_0007903'
     frames = {name: frame.clear() for name, frame in world().items()}
     frames['variant'] = pl.DataFrame(
         {
             'variantId': [variant],
             'variantEffect': [[{'method': 'AlphaMissense', 'score': 0.98}]],
-            'transcriptConsequences': [[tc(target, 'R248Q', ['P04637'], ['SO_0001583'])]],
+            'transcriptConsequences': [[tc(target, aa, ['P04637'], ['SO_0001583'])]],
         },
         schema=frames['variant'].schema,
     )
@@ -535,8 +535,21 @@ def test_writes_its_model(tmp_path: Path) -> None:
 
     coding_variant(source, str(tmp_path / 'out'), None, None)
 
+
+def test_writes_its_model(tmp_path: Path) -> None:
+    """On a variant with one consequence and one ClinVar evidence, with real identifiers, the view passes its model."""
+    write_one_clinvar_variant(tmp_path, 'R248Q')
+
     assert OutputValidation.of(coding_variant, module).outputs == {None: CodingVariant}
     validate_dataset(CodingVariant, str(tmp_path / 'out'))
     written = pl.read_parquet(tmp_path / 'out')
     assert written.schema == OUTPUT_SCHEMA
     assert written['datasources'].to_list() == [[ds(1, 'eva', 'ClinVar')]]
+
+
+def test_a_change_without_a_position_breaks_the_model(tmp_path: Path) -> None:
+    write_one_clinvar_variant(tmp_path, 'AV')
+
+    assert pl.read_parquet(tmp_path / 'out')['aminoAcidPosition'].to_list() == [None]
+    with pytest.raises(ValueError, match='breaks its model CodingVariant'):
+        validate_dataset(CodingVariant, str(tmp_path / 'out'))

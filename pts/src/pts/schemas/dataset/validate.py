@@ -270,7 +270,7 @@ def _duplicate_keys(parts: list[str], key: list[str], repeated: pl.Series, model
 def main(argv: list[str]) -> int:
     """Validate every modelled dataset, output or view, found under a directory; exit 1 on any violation."""
     if not argv:
-        print('usage: python -m pts.schemas.dataset.validate <output_dir> [dataset ...]', file=sys.stderr)  # noqa: T201
+        print('usage: python -m pts.schemas.dataset.validate <output_or_view_dir> [dataset ...]', file=sys.stderr)  # noqa: T201
         return 2
     output_dir, names = Path(argv[0]), argv[1:]
     models = discover_models()

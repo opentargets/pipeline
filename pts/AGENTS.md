@@ -54,6 +54,10 @@ changes need a `pts_version` bump.
   fails on such a file: read it with its own dtypes, then `without_enums`. A partial
   rerun that mixes intermediates written before and after a column became an Enum
   fails on concat (different categories); rerun the whole chain.
+- `target_view` fails in `conform` on a `homology` written before opentargets/pipeline#411
+  (`isHighConfidence` a string, not a bool): on a pre-#411 run, rerun `homology` with
+  `target_view`. Never load views written before phase 5 piece 3 with a newer pos without
+  a live check first.
 - Input and intermediate schemas (`pl.Schema`, schema dicts, reused `pl.Struct` dtypes)
   go in `src/pts/schemas/`, one module per step (follow `drug_molecule.py`), not in
   the transformer.
