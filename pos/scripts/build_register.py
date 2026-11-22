@@ -13,7 +13,9 @@ changes (e9133802), so that rows since resolved by a model change keep their reg
 (`--previous`, default `docs/phase5_register_piece1.csv`, the register at 19920e46) are printed and listed in the
 note. `docs/phase5_landing_before.csv` holds the hand-written landing DDL columns at 19920e46 (`dataset, field,
 ddl_type`, written with `schema_drift.render`): it decides whether a DDL-only column was dropped in piece 1 and
-gives the `before` of the `ppp_only` rows. The builder reads no landing DDL.
+gives the `before` of the `ppp_only` rows. The builder reads no landing DDL. `docs/phase5_sql_edits.csv` lists the
+serving-script edits a generated type forced (`dataset, field, edit, table, served`): one `serving_sql` row each,
+`before` the landing type at 19920e46, `after` the type `table` serves (`tests/test_serving_sql.py` checks it).
 
 One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
 PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up `none`. `before` is the
@@ -69,6 +71,8 @@ SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
 
 with (DOCS / 'phase5_landing_before.csv').open(newline='') as _fh:
     LANDING = {(r['dataset'], r['field']): r['ddl_type'] for r in csv.DictReader(_fh)}
+with (DOCS / 'phase5_sql_edits.csv').open(newline='') as _fh:
+    SQL_EDITS = list(csv.DictReader(_fh))
 
 
 def changed(category: str, before: str, after: str) -> bool:
@@ -229,6 +233,18 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
     raise ValueError(f'unknown category {category!r}')
 
 
+def sql_edit(edit: dict[str, str], evidence: Evidence) -> dict[str, str]:
+    """The `serving_sql` row of one serving-script edit."""
+    dataset, path, after = edit['dataset'], edit['field'], edit['served']
+    before = LANDING[dataset, path]
+    read = sd._serving(CONFIG[dataset], SCRIPTS).read(path, landed=True)
+    models = sd._models_for(CONFIG[dataset], MODELS) or []
+    text = evidence.text(dataset, [{'model': m.dataset_name} for m in models], path)
+    values = (dataset, path, 'serving_sql', edit['edit'], before, after, text, read,
+              api_follow_up('serving_sql', before, after, read))  # fmt: skip
+    return dict(zip(COLUMNS, values, strict=True))
+
+
 def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for r in drift.iter_rows(named=True):
@@ -242,7 +258,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             cells = {'ddl_type': d, 'serving_read': serving.read(col, landed=bool(d))}
             groups[dataset, col, 'ppp_only'] = [m | cells for m in ms]
     no_output = evidence.no_output
-    out = []
+    out = [sql_edit(e, evidence) for e in SQL_EDITS]
     for (dataset, path, category), rows in groups.items():
         first = rows[0]
         read = first['serving_read']
@@ -302,6 +318,7 @@ lacks the column); empty where the generated Platform table lacks the column (a 
 column).
 - `serving read`: `named:<script>` names the column, `pass:<script>` reads it through `SELECT *`; for a \
 column not loaded today, the read it would get once loaded.
+- `serving_sql`: a serving-script edit a generated type forced; `after` is the type the serving table serves.
 - `API follow-up`: `open` when the ClickHouse type changes from `before` to `after` and a serving script reads \
 the column (column order excepted); else `none`.
 """

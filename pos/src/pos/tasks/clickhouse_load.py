@@ -5,6 +5,7 @@ from clickhouse_connect.driver.binding import quote_identifier
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from clickhouse_connect.driver.tools import insert_file
 from loguru import logger
+from ot_datamodels.base import DatasetModel
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
@@ -34,6 +35,21 @@ class ClickhouseLoadSpec(Spec):
     data_dir_parent: str
     dataset_config_path: str = 'config/datasets.yaml'
     product: str = 'platform'
+
+
+def union_inserts(table: str, loaded: list[type[DatasetModel]]) -> list[str]:
+    """An `INSERT ... SELECT` from each member table into the union table."""
+    inserts = []
+    for model in loaded:
+        cols = ', '.join(quote_identifier(name) for name, _ in columns(model))
+        source = quote_identifier(member_table(model))
+        inserts.append(f'INSERT INTO {quote_identifier(table)} ({cols}) SELECT {cols} FROM {source}')  # noqa: S608 quoted identifiers
+    return inserts
+
+
+def member_drops(loaded: list[type[DatasetModel]]) -> list[str]:
+    """A `DROP TABLE` for each member table."""
+    return [f'DROP TABLE {quote_identifier(member_table(model))}' for model in loaded]
 
 
 class ClickhouseLoad(Task):
@@ -117,12 +133,7 @@ class ClickhouseLoad(Task):
                     f'loading {model.dataset_name} into {table} failed on {self._file}: {e}; its table: {create}'
                 ) from e
         self._create(client, ddl[self._table_name])
-        inserts = []
-        for model in loaded:
-            cols = ', '.join(quote_identifier(name) for name, _ in columns(model))
-            source = quote_identifier(member_table(model))
-            target = quote_identifier(self._table_name)
-            inserts.append(f'INSERT INTO {target} ({cols}) SELECT {cols} FROM {source}')  # noqa: S608 quoted identifiers
+        inserts = union_inserts(self._table_name, loaded)
         try:
             self._run_all(client, inserts)
         except ClickHouseError as e:
@@ -130,8 +141,8 @@ class ClickhouseLoad(Task):
             client.command(f'TRUNCATE TABLE {quote_identifier(self._table_name)}')
             self._run_all(client, inserts)
         self._log_count(client, self._table_name)
-        for model in loaded:
-            client.command(f'DROP TABLE {quote_identifier(member_table(model))}')
+        for sql in member_drops(loaded):
+            client.command(sql)
 
     @staticmethod
     def _run_all(client, statements: list[str]) -> None:

@@ -175,6 +175,14 @@ destinations, for test runs that must not touch the public release:
 dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
 in the same PR.
 
+`tests/test_serving_sql.py` runs the `backend_clickhouse` DDL and serving SQL, in `requires:`
+order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
+`localhost:8123`; CI starts one and sets `POS_REQUIRE_CLICKHOUSE=1`; without a server it
+skips). Locally: `docker run -d --rm --name pos-test-clickhouse -p 8123:8123 -e
+CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7`. A serving-script edit a
+generated type forces goes in `docs/phase5_sql_edits.csv`, which `scripts/build_register.py`
+turns into a `serving_sql` register row.
+
 ## Schema drift and the change register (phase 5)
 
 `scripts/schema_drift.py` lists every disagreement between the dataset models and the hand-written ClickHouse

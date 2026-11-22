@@ -19,6 +19,7 @@ ROOT = Path(__file__).parents[1]
 CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
 SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
+SQL_EDITS = ROOT / 'docs' / 'phase5_sql_edits.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
 ORDER = {'struct_order', 'column_order'}
 #: Evidence columns only PPP models have.
@@ -109,6 +110,8 @@ def test_after_matches_the_generator(register):
     tables = {d: _platform(d) for d in {r['dataset'] for r in register}}
     for row in register:
         key = (row['dataset'], row['field'], row['category'])
+        if row['category'] == 'serving_sql':
+            continue
         cols = tables[row['dataset']]
         found = type_at(cols, row['field']) if cols is not None else None
         if row['category'] in {'ddl_only', 'ppp_only', 'no_model'}:
@@ -143,6 +146,17 @@ def test_superseded_rows_are_ppp_only_columns(register):
         assert (row['outcome'] == SUPERSEDED) == under, f'{key}: outcome {SUPERSEDED} iff under a PPP-only column'
         if under:
             assert row['after'] == '' and row['API follow-up'] == 'none', key
+
+
+def test_every_sql_edit_has_a_row(register):
+    """One `serving_sql` row per serving-script edit, `after` the served type."""
+    with SQL_EDITS.open(newline='') as fh:
+        edits = {(e['dataset'], e['field']): e for e in csv.DictReader(fh)}
+    rows = {(r['dataset'], r['field']): r for r in register if r['category'] == 'serving_sql'}
+    assert sorted(rows) == sorted(edits)
+    for key, edit in edits.items():
+        assert rows[key]['outcome'] == edit['edit'], key
+        assert rows[key]['after'] == edit['served'], key
 
 
 def test_every_clickhouse_marker_parses():

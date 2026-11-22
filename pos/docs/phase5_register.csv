@@ -298,8 +298,10 @@ literature_entity_lut,day,nullability,ClickHouse nullable,UInt8,Nullable(UInt8),
 literature_entity_lut,day,type,marker,UInt8,Nullable(UInt8),"nulls 1307891/190883430; min 1, max 31; 31 distinct",no,none
 literature_entity_lut,keywordType,kind,marker,FixedString(2),FixedString(2),nulls 0/190883430; distinct CD · DS · GP,no,none
 literature_entity_lut,month,nullability,ClickHouse nullable,UInt8,Nullable(UInt8),"nulls 1307891/190883430; min 1, max 12; 12 distinct",named:literature_entity_lut.sql,open
+literature_entity_lut,month,serving_sql,"serving SQL: ifNull(month, 0): a sort key cannot be Nullable; null served as 0, as before",UInt8,UInt8,"nulls 1307891/190883430; min 1, max 12; 12 distinct",named:literature_entity_lut.sql,none
 literature_entity_lut,month,type,marker,UInt8,Nullable(UInt8),"nulls 1307891/190883430; min 1, max 12; 12 distinct",named:literature_entity_lut.sql,open
 literature_entity_lut,year,nullability,ClickHouse nullable,UInt16,Nullable(UInt16),"nulls 1307891/190883430; min 1781, max 2124",named:literature_entity_lut.sql,open
+literature_entity_lut,year,serving_sql,"serving SQL: ifNull(year, 0): a sort key cannot be Nullable; null served as 0, as before",UInt16,UInt16,"nulls 1307891/190883430; min 1781, max 2124",named:literature_entity_lut.sql,none
 literature_entity_lut,year,type,marker,UInt16,Nullable(UInt16),"nulls 1307891/190883430; min 1781, max 2124",named:literature_entity_lut.sql,open
 mechanism_of_action,,column_order,model order (piece 2),"chemblIds, targets, mechanismOfAction, actionType, targetType, targetName, curation, references","mechanismOfAction, actionType, chemblIds, references, targetName, targetType, targets, curation",,no,none
 mechanism_of_action,actionType,nullability,ClickHouse non-null,Nullable(String),String,nulls 0/8526; 30 distinct,named:mechanism_of_action.sql,open
