@@ -12,7 +12,16 @@ from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec
 
 from pos import clickhouse_ddl
-from pos.clickhouse_ddl import column_type, columns, create_table, members, parse_table, render, union_columns
+from pos.clickhouse_ddl import (
+    column_type,
+    columns,
+    create_table,
+    members,
+    parse_table,
+    parse_type,
+    render,
+    union_columns,
+)
 
 ROOT = Path(__file__).parents[1]
 
@@ -66,8 +75,8 @@ def _rendered(name: str) -> str:
         ('tags', 'Array(String)'),
         ('maybe_tags', 'Array(Nullable(String))'),
         ('nested', 'Array(Array(Int64))'),
-        ('struct', 'Tuple(a String, b Int64)'),
-        ('nullable_struct', 'Tuple(a Nullable(String), b Nullable(Int64))'),
+        ('struct', 'Tuple(`a` String, `b` Int64)'),
+        ('nullable_struct', 'Tuple(`a` Nullable(String), `b` Nullable(Int64))'),
     ],
 )
 def test_column_type(name, expected):
@@ -79,7 +88,7 @@ def test_low_cardinality_nullable_order():
 
 
 def test_list_of_nullable_structs():
-    assert _rendered('bars') == 'Array(Tuple(a Nullable(String)))'
+    assert _rendered('bars') == 'Array(Tuple(`a` Nullable(String)))'
 
 
 def test_columns_in_model_order():
@@ -131,7 +140,7 @@ def test_union_absent_struct_and_list():
     assert list(union) == ['id', 's', 'l', 'only_a', 'only_b']
     assert union == {
         'id': 'String',
-        's': 'Tuple(a Nullable(String))',
+        's': 'Tuple(`a` Nullable(String))',
         'l': 'Array(String)',
         'only_a': 'Nullable(Int64)',
         'only_b': 'Nullable(Float64)',
@@ -139,10 +148,69 @@ def test_union_absent_struct_and_list():
 
 
 def test_union_type_clash_raises():
-    with pytest.raises(ValueError, match='x') as info:
+    with pytest.raises(ValueError, match=r'^column x:') as info:
         union_columns([ClashA, ClashB])
     assert 'clash_a' in str(info.value)
     assert 'clash_b' in str(info.value)
+
+
+class NullableBar(DatasetModel):
+    dataset_name = 'nullable_bar'
+    dataset_title = 'N'
+    dataset_description = 'N.'
+    example = {}
+
+    s: Bar | None
+
+
+class PlainBar(DatasetModel):
+    dataset_name = 'plain_bar'
+    dataset_title = 'P'
+    dataset_description = 'P.'
+    example = {}
+
+    s: Bar
+
+
+def test_union_nested_field_nullability():
+    union = union_columns([PlainBar, NullableBar])
+    assert [(n, render(t)) for n, t in union] == [('s', 'Tuple(`a` Nullable(String))')]
+
+
+class Quoted(DatasetModel):
+    dataset_name = 'quoted'
+    dataset_title = 'Q'
+    dataset_description = 'Q.'
+    example = {}
+
+    label: Annotated[Literal["it's", 'back\\slash'], PolarsDtype(pl.Enum)]
+
+
+def test_enum_labels_round_trip():
+    t = columns(Quoted)[0][1]
+    assert render(t) == r"Enum8('it\'s' = 1, 'back\\slash' = 2)"
+    assert parse_type(render(t)) == t
+
+
+BigLiteral = Literal[tuple(f'v{i}' for i in range(128))]  # ty: ignore[invalid-type-form]
+
+
+class BigEnum(StructModel):
+    a: Annotated[BigLiteral, PolarsDtype(pl.Enum)]
+
+
+class BigEnumDataset(DatasetModel):
+    dataset_name = 'big_enum'
+    dataset_title = 'B'
+    dataset_description = 'B.'
+    example = {}
+
+    s: BigEnum
+
+
+def test_enum_too_large_names_the_path():
+    with pytest.raises(ValueError, match=r'^s/a: 128 Enum categories'):
+        columns(BigEnumDataset)
 
 
 class PppOnly(DatasetModel):
@@ -177,6 +245,6 @@ def test_every_entry_round_trips():
         if name == 'evidence' or model is None:
             continue
         cols = columns(model)
-        assert parse_table(create_table(entry['table'], cols)) == dict(cols), name
+        assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20

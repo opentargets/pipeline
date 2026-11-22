@@ -133,7 +133,8 @@ def after_type(dataset: str, path: str, no_output: set[str]) -> str:
         return ''
     rep = next((m for m in having if m not in no_output), having[0])
     node = nodes(rep)[path]
-    return render(union_type(node, path, ms) if len(ms) > 1 else column_type(node, forced(rep, path)))
+    t = union_type(node, path, ms) if len(ms) > 1 else column_type(node, forced(rep, path))
+    return render(t, quote_fields=False)
 
 
 class Evidence:

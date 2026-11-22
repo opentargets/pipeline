@@ -20,6 +20,7 @@ from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec
 
+from pos import clickhouse_ddl as ddl
 from pos.clickhouse_ddl import _ENUMS, CHType, model_type, parse_table, parse_type
 
 CATEGORIES = (
@@ -55,20 +56,8 @@ _FLOATS = frozenset({'Float32', 'Float64'})
 
 
 def render(t: CHType) -> str:
-    """The type as the drift CSVs spell it, normalised: `Nullable` outermost."""
-    if t.name == 'Array' and t.element is not None:
-        text = f'Array({render(t.element)})'
-    elif t.name == 'Tuple':
-        text = f'Tuple({", ".join(f"{n} {render(f)}" for n, f in t.fields)})'
-    elif t.args:
-        text = f'{t.name}({", ".join(t.args)})'
-    else:
-        text = t.name
-    if t.low_cardinality:
-        text = f'LowCardinality({text})'
-    if t.nullable:
-        text = f'Nullable({text})'
-    return text
+    """The type as the drift CSVs spell it: `Nullable` outermost, Tuple field names bare."""
+    return ddl.render(t, nullable_outermost=True, quote_fields=False)
 
 
 # models

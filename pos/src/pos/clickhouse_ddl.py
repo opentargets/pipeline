@@ -135,21 +135,30 @@ def parse_table(sql: str) -> dict[str, CHType]:
     return dict(cols)
 
 
-def render(t: CHType) -> str:
-    """The type as ClickHouse accepts it: `LowCardinality(Nullable(...))`, never the reverse."""
+def render(t: CHType, *, nullable_outermost: bool = False, quote_fields: bool = True) -> str:
+    """The type as ClickHouse accepts it: `LowCardinality(Nullable(...))`, Tuple field names backtick-quoted.
+
+    `nullable_outermost` gives `Nullable(LowCardinality(...))` instead; `quote_fields=False` leaves field names bare.
+    """
+    sub = lambda u: render(u, nullable_outermost=nullable_outermost, quote_fields=quote_fields)
     if t.name == 'Array' and t.element is not None:
-        text = f'Array({render(t.element)})'
+        text = f'Array({sub(t.element)})'
     elif t.name == 'Tuple':
-        text = f'Tuple({", ".join(f"{n} {render(f)}" for n, f in t.fields)})'
+        text = f'Tuple({", ".join(f"{_name(n) if quote_fields else n} {sub(f)}" for n, f in t.fields)})'
     elif t.args:
         text = f'{t.name}({", ".join(t.args)})'
     else:
         text = t.name
-    if t.nullable:
-        text = f'Nullable({text})'
-    if t.low_cardinality:
-        text = f'LowCardinality({text})'
+    wrappers = {'Nullable': t.nullable, 'LowCardinality': t.low_cardinality}
+    order = ('LowCardinality', 'Nullable') if nullable_outermost else ('Nullable', 'LowCardinality')
+    for wrapper in order:
+        if wrappers[wrapper]:
+            text = f'{wrapper}({text})'
     return text
+
+
+def _name(name: str) -> str:
+    return f'`{name}`'
 
 
 # models
@@ -173,7 +182,7 @@ def _quote(label: str) -> str:
     return "'" + label.replace('\\', '\\\\').replace("'", "\\'") + "'"
 
 
-def _primitive(node: Node) -> CHType:
+def _primitive(node: Node, path: str) -> CHType:
     """The non-null type of a primitive: its marker, else its dtype."""
     if node.clickhouse:
         return replace(parse_type(node.clickhouse), nullable=False)
@@ -181,26 +190,30 @@ def _primitive(node: Node) -> CHType:
     if isinstance(dtype, pl.Enum):
         categories = dtype.categories.to_list()
         if len(categories) > _ENUM8_MAX:
-            raise ValueError(f'{len(categories)} Enum categories do not fit Enum8')
+            raise ValueError(f'{path or "value"}: {len(categories)} Enum categories do not fit Enum8')
         return CHType('Enum8', args=tuple(f'{_quote(c)} = {i}' for i, c in enumerate(categories, 1)))
     name = type(dtype).__name__
     return CHType(_POLARS_NAMES.get(name, name))
 
 
-def column_type(node: Node, in_nullable_struct: bool = False) -> CHType:
-    """The landing type of a node; every field of a nullable struct is Nullable, down to the next Array."""
+def _type(node: Node, force: bool, path: str) -> CHType:
     if node.kind == 'list':
         assert node.element is not None
-        return CHType('Array', element=column_type(node.element))
+        return CHType('Array', element=_type(node.element, False, f'{path}[]'))
     if node.kind == 'struct':
-        inner = in_nullable_struct or node.nullable
-        return CHType('Tuple', fields=tuple((f.name, column_type(f.node, inner)) for f in node.fields))
-    return replace(_primitive(node), nullable=node.nullable or in_nullable_struct)
+        inner = force or node.nullable
+        return CHType('Tuple', fields=tuple((f.name, _type(f.node, inner, f'{path}/{f.name}')) for f in node.fields))
+    return replace(_primitive(node, path), nullable=node.nullable or force)
+
+
+def column_type(node: Node, in_nullable_struct: bool = False) -> CHType:
+    """The landing type of a node; every field of a nullable struct is Nullable, down to the next Array."""
+    return _type(node, in_nullable_struct, '')
 
 
 def columns(model: type[DatasetModel]) -> list[tuple[str, CHType]]:
     """The model's top-level columns and their landing types, in model order."""
-    return [(f.name, column_type(f.node)) for f in dataset_spec(model).fields]
+    return [(f.name, _type(f.node, False, f.name)) for f in dataset_spec(model).fields]
 
 
 def _non_null(t: CHType) -> CHType:
@@ -247,8 +260,8 @@ def union_columns(models: Sequence[type[DatasetModel]]) -> list[tuple[str, CHTyp
 
 def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log') -> str:
     """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted."""
-    body = ', '.join(f'`{name}` {render(t)}' for name, t in cols)
-    return f'CREATE TABLE IF NOT EXISTS `{table}` ({body}) ENGINE = {engine}'
+    body = ', '.join(f'{_name(name)} {render(t)}' for name, t in cols)
+    return f'CREATE TABLE IF NOT EXISTS {_name(table)} ({body}) ENGINE = {engine}'
 
 
 def members(pattern: str, product: str) -> list[type[DatasetModel]]:
