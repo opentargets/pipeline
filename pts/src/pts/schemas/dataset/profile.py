@@ -13,6 +13,7 @@ Datasets are read one at a time, lazily, so memory stays bounded whatever the da
     uv run python -m pts.schemas.dataset.profile gs://<bucket>/<run> <out_dir>
 """
 
+import io
 import json
 import re
 import sys
@@ -178,8 +179,13 @@ def _row(dataset: str, check: str, examples: list[str] | None = None) -> pl.Data
 
 
 def _write(frame: pl.DataFrame, path: str) -> None:
-    with StorageHandle(path).open('wb') as handle:
-        frame.write_parquet(handle)
+    """Write `frame` as one upload: polars flushes a writer mid-file, which a GCS upload rejects."""
+    buffer = io.BytesIO()
+    frame.write_parquet(buffer)
+    try:
+        StorageHandle(path).write(buffer.getvalue())
+    except Exception as error:
+        raise RuntimeError(f'could not write {path}: {error}') from error
 
 
 def profile_run(run_uri: str, out_dir: str) -> None:

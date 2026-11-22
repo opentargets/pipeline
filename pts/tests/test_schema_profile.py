@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Annotated, ClassVar
 
 import polars as pl
+import pytest
 from ot_datamodels import DatasetModel, PrimaryKey
 from ot_datamodels.base import StructModel
 
+from pts.schemas.dataset.profile import _write as upload
 from pts.schemas.dataset.profile import field_profile, profile_run
 
 
@@ -180,3 +182,46 @@ def test_profile_run_survives_a_failing_dataset(tmp_path: Path, monkeypatch) -> 
     assert pl.read_parquet(out / 'profile.parquet')['dataset'].to_list() == ['evidence_b']
     assert pl.read_parquet(out / 'profile' / 'evidence_b.parquet')['rows'].to_list() == [1]
     assert pl.read_parquet(out / 'validation' / 'evidence_a.parquet')['check'].to_list() == ['error']
+
+
+def test_write_uploads_in_one_call_without_flushing(tmp_path: Path, monkeypatch) -> None:
+    """A GCS writer rejects `flush` before `close`, which polars calls when given a file handle."""
+    written: dict[str, bytes] = {}
+
+    class _Writer:
+        def write(self, data: bytes) -> int:
+            raise AssertionError('streamed write')
+
+        def flush(self) -> None:
+            raise AssertionError('flushed before close')
+
+    class _Handle:
+        def __init__(self, path: str) -> None:
+            self.path = path
+
+        def open(self, mode: str = 'r') -> _Writer:
+            return _Writer()
+
+        def write(self, data: bytes) -> None:
+            written[self.path] = data
+
+    monkeypatch.setattr('pts.schemas.dataset.profile.StorageHandle', _Handle)
+    frame = pl.DataFrame({'a': [1, 2]})
+
+    upload(frame, 'gs://bucket/x.parquet')
+
+    assert pl.read_parquet(written['gs://bucket/x.parquet']).equals(frame)
+
+
+def test_write_failure_names_the_path(monkeypatch) -> None:
+    class _Handle:
+        def __init__(self, path: str) -> None:
+            pass
+
+        def write(self, data: bytes) -> None:
+            raise OSError('denied')
+
+    monkeypatch.setattr('pts.schemas.dataset.profile.StorageHandle', _Handle)
+
+    with pytest.raises(RuntimeError, match=r'could not write gs://bucket/x.parquet: denied'):
+        upload(pl.DataFrame({'a': [1]}), 'gs://bucket/x.parquet')
