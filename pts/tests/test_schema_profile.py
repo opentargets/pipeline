@@ -7,9 +7,10 @@ import polars as pl
 import pytest
 from ot_datamodels import DatasetModel, PrimaryKey
 from ot_datamodels.base import StructModel
+from ot_datamodels.discovery import discover_datasets, discover_models
 
 from pts.schemas.dataset.profile import _write as upload
-from pts.schemas.dataset.profile import field_profile, profile_run
+from pts.schemas.dataset.profile import field_profile, profile_run, run_folder
 
 
 class _Item(StructModel):
@@ -39,6 +40,10 @@ class _EvidenceA(DatasetModel):
 
 class _EvidenceB(_EvidenceA):
     dataset_name: ClassVar[str] = 'evidence_b'
+
+
+class _ViewC(_EvidenceA):
+    dataset_name: ClassVar[str] = 'view_c'
 
 
 def _write(path: Path, frame: pl.DataFrame, parts: int = 1) -> str:
@@ -106,7 +111,7 @@ def test_profile_run_maps_each_model_to_its_folder(tmp_path: Path, monkeypatch) 
     _write(run / 'output' / 'evidence_a', pl.DataFrame({'id': ['a1', 'a2']}))
     _write(run / 'output' / 'evidence_b', pl.DataFrame({'id': ['b1']}))
     monkeypatch.setattr(
-        'pts.schemas.dataset.profile.discover_datasets',
+        'pts.schemas.dataset.profile.discover_models',
         lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
     )
 
@@ -122,7 +127,7 @@ def test_profile_run_reports_missing_outputs(tmp_path: Path, monkeypatch) -> Non
     (run / 'output' / 'evidence_b').mkdir(parents=True)
     _write(run / 'output' / 'other', pl.DataFrame({'id': ['x']}))
     monkeypatch.setattr(
-        'pts.schemas.dataset.profile.discover_datasets',
+        'pts.schemas.dataset.profile.discover_models',
         lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
     )
 
@@ -135,6 +140,35 @@ def test_profile_run_reports_missing_outputs(tmp_path: Path, monkeypatch) -> Non
     ]
     assert validation['failures'].to_list() == [0, 0]
     assert pl.read_parquet(tmp_path / 'out' / 'profile.parquet').is_empty()
+
+
+def test_profile_run_reads_views_from_the_view_folder(tmp_path: Path, monkeypatch) -> None:
+    run = tmp_path / 'run'
+    _write(run / 'output' / 'evidence_a', pl.DataFrame({'id': ['a1', 'a2']}))
+    _write(run / 'view' / 'evidence_b', pl.DataFrame({'id': ['b1']}))
+    _write(run / 'output' / 'view_c', pl.DataFrame({'id': ['c1']}))  # a view's name under output is not read
+    monkeypatch.setattr(_EvidenceB, '__module__', 'ot_datamodels.views.evidence_b')
+    monkeypatch.setattr(_ViewC, '__module__', 'ot_datamodels.views.view_c')
+    monkeypatch.setattr(
+        'pts.schemas.dataset.profile.discover_models',
+        lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB, 'view_c': _ViewC},
+    )
+
+    profile_run(str(run), str(tmp_path / 'out'))
+
+    profile = pl.read_parquet(tmp_path / 'out' / 'profile.parquet')
+    assert dict(zip(profile['dataset'], profile['rows'], strict=True)) == {'evidence_a': 2, 'evidence_b': 1}
+    validation = pl.read_parquet(tmp_path / 'out' / 'validation.parquet')
+    assert validation.select('dataset', 'check').rows() == [('view_c', 'missing')]
+
+
+def test_run_folder_of_the_discovered_models() -> None:
+    models = discover_models()
+    views = {name for name, model in models.items() if run_folder(model) == 'view'}
+    assert views == set(models) - set(discover_datasets())
+    assert views == {'association_otf', 'association_timeseries', 'coding_variant', 'target_view'}
+    assert run_folder(models['target_view']) == 'view'
+    assert run_folder(models['target']) == 'output'
 
 
 def test_field_profile_marks_absent_columns(tmp_path: Path) -> None:
@@ -162,7 +196,7 @@ def test_profile_run_survives_a_failing_dataset(tmp_path: Path, monkeypatch) -> 
     _write(run / 'output' / 'evidence_a', pl.DataFrame({'id': ['a1', 'a2']}))
     _write(run / 'output' / 'evidence_b', pl.DataFrame({'id': ['b1']}))
     monkeypatch.setattr(
-        'pts.schemas.dataset.profile.discover_datasets',
+        'pts.schemas.dataset.profile.discover_models',
         lambda: {'evidence_a': _EvidenceA, 'evidence_b': _EvidenceB},
     )
     real = field_profile

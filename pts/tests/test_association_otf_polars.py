@@ -6,8 +6,12 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.association_otf import AssociationOtf
 
-from pts.schemas.association import association_otf_schema
+from pts.schemas.dataset.validate import validate_dataset
+from pts.task_outputs import OutputValidation
+from pts.transformers import association_otf as module
 from pts.transformers.association_otf import association_otf
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 
@@ -21,29 +25,39 @@ def _write(path: Path, frame: pl.DataFrame) -> str:
     return str(path)
 
 
+E1, E2, E3, E4 = (f'{i:040x}' for i in range(1, 5))
+T1, T2 = 'ENSG00000000001', 'ENSG00000000002'
+
+
 @pytest.fixture
 def source(tmp_path: Path) -> dict[str, str]:
     evidence_a = pl.DataFrame(
-        [('e1', 'EFO_1', 'ENSG1', 'ds1', 'dt1', 0.5, 'x'), ('e2', 'EFO_2', 'ENSG2', 'ds1', 'dt1', 0.7, 'x')],
+        [
+            (E1, 'EFO_1', T1, 'eva', 'genetic_association', 0.5, 'x'),
+            (E2, 'EFO_2', T2, 'eva', 'genetic_association', 0.7, 'x'),
+        ],
         schema=EVIDENCE,
         orient='row',
     )
     evidence_b = pl.DataFrame(
-        [('e3', 'EFO_1', 'ENSG2', 'ds2', 'dt2', 0.1, 'x'), ('e4', 'EFO_9', 'ENSG1', 'ds2', 'dt2', 0.9, 'x')],
+        [
+            (E3, 'EFO_1', T2, 'europepmc', 'literature', 0.1, 'x'),
+            (E4, 'EFO_9', T1, 'europepmc', 'literature', 0.9, 'x'),
+        ],
         schema=EVIDENCE,
         orient='row',
     )
     disease = pl.DataFrame({'id': ['EFO_1', 'EFO_2'], 'name': ['name', 'other']})
     target = pl.DataFrame({
-        'id': ['ENSG1', 'ENSG2'],
+        'id': [T1, T2],
         'approvedName': ['approvedName', None],
         'approvedSymbol': ['SYMBOL', 'S2'],
     })
-    novelty = pl.DataFrame({'targetId': ['ENSG1'], 'diseaseId': ['EFO_1'], 'currentNovelty': [1.5]})
+    novelty = pl.DataFrame({'targetId': [T1], 'diseaseId': ['EFO_1'], 'currentNovelty': [0.15]})
     novelty_indirect = pl.DataFrame({
-        'targetId': ['ENSG1', 'ENSG2'],
+        'targetId': [T1, T2],
         'diseaseId': ['EFO_1', 'EFO_1'],
-        'currentNovelty': [2.5, 3.5],
+        'currentNovelty': [0.25, 0.35],
     })
     _write(tmp_path / 'evidence_a', evidence_a)
     _write(tmp_path / 'evidence_b', evidence_b)
@@ -63,7 +77,24 @@ def _run(source: dict[str, str], tmp_path: Path) -> pl.DataFrame:
 
 
 def test_schema_and_order(source: dict[str, str], tmp_path: Path) -> None:
-    assert _run(source, tmp_path).schema == association_otf_schema()
+    assert _run(source, tmp_path).schema == to_polars_schema(AssociationOtf)
+
+
+def test_writes_its_model(source: dict[str, str], tmp_path: Path) -> None:
+    assert OutputValidation.of(association_otf, module).outputs == {None: AssociationOtf}
+    association_otf(source, str(tmp_path / 'out'), None, None)
+    validate_dataset(AssociationOtf, str(tmp_path / 'out'))
+
+
+def test_evidence_as_pts_writes_it_gives_the_same_view(source: dict[str, str], tmp_path: Path) -> None:
+    """Evidence stores its datasource and datatype as the shared Enums; the view keeps them."""
+    strings = _run(source, tmp_path / 'strings')
+    schema = to_polars_schema(AssociationOtf)
+    for path in tmp_path.glob('evidence_*/part-0.parquet'):
+        frame = pl.read_parquet(path)
+        frame.cast({'datasourceId': schema['datasourceId'], 'datatypeId': schema['datatypeId']}).write_parquet(path)
+
+    assert _run(source, tmp_path / 'typed').equals(strings)
 
 
 def test_row_count_equals_evidence(source: dict[str, str], tmp_path: Path) -> None:
@@ -71,31 +102,31 @@ def test_row_count_equals_evidence(source: dict[str, str], tmp_path: Path) -> No
 
 
 def test_labels(source: dict[str, str], tmp_path: Path) -> None:
-    row = _run(source, tmp_path).filter(pl.col('rowId') == 'e1').row(0, named=True)
+    row = _run(source, tmp_path).filter(pl.col('rowId') == E1).row(0, named=True)
     assert row['diseaseData'] == 'EFO_1 name'
-    assert row['targetData'] == 'ENSG1 approvedName SYMBOL'
-    assert row['noveltyDirect'] == 1.5
-    assert row['noveltyIndirect'] == 2.5
+    assert row['targetData'] == f'{T1} approvedName SYMBOL'
+    assert row['noveltyDirect'] == 0.15
+    assert row['noveltyIndirect'] == 0.25
 
 
 def test_null_approved_name_gives_null_target_data(source: dict[str, str], tmp_path: Path) -> None:
-    row = _run(source, tmp_path).filter(pl.col('rowId') == 'e2').row(0, named=True)
+    row = _run(source, tmp_path).filter(pl.col('rowId') == E2).row(0, named=True)
     assert row['targetData'] is None
     assert row['diseaseData'] == 'EFO_2 other'
 
 
 def test_unmatched_gets_nulls(source: dict[str, str], tmp_path: Path) -> None:
     result = _run(source, tmp_path)
-    e3 = result.filter(pl.col('rowId') == 'e3').row(0, named=True)
+    e3 = result.filter(pl.col('rowId') == E3).row(0, named=True)
     assert e3['noveltyDirect'] is None
-    assert e3['noveltyIndirect'] == 3.5
-    e4 = result.filter(pl.col('rowId') == 'e4').row(0, named=True)
+    assert e3['noveltyIndirect'] == 0.35
+    e4 = result.filter(pl.col('rowId') == E4).row(0, named=True)
     assert e4['diseaseData'] is None
     assert e4['noveltyIndirect'] is None
 
 
 def test_sorted_by_row_id(source: dict[str, str], tmp_path: Path) -> None:
-    assert _run(source, tmp_path)['rowId'].to_list() == ['e1', 'e2', 'e3', 'e4']
+    assert _run(source, tmp_path)['rowId'].to_list() == [E1, E2, E3, E4]
 
 
 def test_refuses_existing_destination(source: dict[str, str], tmp_path: Path) -> None:
@@ -111,8 +142,8 @@ def test_rerun_is_byte_identical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         'id': [f'e{i:07d}' for i in range(rows)],
         'diseaseId': [f'EFO_{i % 500}' for i in range(rows)],
         'targetId': [f'ENSG{i % 700}' for i in range(rows)],
-        'datasourceId': ['ds'] * rows,
-        'datatypeId': ['dt'] * rows,
+        'datasourceId': ['eva'] * rows,
+        'datatypeId': ['genetic_association'] * rows,
         'score': [i / rows for i in range(rows)],
     })
     disease = pl.DataFrame({'id': [f'EFO_{i}' for i in range(500)], 'name': [f'name {i}' for i in range(500)]})

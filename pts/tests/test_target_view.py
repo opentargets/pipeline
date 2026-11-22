@@ -1,23 +1,30 @@
 """Tests for the target view transformer."""
 
 import json
-import re
 from pathlib import Path
 
 import polars as pl
 import pytest
 from ot_datamodels import DatasetModel
+from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.target_view import TargetView
 
-from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.conform import conform, without_enums
+from pts.schemas.dataset.validate import validate_dataset
 from pts.schemas.target import TARGET
-from pts.schemas.target_view import TARGET_VIEW, VIEW_COLUMNS
+from pts.task_outputs import OutputValidation
+from pts.transformers import target_view as module
 from pts.transformers.target_view import target_view
 from tests.target_view_spark_rows import EMPTY_TRANSCRIPT, NULLED_BY_EMPTY, OUTPUT
+
+TARGET_VIEW = to_polars_schema(TargetView)
+VIEW_COLUMNS = [name for name in TARGET_VIEW if name not in TARGET]
 
 EXON = pl.Struct({'exonId': pl.String, 'chromosome': pl.String, 'start': pl.Int64, 'end': pl.Int64, 'strand': pl.Int32})
 FLAG = pl.Struct({'label': pl.String, 'value': pl.String})
@@ -40,7 +47,7 @@ INPUT_SCHEMAS: dict[str, pl.Schema] = {
         'speciesName': pl.String,
         'homologyType': pl.String,
         'targetGeneId': pl.String,
-        'isHighConfidence': pl.String,
+        'isHighConfidence': pl.Boolean,
         'targetGeneSymbol': pl.String,
         'queryPercentageIdentity': pl.Float64,
         'targetPercentageIdentity': pl.Float64,
@@ -110,7 +117,7 @@ def _homologue(target_id: str | None, gene: str, priority: int | None, species: 
         'speciesName': f'species {species}',
         'homologyType': 'ortholog_one2one',
         'targetGeneId': gene,
-        'isHighConfidence': '1',
+        'isHighConfidence': True,
         'targetGeneSymbol': gene.lower(),
         'queryPercentageIdentity': 90.5,
         'targetPercentageIdentity': 88.25,
@@ -278,9 +285,7 @@ MODELS: dict[str, type[DatasetModel]] = {
 
 
 def _as_written(name: str, frame: pl.DataFrame) -> pl.DataFrame:
-    """The input as pts writes it: its model's Enums, and homology's `isHighConfidence` a bool."""
-    if name == 'homology':
-        frame = frame.with_columns(pl.col('isHighConfidence').cast(pl.Int8).cast(pl.Boolean))
+    """The input as pts writes it: its model's Enums."""
     return conform(frame, MODELS[name])
 
 
@@ -385,19 +390,41 @@ def test_schema_is_published(tmp_path: Path):
     assert _run(tmp_path).schema == TARGET_VIEW
 
 
-def test_inputs_as_pts_writes_them_keep_the_published_types(tmp_path: Path):
-    """The inputs' Enums and homology's bool reach the view as `TARGET_VIEW`'s strings."""
+def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path):
+    """The inputs' Enums reach the view as `TargetView`'s, and homology's bool as a bool."""
     written = {name: _as_written(name, pl.DataFrame(ROWS.get(name, []), schema=INPUT_SCHEMAS[name])) for name in MODELS}
     assert isinstance(written['transcript'].schema['chromosome'], pl.Enum)
     assert isinstance(written['homology'].schema['homologyType'], pl.Enum)
-    assert written['homology'].schema['isHighConfidence'] == pl.Boolean
 
     result = _run(tmp_path, typed=True)
 
     assert result.schema == TARGET_VIEW
     homologues = result['homologues'].explode().struct.field('isHighConfidence')
-    assert homologues.drop_nulls().unique().to_list() == ['1']
+    assert homologues.drop_nulls().unique().to_list() == [True]
     assert _view_rows(result) == OUTPUT
+
+
+def test_writes_its_model(tmp_path: Path):
+    """On one row of each input, its model's example for the same target, the view passes its model."""
+    target_id = Target.example['id']
+    examples: dict[str, type[DatasetModel]] = {**MODELS, 'chemical_probes': ChemicalProbe}
+    source = {}
+    for name, model in examples.items():
+        row = model.example if model is Target else model.example | {'targetId': target_id}
+        (tmp_path / name).mkdir()
+        pl.DataFrame([row], schema=to_polars_schema(model)).write_parquet(tmp_path / name / 'part-0.parquet')
+        source[name] = str(tmp_path / name)
+    destination = str(tmp_path / 'out')
+
+    target_view(source, destination, {}, None)
+
+    assert OutputValidation.of(target_view, module).outputs == {None: TargetView}
+    validate_dataset(TargetView, destination)
+    written = pl.read_parquet(destination)
+    assert written.schema == TARGET_VIEW
+    assert written['homologues'].explode().struct.field('isHighConfidence').to_list() == [
+        Homology.example['isHighConfidence']
+    ]
 
 
 def test_rows_in_target_order(tmp_path: Path):
@@ -417,50 +444,11 @@ def test_homologues_by_priority_then_content(tmp_path: Path):
 
 
 def test_lists_sorted(tmp_path: Path):
-    result = _run(tmp_path)
+    """By their values as strings, as the view sorts them before its Enums are cast."""
+    result = without_enums(_run(tmp_path))
     for column in ['tractability', 'safetyLiabilities', 'chemicalProbes', 'transcriptIds', 'transcripts']:
         assert result[column].to_list() == result[column].list.sort().to_list(), column
 
 
 def test_alternative_genes_null(tmp_path: Path):
     assert _run(tmp_path)['alternativeGenes'].null_count() == len(ROWS['target']) + 1
-
-
-#: ClickHouse's hand-written `targets` table, loaded from the view.
-TARGETS_SQL = Path(__file__).resolve().parents[2] / 'pos' / 'config' / 'clickhouse' / 'schema' / 'targets.sql'
-
-#: The view fields whose inputs are Enums or a bool in their models.
-FROM_ENUMS = [
-    'chromosome',
-    'aspect',
-    'evidence',
-    'constraintType',
-    'homologyType',
-    'isHighConfidence',
-    'modality',
-    'type',
-]
-
-
-@pytest.mark.parametrize('field', FROM_ENUMS)
-def test_targets_sql_loads_as_a_string_every_field_the_view_writes_as_one(field: str):
-    """`targets.sql` is hand-written: every declaration of the field there is a String, as `TARGET_VIEW` has it."""
-    declared = re.findall(rf'`{field}`\s+([A-Za-z]+(?:\s*\([^()]*\))?)', TARGETS_SQL.read_text())
-    assert declared, f'targets.sql declares no `{field}`'
-    assert all(re.fullmatch(r'(?:Nullable|LowCardinality)?\s*\(?\s*String\s*\)?', d) for d in declared), declared
-    assert all(dtype == pl.String for dtype in _dtypes(TARGET_VIEW, field)), field
-
-
-def _dtypes(schema: pl.Schema | pl.Struct, field: str) -> list:
-    """The dtype of every field named `field`, at any depth."""
-    fields = schema.fields if isinstance(schema, pl.Struct) else [pl.Field(n, d) for n, d in schema.items()]
-    found = []
-    for f in fields:
-        dtype = f.dtype.inner if isinstance(f.dtype, pl.List) else f.dtype
-        while isinstance(dtype, pl.List):
-            dtype = dtype.inner
-        if f.name == field:
-            found.append(dtype)
-        if isinstance(dtype, pl.Struct):
-            found += _dtypes(dtype, field)
-    return found

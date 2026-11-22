@@ -4,9 +4,6 @@ The target dataset with its homologues, tractability, safety liabilities, chemic
 transcripts nested back in, in the shape target had before they were split out of it. A
 compatibility view for consumers of that shape (Platform, API, croissant), not an input to other
 steps. `tep` is not reproduced and `alternativeGenes` is always null.
-
-The view keeps the types of ClickHouse's hand-written `targets` table: its inputs' Enums are read as
-strings, and a homologue's `isHighConfidence` as `'1'`/`'0'`.
 """
 
 from __future__ import annotations
@@ -15,13 +12,17 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.target_view import TargetView
 from otter.config.model import Config
 
-from pts.schemas.dataset.conform import without_enums
-from pts.schemas.target_view import VIEW_COLUMNS
+from pts.schemas.dataset.conform import conform, without_enums
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SOURCES = ['target', 'homology', 'target_tractability', 'target_safety_event', 'chemical_probes', 'transcript']
+
+VIEW_SCHEMA = to_polars_schema(TargetView)
 
 
 def homologues(homology: pl.DataFrame) -> pl.DataFrame:
@@ -38,7 +39,7 @@ def homologues(homology: pl.DataFrame) -> pl.DataFrame:
         'speciesName',
         'homologyType',
         'targetGeneId',
-        pl.col('isHighConfidence').cast(pl.Int8).cast(pl.String),
+        'isHighConfidence',
         'targetGeneSymbol',
         'queryPercentageIdentity',
         'targetPercentageIdentity',
@@ -144,7 +145,7 @@ def build_target_view(
     probes: pl.DataFrame,
     transcript: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Every target row, in target's order, with the view columns after its own.
+    """Every target row, in target's order, with the view columns after its own, conformed to `TargetView`.
 
     Lists are sorted, apart from `homologues`, by priority first, and `canonicalExons`.
     """
@@ -157,11 +158,11 @@ def build_target_view(
         transcripts(transcript),
     ]:
         view = view.join(aggregate.rename({'targetId': 'id'}), on='id', how='left', maintain_order='left')
-    return view.with_columns(alternativeGenes=pl.lit(None, dtype=VIEW_COLUMNS['alternativeGenes'])).select(
-        *target.columns, *VIEW_COLUMNS
-    )
+    view = view.with_columns(alternativeGenes=pl.lit(None, dtype=VIEW_SCHEMA['alternativeGenes']))
+    return conform(view.select(VIEW_SCHEMA.names()), TargetView)
 
 
+@writes(TargetView)
 def target_view(
     source: dict[str, str],
     destination: str,

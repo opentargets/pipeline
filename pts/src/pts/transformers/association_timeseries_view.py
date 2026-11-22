@@ -8,9 +8,12 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from otter.config.model import Config
 
-from pts.schemas.association import association_timeseries_schema
+from pts.schemas.dataset.conform import conform
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset
 
 DEFAULT_FILE_COUNT = 300
@@ -34,6 +37,7 @@ TIMESERIES = pl.List(
 )
 
 
+@writes(AssociationTimeseries)
 def association_timeseries_view(
     source: dict[str, str],
     destination: str,
@@ -78,7 +82,7 @@ def association_timeseries_view(
 
     def write(index: int) -> None:
         split = pieces.pop(index)
-        (
+        view = (
             (pl.concat(split) if split else pl.DataFrame(schema=_split_schema()))
             .lazy()
             .explode('timeseries')
@@ -93,15 +97,14 @@ def association_timeseries_view(
                     ignore_nulls=True,
                 ).alias('partitionKey')
             )
-            .select(association_timeseries_schema().names())
+            .select(to_polars_schema(AssociationTimeseries).names())
             .sort(SORT)
-            .collect()
-            .write_parquet(
-                f'{destination}/part-{index:05d}.parquet',
-                compression='zstd',
-                statistics=True,
-                row_group_size=ROW_GROUP_SIZE,
-            )
+        )
+        conform(view, AssociationTimeseries).collect().write_parquet(
+            f'{destination}/part-{index:05d}.parquet',
+            compression='zstd',
+            statistics=True,
+            row_group_size=ROW_GROUP_SIZE,
         )
         logger.info(f'association_timeseries_view file {index + 1}/{file_count} written')
 

@@ -6,13 +6,17 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.association_otf import AssociationOtf
 
-from pts.schemas.association import association_otf_schema
+from pts.schemas.dataset.conform import conform
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 
 EVIDENCE_COLUMNS = ['id', 'diseaseId', 'targetId', 'datasourceId', 'datatypeId', 'score']
 
 
+@writes(AssociationOtf)
 def association_otf(source: dict[str, str], destination: str, settings: Any, config: Any) -> None:
     """Enrich evidence with disease and target labels and the overall novelties.
 
@@ -35,15 +39,15 @@ def association_otf(source: dict[str, str], destination: str, settings: Any, con
     def novelty(path: str, name: str) -> pl.LazyFrame:
         return scan_dataset(path).select('targetId', 'diseaseId', pl.col('currentNovelty').alias(name))
 
-    result = (
+    result = conform(
         evidence
         .join(disease, on='diseaseId', how='left')
         .join(target, on='targetId', how='left')
         .join(novelty(source['association_direct'], 'noveltyDirect'), on=['diseaseId', 'targetId'], how='left')
         .join(novelty(source['association_indirect'], 'noveltyIndirect'), on=['diseaseId', 'targetId'], how='left')
-        .select(list(association_otf_schema()))
-        .cast(association_otf_schema())
-        .sort('rowId')
+        .select(to_polars_schema(AssociationOtf).names())
+        .sort('rowId'),
+        AssociationOtf,
     )
     logger.info('Writing association OTF data to {}', destination)
     sink_dataset(result, destination).collect()

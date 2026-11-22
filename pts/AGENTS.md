@@ -44,6 +44,9 @@ changes need a `pts_version` bump.
   same PR.** Nothing fails without it; `pos/AGENTS.md` says what to edit under `pos/src/pos/croissant/assets/`.
 - Output datasets are declared once, as models in `datamodels/` (`ot_datamodels.outputs`);
   a transformer's `validate` imports its model from there (`datamodels/AGENTS.md`).
+  The views written to `view/` have models too (`ot_datamodels.views`), declared and
+  conformed the same way. Look a dataset's model up with `discover_models()` (outputs
+  and views); `discover_datasets()` lists the release outputs only.
 - A polars transformer writes a modelled output through `conform(frame, Model)`
   (`pts.schemas.dataset.conform`), which stores its closed vocabularies as Enums. A step
   reading an output joins, concatenates or applies `str` functions to those columns only
