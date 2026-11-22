@@ -185,6 +185,8 @@ def test_row_of_rejects_unknown_fields() -> None:
         row_of(_Out, ['score', 'nope'], name='BadRow')
     with pytest.raises(SchemaDefinitionError, match="nullable names 'gone'"):
         row_of(_Out, ['score'], name='BadRow', nullable={'gone': True})
+    with pytest.raises(SchemaDefinitionError, match="name 'Bad Row' is not a valid identifier"):
+        row_of(_Out, ['score'], name='Bad Row')
 
 
 class _Extended(_Out):

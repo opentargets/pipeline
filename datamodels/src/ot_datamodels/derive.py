@@ -17,16 +17,18 @@ column may be renamed. `PrimaryKey` is dropped unless asked for, and nullability
 override.
 """
 
-import copy
 import types
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Union, get_args, get_origin
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
 
 from ot_datamodels.base import PrimaryKey, StructModel
 from ot_datamodels.spec import SchemaDefinitionError
+
+#: `FieldInfo` attributes a derived field copies, besides its metadata and default.
+_COPIED_ATTRIBUTES = ('description', 'title', 'examples', 'deprecated')
 
 
 def from_output(model: type[BaseModel], field: str, *, nullable: bool | None = None, primary_key: bool = False) -> Any:
@@ -39,19 +41,20 @@ def from_output(model: type[BaseModel], field: str, *, nullable: bool | None = N
         primary_key: whether the copy is (part of) the view's primary key.
 
     Returns:
-        `Annotated[<the field's type>, <a copy of its FieldInfo>]`.
+        `Annotated[<the field's type>, *<its metadata>, Field(<its description, default, ...>)]`.
 
     Raises:
         SchemaDefinitionError: if `model` has no such field.
     """
     info = _info(model, field)
-    copied = copy.copy(info)
-    copied.metadata = [item for item in info.metadata if not isinstance(item, PrimaryKey)]
+    metadata = [item for item in info.metadata if not isinstance(item, PrimaryKey)]
     if primary_key:
-        copied.metadata.append(PrimaryKey())
+        metadata.append(PrimaryKey())
+    kwargs = {name: getattr(info, name) for name in _COPIED_ATTRIBUTES if getattr(info, name) is not None}
+    if not info.is_required():
+        kwargs['default'] = info.default
     annotation = _with_nullability(info.annotation, nullable)
-    copied.annotation = annotation
-    return Annotated[annotation, copied]
+    return Annotated[annotation, *metadata, Field(**kwargs)]
 
 
 def row_of(
@@ -62,15 +65,18 @@ def row_of(
     Args:
         model: the `DatasetModel` or `StructModel` holding the fields.
         fields: the fields to copy.
-        name: the struct's class name.
+        name: the struct's class name, a valid identifier; it only appears in messages and reprs.
         nullable: per field, `True` or `False` to override its nullability.
 
     Returns:
         A `StructModel` subclass named `name`.
 
     Raises:
-        SchemaDefinitionError: if `model` lacks a field, or `nullable` names one not copied.
+        SchemaDefinitionError: if `name` is not an identifier, `model` lacks a field, or `nullable`
+            names one not copied.
     """
+    if not name.isidentifier():
+        raise SchemaDefinitionError(f'row_of: name {name!r} is not a valid identifier')
     nullable = nullable or {}
     unknown = sorted(set(nullable) - set(fields))
     if unknown:
