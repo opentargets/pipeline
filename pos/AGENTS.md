@@ -181,7 +181,7 @@ order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
 skips). Locally: `docker run -d --rm --name pos-test-clickhouse -p 8123:8123 -e
 CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7`. It also loads polars-written
 Enum parquet (top level, list, struct) into generated `Enum8` landing tables. A serving-script edit a
-generated type forces goes in `docs/phase5_sql_edits.csv`, which `scripts/build_register.py`
+generated type forces goes in `docs/phase5_sql_edits.csv` (`path` in the served `table`), which `scripts/build_register.py`
 turns into a `serving_sql` register row. A landing-only type change a serving script casts back
 to the landing type goes in `docs/phase5_cast_back.csv` (`path` in the served `table`); the test
 checks the served type there.

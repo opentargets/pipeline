@@ -126,16 +126,13 @@ def test_serving_sql(product):
         query = (
             'SELECT type FROM system.columns WHERE database = {d:String} AND table = {t:String} AND name = {c:String}'
         )
-        for edit in SQL_EDITS:
-            served = client.query(query, parameters={'d': client.database, 't': edit['table'], 'c': edit['field']})
-            assert served.result_rows == [(edit['served'],)], f'phase5_sql_edits.csv: {edit}'
-        for entry in CAST_BACK:
+        for entry in SQL_EDITS + CAST_BACK:
             column = entry['path'].split('/', 1)[0].removesuffix('[]')
             served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': column})
-            assert len(served.result_rows) == 1, f'phase5_cast_back.csv: {entry}: no column {column}'
+            assert len(served.result_rows) == 1, f'{entry}: no column {column}'
             found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
-            assert found is not None, f'phase5_cast_back.csv: {entry}: no {entry["path"]}'
-            assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_cast_back.csv: {entry}'
+            assert found is not None, f'{entry}: no {entry["path"]}'
+            assert canonical(found) == canonical(parse_type(entry['served'])), str(entry)
         for entry in DERIVED:
             served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': entry['field']})
             assert len(served.result_rows) == 1, f'phase5_derived_changes.csv: {entry}: no column'

@@ -84,7 +84,7 @@ DOCS_HEADERS = {
     'phase5_landing_before.csv': ['dataset', 'field', 'ddl_type', 'position'],
     'phase5_register.csv': COLUMNS,
     'phase5_register_piece1.csv': COLUMNS,
-    'phase5_sql_edits.csv': ['dataset', 'field', 'edit', 'table', 'served'],
+    'phase5_sql_edits.csv': ['dataset', 'field', 'edit', 'table', 'path', 'served'],
 }
 
 

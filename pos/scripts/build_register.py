@@ -20,9 +20,9 @@ Inputs:
   change no row shows gets a `type_unrecorded` row, an order change of the shared columns a `column_order` row.
   It also holds the view tables (hand-written until piece 3): a table the drift lists as `no_model` that has a
   model now gets the drift of its model against these columns (`schema_drift.dataset_rows`), outcomes `(piece 3)`.
-- `docs/phase5_sql_edits.csv` (`dataset, field, edit, table, served`): serving-script edits a generated type forces.
-  One `serving_sql` row each, `before` the piece 1 landing type, `after` the type `table` serves
-  (`tests/test_serving_sql.py` checks it). Where `after` is the landing type, the field's other rows are
+- `docs/phase5_sql_edits.csv` (`dataset, field, edit, table, path, served`): serving-script edits a generated type
+  forces. One `serving_sql` row each, `before` the piece 1 landing type of `field`, `after` the type at `path` in
+  `table` (`tests/test_serving_sql.py` checks it). Where `after` is the landing type, the field's other rows are
   `superseded by serving_sql`, follow-up `none`.
 - `docs/phase5_api_follow_ups.csv` (`dataset, field, follow_up`): API changes that are no ClickHouse schema diff. One
   `api_follow_up` row each, outcome the text, follow-up `open`.
@@ -333,7 +333,7 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
 def sql_edit(edit: dict[str, str], evidence: Evidence) -> dict[str, str]:
     """The `serving_sql` row of one serving-script edit."""
     dataset, path, after = edit['dataset'], edit['field'], edit['served']
-    before = LANDING[dataset, path]
+    before = landing_type(dataset, path)
     read = sd._serving(CONFIG[dataset], SCRIPTS).read(path, landed=True)
     models = sd._models_for(CONFIG[dataset], MODELS) or []
     text = evidence.text(dataset, [{'model': m.dataset_name} for m in models], path)
@@ -357,6 +357,15 @@ def derived_row(entry: dict[str, str]) -> dict[str, str]:
     return dict(zip(COLUMNS, values, strict=True))
 
 
+def landing_type(dataset: str, path: str) -> str:
+    """The frozen landing type at `path` (`a`, `a/b`, `a[]/b`)."""
+    column = path.split('/', 1)[0].removesuffix('[]')
+    found = type_at([(column, parse_type(LANDING[dataset, column]))], path)
+    if found is None:
+        raise KeyError(f'{dataset}: no {path} in the frozen landing table')
+    return LANDING[dataset, path] if path == column else render(found)
+
+
 def same(a: str, b: str) -> bool:
     return canonical(parse_type(a)) == canonical(parse_type(b))
 
@@ -364,7 +373,7 @@ def same(a: str, b: str) -> bool:
 @cache
 def kept_by_sql_edit() -> frozenset[tuple[str, str]]:
     """(dataset, field) of each serving-script edit that serves the landing type."""
-    kept = (e for e in SQL_EDITS if same(e['served'], LANDING[e['dataset'], e['field']]))
+    kept = (e for e in SQL_EDITS if same(e['served'], landing_type(e['dataset'], e['field'])))
     return frozenset((e['dataset'], e['field']) for e in kept)
 
 
