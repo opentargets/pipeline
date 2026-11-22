@@ -192,10 +192,10 @@ class EvidenceGeneBurden(DatasetModel):
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    publicationDate: str = Field(
+    publicationDate: str | None = Field(
         pattern=ISO_DATE, description='Date of the earliest publication supporting the evidence'
     )
-    evidenceDate: str = Field(pattern=ISO_DATE, description='Earliest data for the evidence')
+    evidenceDate: str | None = Field(pattern=ISO_DATE, description='Earliest data for the evidence')
     score: float = Field(
         ge=0.0,
         le=1.0,
