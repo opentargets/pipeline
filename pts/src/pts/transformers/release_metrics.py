@@ -13,6 +13,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.dataset.conform import enums_as_strings, without_enums
 from pts.schemas.evidence import evidence_schema
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -435,13 +436,7 @@ def _read_evidence_with_canonical_schema_from_paths(
     if not paths:
         return pl.DataFrame(schema=schema)
 
-    return pl.scan_parquet(
-        paths,
-        glob=True,
-        schema=schema,
-        missing_columns='insert',
-        extra_columns='ignore',
-    ).collect()
+    return pl.concat([_scan_into(path, schema) for path in paths]).collect()
 
 
 def _read_associations_minimal(path: str) -> pl.DataFrame:
@@ -451,18 +446,28 @@ def _read_associations_minimal(path: str) -> pl.DataFrame:
     `missing_columns='insert'` / `extra_columns='ignore'` to reconcile `ASSOCIATION_MINIMAL_SCHEMA`
     against files that may not carry every column, which the shared reader does not support.
     """
+    return _scan_into(path, ASSOCIATION_MINIMAL_SCHEMA).collect()
+
+
+def _scan_into(path: str, schema: dict[str, Any]) -> pl.LazyFrame:
+    """A parquet path glob read into `schema`; a column it stores as an Enum is read as one, then cast.
+
+    `scan_parquet` reads an Enum into a string column of `schema` only through a cast.
+    """
+    stored = pl.scan_parquet(path, glob=True).collect_schema()
+    enums = {name: stored[name] for name in schema if name in stored and enums_as_strings(stored[name]) != stored[name]}
     return pl.scan_parquet(
         path,
         glob=True,
-        schema=ASSOCIATION_MINIMAL_SCHEMA,
+        schema={**schema, **enums},
         missing_columns='insert',
         extra_columns='ignore',
-    ).collect()
+    ).cast({name: schema[name] for name in enums})
 
 
 def _load_parquet_dataset(path: str) -> pl.DataFrame:
-    """Read a dataset parquet path (or directory) eagerly into a dataframe."""
-    return scan_dataset(path).collect()
+    """Read a dataset parquet path (or directory) eagerly into a dataframe, its Enums as strings."""
+    return without_enums(scan_dataset(path).collect())
 
 
 def _count_parquet_rows(path: str) -> int:

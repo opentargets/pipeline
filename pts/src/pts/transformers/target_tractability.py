@@ -16,6 +16,7 @@ from loguru import logger
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.target_tractability import tractability_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -92,4 +93,4 @@ def target_tractability(
     result = build_tractability(raw, target_ids)
 
     logger.info(f'writing {result.height} tractability assessments to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, TargetTractability), destination)

@@ -14,6 +14,7 @@ from loguru import logger
 from ot_datamodels.outputs.transcript import Transcript
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.transcript import transcript as transcript_schema
 from pts.task_outputs import writes
 from pts.transformers.utils import ensembl
@@ -131,4 +132,4 @@ def transcript(
     )
 
     logger.info(f'writing {result.height} transcripts from Ensembl {dump.release} to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, Transcript), destination)

@@ -4,6 +4,9 @@ The target dataset with its homologues, tractability, safety liabilities, chemic
 transcripts nested back in, in the shape target had before they were split out of it. A
 compatibility view for consumers of that shape (Platform, API, croissant), not an input to other
 steps. `tep` is not reproduced and `alternativeGenes` is always null.
+
+The view keeps the types of ClickHouse's hand-written `targets` table: its inputs' Enums are read as
+strings, and a homologue's `isHighConfidence` as `'1'`/`'0'`.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.schemas.target_view import VIEW_COLUMNS
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -34,7 +38,7 @@ def homologues(homology: pl.DataFrame) -> pl.DataFrame:
         'speciesName',
         'homologyType',
         'targetGeneId',
-        'isHighConfidence',
+        pl.col('isHighConfidence').cast(pl.Int8).cast(pl.String),
         'targetGeneSymbol',
         'queryPercentageIdentity',
         'targetPercentageIdentity',
@@ -175,6 +179,6 @@ def target_view(
     """
     logger.info('load target view inputs')
     frames = pl.collect_all([scan_dataset(source[name]) for name in SOURCES])
-    result = build_target_view(*frames)
+    result = build_target_view(*(without_enums(frame) for frame in frames))
     logger.info(f'{result.height} targets in the target view')
     write_dataset(result, destination)

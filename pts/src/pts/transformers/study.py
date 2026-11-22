@@ -9,7 +9,8 @@ from ot_datamodels.outputs.study import Study
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pts.schemas.study import StudyType, study_schema
+from pts.schemas.dataset.conform import conform
+from pts.schemas.study import STUDY_TYPES, study_schema
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -163,9 +164,9 @@ def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag study types that are not one of `StudyType`, the gentropy study types."""
+    """Flag study types that are not one of `STUDY_TYPES`, the gentropy study types."""
     logger.info('Validating study types')
-    supported = pl.col('studyType').is_in([study_type.value for study_type in StudyType])
+    supported = pl.col('studyType').is_in(STUDY_TYPES)
     return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 
@@ -362,6 +363,6 @@ def study(
     result = valid_rows(validated.lazy(), options.invalid_qc_reasons)
     logger.info('Writing accepted studies to {} and excluded studies to {}', destinations.output, destinations.excluded)
     pl.collect_all([
-        sink_dataset(result.valid, destinations.output),
+        sink_dataset(conform(result.valid, Study), destinations.output),
         sink_dataset(result.invalid, destinations.excluded),
     ])

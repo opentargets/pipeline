@@ -8,6 +8,7 @@ from loguru import logger
 from ot_datamodels.outputs.clinical_indication import ClinicalIndication as ClinicalIndicationOutput
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import ClinicalIndication
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -33,7 +34,7 @@ def clinical_indication(
         config: Config object (not used in this transformer)
     """
     logger.info(f'Source path: {source}')
-    reports = scan_dataset(str(source)).collect()
+    reports = without_enums(scan_dataset(str(source))).collect()
 
     # Filter out clinical reports that fail QC
     reports, excluded = valid_rows(reports, settings.get('invalid_clinical_report_qc', []))
@@ -49,4 +50,4 @@ def clinical_indication(
     )
 
     logger.info(f'Destination path: {destination["output"]}')
-    write_dataset(indications, str(destination['output']))
+    write_dataset(conform(indications, ClinicalIndicationOutput), str(destination['output']))

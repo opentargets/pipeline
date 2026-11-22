@@ -200,9 +200,20 @@ def as_frame(model: type[DatasetModel], mutation: Mutation) -> pl.DataFrame:
 def _series(name: str, value: Any, dtype: pl.DataType) -> pl.Series:
     """`value` in the column's dtype -- or, for a value no Enum category holds, as the string column it would
     arrive in (an Enum cannot store it)."""
-    if isinstance(dtype, pl.Enum) and value is not None and value not in dtype.categories:
-        return pl.Series(name, [value])
-    return pl.Series(name, [value], dtype=dtype, strict=True)
+    try:
+        return pl.Series(name, [value], dtype=dtype, strict=True)
+    except pl.exceptions.InvalidOperationError:
+        return pl.Series(name, [value], dtype=_without_enums(dtype), strict=True)
+
+
+def _without_enums(dtype: pl.DataType) -> pl.DataType:
+    if isinstance(dtype, pl.Enum):
+        return pl.String()
+    if isinstance(dtype, pl.List):
+        return pl.List(_without_enums(dtype.inner))
+    if isinstance(dtype, pl.Struct):
+        return pl.Struct([pl.Field(f.name, _without_enums(f.dtype)) for f in dtype.fields])
+    return dtype
 
 
 def stored_row(model: type[DatasetModel], mutation: Mutation) -> dict[str, Any]:

@@ -50,4 +50,8 @@ def uniprot_variants(
     """
     raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
-    write_evidence(UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(), destination)
+    write_evidence(
+        UNIPROT_VARIANTS.postprocess(raw, luts).hash_long_variant_identifiers(),
+        destination,
+        model=EvidenceUniprotVariants,
+    )

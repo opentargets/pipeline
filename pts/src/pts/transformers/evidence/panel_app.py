@@ -279,4 +279,5 @@ def panel_app(
         target=source['target'],
         destination=destination,
         literature=source['literature'],
+        model=EvidenceGenomicsEngland,
     )

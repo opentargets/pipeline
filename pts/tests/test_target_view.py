@@ -5,7 +5,14 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels import DatasetModel
+from ot_datamodels.outputs.homology import Homology
+from ot_datamodels.outputs.target import Target
+from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
+from ot_datamodels.outputs.target_tractability import TargetTractability
+from ot_datamodels.outputs.transcript import Transcript
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.target import TARGET
 from pts.schemas.target_view import TARGET_VIEW, VIEW_COLUMNS
 from pts.transformers.target_view import target_view
@@ -126,7 +133,7 @@ def _transcript(target_id: str | None, transcript_id: str | None, canonical: boo
         'end': 900,
         'strand': -1,
         'transcriptionStartSite': 900,
-        'flags': [{'label': 'tsl', 'value': '1'}],
+        'flags': [{'label': 'mane', 'value': 'select'}],
         'exons': [],
         **kwargs,
     }
@@ -184,7 +191,7 @@ ROWS: dict[str, list[dict]] = {
             'datasource': 'Brennan',
             'literature': '123',
             'url': None,
-            'studies': [{'description': 'd', 'name': 'n', 'type': 't'}],
+            'studies': [{'description': 'd', 'name': 'n', 'type': 'clinical'}],
         },
         {
             'targetId': 'ENSG1',
@@ -259,19 +266,38 @@ ROWS: dict[str, list[dict]] = {
 }
 
 
-def _write(root: Path, rows: dict[str, list[dict]]) -> dict[str, str]:
+#: The inputs pts writes with a model.
+MODELS: dict[str, type[DatasetModel]] = {
+    'target': Target,
+    'homology': Homology,
+    'target_tractability': TargetTractability,
+    'target_safety_event': TargetSafetyEvent,
+    'transcript': Transcript,
+}
+
+
+def _as_written(name: str, frame: pl.DataFrame) -> pl.DataFrame:
+    """The input as pts writes it: its model's Enums, and homology's `isHighConfidence` a bool."""
+    if name == 'homology':
+        frame = frame.with_columns(pl.col('isHighConfidence').cast(pl.Int8).cast(pl.Boolean))
+    return conform(frame, MODELS[name])
+
+
+def _write(root: Path, rows: dict[str, list[dict]], *, typed: bool = False) -> dict[str, str]:
     source = {}
     for name, schema in INPUT_SCHEMAS.items():
         (root / name).mkdir(parents=True)
         frame = pl.DataFrame(rows.get(name, []), schema=schema)
+        if typed and name in MODELS:
+            frame = _as_written(name, frame)
         frame.write_parquet(root / name / 'part-0.parquet')
         source[name] = str(root / name)
     return source
 
 
-def _run(tmp_path: Path, rows: dict[str, list[dict]] = ROWS) -> pl.DataFrame:
+def _run(tmp_path: Path, rows: dict[str, list[dict]] = ROWS, *, typed: bool = False) -> pl.DataFrame:
     destination = str(tmp_path / 'out')
-    target_view(_write(tmp_path / 'src', rows), destination, {}, None)
+    target_view(_write(tmp_path / 'src', rows, typed=typed), destination, {}, None)
     return pl.read_parquet(destination)
 
 
@@ -356,6 +382,21 @@ def test_target_columns_pass_through(tmp_path: Path):
 
 def test_schema_is_published(tmp_path: Path):
     assert _run(tmp_path).schema == TARGET_VIEW
+
+
+def test_inputs_as_pts_writes_them_keep_the_types_of_targets_sql(tmp_path: Path):
+    """The inputs' Enums and homology's bool reach the view as the strings `targets.sql` loads."""
+    written = {name: _as_written(name, pl.DataFrame(ROWS.get(name, []), schema=INPUT_SCHEMAS[name])) for name in MODELS}
+    assert isinstance(written['transcript'].schema['chromosome'], pl.Enum)
+    assert isinstance(written['homology'].schema['homologyType'], pl.Enum)
+    assert written['homology'].schema['isHighConfidence'] == pl.Boolean
+
+    result = _run(tmp_path, typed=True)
+
+    assert result.schema == TARGET_VIEW
+    homologues = result['homologues'].explode().struct.field('isHighConfidence')
+    assert homologues.drop_nulls().unique().to_list() == ['1']
+    assert _view_rows(result) == OUTPUT
 
 
 def test_rows_in_target_order(tmp_path: Path):

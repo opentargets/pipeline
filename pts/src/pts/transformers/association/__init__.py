@@ -17,6 +17,7 @@ from ot_datamodels.outputs.association_overall_direct import AssociationOverallD
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.association.evidence import expand_disease, prepare_evidence
 from pts.transformers.association.novelty import GROUP, compute_novelty
@@ -28,16 +29,18 @@ DEFAULT_CONCURRENCY = 8
 ROW_GROUP_SIZE = 100_000
 EVIDENCE_COLUMNS = ['targetId', 'diseaseId', 'datasourceId', 'datatypeId', 'score', 'evidenceDate']
 OUTPUTS = [f'{kind}_{way}' for way in ('direct', 'indirect') for kind in ('by_datasource', 'overall', 'by_datatype')]
+#: The model of each output.
+MODELS = {
+    'overall_direct': AssociationOverallDirect,
+    'overall_indirect': AssociationOverallIndirect,
+    'by_datasource_direct': AssociationByDatasourceDirect,
+    'by_datasource_indirect': AssociationByDatasourceIndirect,
+    'by_datatype_direct': AssociationByDatatypeDirect,
+    'by_datatype_indirect': AssociationByDatatypeIndirect,
+}
 
 
-@writes(
-    overall_direct=AssociationOverallDirect,
-    overall_indirect=AssociationOverallIndirect,
-    by_datasource_direct=AssociationByDatasourceDirect,
-    by_datasource_indirect=AssociationByDatasourceIndirect,
-    by_datatype_direct=AssociationByDatatypeDirect,
-    by_datatype_indirect=AssociationByDatatypeIndirect,
-)
+@writes(**MODELS)
 def association(
     source: dict[str, str],
     destination: dict[str, str],
@@ -68,7 +71,12 @@ def association(
         if '://' not in path:
             os.makedirs(path)
 
-    raw = scan_datasets(source['evidence']).select(EVIDENCE_COLUMNS).collect()
+    raw = (
+        scan_datasets(source['evidence'])
+        .select(EVIDENCE_COLUMNS)
+        .cast({'datasourceId': pl.String, 'datatypeId': pl.String})
+        .collect()
+    )
     buckets = raw.with_columns((pl.col('targetId').hash(seed=0) % bucket_count).alias('bucket')).partition_by(
         'bucket', as_dict=True, include_key=False
     )
@@ -94,7 +102,7 @@ def association(
                     aggregated, current_year=current_year, evidence_count_dtype=dtype, **novelty
                 ).sort(GROUP)
         for name, frame in zip(frames, pl.collect_all(frames.values()), strict=True):
-            frame.write_parquet(
+            conform(frame, MODELS[name]).write_parquet(
                 f'{paths[name]}/part-{bucket:05d}.parquet',
                 compression='zstd',
                 statistics=True,

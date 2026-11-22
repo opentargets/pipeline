@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 import polars as pl
+from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.target_safety_event import biosample, effect, study
 from pts.transformers.target_safety_event import (
     build_target_safety_events,
@@ -617,7 +619,7 @@ AE_ROWS = [
      'Bowes et al. (2012)', 'G1', 'UBERON_1', ''),
     (' nausea ', '', 'activation', 'EFO_X', 'ENSG1', '0042', 'Urban et al. (2012)', 'G1', 'UBERON_3', ''),
     ('', 'liver', 'inhibition_chronic', 'EFO_X', 'ENSG5', '456', 'Lynch et al. (2017)', 'G5', 'UBERON_4', ''),
-    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Other ref', 'G1', 'UBERON_5',
+    ('crisis (known as \\cheese reaction\\)', 'cns', '', 'EFO_B', 'ENSG1', '7', 'Urban et al. (2012)', 'G1', 'UBERON_5',
      'https://x'),
     ('orphan', 'liver', 'activation_acute', 'EFO_X', '', '8', 'Bowes et al. (2012)', 'G', 'UBERON_6', ''),
     ('vomiting', 'gi', 'inhibition_developmental toxicity', 'EFO_X', 'ENSG4', '9', 'Lynch et al. (2017)', 'G4',
@@ -713,8 +715,8 @@ EXPECTED = [
     ('ENSG5', None, 'EFO_X', None, [('liver', 'UBERON_4', None, None, None)], 'Lynch et al. (2017)', '456', None,
      [(None, 'EFO_X', 'preclinical')]),
     ('ENSG1', 'crisis (known as \\cheese reaction\\)', 'EFO_B', [(None, None)],
-     [('cns', 'UBERON_5', None, None, None)], 'Other ref', '7', 'https://x',
-     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'Other ref')]),
+     [('cns', 'UBERON_5', None, None, None)], 'Urban et al. (2012)', '7', 'https://x',
+     [('crisis (known as \\cheese reaction\\)', 'EFO_B', 'clinical')]),
     ('ENSG4', 'vomiting', 'EFO_X', [('Inhibition/Decrease/Downregulation', 'developmental toxicity')],
      [('gi', 'UBERON_7', None, None, None)], 'Lynch et al. (2017)', '9', None,
      [('vomiting', 'EFO_X', 'preclinical')]),
@@ -808,7 +810,7 @@ def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
     assert [p.read_bytes() for p in first] == [p.read_bytes() for p in second]
 
     out = pl.read_parquet(first)
-    assert out.schema == pl.Schema({
+    built = pl.Schema({
         'targetId': pl.String,
         'event': pl.String,
         'eventId': pl.String,
@@ -819,6 +821,7 @@ def test_target_safety_event_end_to_end(tmp_path: Path) -> None:
         'url': pl.String,
         'studies': pl.List(study),
     })
+    assert out.schema == conformed_schema(built, TargetSafetyEvent)
     got = sorted((_canonical(list(r)) for r in out.rows()), key=repr)
     assert got == sorted((_canonical(list(r)) for r in EXPECTED), key=repr)
 

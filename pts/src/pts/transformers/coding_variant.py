@@ -15,6 +15,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
 from pts.schemas.coding_variant import datasource
+from pts.schemas.dataset.conform import without_enums
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HARMONIC_SUM_CONSTANT = sum(1 / ((i + 1) ** 2) for i in range(1000))
@@ -72,7 +73,7 @@ def coding_variant(
         config: unused.
     """
     variants = read_variants(source['variant'])
-    frames = {name: scan_dataset(path) for name, path in source.items() if name != 'variant'}
+    frames = {name: without_enums(scan_dataset(path)) for name, path in source.items() if name != 'variant'}
     write_dataset(build_view(variants, frames), destination)
     logger.info(f'wrote coding variant view to {destination}')
 
@@ -88,7 +89,7 @@ def read_variants(path: str) -> pl.LazyFrame:
     """
     handle = StorageHandle(path)
     parts = sorted(handle.glob('*.parquet')) if handle.stat().is_dir else [path]
-    return pl.concat([process_variants(scan_dataset(part)).collect() for part in parts]).lazy()
+    return pl.concat([process_variants(without_enums(scan_dataset(part))).collect() for part in parts]).lazy()
 
 
 def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.LazyFrame:

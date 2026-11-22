@@ -17,6 +17,7 @@ from loguru import logger
 from ot_datamodels.outputs.baseline_expression import BaselineExpression
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, scan_datasets, sink_dataset
 from pts.transformers.utils.quality_flags import QC_COLUMN, flag_rows
@@ -362,4 +363,7 @@ def baseline_expression(
     valid = flagged.filter(pl.col(QC_COLUMN).list.len() == 0)
     failed = flagged.filter(pl.col(QC_COLUMN).list.len() != 0)
     logger.info(f'writing {destination["valid"]} and {destination["failed"]}')
-    pl.collect_all([sink_dataset(valid, destination['valid']), sink_dataset(failed, destination['failed'])])
+    pl.collect_all([
+        sink_dataset(conform(valid, BaselineExpression), destination['valid']),
+        sink_dataset(failed, destination['failed']),
+    ])

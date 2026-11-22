@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from pts.schemas.credible_set import FinemappingMethod, cross_set_flags_schema
+from pts.schemas.credible_set import SUSIE_METHODS, cross_set_flags_schema
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.credible_set.identifier import variant_position
 from pts.transformers.utils.quality_flags import flag_rows
@@ -27,10 +27,10 @@ from pts.transformers.utils.quality_flags import flag_rows
 _TOP_HIT = pl.col('qualityControls').list.contains(CredibleSetFlag.TOP_HIT.value)
 """A curated top hit."""
 
-_PICS = pl.col('fineMappingMethod') == FinemappingMethod.PICS.value
+_PICS = pl.col('fineMappingMethod') == 'PICS'
 """A set fine-mapped by PICS."""
 
-_SUSIE = pl.col('fineMappingMethod').is_in([method.value for method in FinemappingMethod.susie()])
+_SUSIE = pl.col('fineMappingMethod').is_in(SUSIE_METHODS)
 """A set fine-mapped by SuSiE or SuSiE-inf."""
 
 _FLAGGED_ROW = {

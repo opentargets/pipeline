@@ -9,6 +9,7 @@ from loguru import logger
 from ot_datamodels.outputs.clinical_target import ClinicalTarget
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.clinical_mira import (
     CATEGORY_RANKS,
@@ -41,8 +42,8 @@ def clinical_target(
         config: Config object (not used in this transformer)
     """
     logger.info(f'Source paths: {source}')
-    reports = scan_dataset(str(source['clinical_report'])).collect()
-    moa = scan_dataset(str(source['drug_mechanism_of_action'])).collect()
+    reports = without_enums(scan_dataset(str(source['clinical_report']))).collect()
+    moa = without_enums(scan_dataset(str(source['drug_mechanism_of_action']))).collect()
 
     # Filter out clinical reports that fail QC
     reports, excluded = valid_rows(reports, settings.get('invalid_clinical_report_qc', []))
@@ -103,4 +104,4 @@ def clinical_target(
         .join(drug_max_stage, 'drugId')
     )
     logger.info(f'Destination path: {destination["output"]}')
-    write_dataset(clinical_target, str(destination['output']))
+    write_dataset(conform(clinical_target, ClinicalTarget), str(destination['output']))

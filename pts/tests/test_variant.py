@@ -18,8 +18,10 @@ import pyBigWig  # ty: ignore[unresolved-import] -- compiled module without stub
 import pytest
 import yaml
 from loguru import logger
+from ot_datamodels.outputs.variant import Variant
 from pydantic import ValidationError
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.variant import variant_schema
 from pts.tasks.transform import TransformSpec
 from pts.transformers.utils.variant import hash_long_variant_ids
@@ -905,7 +907,7 @@ def test_variant_end_to_end_with_fake_fastvep(end_to_end):
         str(rows / 'pharmacogenomics'),
         str(rows / 'credible_set_variant'),
     ).collect()
-    assert index.schema == variant_schema
+    assert index.schema == conformed_schema(variant_schema, Variant)
     assert index.height == collected.height == 52
     assert index.select(key).sort(key).equals(collected.select(key).sort(key))
     by_id = {row['variantId']: row for row in index.to_dicts()}
@@ -940,7 +942,7 @@ def test_chromosome_without_reference_is_intergenic(tmp_path, step_inputs):
     """Y is not in the reference FASTA: fastVEP, which fails on Y here, is not run on it."""
     output = _run_step(tmp_path, step_inputs, [('1_123_A_G', None), ('Y_100_A_G', None)], fail='Y')
     result = pl.read_parquet(output / '*.parquet')
-    assert result.schema == variant_schema
+    assert result.schema == conformed_schema(variant_schema, Variant)
     found = result.filter(pl.col('chromosome') == 'Y').to_dicts()
     assert len(found) == 1
     assert found[0]['variantId'] == 'Y_100_A_G'
@@ -967,7 +969,7 @@ def test_variant_step_writes_the_annotated_index(tmp_path, step_inputs):
         source={'variant_annotations': [str(tmp_path / 'gnomad')], 'amino_acid_annotations': [str(tmp_path / 'foldx')]},
     )
     result = pl.read_parquet(output / '*.parquet')
-    assert result.schema == variant_schema
+    assert result.schema == conformed_schema(variant_schema, Variant)
     assert result['variantId'].to_list() == ['1_123_A_G', '2_5_C_T']
     first = result.row(0, named=True)
     assert sorted(first['rsIds']) == ['rs1', 'rs123']

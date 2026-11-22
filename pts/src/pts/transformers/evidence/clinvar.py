@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import polars as pl
+from ot_datamodels.base import DatasetModel
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from otter.config.model import Config
 
@@ -132,13 +133,19 @@ EVA = EvidenceDatasource(
 )
 
 
-def run_eva(source: dict[str, str], destination: dict[str, str], datasource: EvidenceDatasource) -> None:
+def run_eva(
+    source: dict[str, str],
+    destination: dict[str, str],
+    datasource: EvidenceDatasource,
+    model: type[DatasetModel],
+) -> None:
     """Post-process EVA evidence for one of its datasources and write it.
 
     Args:
         source: `evidence`, `disease`, `target` and `literature` locations.
         destination: `evidence` and `failed_evidence` output directories.
         datasource: the EVA datasource to keep.
+        model: the model of its evidence.
     """
     raw = scan_dataset(source['evidence'], format='ndjson', infer_schema_length=None)
     luts = build_luts(raw, disease=source['disease'], target=source['target'], literature=source['literature'])
@@ -149,7 +156,7 @@ def run_eva(source: dict[str, str], destination: dict[str, str], datasource: Evi
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
         .hash_long_variant_identifiers()
     )
-    write_evidence(evidence, destination)
+    write_evidence(evidence, destination, model=model)
 
 
 @writes(evidence=EvidenceEva)
@@ -167,4 +174,4 @@ def clinvar(
         settings: unused.
         config: unused.
     """
-    run_eva(source, destination, EVA)
+    run_eva(source, destination, EVA, EvidenceEva)

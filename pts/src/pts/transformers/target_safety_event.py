@@ -19,6 +19,7 @@ from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.schemas.target_safety_event import aopwiki_schema, biosample, brennan_schema, safety_evidence_schema, study
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
@@ -392,7 +393,7 @@ def target_safety_event(
     aopwiki = _read_json_array(source['aopwiki'], aopwiki_schema)
     brennan = scan_dataset(source['brennan'], format='ndjson', schema=brennan_schema).collect()
     pharmacogenetics = (
-        scan_dataset(source['pharmacogenetics'])
+        without_enums(scan_dataset(source['pharmacogenetics']))
         .select('pgxCategory', 'targetFromSourceId', 'phenotypeText', 'genotypeId', 'haplotypeId', 'drugs')
         .collect()
     )
@@ -411,4 +412,4 @@ def target_safety_event(
     result = _sort_output(build_target_safety_events(safety, target, diseases))
 
     logger.info(f'writing {result.height} target safety events to {destination}')
-    write_dataset(result, destination)
+    write_dataset(conform(result, TargetSafetyEvent), destination)

@@ -29,6 +29,7 @@ from otter.config.model import Config
 
 from pts.postgres import read_dump_tables
 from pts.schemas.chembl_bioactivity import chembl_bioactivity_schema
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 from pts.transformers.utils.target import chembl_accession_lookup
@@ -149,12 +150,14 @@ def chembl_bioactivity(
     gene_df = scan_dataset(str(source['target'])).select('id', 'proteinIds').collect()
     logger.info(f'Reading drugs from {source["drug_molecule"]} and {source["mechanism_of_action"]}')
     drug_df = scan_dataset(str(source['drug_molecule'])).select('id', 'parentId', 'childChemblIds').collect()
-    moa_df = scan_dataset(str(source['mechanism_of_action'])).select('actionType', 'chemblIds', 'targets').collect()
+    moa_df = without_enums(
+        scan_dataset(str(source['mechanism_of_action'])).select('actionType', 'chemblIds', 'targets')
+    ).collect()
 
     bioactivity = process_bioactivity(tables, gene_df, drug_df, moa_df)
 
     logger.info(f'Writing {bioactivity.height} bioactivity rows to {destination["bioactivity"]}')
-    write_dataset(bioactivity, str(destination['bioactivity']))
+    write_dataset(conform(bioactivity, ChemblBioactivity), str(destination['bioactivity']))
 
 
 def process_bioactivity(

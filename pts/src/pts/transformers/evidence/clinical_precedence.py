@@ -9,6 +9,7 @@ from loguru import logger
 from ot_datamodels.outputs.evidence_clinical_precedence import EvidenceClinicalPrecedence
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.datasource import EvidenceDatasource
 from pts.transformers.evidence.utils.expressions import direction_when_disease_present
@@ -162,7 +163,7 @@ def generate(
         Raw clinical precedence evidence, one row per report, disease, drug and target; and the
         clinical reports excluded by quality control.
     """
-    reports, excluded = valid_rows(scan_dataset(clinical_report), invalid_clinical_report_qc)
+    reports, excluded = valid_rows(without_enums(scan_dataset(clinical_report)), invalid_clinical_report_qc)
 
     report_evidence = (
         reports
@@ -185,7 +186,7 @@ def generate(
         .filter(pl.col('diseaseFromSourceMappedId').is_not_null() & pl.col('drugId').is_not_null())
     )
     mechanisms = (
-        scan_dataset(drug_mechanism_of_action)
+        without_enums(scan_dataset(drug_mechanism_of_action))
         .select(pl.col('chemblIds').alias('drugId'), pl.col('targets').alias('targetFromSourceId'), 'actionType')
         .pipe(_explode, 'drugId')
     )
@@ -245,4 +246,9 @@ def clinical_precedence(
         .assign_direction_on_target(DIRECTION_ON_TARGET, luts.target)
     )
     logger.info(f'writing excluded clinical reports to {destination["excluded_report"]}')
-    write_evidence(evidence, destination, alongside=[sink_dataset(excluded, destination['excluded_report'])])
+    write_evidence(
+        evidence,
+        destination,
+        alongside=[sink_dataset(excluded, destination['excluded_report'])],
+        model=EvidenceClinicalPrecedence,
+    )

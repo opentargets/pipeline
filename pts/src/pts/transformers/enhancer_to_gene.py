@@ -11,6 +11,7 @@ from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.enhancer_to_gene import enhancer_to_gene_schema
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -300,6 +301,8 @@ def enhancer_to_gene(
         destinations.excluded,
     )
     pl.collect_all([
-        sink_dataset(result.valid.sort('chromosome', 'start', nulls_last=False), destinations.output),
+        sink_dataset(
+            conform(result.valid.sort('chromosome', 'start', nulls_last=False), EnhancerToGene), destinations.output
+        ),
         sink_dataset(result.invalid.sort('chromosome', 'start', nulls_last=False), destinations.excluded),
     ])

@@ -17,6 +17,7 @@ from ot_datamodels.outputs.biosample_enrichment import BiosampleEnrichment
 from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
@@ -452,5 +453,5 @@ def biosample_enrichment(
         .select([pl.col(name).cast(dtype) for name, dtype in biosample_enrichment_schema.items()])
         .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', 'tissueBiosampleId', nulls_last=True)
     )
-    write_dataset(output, destination)
+    write_dataset(conform(output, BiosampleEnrichment), destination)
     logger.info(f'wrote {output.height} rows')

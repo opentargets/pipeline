@@ -92,4 +92,5 @@ def expression_atlas(
         target=source['target'],
         literature=source['literature'],
         destination=destination,
+        model=EvidenceExpressionAtlas,
     )

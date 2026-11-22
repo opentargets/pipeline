@@ -7,8 +7,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 import yaml
+from ot_datamodels.outputs.homology import Homology
 from polars.testing import assert_frame_equal
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.homology import homology_schema, orthologs_schema
 from pts.transformers.homology import (
     COMPARA_COLUMNS,
@@ -82,7 +84,7 @@ def _orthologs(**kwargs: object) -> pl.DataFrame:
         'speciesName': 'mouse',
         'homologyType': 'ortholog_one2one',
         'targetGeneId': 'ENSMUSG1',
-        'isHighConfidence': '1',
+        'isHighConfidence': True,
         'targetGeneSymbol': 'Gene1',
         'queryPercentageIdentity': 90.0,
         'targetPercentageIdentity': 88.0,
@@ -135,9 +137,9 @@ def test_homology_normalises_stringified_null_confidence() -> None:
 
 
 def test_homology_keeps_real_confidence_flag() -> None:
-    """A genuine "1"/"0" confidence flag passes through unchanged."""
-    result = _single_pair(_pair(is_high_confidence='1'), gene_name='Trp53')
-    assert result['isHighConfidence'].to_list() == ['1']
+    """A genuine "1"/"0" confidence flag becomes a bool."""
+    assert _single_pair(_pair(is_high_confidence='1'), gene_name='Trp53')['isHighConfidence'].to_list() == [True]
+    assert _single_pair(_pair(is_high_confidence='0'), gene_name='Trp53')['isHighConfidence'].to_list() == [False]
 
 
 @pytest.mark.parametrize('real_symbol', ['na', 'nan', 'Nil'])
@@ -545,7 +547,7 @@ def test_homology_writes_the_dataset(tmp_path: Path) -> None:
 
     expected = pl.DataFrame(
         [('ENSG0001', '10090', 'Mouse', 'ortholog_one2one', 'ENSMUSG0001', None, 'Trp53', 100.0, 88.0, 3)],
-        schema=homology_schema,
+        schema=conformed_schema(homology_schema, Homology),
         orient='row',
     )
     assert_frame_equal(pl.read_parquet(str(destination / '*.parquet')), expected)

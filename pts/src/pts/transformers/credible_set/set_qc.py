@@ -16,11 +16,12 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
+from ot_datamodels.vocabularies import FineMappingMethod
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
-from pts.schemas.credible_set import Chromosome, FinemappingMethod, credible_set_required, credible_set_schema
-from pts.schemas.study import StudyType
+from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS, credible_set_required, credible_set_schema
+from pts.schemas.study import STUDY_TYPES
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.identifier import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
 from pts.transformers.credible_set.region import KnownGenomicRegion
@@ -44,7 +45,7 @@ class SetQcSettings(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
 
-    allowed_fm_methods: list[FinemappingMethod] = Field(default_factory=lambda: list(FinemappingMethod))
+    allowed_fm_methods: list[FineMappingMethod] = Field(default_factory=lambda: list(FINEMAPPING_METHODS))
     """The accepted `fineMappingMethod` values; any other value gets INVALID_FINEMAPPING_METHOD."""
 
 
@@ -98,7 +99,7 @@ def _flag_invalid_chromosome(frame: pl.LazyFrame) -> pl.LazyFrame:
         >>> _flag_invalid_chromosome(credible_set).collect()['qualityControls'].list.len().to_list()
         [0, 1, 1, 1]
     """
-    invalid = ~pl.col('chromosome').is_in([chromosome.value for chromosome in Chromosome])
+    invalid = ~pl.col('chromosome').is_in(CHROMOSOMES)
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_CHROMOSOME)
 
 
@@ -137,20 +138,20 @@ def _flag_in_mhc(frame: pl.LazyFrame) -> pl.LazyFrame:
     """
     mhc = KnownGenomicRegion.MHC.value
     lead_position = variant_position(pl.col('leadVariantId'))
-    in_mhc = (pl.col('chromosome') == mhc.chromosome.value) & lead_position.is_between(mhc.start, mhc.end)
+    in_mhc = (pl.col('chromosome') == mhc.chromosome) & lead_position.is_between(mhc.start, mhc.end)
     return flag_rows(frame, in_mhc, CredibleSetFlag.IN_MHC)
 
 
-def _flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[FinemappingMethod]) -> pl.LazyFrame:
+def _flag_invalid_finemapping_method(frame: pl.LazyFrame, allowed: list[FineMappingMethod]) -> pl.LazyFrame:
     """Flag credible sets whose `fineMappingMethod` is not one of `allowed`; the comparison is exact.
 
     Examples:
         >>> credible_set = pl.LazyFrame({'fineMappingMethod': ['SuSiE', 'SuSie', 'PICS'], 'qualityControls': [[]] * 3})
-        >>> flagged = _flag_invalid_finemapping_method(credible_set, [FinemappingMethod.SUSIE])
+        >>> flagged = _flag_invalid_finemapping_method(credible_set, ['SuSiE'])
         >>> flagged.collect()['qualityControls'].list.len().to_list()
         [0, 1, 1]
     """
-    invalid = ~pl.col('fineMappingMethod').is_in([method.value for method in allowed])
+    invalid = ~pl.col('fineMappingMethod').is_in(allowed)
     return flag_rows(frame, invalid, CredibleSetFlag.INVALID_FINEMAPPING_METHOD)
 
 
@@ -160,7 +161,7 @@ def _flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     A set without a `studyType` takes its study's from the index, with no flag; a set that has one
     keeps it, so a mismatch stays visible.
 
-    - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
+    - INVALID_STUDY_TYPE: the source `studyType` is not one of `STUDY_TYPES`; a missing type is not.
     - STUDY_TYPE_MISMATCH: the study is in the index, and the source `studyType` differs from the
       study's.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
@@ -199,7 +200,7 @@ def _flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     return (
         frame
         .join(lookup, on='studyId', how='left')
-        .pipe(flag_rows, ~pl.col('studyType').is_in([t.value for t in StudyType]), CredibleSetFlag.INVALID_STUDY_TYPE)
+        .pipe(flag_rows, ~pl.col('studyType').is_in(STUDY_TYPES), CredibleSetFlag.INVALID_STUDY_TYPE)
         .pipe(flag_rows, mismatch, CredibleSetFlag.STUDY_TYPE_MISMATCH)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
         .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)

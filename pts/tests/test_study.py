@@ -4,10 +4,12 @@ from unittest.mock import Mock
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.study import Study
 from otter.config.model import Config
 from polars.testing import assert_frame_equal
 from pydantic import ValidationError
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.study import study_schema
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.study import (
@@ -461,7 +463,8 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
     invalid = pl.read_parquet(excluded_files[0])
     assert valid['studyId'].to_list() == ['valid']
     assert invalid['studyId'].to_list() == ['invalid']
-    assert valid.schema == invalid.schema == study_schema
+    assert invalid.schema == study_schema
+    assert valid.schema == conformed_schema(study_schema, Study)
     assert valid['diseaseIds'].to_list() == [['disease']]
     assert valid['sumstatQCValues'][0][0]['QCCheckValue'] == 0.5
     assert str(QualityFlag.UNKNOWN_STUDY_TYPE) in invalid['qualityControls'][0]

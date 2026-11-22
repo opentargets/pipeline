@@ -15,6 +15,7 @@ from loguru import logger
 from ot_datamodels.outputs.target_prioritisation import TargetPrioritisation
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import without_enums
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -713,21 +714,21 @@ def target_prioritisation(
     """
     logger.info(f'loading data from {source}')
     frames = {
-        'targets': scan_dataset(source['targets'])
+        'targets': without_enums(scan_dataset(source['targets']))
         .select('id', 'biotype', 'subcellularLocations', 'constraint', 'hallmarks')
         .collect(),
         'tractability': scan_dataset(source['tractability']).select('targetId', 'category', 'value').collect(),
         'target_safety_event': scan_dataset(source['target_safety_event']).select('targetId', 'event').collect(),
         'chemical_probes': scan_dataset(source['chemical_probes']).select('targetId', 'isHighQuality').collect(),
-        'homology': scan_dataset(source['homology'])
+        'homology': without_enums(scan_dataset(source['homology']))
         .select('targetId', 'homologyType', 'speciesName', 'queryPercentageIdentity')
         .collect(),
         'mouse_phenotypes': scan_dataset(source['mouse_phenotypes'])
         .select('targetFromSourceId', 'modelPhenotypeClasses')
         .collect(),
-        'molecule': scan_dataset(source['molecule']).select('id', 'maximumClinicalStage').collect(),
+        'molecule': without_enums(scan_dataset(source['molecule']).select('id', 'maximumClinicalStage')).collect(),
         'mechanism_of_action': scan_dataset(source['mechanism_of_action']).select('targets', 'chemblIds').collect(),
-        'baseline_expression': scan_dataset(source['baseline_expression']),
+        'baseline_expression': without_enums(scan_dataset(source['baseline_expression'])),
         'uniprot_slterms': scan_dataset(source['uniprot_slterms'], format='tsv', infer_schema=False).collect(),
         'mouse_pheno_scores': scan_dataset(source['mouse_pheno_scores'], format='csv', infer_schema=False)
         .select('id', cast_double('score'))

@@ -7,8 +7,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from ot_datamodels.outputs.target import Target
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.target import TARGET
 from pts.transformers.target import target
 from pts.transformers.utils.dataset import scan_dataset
@@ -62,7 +64,7 @@ def output(chembl_dump: Path, tmp_path_factory: pytest.TempPathFactory) -> dict:
 
 class TestTarget:
     def test_schema_is_the_published_one(self, output: dict) -> None:
-        assert output['frame'].schema == TARGET
+        assert output['frame'].schema == conformed_schema(TARGET, Target)
 
     def test_genes_on_the_primary_assembly_only(self, output: dict) -> None:
         assert output['frame']['id'].to_list() == ['ENSG00000000002', 'ENSG00000141510']

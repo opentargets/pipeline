@@ -4,8 +4,10 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from ot_datamodels.discovery import discover_datasets
 
 from pts.schemas.coding_variant import datasource
+from pts.schemas.dataset.conform import conform
 from pts.transformers.coding_variant import (
     HARMONIC_SUM_CONSTANT,
     build_view,
@@ -483,3 +485,32 @@ def test_coding_variant_end_to_end_is_deterministic(tmp_path: Path) -> None:
         assert out.schema == pl.Schema(OUTPUT_SCHEMA)
         assert out.to_dicts() == EXPECTED
     assert outputs[0] == outputs[1]
+
+
+#: The inputs pts writes with a model, by the dataset they are.
+WRITTEN = {
+    'variant': 'variant',
+    'target': 'target',
+    'evidence_eva': 'evidence_eva',
+    'evidence_eva_somatic': 'evidence_eva_somatic',
+    'evidence_uniprot_variant': 'evidence_uniprot_variants',
+    'evidence_gwas_credible_set': 'evidence_gwas_credible_sets',
+    'credible_set': 'credible_set',
+    'pharmacogenetics': 'pharmacogenomics',
+}
+
+
+def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
+    """Each evidence dataset's own datasource Enum, and the variant's Enums, are read as strings."""
+    models = discover_datasets()
+    source = {}
+    for name, frame in world().items():
+        typed = conform(frame, models[WRITTEN[name]]) if name in WRITTEN else frame
+        write_parts(typed, tmp_path / 'in' / name)
+        source[name] = str(tmp_path / 'in' / name)
+    stored = pl.read_parquet_schema(tmp_path / 'in' / 'pharmacogenetics' / 'part-0.parquet')
+    assert isinstance(stored['datasourceId'], pl.Enum)
+
+    coding_variant(source, str(tmp_path / 'out'), None, None)
+
+    assert pl.read_parquet(tmp_path / 'out').to_dicts() == EXPECTED

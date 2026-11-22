@@ -220,4 +220,5 @@ def crispr_screens(
         target=source['target'],
         literature=source['literature'],
         destination=destination,
+        model=EvidenceCrisprScreen,
     )

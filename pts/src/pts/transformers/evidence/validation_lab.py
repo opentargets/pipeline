@@ -52,4 +52,5 @@ def validation_lab(
         disease=source['disease'],
         target=source['target'],
         destination=destination,
+        model=EvidenceOtCrisprValidation,
     )

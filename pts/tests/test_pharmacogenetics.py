@@ -9,7 +9,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 from loguru import logger
+from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.pharmacogenetics import PHARMACOGENOMICS
 from pts.transformers import pharmacogenetics as pgx
 from pts.transformers.pharmacogenetics import (
@@ -357,7 +359,7 @@ CLINPGX_RECORD = {
             'effect': 'x',
             'id': 'v1',
             'entity': 'e',
-            'effectType': 't',
+            'effectType': 'drug',
             'effectDescription': 'd',
             'directionality': 'up',
             'comparisonAlleleOrGenotype': 'T',
@@ -405,7 +407,7 @@ def test_output_schema_is_published(tmp_path: Path) -> None:
     pharmacogenetics(source, destination, {}, None)
     out = _read_output(destination['associations'])
     assert list(PHARMACOGENOMICS) == PUBLISHED_COLUMNS
-    assert out.schema == PHARMACOGENOMICS
+    assert out.schema == conformed_schema(PHARMACOGENOMICS, Pharmacogenomics)
     assert out.select('genotypeAnnotationText', 'phenotypeText', 'phenotypeFromSourceId', 'variantId').rows() == [
         ('parsed', 'increased response', 'EFO_0000001', '1_163063901_C_T'),
         ('unmapped', None, None, '1_163063901_C_T'),
@@ -441,7 +443,7 @@ def test_empty_input_writes_empty_outputs(tmp_path: Path) -> None:
     pharmacogenetics(source, destination, {}, None)
     out = _read_output(destination['associations'])
     assert out.height == 0
-    assert out.schema == PHARMACOGENOMICS
+    assert out.schema == conformed_schema(PHARMACOGENOMICS, Pharmacogenomics)
     assert json.loads(Path(destination['unparsed_texts']).read_text()) == []
 
 

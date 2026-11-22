@@ -59,21 +59,24 @@ CLINICALTRIALS_URL = 'https://clinicaltrials.gov/study/'
 
 
 class ClinicalStageCategory(str, Enum):
-    """Standardised clinical development status categories, ranked by development stage."""
+    """Standardised clinical development status categories, in the order of the `ClinicalStage` vocabulary.
 
-    WITHDRAWAL = 'WITHDRAWAL'
+    Their ranks are `datasets.CATEGORY_RANKS`.
+    """
+
+    UNKNOWN = 'UNKNOWN'
+    PRECLINICAL = 'PRECLINICAL'
+    IND = 'IND'
+    EARLY_PHASE_1 = 'EARLY_PHASE_1'
+    PHASE_1 = 'PHASE_1'
+    PHASE_1_2 = 'PHASE_1_2'
+    PHASE_2 = 'PHASE_2'
+    PHASE_2_3 = 'PHASE_2_3'
+    PHASE_3 = 'PHASE_3'
+    PREAPPROVAL = 'PREAPPROVAL'
     APPROVAL = 'APPROVAL'
     PHASE_4 = 'PHASE_4'
-    PREAPPROVAL = 'PREAPPROVAL'
-    PHASE_3 = 'PHASE_3'
-    PHASE_2_3 = 'PHASE_2_3'
-    PHASE_2 = 'PHASE_2'
-    PHASE_1_2 = 'PHASE_1_2'
-    PHASE_1 = 'PHASE_1'
-    EARLY_PHASE_1 = 'EARLY_PHASE_1'
-    IND = 'IND'
-    PRECLINICAL = 'PRECLINICAL'
-    UNKNOWN = 'UNKNOWN'
+    WITHDRAWAL = 'WITHDRAWAL'
 
 
 class MappingStatus(str, Enum):
@@ -86,14 +89,17 @@ class MappingStatus(str, Enum):
 
 
 class ClinicalProvider(str, Enum):
-    """The resource or organisation that distributes data fetched from a primary source."""
+    """The resource or organisation that distributes data fetched from a primary source.
 
-    AACT = 'AACT'
+    In the order of the `Provider` vocabulary.
+    """
+
     CHEMBL = 'ChEMBL'
-    EMA = 'EMA'
-    FDA = 'FDA'
-    PMDA = 'PMDA'
     TTD = 'TTD'
+    AACT = 'AACT'
+    EMA = 'EMA'
+    PMDA = 'PMDA'
+    FDA = 'FDA'
 
     @classmethod
     def owns_source(cls, provider: str, source: str) -> bool:

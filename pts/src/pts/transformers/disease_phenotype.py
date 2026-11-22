@@ -6,6 +6,7 @@ from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.ontology import edge as ontology_edge
 from pts.schemas.ontology import node as ontology_node
 from pts.schemas.ontology import schema as ontology_schema
@@ -279,5 +280,5 @@ def disease_phenotype(
 
     # write the result locally
     # raise NotImplementedError
-    write_dataset(grouped_phenotypes, destination)
+    write_dataset(conform(grouped_phenotypes, DiseasePhenotype), destination)
     logger.info('transformation complete')

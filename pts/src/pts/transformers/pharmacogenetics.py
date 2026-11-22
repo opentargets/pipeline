@@ -18,6 +18,7 @@ from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.dataset.conform import conform
 from pts.schemas.pharmacogenetics import CLINPGX_SCHEMA, PHARMACOGENOMICS, PHENOTYPES_SCHEMA
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.ontology import MAPPED_ID_COLUMN, add_efo_mapping
@@ -233,6 +234,8 @@ def pharmacogenetics(
 
     logger.info(f'save associations to {destination["associations"]}')
     write_dataset(
-        enriched.select(pl.col(name).cast(dtype) for name, dtype in PHARMACOGENOMICS.items()),
+        conform(
+            enriched.select(pl.col(name).cast(dtype) for name, dtype in PHARMACOGENOMICS.items()), Pharmacogenomics
+        ),
         destination['associations'],
     )

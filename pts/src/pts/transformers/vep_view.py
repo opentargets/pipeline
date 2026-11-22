@@ -18,6 +18,7 @@ from loguru import logger
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
+from pts.schemas.dataset.conform import without_enums
 from pts.transformers.utils.dataset import scan_dataset
 
 # Columns shared by every VEP file. The leading `#` on the first column makes the header line a
@@ -299,9 +300,9 @@ def vep_view(
     """
     logger.info('Loading input data')
     credible_set = process_credible_set(
-        scan_dataset(source['credible_set']), scan_dataset(source['credible_set_variant'])
+        without_enums(scan_dataset(source['credible_set'])), scan_dataset(source['credible_set_variant'])
     )
-    study = process_study(scan_dataset(source['study_table']))
+    study = process_study(without_enums(scan_dataset(source['study_table'])))
     l2g = process_l2g(scan_dataset(source['l2g_table']))
     biosample = process_biosample(scan_dataset(source['biosample']))
 

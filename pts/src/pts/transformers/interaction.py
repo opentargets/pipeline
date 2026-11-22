@@ -20,6 +20,7 @@ from ot_datamodels.outputs.interaction import Interaction
 from ot_datamodels.outputs.interaction_evidence import InteractionEvidence
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -569,8 +570,8 @@ def interaction(
         raise ValueError('interaction_evidence has a null interactionId')
 
     logger.info(f'writing {interactions.height} interactions to {destination["interactions"]}')
-    write_dataset(interactions, destination['interactions'])
+    write_dataset(conform(interactions, Interaction), destination['interactions'])
     logger.info(f'writing {evidences.height} evidences to {destination["interactions_evidence"]}')
-    write_dataset(evidences, destination['interactions_evidence'])
+    write_dataset(conform(evidences, InteractionEvidence), destination['interactions_evidence'])
     logger.info(f'writing {unmatched_ids.height} unmatched interactors to {destination["interactions_unmatched"]}')
     write_dataset(unmatched_ids, destination['interactions_unmatched'])

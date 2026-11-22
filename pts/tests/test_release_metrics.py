@@ -5,8 +5,13 @@ from typing import cast
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.association_by_datasource_direct import AssociationByDatasourceDirect
+from ot_datamodels.outputs.evidence_europepmc import EvidenceEuropepmc
+from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from otter.config.model import Config
 
+from pts.schemas.dataset.conform import conform
+from pts.schemas.evidence import evidence_schema
 from pts.transformers.release_metrics import (
     _build_run_id,
     _discover_dataset_paths,
@@ -14,7 +19,10 @@ from pts.transformers.release_metrics import (
     _emit_evidence_failed_metrics,
     _emit_evidence_metrics,
     _global_rich_metrics,
+    _load_parquet_dataset,
     _quality_control_flag_total_metrics,
+    _read_associations_minimal,
+    _read_evidence_with_canonical_schema_from_paths,
     _to_parquet_glob,
 )
 
@@ -305,3 +313,37 @@ def test_build_run_id_normalisation(monkeypatch, ot_release: str, expected_run_i
     monkeypatch.setattr('pts.transformers.release_metrics.datetime', _FixedDateTime)
 
     assert _build_run_id(ot_release) == expected_run_id
+
+
+def test_evidence_stored_as_enums_is_read_into_the_canonical_schema(tmp_path) -> None:
+    """Each evidence dataset stores its `datasourceId` as an Enum; metrics read it as the canonical string."""
+    for name, model, datasource in (('eva', EvidenceEva, 'eva'), ('europepmc', EvidenceEuropepmc, 'europepmc')):
+        (tmp_path / name).mkdir()
+        frame = conform(pl.DataFrame({'datasourceId': [datasource], 'targetId': ['T1']}), model)
+        assert isinstance(frame.schema['datasourceId'], pl.Enum)
+        frame.write_parquet(tmp_path / name / 'part-0.parquet')
+
+    paths = [f'{tmp_path}/{name}/*.parquet' for name in ('eva', 'europepmc')]
+    evidence = _read_evidence_with_canonical_schema_from_paths(paths, evidence_schema)
+
+    assert evidence.schema == pl.Schema(evidence_schema)
+    assert sorted(evidence['datasourceId']) == ['europepmc', 'eva']
+
+
+def test_associations_and_datasets_stored_as_enums_are_read_as_strings(tmp_path) -> None:
+    frame = conform(
+        pl.DataFrame({
+            'diseaseId': ['D1'],
+            'targetId': ['T1'],
+            'aggregationType': ['datasourceId'],
+            'aggregationValue': ['eva'],
+        }),
+        AssociationByDatasourceDirect,
+    )
+    frame.write_parquet(tmp_path / 'part-0.parquet')
+
+    associations = _read_associations_minimal(f'{tmp_path}/*.parquet')
+    dataset = _load_parquet_dataset(str(tmp_path))
+
+    assert associations['aggregationValue'].dtype == pl.String
+    assert dataset.schema['aggregationType'] == dataset.schema['aggregationValue'] == pl.String

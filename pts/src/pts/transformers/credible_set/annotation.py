@@ -22,6 +22,7 @@ from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
+from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
 from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.confidence import assign_confidence
@@ -110,6 +111,6 @@ def annotation(
         'Writing credible sets to {} and variants to {}', destinations.credible_set, destinations.credible_set_variant
     )
     pl.collect_all([
-        sink_dataset(credible_set, destinations.credible_set),
+        sink_dataset(conform(credible_set, CredibleSet), destinations.credible_set),
         sink_dataset(credible_set_variant, destinations.credible_set_variant),
     ])
