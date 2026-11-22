@@ -13,7 +13,7 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
 
-from pos.clickhouse_ddl import CHType, columns, members, parse_type, render, union_columns
+from pos.clickhouse_ddl import landing_columns, members, parse_type, render, type_at
 
 ROOT = Path(__file__).parents[1]
 CLICKHOUSE = ROOT / 'config' / 'clickhouse'
@@ -64,29 +64,13 @@ def register() -> list[dict[str, str]]:
         return list(reader)
 
 
-def _platform_table(dataset: str) -> CHType | None:
-    """The generated Platform landing table of a dataset as one Tuple; None for a table with no model."""
-    if dataset == 'evidence':
-        return CHType('Tuple', fields=tuple(union_columns(members('evidence_*', 'platform'))))
-    entry = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse'][dataset]
-    models = schema_drift._models_for(entry, discover_datasets())
-    if not models:
-        return None
-    (model,) = models
-    return CHType('Tuple', fields=tuple(columns(model)))
+CONFIG = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+SUPERSEDED = 'superseded by ppp_only'
 
 
-def _at(table: CHType | None, path: str) -> CHType | None:
-    """The type at `a`, `a/b` or `a[]/b` (the table itself for ''); None if the path is absent."""
-    t = table
-    for part in path.split('/') if path else []:
-        name, lists = part, 0
-        while name.endswith('[]'):
-            name, lists = name[:-2], lists + 1
-        t = dict(t.fields).get(name) if t is not None else None
-        for _ in range(lists):
-            t = t.element if t is not None else None
-    return t
+def _platform(dataset: str):
+    """The generated Platform landing columns of a dataset; None for a table with no model."""
+    return landing_columns(CONFIG[dataset], 'platform')
 
 
 def _changed(row: dict[str, str]) -> bool:
@@ -110,23 +94,25 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
     )
     for row, key in zip(register, keys, strict=True):
         served = row['serving read'] != 'no' and row['category'] != 'column_order'
-        expected = 'open' if served and _changed(row) else 'none'
+        superseded = row['outcome'] == SUPERSEDED
+        expected = 'open' if served and _changed(row) and not superseded else 'none'
         assert row['API follow-up'] == expected, f'{key}: API follow-up should be {expected}'
 
 
 def test_after_matches_the_generator(register):
     """`after` is the generated Platform type; empty where the generated table lacks the column."""
-    tables = {d: _platform_table(d) for d in {r['dataset'] for r in register}}
+    tables = {d: _platform(d) for d in {r['dataset'] for r in register}}
     for row in register:
         key = (row['dataset'], row['field'], row['category'])
-        found = _at(tables[row['dataset']], row['field'])
+        cols = tables[row['dataset']]
+        found = type_at(cols, row['field']) if cols is not None else None
+        if row['category'] in {'ddl_only', 'ppp_only', 'no_model'}:
+            assert found is None, f'{key}: the generated Platform table has it'
         if row['category'] in ORDER:
             kept = set(row['before'].split(', '))
             expected = ', '.join(n for n, _ in found.fields if n in kept) if found is not None else ''
-        elif row['category'] in {'ddl_only', 'no_model'} or found is None:
-            expected = ''
         else:
-            expected = render(found, quote_fields=False)
+            expected = render(found, quote_fields=False) if found is not None else ''
         assert row['after'] == expected, f'{key}: after should be {expected!r}'
 
 
@@ -137,9 +123,21 @@ def test_ppp_only_columns_are_platform_removals(register):
         assert row['outcome'] == 'API removal (Platform; PPP only)', field
         assert row['after'] == '', field
         assert row['API follow-up'] == 'open', field
-    platform = _platform_table('evidence')
-    assert platform is not None
-    assert not set(PPP_ONLY) & {n for n, _ in platform.fields}, 'a PPP-only column is in the Platform table'
+    platform = {n for n, _ in _platform('evidence') or []}
+    every = {f.name for m in members('evidence_*', 'ppp') + members('evidence_*', 'platform')
+             for f in dataset_spec(m).fields}  # fmt: skip
+    assert every - platform == set(PPP_ONLY), 'generated PPP-only evidence columns differ from PPP_ONLY'
+
+
+def test_superseded_rows_are_ppp_only_columns(register):
+    """A non-`ppp_only` row under a PPP-only column defers its follow-up to the `ppp_only` row."""
+    for row in register:
+        key = (row['dataset'], row['field'], row['category'])
+        top = row['field'].split('/', 1)[0].removesuffix('[]')
+        under = row['dataset'] == 'evidence' and top in PPP_ONLY and row['category'] != 'ppp_only'
+        assert (row['outcome'] == SUPERSEDED) == under, f'{key}: outcome {SUPERSEDED} iff under a PPP-only column'
+        if under:
+            assert row['after'] == '' and row['API follow-up'] == 'none', key
 
 
 def test_every_clickhouse_marker_parses():

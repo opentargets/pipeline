@@ -13,13 +13,16 @@ from ot_datamodels.spec import dataset_spec
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
+    CHType,
     column_type,
     columns,
     create_table,
+    landing_columns,
     members,
     parse_table,
     parse_type,
     render,
+    type_at,
     union_columns,
 )
 
@@ -228,6 +231,30 @@ def test_members_filters_product(monkeypatch):
     monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
     assert members('*_*', 'platform') == [MemberA, MemberB]
     assert members('*_*', 'ppp') == [MemberA, MemberB, PppOnly]
+
+
+def test_landing_columns(monkeypatch):
+    models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
+    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    glob = {'input_dir': 'output', 'glob_pattern': 'member_*/*.parquet'}
+    assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
+    assert landing_columns({'input_dir': 'output/toy_ppp'}, 'platform') == columns(PppOnly)
+    assert landing_columns({'input_dir': 'view/toy'}, 'platform') is None
+    assert landing_columns({'input_dir': 'output/missing'}, 'platform') is None
+
+
+def test_type_at():
+    cols = columns(Toy)
+    assert type_at(cols, 'tags') == dict(cols)['tags']
+    assert type_at(cols, 'tags[]') == CHType('String')
+    assert type_at(cols, 'nested[][]') == CHType('Int64')
+    assert type_at(cols, 'struct/b') == CHType('Int64')
+    assert type_at(cols, 'nullable_struct/a') == CHType('String', nullable=True)
+    assert type_at(cols, 'bars[]/a') == CHType('String', nullable=True)
+    assert type_at(cols, '') == CHType('Tuple', fields=tuple(cols))
+    assert type_at(cols, 'absent') is None
+    assert type_at(cols, 'struct/absent') is None
+    assert type_at(cols, 'absent[]/a') is None
 
 
 def test_create_table_quotes_identifiers():

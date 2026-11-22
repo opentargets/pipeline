@@ -10,20 +10,22 @@ changes (e9133802), so that rows since resolved by a model change keep their reg
 `validation/` and `profile/` parquet files of `pts.schemas.dataset.profile` from the 2612-3 run:
 `gs://open-targets-pos-scratch/phase5/2612-3/{validation,profile}/` (7-day lifecycle, so copy them locally first).
 `--note` also writes the register as a Markdown note. The rows whose `after` differs from the piece 1 register
-(`PIECE1`) are printed and listed in the note.
+(`--previous`, default `docs/phase5_register_piece1.csv`, the register at 19920e46) are printed and listed in the
+note. `docs/phase5_landing_before.csv` holds the hand-written landing DDL columns at 19920e46 (`dataset, field,
+ddl_type`, written with `schema_drift.render`): it decides whether a DDL-only column was dropped in piece 1 and
+gives the `before` of the `ppp_only` rows. The builder reads no landing DDL.
 
 One row per `(dataset, field, category)`, evidence models merged, plus a `ppp_only` row per evidence column only
-PPP models have. `before` is the landing DDL type, `after` the type `pos.clickhouse_ddl` generates for the Platform
-table (evidence: `union_columns` of the Platform members), empty where that table lacks the column. `API follow-up`
-is `open` when the type changes and a serving script reads the column (column order excepted).
+PPP models have; other rows under such a column are `superseded by ppp_only`, follow-up `none`. `before` is the
+landing DDL type, `after` the type `pos.clickhouse_ddl` generates for the Platform table (evidence: `union_columns`
+of the Platform members), empty where that table lacks the column. `API follow-up` is `open` when the type changes
+and a serving script reads the column (column order excepted).
 """
 
 import argparse
 import csv
 import importlib.util
-import io
 import json
-import subprocess
 import sys
 from dataclasses import replace
 from functools import cache
@@ -34,12 +36,12 @@ import yaml
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import Node, dataset_spec, walk
 
-from pos.clickhouse_ddl import CHType, columns, members, parse_table, parse_type, render, union_columns
+from pos.clickhouse_ddl import CHType, landing_columns, parse_type, render, type_at
 
 POS = Path(__file__).resolve().parents[1]
-#: The commit holding the piece 1 register.
-PIECE1 = '19920e46'
+DOCS = POS / 'docs'
 PPP_ONLY = 'API removal (Platform; PPP only)'
+SUPERSEDED = 'superseded by ppp_only'
 COLUMNS = ('dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up')
 ORDER = frozenset({'struct_order', 'column_order'})
 UNLANDED = frozenset({'model_only', 'struct_field_missing'})
@@ -64,9 +66,9 @@ MODELS = discover_datasets()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
 CLICKHOUSE = POS / 'config' / 'clickhouse'
 SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
-#: DDL-only columns still in the landing DDL; one gone from it was dropped in piece 1.
-CURRENT = sd.drift(POS / 'config' / 'datasets.yaml', CLICKHOUSE / 'schema', CLICKHOUSE / 'scripts')
-LANDED = {(r['dataset'], r['field']) for r in CURRENT.iter_rows(named=True) if r['category'] == 'ddl_only'}
+
+with (DOCS / 'phase5_landing_before.csv').open(newline='') as _fh:
+    LANDING = {(r['dataset'], r['field']): r['ddl_type'] for r in csv.DictReader(_fh)}
 
 
 def changed(category: str, before: str, after: str) -> bool:
@@ -87,48 +89,33 @@ def nodes(model: str) -> dict[str, Node]:
 
 
 @cache
-def platform_table(dataset: str) -> CHType | None:
-    """The generated Platform landing table as one Tuple; None for a table with no model."""
-    entry = CONFIG[dataset]
-    if 'glob_pattern' in entry:
-        cols = union_columns(members(entry['glob_pattern'].split('/')[0], 'platform'))
-    else:
-        models = sd._models_for(entry, MODELS)
-        if not models:
-            return None
-        (model,) = models
-        cols = columns(model)
-    return CHType('Tuple', fields=tuple(cols))
+def platform_table(dataset: str) -> tuple[tuple[str, CHType], ...] | None:
+    """The generated Platform landing columns; None for a table with no model."""
+    cols = landing_columns(CONFIG[dataset], 'platform')
+    return tuple(cols) if cols is not None else None
 
 
-def at(t: CHType | None, path: str) -> CHType | None:
-    """The type at `a`, `a/b` or `a[]/b` (`t` itself for ''); None if the path is absent."""
-    for part in path.split('/') if path else []:
-        name, lists = part, 0
-        while name.endswith('[]'):
-            name, lists = name[:-2], lists + 1
-        t = dict(t.fields).get(name) if t is not None else None
-        for _ in range(lists):
-            t = t.element if t is not None else None
-    return t
+def at(dataset: str, path: str) -> CHType | None:
+    cols = platform_table(dataset)
+    return type_at(cols, path) if cols is not None else None
 
 
 def after_type(dataset: str, path: str) -> str:
-    t = at(platform_table(dataset), path)
+    t = at(dataset, path)
     return render(t, quote_fields=False) if t is not None else ''
 
 
 def after_order(dataset: str, path: str, before: str) -> str:
     """The generated order of the fields named in `before`."""
-    t = at(platform_table(dataset), path)
+    t = at(dataset, path)
     kept = set(before.split(', '))
     return ', '.join(n for n, _ in t.fields if n in kept) if t is not None else ''
 
 
+@cache
 def ppp_only(dataset: str) -> dict[str, list[dict[str, str]]]:
     """Columns of the dataset's models absent from the Platform table -> one `{'model': ...}` per model."""
-    table = platform_table(dataset)
-    platform = {n for n, _ in table.fields} if table is not None else set()
+    platform = {n for n, _ in platform_table(dataset) or ()}
     found: dict[str, list[dict[str, str]]] = {}
     for model in sd._models_for(CONFIG[dataset], MODELS) or []:
         for f in dataset_spec(model).fields:
@@ -210,7 +197,7 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
         return 'model order (piece 2)' if evidenced else 'no evidence; unchanged'
     if category in UNLANDED:
         return 'API addition (piece 2)' if evidenced else 'no evidence; unchanged'
-    if category == 'ddl_only' and (dataset, path) not in LANDED:
+    if category == 'ddl_only' and (dataset, path) not in LANDING:
         return 'API removal (dropped)'
     if category == 'ddl_only':
         return 'API removal (piece 2)' if rows[0]['serving_read'] != 'no' else 'removal (piece 2)'
@@ -249,11 +236,10 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     for dataset, entry in CONFIG.items():
         if 'glob_pattern' not in entry:
             continue
-        ddl = parse_table((CLICKHOUSE / 'schema' / Path(entry['preload_script']).name).read_text())
         serving = sd._serving(entry, SCRIPTS)
         for col, ms in ppp_only(dataset).items():
-            d = ddl.get(col)
-            cells = {'ddl_type': sd.render(d) if d else '', 'serving_read': serving.read(col, landed=d is not None)}
+            d = LANDING.get((dataset, col), '')
+            cells = {'ddl_type': d, 'serving_read': serving.read(col, landed=bool(d))}
             groups[dataset, col, 'ppp_only'] = [m | cells for m in ms]
     no_output = evidence.no_output
     out = []
@@ -281,17 +267,13 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             text = evidence.text(dataset, rows, path)
         if (dataset, path, category) in NOTES:
             text = f'{text}; {NOTES[dataset, path, category]}'
-        values = (
-            dataset,
-            path,
-            category,
-            outcome(category, dataset, path, rows, before, after, no_output),
-            before,
-            after,
-            text,
-            read,
-            api_follow_up(category, before, after, read),
-        )
+        top = path.split('/', 1)[0].removesuffix('[]')
+        if category != 'ppp_only' and top in ppp_only(dataset):
+            result, follow_up = SUPERSEDED, 'none'
+        else:
+            result = outcome(category, dataset, path, rows, before, after, no_output)
+            follow_up = api_follow_up(category, before, after, read)
+        values = (dataset, path, category, result, before, after, text, read, follow_up)
         out.append(dict(zip(COLUMNS, values, strict=True)))
     return sorted(out, key=lambda r: (r['dataset'], r['field'], r['category']))
 
@@ -358,32 +340,28 @@ PIECE2 = """
 ## Piece 2
 
 `after` is now the generated Platform type. The Platform evidence table drops the 15 columns only PPP models have \
-(`ppp_only` rows, outcome `API removal (Platform; PPP only)`); their other rows keep their piece 1 outcome with an \
-empty `after`. Rows whose `after` changed from the piece 1 register:
+(`ppp_only` rows, outcome `API removal (Platform; PPP only)`, which carry the API follow-up); the other rows under \
+those columns are `superseded by ppp_only`, follow-up `none`. Rows whose `after` changed from the piece 1 register:
 """
 
-
-def previous() -> dict[tuple[str, str, str], dict[str, str]]:
-    """The piece 1 register rows, by key."""
-    text = subprocess.run(['git', 'show', f'{PIECE1}:pos/docs/phase5_register.csv'], cwd=POS, check=True,
-                          capture_output=True, text=True).stdout  # fmt: skip
-    return {(r['dataset'], r['field'], r['category']): r for r in csv.DictReader(io.StringIO(text))}
+Changes = list[tuple[dict[str, str], dict[str, str]]]
 
 
-def after_changes(rows: list[dict[str, str]]) -> list[tuple[dict[str, str], dict[str, str]]]:
-    """(piece 1 row, row) for each row whose `after` changed."""
-    old = previous()
+def after_changes(rows: list[dict[str, str]], previous: Path) -> Changes:
+    """(previous row, row) for each row whose `after` changed."""
+    with previous.open(newline='') as fh:
+        old = {(r['dataset'], r['field'], r['category']): r for r in csv.DictReader(fh)}
     keyed = ((old.get((r['dataset'], r['field'], r['category'])), r) for r in rows)
     return [(o, r) for o, r in keyed if o is not None and o['after'] != r['after']]
 
 
-def note(rows: list[dict[str, str]]) -> str:
+def note(rows: list[dict[str, str]], changes: Changes) -> str:
     frame = pl.DataFrame(rows)
     counts = frame.group_by('outcome').agg(rows=pl.len(), open=(pl.col('API follow-up') == 'open').sum())
     n_open = sum(r['API follow-up'] == 'open' for r in rows)
     out = [NOTE_HEAD, HINTS, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
            '| --- | --- | --- | --- | --- | --- |']  # fmt: skip
-    for o, r in after_changes(rows):
+    for o, r in changes:
         after = f'`{o["after"]}` → `{r["after"]}`' if r['after'] else f'`{o["after"]}` → empty'
         values = [r['dataset'], f'`{r["field"]}`' if r['field'] else '', r['category'], r['outcome'], after,
                   f'{o["API follow-up"]} → {r["API follow-up"]}']  # fmt: skip
@@ -405,18 +383,22 @@ def main() -> None:
     parser.add_argument('evidence', type=Path, help='directory with validation/ and profile/ parquet files')
     parser.add_argument('out', type=Path, help='register CSV to write')
     parser.add_argument(
-        '--drift', type=Path, default=POS / 'docs' / 'phase5_drift_before.csv', help='pre-change drift snapshot'
+        '--drift', type=Path, default=DOCS / 'phase5_drift_before.csv', help='pre-change drift snapshot'
+    )
+    parser.add_argument(
+        '--previous', type=Path, default=DOCS / 'phase5_register_piece1.csv', help='register to list changes against'
     )
     parser.add_argument('--note', type=Path, help='also write the register as a Markdown note')
     args = parser.parse_args()
     rows = build(pl.read_csv(args.drift, infer_schema=False), Evidence(args.evidence))
+    changes = after_changes(rows, args.previous)
     with args.out.open('w', newline='') as fh:
         writer = csv.DictWriter(fh, COLUMNS, lineterminator='\n')
         writer.writeheader()
         writer.writerows(rows)
     if args.note:
-        args.note.write_text(note(rows))
-    for o, r in after_changes(rows):
+        args.note.write_text(note(rows, changes))
+    for o, r in changes:
         sys.stdout.write(f'{r["dataset"]}\t{r["field"]}\t{r["category"]}\t{o["after"]} -> {r["after"]}\t'
                          f'{o["API follow-up"]} -> {r["API follow-up"]}\n')  # fmt: skip
     opened = sum(r['API follow-up'] == 'open' for r in rows)

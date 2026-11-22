@@ -119,14 +119,14 @@ evidence,alleleOrigins[],literal_vs_string,"String kept, no Enum",String,String,
 evidence,allelicRequirements,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),eva: nulls 3539375/3670754 | eva_somatic: nulls 7917/8875 | gene_burden: nulls 26698/55959 | genomics_england: nulls 49/43053,pass:evidence.sql,none
 evidence,ancestry,literal_vs_string,"String kept, no Enum",Nullable(String),Nullable(String),gene_burden: nulls 6586/55959; 12 distinct,pass:evidence.sql,none
 evidence,assays,ppp_only,API removal (Platform; PPP only),"Array(Tuple(description Nullable(String), isHit Nullable(Bool), shortName Nullable(String)))",,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,assays[]/description,nullability,no evidence; unchanged,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,assays[]/isHit,nullability,no evidence; unchanged,Nullable(Bool),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,assays[]/shortName,nullability,no evidence; unchanged,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
+evidence,assays[]/description,nullability,superseded by ppp_only,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
+evidence,assays[]/isHit,nullability,superseded by ppp_only,Nullable(Bool),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
+evidence,assays[]/shortName,nullability,superseded by ppp_only,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,assessments,ppp_only,API removal (Platform; PPP only),Array(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
 evidence,biologicalModelAllelicComposition,nullability,evidence union (piece 2),Nullable(String),Nullable(String),impc: nulls 0/893414,pass:evidence.sql,none
 evidence,biologicalModelGeneticBackground,nullability,evidence union (piece 2),Nullable(String),Nullable(String),impc: nulls 0/893414,pass:evidence.sql,none
 evidence,biomarkerList,ppp_only,API removal (Platform; PPP only),"Array(Tuple(name String, description String))",,encore: no output in 2612-3 | ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,biomarkerList[],struct_order,no evidence; unchanged,"name, description",,encore: no output in 2612-3 | ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
+evidence,biomarkerList[],struct_order,superseded by ppp_only,"name, description",,encore: no output in 2612-3 | ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,biomarkerName,nullability,evidence union (piece 2),Nullable(String),Nullable(String),cancer_biomarkers: nulls 0/1302,pass:evidence.sql,none
 evidence,biomarkers/geneExpression,list_nullability,null list loads as [] (model unchanged),"Array(Tuple(name Nullable(String), id Nullable(String)))","Array(Tuple(id String, name String))",cancer_biomarkers: nulls 1239/1302,pass:evidence.sql,open
 evidence,biomarkers/geneExpression[],struct_order,model order (piece 2),"name, id","id, name",cancer_biomarkers: nulls 0/82,pass:evidence.sql,open
@@ -169,13 +169,13 @@ evidence,drugResponse,nullability,evidence union (piece 2),Nullable(String),Null
 evidence,evidenceDate,nullability,model nullable,Nullable(String),Nullable(String),clingen: nulls 0/4106 | crispr: nulls 0/517; distinct 2024-01-11 | encore: no output in 2612-3 | eva: nulls 0/3670754 | eva_somatic: nulls 0/8875 | gene_burden: nulls 73/55959; 16 distinct; validation not_nullable 73 | gwas_credible_sets: nulls 0/4071498 | ot_crispr: no output in 2612-3 | ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,geneticBackground,model_only,API addition (piece 2),,Nullable(String),crispr_screen: nulls 15797/21631; distinct PSAP KO,pass:evidence.sql,open
 evidence,geneticInteractionFDR,ddl_only,API removal (piece 2),Nullable(Float64),,absent: strict validation clean on every member with output,pass:evidence.sql,open
-evidence,geneticInteractionScore,nullability,no evidence; unchanged,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,geneticInteractionScore,nullability,superseded by ppp_only,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,geneticInteractionScore,ppp_only,API removal (Platform; PPP only),Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,geneticInteractionType,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,geneticInteractionType,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,geneticInteractionType,ppp_only,API removal (Platform; PPP only),Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,interactingTargetFromSourceId,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,interactingTargetFromSourceId,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,interactingTargetFromSourceId,ppp_only,API removal (Platform; PPP only),Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,interactingTargetRole,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,interactingTargetRole,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,interactingTargetRole,ppp_only,API removal (Platform; PPP only),Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
 evidence,literature,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),cancer_biomarkers: nulls 312/1302 | cancer_gene_census: nulls 16931/74341 | clinical_precedence: nulls 429855/579666 | crispr_screen: nulls 1077/21631 | eva: nulls 3635743/3670754 | eva_somatic: nulls 8300/8875 | expression_atlas: nulls 44440/238857 | gene2phenotype: nulls 144/4905 | gene_burden: nulls 73/55959 | genomics_england: nulls 12244/43053 | impc: nulls 81752/893414 | intogen: nulls 938/4223 | orphanet: nulls 547/6784 | reactome: nulls 317/10749,pass:evidence.sql,none
 evidence,literature[],literal_vs_string,"String kept, no Enum",String,String,crispr_screen: nulls 0/20554; distinct 30297964 · 34031600 · PPR387167 · ppr393667,pass:evidence.sql,none
@@ -194,17 +194,17 @@ evidence,pValueExponent,type,marker,Nullable(Int32),Nullable(Int32),"gene_burden
 evidence,pValueMantissa,nullability,evidence union (piece 2),Nullable(Float64),Nullable(Float64),"gene_burden: nulls 0/55959; min 1.0, max 9.999",pass:evidence.sql,none
 evidence,pathways[]/id,nullability,evidence union (piece 2),Nullable(String),String,reactome: nulls 0/11227,named:evidence.sql,open
 evidence,pathways[]/name,nullability,evidence union (piece 2),Nullable(String),String,reactome: nulls 0/11227,pass:evidence.sql,open
-evidence,phenotypicConsequenceLogFoldChange,nullability,no evidence; unchanged,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,phenotypicConsequenceLogFoldChange,nullability,superseded by ppp_only,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,phenotypicConsequenceLogFoldChange,ppp_only,API removal (Platform; PPP only),Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,phenotypicConsequencePValue,nullability,no evidence; unchanged,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,phenotypicConsequencePValue,nullability,superseded by ppp_only,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,phenotypicConsequencePValue,ppp_only,API removal (Platform; PPP only),Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
 evidence,phenotypicConsequenceScore,nullability,evidence union (piece 2),Nullable(Float64),Nullable(Float64),"crispr_screen: nulls 0/21631; min -37.164215444007375, max 33.61077926742325",pass:evidence.sql,none
 evidence,pmcIds,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),europepmc: nulls 7528406/27583604,pass:evidence.sql,none
-evidence,primaryProjectHit,nullability,no evidence; unchanged,Nullable(Bool),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
+evidence,primaryProjectHit,nullability,superseded by ppp_only,Nullable(Bool),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,primaryProjectHit,ppp_only,API removal (Platform; PPP only),Nullable(Bool),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,primaryProjectId,nullability,no evidence; unchanged,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
+evidence,primaryProjectId,nullability,superseded by ppp_only,Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,primaryProjectId,ppp_only,API removal (Platform; PPP only),Nullable(String),,ot_crispr_validation: no output in 2612-3,pass:evidence.sql,open
-evidence,projectDescription,nullability,no evidence; unchanged,Nullable(String),,ot_crispr: no output in 2612-3,pass:evidence.sql,open
+evidence,projectDescription,nullability,superseded by ppp_only,Nullable(String),,ot_crispr: no output in 2612-3,pass:evidence.sql,none
 evidence,projectDescription,ppp_only,API removal (Platform; PPP only),Nullable(String),,ot_crispr: no output in 2612-3,pass:evidence.sql,open
 evidence,projectId,nullability,evidence union (piece 2),Nullable(String),Nullable(String),crispr_screen: nulls 0/21631; distinct crispr_brain | encore: no output in 2612-3 | ot_crispr: no output in 2612-3 | ot_crispr_validation: no output in 2612-3,pass:evidence.sql,none
 evidence,publicationDate,nullability,model nullable,Nullable(String),Nullable(String),crispr: nulls 0/517; distinct 2024-01-11 | gene_burden: nulls 73/55959; 16 distinct; validation not_nullable 73,pass:evidence.sql,none
@@ -233,7 +233,7 @@ evidence,targetInModel,nullability,evidence union (piece 2),Nullable(String),Nul
 evidence,targetInModelEnsemblId,model_only,API addition (piece 2),,Nullable(String),impc: nulls 0/893414,pass:evidence.sql,open
 evidence,targetInModelMgiId,model_only,API addition (piece 2),,Nullable(String),impc: nulls 0/893414,pass:evidence.sql,open
 evidence,targetModulation,nullability,evidence union (piece 2),Nullable(String),Nullable(String),reactome: nulls 0/10749; distinct decreased_transcript_level · gain_of_function · increased_translational_product_level · loss_of_function · partial_loss_of_function · up_or_down | uniprot_literature: nulls 0/6396; distinct up_or_down | uniprot_variants: nulls 0/34765; distinct up_or_down,pass:evidence.sql,none
-evidence,targetRole,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,targetRole,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,targetRole,ppp_only,API removal (Platform; PPP only),Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
 evidence,textMiningSentences[],struct_order,model order (piece 2),"dEnd, tEnd, dStart, tStart, section, text","dEnd, dStart, section, tEnd, tStart, text",europepmc: nulls 0/81171305,pass:evidence.sql,open
 evidence,textMiningSentences[]/dEnd,type,marker,UInt32,UInt32,"europepmc: nulls 0/81171305; min 2, max 598",pass:evidence.sql,none
@@ -249,10 +249,10 @@ evidence,urls[]/niceName,literal_vs_string,"String kept, no Enum",Nullable(Strin
 evidence,urls[]/niceName,nullability,evidence union (piece 2),Nullable(String),Nullable(String),cancer_biomarkers: nulls 0/460 | gene_burden: nulls 0/27090; distinct AstraZeneca PheWAS Portal · BipEx browser · Broad CVDI Human Disease Portal · SCHEMA browser,pass:evidence.sql,none
 evidence,urls[]/url,nullability,evidence union (piece 2),Nullable(String),String,cancer_biomarkers: nulls 0/460 | clingen: nulls 0/4106 | gene_burden: nulls 0/27090,pass:evidence.sql,open
 evidence,validationReadouts,ppp_only,API removal (Platform; PPP only),"Array(Tuple(hsaValue Nullable(Float64), isValidated Nullable(Bool), readoutMethodName Nullable(String), screen Nullable(String)))",,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,validationReadouts[]/hsaValue,nullability,no evidence; unchanged,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,validationReadouts[]/isValidated,nullability,no evidence; unchanged,Nullable(Bool),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,validationReadouts[]/readoutMethodName,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
-evidence,validationReadouts[]/screen,nullability,no evidence; unchanged,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,open
+evidence,validationReadouts[]/hsaValue,nullability,superseded by ppp_only,Nullable(Float64),,encore: no output in 2612-3,pass:evidence.sql,none
+evidence,validationReadouts[]/isValidated,nullability,superseded by ppp_only,Nullable(Bool),,encore: no output in 2612-3,pass:evidence.sql,none
+evidence,validationReadouts[]/readoutMethodName,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
+evidence,validationReadouts[]/screen,nullability,superseded by ppp_only,Nullable(String),,encore: no output in 2612-3,pass:evidence.sql,none
 evidence,variantAminoacidDescriptions,list_nullability,null list loads as [] (model unchanged),Array(String),Array(String),reactome: nulls 9482/10749,pass:evidence.sql,none
 evidence,variantFromSourceId,model_only,API addition (piece 2),,Nullable(String),eva: nulls 0/3670754 | eva_somatic: nulls 0/8875,pass:evidence.sql,open
 evidence,variantFunctionalConsequenceFromQtlId,ddl_only,API removal (piece 2),Nullable(String),,absent: strict validation clean on every member with output,pass:evidence.sql,open

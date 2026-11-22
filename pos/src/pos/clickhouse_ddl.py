@@ -268,3 +268,31 @@ def members(pattern: str, product: str) -> list[type[DatasetModel]]:
     """The models whose `dataset_name` matches the glob and that are loaded for `product`, by name."""
     models = discover_datasets()
     return [m for name, m in sorted(models.items()) if fnmatch(name, pattern) and product in m.products]
+
+
+def landing_columns(entry: dict, product: str) -> list[tuple[str, CHType]] | None:
+    """The generated columns of a `datasets.yaml` clickhouse entry; None if it has no model.
+
+    A `glob_pattern` entry is the union of its members for `product`; any other `output/` entry is its one model,
+    whatever the model's products (a product without the output loads an empty table).
+    """
+    input_dir = entry.get('input_dir', '')
+    if not input_dir.startswith('output'):
+        return None
+    if 'glob_pattern' in entry:
+        return union_columns(members(entry['glob_pattern'].split('/')[0], product))
+    model = discover_datasets().get(input_dir.rstrip('/').rsplit('/', 1)[-1])
+    return columns(model) if model else None
+
+
+def type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
+    """The type at `a`, `a/b` or `a[]/b` (`a[]` is the element); a Tuple of `cols` for ''; None if absent."""
+    t: CHType | None = CHType('Tuple', fields=tuple(cols))
+    for part in path.split('/') if path else []:
+        name, lists = part, 0
+        while name.endswith('[]'):
+            name, lists = name[:-2], lists + 1
+        t = dict(t.fields).get(name) if t is not None else None
+        for _ in range(lists):
+            t = t.element if t is not None else None
+    return t

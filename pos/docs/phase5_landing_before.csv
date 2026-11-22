@@ -1,0 +1,451 @@
+dataset,field,ddl_type
+baseline_expression,celltypeBiosampleFromSource,Nullable(String)
+baseline_expression,celltypeBiosampleId,Nullable(String)
+baseline_expression,celltypeBiosampleParentId,Nullable(String)
+baseline_expression,datasourceId,String
+baseline_expression,datatypeId,String
+baseline_expression,distribution_score,Float64
+baseline_expression,max,Nullable(Float64)
+baseline_expression,median,Nullable(Float64)
+baseline_expression,min,Nullable(Float64)
+baseline_expression,q1,Nullable(Float64)
+baseline_expression,q3,Nullable(Float64)
+baseline_expression,qualityControls,Array(String)
+baseline_expression,specificity_score,Nullable(Float64)
+baseline_expression,targetFromSourceId,Nullable(String)
+baseline_expression,targetId,LowCardinality(String)
+baseline_expression,tissueBiosampleFromSource,Nullable(String)
+baseline_expression,tissueBiosampleId,Nullable(String)
+baseline_expression,tissueBiosampleParentId,Nullable(String)
+baseline_expression,unit,String
+biosample,ancestors,Array(String)
+biosample,biosampleId,String
+biosample,biosampleName,String
+biosample,children,Array(String)
+biosample,descendants,Array(String)
+biosample,description,Nullable(String)
+biosample,parents,Array(String)
+biosample,synonyms,Array(String)
+biosample,xrefs,Array(String)
+clinical_indication,clinicalReportIds,Array(String)
+clinical_indication,diseaseId,LowCardinality(String)
+clinical_indication,drugId,LowCardinality(String)
+clinical_indication,id,String
+clinical_indication,maxClinicalStage,LowCardinality(String)
+clinical_report,clinicalStage,LowCardinality(String)
+clinical_report,countries,Array(String)
+clinical_report,diseases,"Array(Tuple(diseaseFromSource String, diseaseId String))"
+clinical_report,drugs,"Array(Tuple(drugFromSource String, drugId String))"
+clinical_report,id,String
+clinical_report,origin,String
+clinical_report,phaseFromSource,Nullable(String)
+clinical_report,provider,String
+clinical_report,qualityControls,Array(String)
+clinical_report,sideEffects,"Array(Tuple(diseaseId Nullable(String), diseaseFromSource Nullable(String)))"
+clinical_report,source,LowCardinality(String)
+clinical_report,title,Nullable(String)
+clinical_report,trialDescription,Nullable(String)
+clinical_report,trialLiterature,"Array(Tuple(id String, type String))"
+clinical_report,trialNumberOfArms,Nullable(Int32)
+clinical_report,trialOfficialTitle,Nullable(String)
+clinical_report,trialOverallStatus,Nullable(String)
+clinical_report,trialPhase,Nullable(String)
+clinical_report,trialPrimaryPurpose,Nullable(String)
+clinical_report,trialSponsor,"Tuple(agencyClass Nullable(String), name Nullable(String))"
+clinical_report,trialStartDate,Nullable(Date)
+clinical_report,trialStopReasonCategories,Array(String)
+clinical_report,trialStudyType,Nullable(String)
+clinical_report,trialWhyStopped,Nullable(String)
+clinical_report,type,Nullable(String)
+clinical_report,url,Nullable(String)
+clinical_report,year,Nullable(Int32)
+clinical_target,clinicalReportIds,Array(String)
+clinical_target,diseases,"Array(Tuple(diseaseFromSource String, diseaseId String))"
+clinical_target,drugId,LowCardinality(String)
+clinical_target,id,String
+clinical_target,maxClinicalStage,LowCardinality(String)
+clinical_target,targetId,LowCardinality(String)
+colocalisation,betaRatioSignAverage,Nullable(Float64)
+colocalisation,chromosome,"Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')"
+colocalisation,clpp,Float64
+colocalisation,colocalisationMethod,LowCardinality(String)
+colocalisation,h3,Float64
+colocalisation,h4,Float64
+colocalisation,leftLocusId,String
+colocalisation,numberColocalisingVariants,UInt32
+colocalisation,rightLocusId,String
+colocalisation,rightStudyType,"Enum('tuqtl', 'pqtl', 'eqtl', 'sqtl', 'sctuqtl', 'scpqtl', 'sceqtl', 'scsqtl', 'gwas')"
+credible_set_variant,conditionalBeta,Nullable(Float32)
+credible_set_variant,conditionalStandardError,Nullable(Float32)
+credible_set_variant,credibleSetId,String
+credible_set_variant,effectAlleleFrequency,Nullable(Float32)
+credible_set_variant,logBayesFactor,Nullable(Float32)
+credible_set_variant,pValueExponent,Nullable(Int32)
+credible_set_variant,pValueMantissa,Nullable(Float32)
+credible_set_variant,posteriorProbability,Float32
+credible_set_variant,qualityControls,Array(LowCardinality(String))
+credible_set_variant,r2Overall,Nullable(Float32)
+credible_set_variant,reportedBeta,Nullable(Float64)
+credible_set_variant,reportedStandardError,Nullable(Float64)
+credible_set_variant,rescaledAbsBeta,Nullable(Float32)
+credible_set_variant,rescaledDirection,Nullable(Int8)
+credible_set_variant,rescaledStandardError,Nullable(Float32)
+credible_set_variant,sampleSize,Nullable(UInt32)
+credible_set_variant,variantId,String
+credible_sets,chromosome,"Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')"
+credible_sets,confidence,UInt8
+credible_sets,fineMappingMethod,"Enum('PICS', 'SuSiE', 'SuSiE-inf')"
+credible_sets,id,String
+credible_sets,leadVariantId,String
+credible_sets,locusEnd,UInt32
+credible_sets,locusStart,UInt32
+credible_sets,logBayesFactor,Nullable(Float64)
+credible_sets,purityMeanR2,Nullable(Float64)
+credible_sets,purityMinR2,Nullable(Float64)
+credible_sets,qualityControls,Array(LowCardinality(String))
+credible_sets,studyId,String
+credible_sets,studyType,"Enum('tuqtl', 'pqtl', 'eqtl', 'sqtl', 'sctuqtl', 'scpqtl', 'sceqtl', 'scsqtl', 'gwas')"
+disease,ancestors,Array(LowCardinality(String))
+disease,children,Array(String)
+disease,dbXRefs,Array(String)
+disease,descendants,Array(String)
+disease,description,Nullable(String)
+disease,id,String
+disease,name,String
+disease,obsoleteTerms,Array(String)
+disease,ontology,Tuple(isTherapeuticArea Bool)
+disease,parents,Array(LowCardinality(String))
+disease,synonyms,"Tuple(hasExactSynonym Array(Nullable(String)), hasRelatedSynonym Array(Nullable(String)), hasNarrowSynonym Array(Nullable(String)), hasBroadSynonym Array(Nullable(String)))"
+disease,therapeuticAreas,Array(LowCardinality(String))
+disease_hpo,disease,String
+disease_hpo,evidence,"Array(Tuple(aspect Nullable(String), bioCuration Nullable(String), diseaseFromSourceId String, diseaseFromSource String, diseaseName String, evidenceType Nullable(String), frequency Nullable(String), modifiers Array(String), onset Array(String), qualifierNot Bool, references Array(String), sex Nullable(String), resource String))"
+disease_hpo,phenotype,String
+drug,childChemblIds,Array(String)
+drug,crossReferences,"Array(Tuple(source String, ids Array(String)))"
+drug,description,Nullable(String)
+drug,drugType,String
+drug,id,String
+drug,maximumClinicalStage,String
+drug,molblock,Nullable(String)
+drug,name,String
+drug,parentId,Nullable(String)
+drug,synonyms,"Array(Tuple(label String, source String))"
+drug,tradeNames,"Array(Tuple(label String, source String))"
+drug_warnings,chemblIds,Array(String)
+drug_warnings,country,Nullable(String)
+drug_warnings,description,Nullable(String)
+drug_warnings,efoId,Nullable(String)
+drug_warnings,efoIdForWarningClass,Nullable(String)
+drug_warnings,efoTerm,Nullable(String)
+drug_warnings,id,Nullable(UInt32)
+drug_warnings,references,"Array(Tuple(id String, source String, url String))"
+drug_warnings,toxicityClass,Nullable(String)
+drug_warnings,warningType,String
+drug_warnings,year,Nullable(UInt16)
+enhancer_to_gene,biosampleFromSourceId,Nullable(String)
+enhancer_to_gene,biosampleId,LowCardinality(String)
+enhancer_to_gene,biosampleName,LowCardinality(String)
+enhancer_to_gene,chromosome,"Enum8('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')"
+enhancer_to_gene,datasourceId,LowCardinality(String)
+enhancer_to_gene,distanceToTss,Int32
+enhancer_to_gene,end,UInt32
+enhancer_to_gene,geneId,String
+enhancer_to_gene,intervalType,LowCardinality(String)
+enhancer_to_gene,pmid,String
+enhancer_to_gene,qualityControls,Array(String)
+enhancer_to_gene,resourceScore,"Array(Tuple(name LowCardinality(String), value Float64))"
+enhancer_to_gene,score,Float64
+enhancer_to_gene,start,UInt32
+enhancer_to_gene,studyId,String
+evidence,alleleOrigins,Array(String)
+evidence,allelicRequirements,Array(String)
+evidence,ancestry,Nullable(String)
+evidence,ancestryId,Nullable(String)
+evidence,assays,"Array(Tuple(description Nullable(String), isHit Nullable(Bool), shortName Nullable(String)))"
+evidence,assessments,Array(String)
+evidence,beta,Nullable(Float64)
+evidence,betaConfidenceIntervalLower,Nullable(Float64)
+evidence,betaConfidenceIntervalUpper,Nullable(Float64)
+evidence,biologicalModelAllelicComposition,Nullable(String)
+evidence,biologicalModelGeneticBackground,Nullable(String)
+evidence,biologicalModelId,Nullable(String)
+evidence,biomarkerList,"Array(Tuple(name String, description String))"
+evidence,biomarkerName,Nullable(String)
+evidence,biomarkers,"Tuple(geneExpression Array(Tuple(name Nullable(String), id Nullable(String))), geneticVariation Array(Tuple(id Nullable(String), name Nullable(String), functionalConsequenceId Nullable(String))))"
+evidence,biosamplesFromSource,Array(String)
+evidence,cellLineBackground,Nullable(String)
+evidence,cellType,Nullable(String)
+evidence,clinicalReportId,Nullable(String)
+evidence,clinicalSignificances,Array(String)
+evidence,clinicalStage,Nullable(String)
+evidence,cohortDescription,Nullable(String)
+evidence,cohortId,Nullable(String)
+evidence,cohortPhenotypes,Array(String)
+evidence,cohortShortName,Nullable(String)
+evidence,confidence,Nullable(String)
+evidence,contrast,Nullable(String)
+evidence,crisprScreenLibrary,Nullable(String)
+evidence,datasourceId,String
+evidence,datatypeId,String
+evidence,directionOnTarget,Nullable(String)
+evidence,directionOnTrait,Nullable(String)
+evidence,diseaseCellLines,"Array(Tuple(id Nullable(String), name Nullable(String), tissue Nullable(String), tissueId Nullable(String)))"
+evidence,diseaseFromSource,Nullable(String)
+evidence,diseaseFromSourceId,Nullable(String)
+evidence,diseaseFromSourceMappedId,Nullable(String)
+evidence,diseaseId,String
+evidence,diseaseModelAssociatedHumanPhenotypes,"Array(Tuple(id String, label String))"
+evidence,diseaseModelAssociatedModelPhenotypes,"Array(Tuple(id String, label String))"
+evidence,drugFromSource,Nullable(String)
+evidence,drugId,Nullable(String)
+evidence,drugResponse,Nullable(String)
+evidence,evidenceDate,Nullable(String)
+evidence,geneticInteractionFDR,Nullable(Float64)
+evidence,geneticInteractionScore,Nullable(Float64)
+evidence,geneticInteractionType,Nullable(String)
+evidence,id,String
+evidence,interactingTargetFromSourceId,Nullable(String)
+evidence,interactingTargetRole,Nullable(String)
+evidence,literature,Array(String)
+evidence,log2FoldChangePercentileRank,Nullable(Int32)
+evidence,mutatedSamples,"Array(Tuple(functionalConsequenceId Nullable(String), numberMutatedSamples Nullable(UInt32), numberSamplesTested Nullable(UInt32), numberSamplesWithMutationType Nullable(UInt32)))"
+evidence,oddsRatio,Nullable(Float64)
+evidence,oddsRatioConfidenceIntervalLower,Nullable(Float64)
+evidence,oddsRatioConfidenceIntervalUpper,Nullable(Float64)
+evidence,pValueExponent,Nullable(Int32)
+evidence,pValueMantissa,Nullable(Float64)
+evidence,pathways,"Array(Tuple(id Nullable(String), name Nullable(String)))"
+evidence,phenotypicConsequenceLogFoldChange,Nullable(Float64)
+evidence,phenotypicConsequencePValue,Nullable(Float64)
+evidence,phenotypicConsequenceScore,Nullable(Float64)
+evidence,pmcIds,Array(String)
+evidence,primaryProjectHit,Nullable(Bool)
+evidence,primaryProjectId,Nullable(String)
+evidence,projectDescription,Nullable(String)
+evidence,projectId,Nullable(String)
+evidence,publicationDate,Nullable(String)
+evidence,publicationFirstAuthor,Nullable(String)
+evidence,publicationYear,Nullable(UInt16)
+evidence,qualityControls,Array(String)
+evidence,reactionId,Nullable(String)
+evidence,reactionName,Nullable(String)
+evidence,releaseDate,Nullable(String)
+evidence,releaseVersion,Nullable(String)
+evidence,resourceScore,Nullable(Float64)
+evidence,score,Float64
+evidence,significantDriverMethods,Array(String)
+evidence,statisticalMethod,Nullable(String)
+evidence,statisticalMethodOverview,Nullable(String)
+evidence,statisticalTestTail,Nullable(String)
+evidence,studyCases,Nullable(UInt32)
+evidence,studyCasesWithQualifyingVariants,Nullable(UInt32)
+evidence,studyId,Nullable(String)
+evidence,studyLocusId,Nullable(String)
+evidence,studyOverview,Nullable(String)
+evidence,studySampleSize,Nullable(UInt32)
+evidence,studyStartDate,Nullable(String)
+evidence,targetFromSource,Nullable(String)
+evidence,targetFromSourceId,Nullable(String)
+evidence,targetId,String
+evidence,targetInModel,Nullable(String)
+evidence,targetModulation,Nullable(String)
+evidence,targetRole,Nullable(String)
+evidence,textMiningSentences,"Array(Tuple(dEnd UInt32, tEnd UInt32, dStart UInt32, tStart UInt32, section String, text String))"
+evidence,trialStopReasonCategories,Array(String)
+evidence,trialWhyStopped,Nullable(String)
+evidence,urls,"Array(Tuple(url Nullable(String), niceName Nullable(String)))"
+evidence,validationReadouts,"Array(Tuple(hsaValue Nullable(Float64), isValidated Nullable(Bool), readoutMethodName Nullable(String), screen Nullable(String)))"
+evidence,variantAminoacidDescriptions,Array(String)
+evidence,variantFunctionalConsequenceFromQtlId,Nullable(String)
+evidence,variantFunctionalConsequenceId,Nullable(String)
+evidence,variantId,Nullable(String)
+evidence,variantRsId,Nullable(String)
+evidence,warningMessage,Nullable(String)
+go,altIds,Array(String)
+go,ancestors,Array(String)
+go,descendants,Array(String)
+go,id,String
+go,isA,Array(String)
+go,isObsolete,Bool
+go,label,String
+go,namespace,LowCardinality(String)
+go,negativelyRegulates,Array(String)
+go,partOf,Array(String)
+go,positivelyRegulates,Array(String)
+go,regulates,Array(String)
+hpo,description,Nullable(String)
+hpo,id,String
+hpo,name,String
+hpo,namespace,Array(String)
+interaction,count,UInt8
+interaction,intA,String
+interaction,intABiologicalRole,LowCardinality(String)
+interaction,intB,String
+interaction,intBBiologicalRole,LowCardinality(String)
+interaction,interactionId,UInt64
+interaction,scoring,Nullable(Float64)
+interaction,sourceDatabase,"Enum('intact', 'reactome', 'signor', 'string')"
+interaction,speciesA,"Tuple(mnemonic LowCardinality(String), scientificName LowCardinality(String), taxonId UInt32)"
+interaction,speciesB,"Tuple(mnemonic LowCardinality(String), scientificName Nullable(LowCardinality(String)), taxonId Nullable(UInt32))"
+interaction,targetA,String
+interaction,targetB,Nullable(String)
+interaction_evidence,evidenceScore,Nullable(Float64)
+interaction_evidence,expansionMethodMiIdentifier,Nullable(String)
+interaction_evidence,expansionMethodShortName,Nullable(String)
+interaction_evidence,hostOrganismScientificName,Nullable(String)
+interaction_evidence,hostOrganismTaxId,Nullable(UInt32)
+interaction_evidence,hostOrganismTissue,"Tuple(fullName Nullable(String), shortName Nullable(String), xrefs Array(String))"
+interaction_evidence,interactionDetectionMethodMiIdentifier,String
+interaction_evidence,interactionDetectionMethodShortName,String
+interaction_evidence,interactionId,UInt64
+interaction_evidence,interactionIdentifier,Nullable(String)
+interaction_evidence,interactionResources,"Tuple(databaseVersion LowCardinality(String), sourceDatabase LowCardinality(String))"
+interaction_evidence,interactionScore,Float64
+interaction_evidence,interactionTypeMiIdentifier,Nullable(String)
+interaction_evidence,interactionTypeShortName,Nullable(String)
+interaction_evidence,participantDetectionMethodA,"Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))"
+interaction_evidence,participantDetectionMethodB,"Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))"
+interaction_evidence,pubmedId,Nullable(String)
+l2g_predictions,credibleSetId,String
+l2g_predictions,features,"Array(Tuple(name LowCardinality(String), value Float64, shapValue Float64))"
+l2g_predictions,geneId,String
+l2g_predictions,score,Float64
+l2g_predictions,shapBaseValue,Float64
+literature_entity_lut,date,Date
+literature_entity_lut,day,UInt8
+literature_entity_lut,keywordId,String
+literature_entity_lut,keywordType,FixedString(2)
+literature_entity_lut,month,UInt8
+literature_entity_lut,pmcid,Nullable(String)
+literature_entity_lut,pmid,String
+literature_entity_lut,relevance,Float64
+literature_entity_lut,year,UInt16
+mechanism_of_action,actionType,Nullable(String)
+mechanism_of_action,chemblIds,Array(String)
+mechanism_of_action,curation,String
+mechanism_of_action,mechanismOfAction,String
+mechanism_of_action,references,"Array(Tuple(ids Array(String), source String, urls Array(String)))"
+mechanism_of_action,targetName,Nullable(String)
+mechanism_of_action,targetType,Nullable(String)
+mechanism_of_action,targets,Array(String)
+mouse_phenotypes,biologicalModels,"Array(Tuple(allelicComposition String, geneticBackground String, id Nullable(String), literature Array(String)))"
+mouse_phenotypes,modelPhenotypeClasses,"Array(Tuple(id String, label String))"
+mouse_phenotypes,modelPhenotypeId,String
+mouse_phenotypes,modelPhenotypeLabel,String
+mouse_phenotypes,targetFromSourceId,String
+mouse_phenotypes,targetInModel,String
+mouse_phenotypes,targetInModelEnsemblId,Nullable(String)
+mouse_phenotypes,targetInModelMgiId,String
+otar_projects,efo_id,String
+otar_projects,projects,"Array(Tuple(otar_code String, status Nullable(String), project_name Nullable(String), reference String, integrates_data_PPP Nullable(Bool)))"
+pharmacogenomics,datasourceId,LowCardinality(String)
+pharmacogenomics,datatypeId,LowCardinality(String)
+pharmacogenomics,drugs,"Array(Tuple(drugId LowCardinality(String), drugFromSource LowCardinality(String)))"
+pharmacogenomics,evidenceLevel,LowCardinality(String)
+pharmacogenomics,genotype,Nullable(String)
+pharmacogenomics,genotypeAnnotationText,Nullable(String)
+pharmacogenomics,genotypeId,Nullable(String)
+pharmacogenomics,haplotypeFromSourceId,Nullable(String)
+pharmacogenomics,haplotypeId,Nullable(String)
+pharmacogenomics,isDirectTarget,Bool
+pharmacogenomics,literature,Array(String)
+pharmacogenomics,pgxCategory,LowCardinality(String)
+pharmacogenomics,phenotypeFromSourceId,Nullable(String)
+pharmacogenomics,phenotypeText,Nullable(String)
+pharmacogenomics,studyId,Nullable(String)
+pharmacogenomics,targetFromSourceId,Nullable(String)
+pharmacogenomics,variantAnnotation,"Array(Tuple(baseAlleleOrGenotype Nullable(String), comparisonAlleleOrGenotype Nullable(String), directionality Nullable(String), effect Nullable(String), effectDescription Nullable(String), effectType Nullable(String), entity Nullable(String), literature Nullable(String)))"
+pharmacogenomics,variantFunctionalConsequenceId,Nullable(String)
+pharmacogenomics,variantId,Nullable(String)
+pharmacogenomics,variantRsId,Nullable(String)
+pharmacovigilance,chembl_id,String
+pharmacovigilance,count,UInt32
+pharmacovigilance,critval,Float64
+pharmacovigilance,event,LowCardinality(String)
+pharmacovigilance,llr,Float64
+pharmacovigilance,meddraCode,LowCardinality(String)
+so,id,LowCardinality(String)
+so,label,LowCardinality(String)
+studies,analysisFlags,Array(String)
+studies,backgroundTraitFromSourceMappedIds,Array(String)
+studies,biosampleFromSourceId,Nullable(String)
+studies,cohorts,Array(String)
+studies,condition,Nullable(LowCardinality(String))
+studies,discoverySamples,"Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))"
+studies,diseaseIds,Array(String)
+studies,geneId,Nullable(String)
+studies,hasSumstats,Nullable(Bool)
+studies,initialSampleSize,Nullable(String)
+studies,ldPopulationStructure,"Array(Tuple(ldPopulation LowCardinality(String), relativeSampleSize Nullable(Float64)))"
+studies,nCases,Nullable(UInt32)
+studies,nControls,Nullable(UInt32)
+studies,nSamples,Nullable(UInt32)
+studies,projectId,String
+studies,publicationDate,Nullable(String)
+studies,publicationFirstAuthor,Nullable(String)
+studies,publicationJournal,Nullable(LowCardinality(String))
+studies,publicationTitle,Nullable(String)
+studies,pubmedId,Nullable(String)
+studies,qualityControls,Array(String)
+studies,replicationSamples,"Array(Tuple(ancestry LowCardinality(String), sampleSize UInt32))"
+studies,studyId,String
+studies,studyType,"Enum('tuqtl', 'pqtl', 'eqtl', 'sqtl', 'sctuqtl', 'scpqtl', 'sceqtl', 'scsqtl', 'gwas')"
+studies,summarystatsLocation,Nullable(String)
+studies,sumstatQCValues,"Array(Tuple(QCCheckName String, QCCheckValue Float64))"
+studies,traitFromSource,String
+studies,traitFromSourceMappedIds,Array(String)
+target_essentiality,depMapEssentiality,"Array(Tuple(screens Array(Tuple(cellLineName Nullable(String), depmapId Nullable(String), diseaseCellLineId Nullable(String), diseaseFromSource Nullable(String), expression Nullable(Float64), geneEffect Nullable(Float64), mutation Nullable(String))), tissueId Nullable(String), tissueName Nullable(String)))"
+target_essentiality,isEssential,Nullable(Bool)
+target_essentiality,targetId,String
+target_prioritisation,celltypeDistribution,Nullable(Float64)
+target_prioritisation,celltypeSpecificity,Nullable(Float64)
+target_prioritisation,geneticConstraint,Nullable(Float64)
+target_prioritisation,hasHighQualityChemicalProbes,Nullable(UInt8)
+target_prioritisation,hasLigand,Nullable(UInt8)
+target_prioritisation,hasPocket,Nullable(UInt8)
+target_prioritisation,hasSafetyEvent,Nullable(Int8)
+target_prioritisation,hasSmallMoleculeBinder,Nullable(UInt8)
+target_prioritisation,isCancerDriverGene,Nullable(Int8)
+target_prioritisation,isInMembrane,Nullable(UInt8)
+target_prioritisation,isSecreted,Nullable(UInt8)
+target_prioritisation,maxClinicalStage,Nullable(Float64)
+target_prioritisation,mouseKOScore,Nullable(Float64)
+target_prioritisation,mouseOrthologMaxIdentityPercentage,Nullable(Float64)
+target_prioritisation,paralogMaxIdentityPercentage,Nullable(Float64)
+target_prioritisation,targetId,String
+target_prioritisation,tissueDistribution,Nullable(Float64)
+target_prioritisation,tissueSpecificity,Nullable(Float64)
+transcript,alphafoldIds,Array(String)
+transcript,biotype,LowCardinality(String)
+transcript,chromosome,"Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')"
+transcript,dbXrefs,"Array(Tuple(id String, source String))"
+transcript,end,UInt32
+transcript,exons,"Array(Tuple(exonId String, chromosome Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT'), start UInt32, end UInt32, strand Enum8('-1' = -1, '0' = 0, '1' = 1)))"
+transcript,flags,"Array(Tuple(label Nullable(String), value Nullable(String)))"
+transcript,isEnsemblCanonical,Bool
+transcript,proteinId,Nullable(String)
+transcript,start,UInt32
+transcript,strand,"Enum8('-1' = -1, '0' = 0, '1' = 1)"
+transcript,targetId,String
+transcript,transcriptId,String
+transcript,transcriptionStartSite,UInt32
+transcript,uniprotIsoformIds,Array(String)
+transcript,uniprotSwissprotIds,Array(String)
+transcript,uniprotTremblIds,Array(String)
+variants,alleleFrequencies,"Array(Tuple(populationName Nullable(String), alleleFrequency Nullable(Float64)))"
+variants,alternateAllele,String
+variants,chromosome,"Enum('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'MT')"
+variants,dbXrefs,"Array(Tuple(id Nullable(String), source Nullable(String)))"
+variants,hgvsId,Nullable(String)
+variants,mostSevereConsequenceId,String
+variants,position,UInt32
+variants,referenceAllele,String
+variants,rsIds,Array(String)
+variants,transcriptConsequences,"Array(Tuple(variantFunctionalConsequenceIds Array(String), aminoAcidChange Nullable(String), uniprotAccessions Array(String), isEnsemblCanonical Bool, codons Nullable(String), distanceFromFootprint Int32, distanceFromTss Int32, targetId Nullable(String), impact Nullable(String), transcriptId Nullable(String), lofteePrediction Nullable(String), transcriptIndex UInt32, consequenceScore Float64))"
+variants,variantDescription,String
+variants,variantEffect,"Array(Tuple(method Nullable(String), assessment Nullable(String), score Nullable(Float64), assessmentFlag Nullable(String), targetId Nullable(String), normalisedScore Nullable(Float64)))"
+variants,variantId,String
+w2v,category,String
+w2v,norm,Float64
+w2v,vector,Array(Float64)
+w2v,word,String

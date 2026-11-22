@@ -160,7 +160,8 @@ in the same PR.
 (`config/clickhouse/`). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
 category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
 column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
-`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes) and the 2612-3 evidence; the
+`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes), `docs/phase5_landing_before.csv` (the
+hand-written landing DDL at the end of piece 1), the generator and the 2612-3 evidence; it reads no landing DDL. The
 builder's docstring says where the evidence is. The register's companion note in the vault
 (`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
 
