@@ -5,4 +5,4 @@ credible_sets,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chr
 credible_set_variant,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
 enhancer_to_gene,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
 variants,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT` (also `EvidenceEva.variantChromosome`)"
-homology,isHighConfidence,"`isHighConfidence` String → Bool: changes in BigQuery, the published parquet and croissant; ClickHouse `targets` keeps `'1'`/`'0'` via pts `target_view` until piece 3"
+homology,isHighConfidence,"`isHighConfidence` String → Bool: changes in BigQuery, the published parquet and croissant; ClickHouse `targets` now serves `Bool` too"
