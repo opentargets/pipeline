@@ -2,11 +2,14 @@
 
 Usage, from `pos/`::
 
-    uv run python scripts/build_register.py <drift.csv> <evidence_dir> docs/phase5_register.csv [--note <note.md>]
+    uv run python scripts/build_register.py <evidence_dir> docs/phase5_register.csv \
+        [--drift <drift.csv>] [--note <note.md>]
 
-`drift.csv` is `scripts/schema_drift.py` output from before the piece 1 model changes (e9133802), so that rows
-since resolved by a model change keep their register row. `evidence_dir` holds the `validation/` and `profile/`
-parquet files of `pts.schemas.dataset.profile`. `--note` also writes the register as a Markdown note.
+`--drift` defaults to `docs/phase5_drift_before.csv`: `scripts/schema_drift.py` output from before the piece 1 model
+changes (e9133802), so that rows since resolved by a model change keep their register row. `evidence_dir` holds the
+`validation/` and `profile/` parquet files of `pts.schemas.dataset.profile` from the 2612-3 run:
+`gs://open-targets-pos-scratch/phase5/2612-3/{validation,profile}/` (7-day lifecycle, so copy them locally first).
+`--note` also writes the register as a Markdown note.
 
 One row per `(dataset, field, category)`, evidence models merged. `before` is the landing DDL type, `after` the
 type generated from the current model: its `ClickHouseType` or dtype; for the evidence union, nullable if any
@@ -173,7 +176,7 @@ class Evidence:
             if not values:
                 bits.append('no values')
             elif len(values) <= 8:
-                bits.append(f'distinct {", ".join(map(str, values))}')
+                bits.append(f'distinct {" · ".join(map(str, values))}')
             else:
                 bits.append(f'{len(values)} distinct')
         fail = self.failures.get((model, path))
@@ -312,6 +315,33 @@ the column (column order excepted); else `none`.
 """
 
 
+HINTS = """
+## Decisions pending (David)
+
+- `interactionId`: UInt64 in ClickHouse, negative in the data. Following the model (Int64) changes the value the API \
+sees for every negative id; or keep a deliberate `UInt64` marker and accept the wraparound.
+- `directLocationIds` / `indirectLocationIds`: `disease.sql` names them but pts drops them (the API serves empty \
+arrays today). Drop them from `disease.sql` and the API, or keep them as derived empty arrays in the pos SQL.
+
+## Piece 2 hints
+
+- `interaction.count` is UInt8 with observed max 227 and no `le` guard: ClickHouse would wrap at 256. Consider \
+`le=255` in the model.
+- `LowCardinality` markers hold the non-null type. On a nullable field emit `LowCardinality(Nullable(String))`; \
+`Nullable(LowCardinality(..))` is rejected by ClickHouse. Affects pharmacogenomics `drugs[].drugId`, study \
+`publicationJournal` and `condition`, interaction `speciesB.scientificName`.
+- Fields of a nullable struct stay Nullable (clinical_report `trialSponsor/*`, clinical_target `diseases[]`): a \
+Tuple cannot be NULL, so a non-null field would turn a null struct into `''`.
+- The evidence-union types come from the first member with output; derive the real union and expect a test \
+failure where it disagrees.
+- The 3 `chromosome` Enums stay open strings (API open); `transcript.strand` and `exons[].strand` get an Enum8 marker.
+- Rows with no 2612-3 evidence take `after` from the model; check those datasets' next outputs first (otar, the \
+assays and validationReadouts of ot_crispr_validation and encore, the encore struct order).
+- Model-nullable scalars all have nulls in the data, so they stay nullable and ClickHouse becomes Nullable.
+- `struct_order` rows are `open` where served (Tuple field order is part of the type); `column_order` is `none`.
+"""
+
+
 def _cell(value: str) -> str:
     return value.replace('|', '\\|').replace('\n', ' ')
 
@@ -320,7 +350,7 @@ def note(rows: list[dict[str, str]]) -> str:
     frame = pl.DataFrame(rows)
     counts = frame.group_by('outcome').agg(rows=pl.len(), open=(pl.col('API follow-up') == 'open').sum())
     n_open = sum(r['API follow-up'] == 'open' for r in rows)
-    out = [NOTE_HEAD, '## Summary', '', f'{len(rows)} rows, {n_open} with API follow-up `open`.', '',
+    out = [NOTE_HEAD, HINTS, '## Summary', '', f'{len(rows)} rows, {n_open} with API follow-up `open`.', '',
            '| outcome | rows | open |', '| --- | --- | --- |']  # fmt: skip
     out += [f'| {r["outcome"]} | {r["rows"]} | {r["open"]} |' for r in counts.sort('outcome').iter_rows(named=True)]
     out += ['', '## Register', '', f'| {" | ".join(COLUMNS)} |', f'|{" --- |" * len(COLUMNS)}']
@@ -334,9 +364,11 @@ def note(rows: list[dict[str, str]]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split('\n', 1)[0])
-    parser.add_argument('drift', type=Path, help='schema_drift.py output from before the model changes')
     parser.add_argument('evidence', type=Path, help='directory with validation/ and profile/ parquet files')
     parser.add_argument('out', type=Path, help='register CSV to write')
+    parser.add_argument(
+        '--drift', type=Path, default=POS / 'docs' / 'phase5_drift_before.csv', help='pre-change drift snapshot'
+    )
     parser.add_argument('--note', type=Path, help='also write the register as a Markdown note')
     args = parser.parse_args()
     rows = build(pl.read_csv(args.drift, infer_schema=False), Evidence(args.evidence))

@@ -154,6 +154,22 @@ destinations, for test runs that must not touch the public release:
 dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
 in the same PR.
 
+## Schema drift and the change register (phase 5)
+
+`scripts/schema_drift.py` lists every disagreement between the dataset models and the ClickHouse landing DDL
+(`config/clickhouse/`). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
+category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
+column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
+`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes) and the 2612-3 evidence; the
+builder's docstring says where the evidence is. The register's companion note in the vault
+(`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
+
+`tests/test_schema_register.py` requires a register row for every snapshot row and for every disagreement
+`drift()` finds now. If it fails with "new schema drift", a later model or DDL change opened a disagreement:
+add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
+serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`) and set the follow-up
+to `open` if the ClickHouse type changes and a serving script reads the column. Do not regenerate the file.
+
 ## Croissant
 
 `pos.croissant` (`src/pos/croissant/`, script `ot_croissant`) builds the

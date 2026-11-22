@@ -17,6 +17,7 @@ from ot_datamodels.spec import dataset_spec, walk
 ROOT = Path(__file__).parents[1]
 CLICKHOUSE = ROOT / 'config' / 'clickhouse'
 REGISTER = ROOT / 'docs' / 'phase5_register.csv'
+SNAPSHOT = ROOT / 'docs' / 'phase5_drift_before.csv'
 COLUMNS = ['dataset', 'field', 'category', 'outcome', 'before', 'after', 'evidence', 'serving read', 'API follow-up']
 #: Outcomes that are a model change, so their disagreement leaves drift().
 MODEL_CHANGES = {'marker', 'model nullable'}
@@ -47,6 +48,13 @@ def drift() -> dict[tuple[str, str, str], dict[str, str]]:
     for r in frame.iter_rows(named=True):
         rows.setdefault((r['dataset'], r['field'], r['category']), r)
     return rows
+
+
+@pytest.fixture(scope='module')
+def snapshot() -> set[tuple[str, str, str]]:
+    """(dataset, field, category) of every disagreement before the piece 1 model changes (e9133802)."""
+    with SNAPSHOT.open(newline='') as fh:
+        return {(r['dataset'], r['field'], r['category']) for r in csv.DictReader(fh)}
 
 
 @pytest.fixture(scope='module')
@@ -93,11 +101,17 @@ def _check_against_drift(row: dict[str, str], found: dict[str, str]) -> None:
             assert after.nullable == nullable, f'{key}: after should be {"" if nullable else "non-"}nullable'
 
 
-def test_register_covers_every_disagreement(drift, register):
+def test_register_covers_every_disagreement(drift, snapshot, register):
     keys = [(r['dataset'], r['field'], r['category']) for r in register]
     assert len(keys) == len(set(keys)), 'duplicate register rows'
-    missing = sorted(set(drift) - set(keys))
-    assert not missing, f'disagreements with no register row: {missing}'
+    unregistered = sorted(snapshot - set(keys))
+    assert not unregistered, f'snapshot rows with no register row: {unregistered}'
+    new = sorted(set(drift) - snapshot - set(keys))
+    assert not new, (
+        f'new schema drift with no register row: {new}. Add a row by hand to pos/docs/phase5_register.csv '
+        f'with columns {", ".join(COLUMNS)} (outcome says what changed; before/after are ClickHouse types; '
+        f'evidence a short data summary; serving read from schema_drift.py; API follow-up open or none).'
+    )
 
     for row, key in zip(register, keys, strict=True):
         served = row['serving read'] != 'no' and row['category'] != 'column_order'
@@ -117,3 +131,11 @@ def test_register_covers_every_disagreement(drift, register):
             assert after in marked, f'{key}: no such marker'
         else:
             assert any(n.nullable for n in nodes), f'{key}: not nullable in the model'
+
+
+def test_every_clickhouse_marker_parses():
+    """Piece 2 generates DDL from the markers, so each one must parse."""
+    for name, model in discover_datasets().items():
+        for path, node in walk(dataset_spec(model)):
+            if node.clickhouse:
+                assert schema_drift.parse_type(node.clickhouse), f'{name}.{path}: {node.clickhouse}'
