@@ -13,6 +13,7 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
+from pos.clickhouse_ddl import is_declared
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
@@ -286,4 +287,27 @@ def test_no_hand_written_landing_ddl():
     for name, entry in DATASETS['clickhouse'].items():
         if 'preload_script' in entry:
             assert entry['preload_script'].startswith('config/clickhouse/scripts/'), name
+
+
+DECLARED_LOADS = 'explode load declared datasets'
+
+
+def test_undeclared_loads_wait_for_the_declared_ones():
+    """Every load of an undeclared dataset requires the declared explode, directly or through another task; a
+    declared dataset outside that explode is product-gated."""
+    tasks = {t['name']: t for t in CONFIG['steps']['backend_clickhouse']}
+    assert all(is_declared(DATASETS['clickhouse'][d]) for d in tasks[DECLARED_LOADS]['foreach'])
+
+    def waits(name: str) -> bool:
+        requires = tasks[name].get('requires', [])
+        return DECLARED_LOADS in requires or any(waits(r) for r in requires if r in tasks)
+
+    for name, task in tasks.items():
+        if name == DECLARED_LOADS or not name.startswith(('clickhouse_load', 'explode ')):
+            continue
+        datasets = task.get('foreach', [task.get('dataset')])
+        if all(is_declared(DATASETS['clickhouse'][d]) for d in datasets):
+            assert task.get('products'), f'{name}: a declared dataset outside {DECLARED_LOADS}'
+            continue
+        assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
 
