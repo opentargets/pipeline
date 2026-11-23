@@ -101,7 +101,7 @@ def validate_declarations(model: 'type[DatasetModel]') -> list[str]:
         if source is None:
             problems.append(f'{where}: source_table {dictionary.source_table!r} is not declared on the model')
             continue
-        known = fields | set(_table_columns(source, fields))
+        known = set(_table_columns(source, fields))
         for c in (dictionary.key, *dictionary.attributes):
             if dictionary.source_columns.get(c, c) not in known:
                 problems.append(f'{where}: column {c!r} is not a column of {dictionary.source_table!r}')

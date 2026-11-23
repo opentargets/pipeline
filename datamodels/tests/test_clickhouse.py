@@ -22,10 +22,27 @@ def test_valid_declarations_have_no_problems():
         ClickHouseTable('sample', 'rocksdb', key='id', columns=('id', 'name'), renames={'name': 'label'}),
         ClickHouseTable('sample_by_name', 'mergetree', order_by=('name', 'id'), primary_key=('name',)),
         ClickHouseDictionary(
-            'sample_names', 'sample', key='id', attributes=('label',), source_columns={'label': 'name'}
+            'sample_names', 'sample', key='id', attributes=('title',), source_columns={'title': 'label'}
         ),
     )
     assert validate_declarations(model) == []
+
+
+def _dictionary_problems(**dictionary) -> list[str]:
+    table = ClickHouseTable('sample', 'rocksdb', key='id', columns=('id', 'name'), renames={'name': 'label'})
+    return validate_declarations(_model(table, ClickHouseDictionary('d', 'sample', **dictionary)))
+
+
+def test_dictionary_column_dropped_by_columns_is_a_problem():
+    problems = _dictionary_problems(key='id', attributes=('extra',))
+    assert problems == ["Sample.d: column 'extra' is not a column of 'sample'"]
+
+
+def test_dictionary_column_renamed_away_is_a_problem():
+    problems = _dictionary_problems(key='id', attributes=('name',))
+    assert problems == ["Sample.d: column 'name' is not a column of 'sample'"]
+    problems = _dictionary_problems(key='id', attributes=('title',), source_columns={'title': 'name'})
+    assert problems == ["Sample.d: column 'title' is not a column of 'sample'"]
 
 
 def test_rocksdb_needs_a_key():
