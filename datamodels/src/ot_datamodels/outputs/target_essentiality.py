@@ -8,7 +8,16 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import (
+    Bioregistry,
+    ClickHouseTable,
+    ClickHouseType,
+    DatasetModel,
+    PolarsDtype,
+    PrimaryKey,
+    Reference,
+    StructModel,
+)
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 
 
@@ -58,6 +67,9 @@ class TargetEssentiality(DatasetModel):
         'can be considered dependencies'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
+        ClickHouseTable('target_essentiality', 'rocksdb', key='targetId'),
+    )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000000003',
         'isEssential': False,

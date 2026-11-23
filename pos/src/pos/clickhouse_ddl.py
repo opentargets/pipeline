@@ -4,7 +4,7 @@ import argparse
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -318,7 +318,7 @@ def table_sql(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landin
         engine = f'MergeTree() ORDER BY ({_names(table.order_by)})'
         if table.primary_key:
             engine += f' PRIMARY KEY ({_names(table.primary_key)})'
-        if any(types[c].nullable for c in table.order_by):
+        if table.allow_nullable_key or any(types[c].nullable for c in table.order_by):
             engine += ' SETTINGS allow_nullable_key = 1'
     select = ', '.join(
         f'{_name(c)} AS {_name(table.renames[c])}' if c in table.renames else _name(c) for c in _kept(table, cols)
@@ -337,13 +337,16 @@ def table_sql(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landin
 
 
 def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) -> str:
-    """`CREATE DICTIONARY` over its source table; `cols` are the table's own. Renames go through EXPRESSION."""
+    """`CREATE DICTIONARY` over its source table; `cols` are the table's own. Renames go through EXPRESSION.
+
+    Columns take their source's type without LowCardinality, which dictionaries do not accept.
+    """
     types = dict(cols)
     parts = []
     for name in (d.key, *d.attributes):
         source = d.source_columns.get(name, name)
         expression = f' EXPRESSION {_name(source)}' if source != name else ''
-        parts.append(f'{_name(name)} {render(types[source])}{expression}')
+        parts.append(f'{_name(name)} {render(replace(types[source], low_cardinality=False))}{expression}')
     return (
         f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
         f"SOURCE(CLICKHOUSE(TABLE '{d.source_table}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
@@ -402,6 +405,66 @@ def declared_dictionaries(model: type[DatasetModel], tables: Sequence[ClickHouse
     """The model's dictionaries over the given tables."""
     names = {t.name for t in tables}
     return [d for d in model.clickhouse if isinstance(d, ClickHouseDictionary) and d.source_table in names]
+
+
+def entry_tables(entry: Mapping) -> list[ClickHouseTable]:
+    """The tables listed under `clickhouse` in a `datasets.yaml` entry."""
+    known = {f.name for f in fields(ClickHouseTable)}
+    tables = []
+    for t in entry.get('clickhouse', []):
+        if unknown := set(t) - known:
+            raise ValueError(f'{entry["table"]}: unknown ClickHouseTable fields {sorted(unknown)}')
+        tables.append(
+            ClickHouseTable(
+                name=t['name'],
+                engine=t['engine'],
+                key=t.get('key'),
+                order_by=tuple(t.get('order_by', ())),
+                primary_key=tuple(t.get('primary_key', ())),
+                columns=tuple(t['columns']) if 'columns' in t else None,
+                renames=t.get('renames', {}),
+                where=t.get('where'),
+                optimize=t.get('optimize', False),
+                products=tuple(t['products']) if 'products' in t else None,
+                allow_nullable_key=t.get('allow_nullable_key', False),
+            )
+        )
+    return tables
+
+
+def is_declared(entry: Mapping) -> bool:
+    """Whether the entry's tables are declared, on its model or under its `clickhouse`."""
+    model = entry_model(entry)
+    return bool(model.clickhouse) if model is not None else bool(entry.get('clickhouse'))
+
+
+def declarations(entry: Mapping, product: str) -> tuple[list[ClickHouseTable], list[ClickHouseDictionary]]:
+    """The tables and dictionaries an entry declares for `product`.
+
+    A `model` entry's come from its model; any other entry's from its `clickhouse` list, which has no dictionaries.
+    """
+    if (model := entry_model(entry)) is not None:
+        tables = declared_tables(model, product)
+        return tables, declared_dictionaries(model, tables)
+    return [t for t in entry_tables(entry) if t.products is None or product in t.products], []
+
+
+def declared_sql(entry: Mapping, product: str) -> list[str]:
+    """The statements that build an entry's declared tables and dictionaries from its filled landing table.
+
+    They end by dropping the landing table. An undeclared entry has none.
+    """
+    tables, dictionaries = declarations(entry, product)
+    if not tables:
+        return []
+    cols = landing_columns(entry, product) or []
+    landing = entry['table']
+    by_name = {t.name: t for t in tables}
+    statements = [drop_dictionary_sql(d) for d in dictionaries]
+    for table in tables:
+        statements += table_sql(table, cols, landing)
+    statements += [dictionary_sql(d, table_columns(by_name[d.source_table], cols)) for d in dictionaries]
+    return [*statements, f'DROP TABLE {_name(landing)} SYNC']
 
 
 def member_table(model: type[DatasetModel]) -> str:

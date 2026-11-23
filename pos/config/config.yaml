@@ -27,48 +27,51 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    - name: explode load all datasets
+    # tables declared on the models; the explode below runs the serving scripts after them
+    - name: explode load declared datasets
       requires:
         - sync_bucket etl output files
         - sync_bucket etl view files
         - clickhouse_create_database release database
       foreach:
         - baseline_expression
-        - colocalisation
-        - disease_hpo
-        - drug_warnings
+        - biosample
+        - clinical_indication
+        - clinical_report
+        - clinical_target
         - enhancer_to_gene
         - evidence
         - go
         - hpo
         - literature_entity_lut
-        - mechanism_of_action
-        - mouse_phenotypes
-        - pharmacovigilance
         - otar_projects
-        - protein_coding_coords
         - so
-        - transcript
+        - target_essentiality
         - w2v
-        - clinical_indication
-        - clinical_report
-        - clinical_target
       do:
         - name: clickhouse_load clickhouse load ${each}
           dataset: ${each}
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
-    # top level, not in the explode: later tasks require them by name
-    - name: clickhouse_load clickhouse load biosample
+    - name: explode load all datasets
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: biosample
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
+        - explode load declared datasets
+      foreach:
+        - colocalisation
+        - disease_hpo
+        - drug_warnings
+        - mechanism_of_action
+        - mouse_phenotypes
+        - pharmacovigilance
+        - protein_coding_coords
+        - transcript
+      do:
+        - name: clickhouse_load clickhouse load ${each}
+          dataset: ${each}
+          clickhouse_database: ${database_namespace}
+          data_dir_parent: ${local_data}
+          product: ${product}
     - name: clickhouse_load clickhouse load credible_set_variant
       requires:
         - sync_bucket etl output files
@@ -105,15 +108,6 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
-    - name: clickhouse_load clickhouse load target_essentiality
-      requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: target_essentiality
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load association_time_series
       products: [ppp]
       requires:
@@ -126,7 +120,7 @@ steps:
       product: ${product}
     - name: clickhouse_load clickhouse target_prioritisation
       requires:
-        - clickhouse_load clickhouse load target_essentiality
+        - explode load declared datasets
       dataset: target_prioritisation
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
@@ -193,7 +187,7 @@ steps:
     - name: clickhouse_load clickhouse load variant_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
-        - clickhouse_load clickhouse load biosample
+        - explode load declared datasets
         - clickhouse_load clickhouse load studies
         - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load disease
@@ -219,7 +213,7 @@ steps:
         - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load studies
-        - clickhouse_load clickhouse load biosample
+        - explode load declared datasets
       dataset: target_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}

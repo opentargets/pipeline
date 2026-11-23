@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey
+from ot_datamodels import Bioregistry, ClickHouseTable, DatasetModel, PolarsDtype, PrimaryKey
 from ot_datamodels.vocabularies import GoNamespace
 
 
@@ -23,6 +23,7 @@ class Go(DatasetModel):
         'metadata'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('gene_ontology', 'rocksdb', key='id'),)
     example: ClassVar[dict] = {
         'id': 'GO:0000001',
         'label': 'mitochondrion inheritance',

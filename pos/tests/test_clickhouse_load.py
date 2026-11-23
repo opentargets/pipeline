@@ -340,6 +340,47 @@ def test_evidence_loads_each_member_into_its_own_table(tmp_path, monkeypatch, in
         assert f'{table}: 7 rows' in info
 
 
+EVIDENCE_DECLARED = EVIDENCE + (
+    '    clickhouse:\n'
+    '      - {name: evidence, engine: rocksdb, key: id}\n'
+    '      - {name: evidence_by_score, engine: mergetree, order_by: [score], columns: [score, id], '
+    'where: score IS NOT NULL}\n'
+)
+
+
+def test_declared_union_is_built_from_the_union_after_a_key_check(tmp_path, monkeypatch):
+    task, events = _generated_task(tmp_path, monkeypatch, EVIDENCE_DECLARED, {'evidence_a': 1, 'evidence_b': 1})
+    _run(task)
+    commands = [e[1] for e in events if e[0] == 'command' and not e[1].startswith('SELECT count()')]
+    assert commands[0] == 'DROP TABLE IF EXISTS `evidence_log` SYNC'
+    union = commands.index(UNION_CREATE)
+    check = commands.index(
+        "SELECT throwIf(count() != uniqExact(tuple(`id`)), 'duplicate id in evidence') FROM `evidence_log`"
+    )
+    assert union < check
+    assert commands[check + 1 :] == [
+        'DROP TABLE IF EXISTS `evidence` SYNC',
+        (
+            'CREATE TABLE `evidence` (`id` String, `score` Nullable(Float64), `extra` Nullable(String)) '
+            'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
+        ),
+        'INSERT INTO `evidence` SELECT `id`, `score`, `extra` FROM `evidence_log`',
+        'DROP TABLE IF EXISTS `evidence_by_score` SYNC',
+        (
+            'CREATE TABLE `evidence_by_score` (`score` Nullable(Float64), `id` String) '
+            'ENGINE = MergeTree() ORDER BY (`score`) SETTINGS allow_nullable_key = 1'
+        ),
+        'INSERT INTO `evidence_by_score` SELECT `score`, `id` FROM `evidence_log` WHERE score IS NOT NULL',
+        'DROP TABLE `evidence_log` SYNC',
+    ]
+
+
+def test_unknown_union_declaration_fields_fail(tmp_path, monkeypatch):
+    datasets = EVIDENCE + '    clickhouse:\n      - {name: e, engine: rocksdb, key: id, keys: [id]}\n'
+    with pytest.raises(ValueError, match=r"evidence_log: unknown ClickHouseTable fields \['keys'\]"):
+        _generated_task(tmp_path, monkeypatch, datasets, {'evidence_a': 1, 'evidence_b': 1})
+
+
 def test_evidence_insert_lists_only_member_columns(tmp_path, monkeypatch):
     task, events = _generated_task(tmp_path, monkeypatch, EVIDENCE, {'evidence_a': 1, 'evidence_b': 1})
     _run(task)
