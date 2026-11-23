@@ -34,7 +34,7 @@ def test_release_config_loads_yaml():
     assert config.opensearch_machine_type == 'n2d-highmem-32'
     assert (config.clickhouse_work_disk_gb, config.opensearch_work_disk_gb) == (100, 100)
     assert config.backend_max_run_hours == 4
-    assert config.clickhouse_build_disk_gb == 300
+    assert config.clickhouse_build_disk_gb == 400
     assert (config.clickhouse_disk_gb, config.opensearch_disk_gb) == (250, 80)
     assert not {'backend_machine_type', 'work_disk_gb'} & set(ReleaseConfig.model_fields)
     assert config.pos_release_service_account == 'pos-release@open-targets-eu-dev.iam.gserviceaccount.com'
