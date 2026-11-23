@@ -20,7 +20,7 @@ LOCATIONS = {
 
 @pytest.fixture
 def dataset(tmp_path: Path) -> str:
-    path = tmp_path / 'target'
+    path = tmp_path / 'so'
     path.mkdir()
     pq.write_table(pa.table({'id': ['ENSG1']}), path / 'part-00000.parquet')
     return str(path)

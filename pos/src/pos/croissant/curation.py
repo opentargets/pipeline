@@ -1,4 +1,4 @@
-"""Manual curation of OT-Croissant datasets."""
+"""Manual curation of the OT-Croissant Platform instances."""
 
 from __future__ import annotations
 
@@ -9,11 +9,7 @@ from pathlib import Path
 from loguru import logger
 from pydantic import BaseModel
 
-from pos.croissant.models import (
-    DistributionAnnotation,
-    InstanceAnnotation,
-    RecordsetFieldAnnotation,
-)
+from pos.croissant.models import InstanceAnnotation
 
 
 class BaseCuration[T: BaseModel](ABC):
@@ -49,20 +45,6 @@ class BaseCuration[T: BaseModel](ABC):
         return entry
 
 
-class DistributionCuration(BaseCuration[DistributionAnnotation]):
-    """Curation for top-level dataset distributions."""
-
-    @property
-    def curation_path(self) -> Path:
-        """Path to the distribution curation file."""
-        return Path(__file__).parent / 'assets/distribution.json'
-
-    @property
-    def _model(self) -> type[DistributionAnnotation]:
-        """Pydantic model for distribution entries."""
-        return DistributionAnnotation
-
-
 class InstanceCuration(BaseCuration[InstanceAnnotation]):
     """Curation for Platform instances (public / ppp)."""
 
@@ -75,57 +57,3 @@ class InstanceCuration(BaseCuration[InstanceAnnotation]):
     def _model(self) -> type[InstanceAnnotation]:
         """Pydantic model for instance entries."""
         return InstanceAnnotation
-
-
-class RecordsetCuration:
-    """Curation for individual fields within recordset datasets.
-
-    Loads per-dataset JSON files from ``assets/recordset/<dataset>.json`` lazily
-    and caches them at the class level so each file is read at most once per
-    process.
-    """
-
-    _RECORDSET_DIR = Path(__file__).parent / 'assets/recordset'
-    _cache: dict[str, dict[str, RecordsetFieldAnnotation]] = {}
-
-    def _load_dataset(self, dataset: str) -> dict[str, RecordsetFieldAnnotation]:
-        if dataset not in self._cache:
-            path = self._RECORDSET_DIR / f'{dataset}.json'
-            if not path.exists():
-                self._cache[dataset] = {}
-                return {}
-            entries = json.loads(path.read_text())
-            self._cache[dataset] = {e['id']: RecordsetFieldAnnotation.model_validate(e) for e in entries}
-        return self._cache[dataset]
-
-    def primary_key_fields(self, dataset: str) -> set[str]:
-        """Return the field paths curated as primary key components for *dataset*."""
-        return {field_path for field_path, ann in self._load_dataset(dataset).items() if ann.is_primary_key}
-
-    def get_field(
-        self,
-        distribution_id: str,
-        log_level: str = 'WARNING',
-    ) -> RecordsetFieldAnnotation | None:
-        """Return the annotation for a field, or ``None`` if not found.
-
-        Args:
-            distribution_id: Full field path as ``dataset/field`` or
-                ``dataset/parent/field`` for nested fields.
-            log_level: Loguru level used when the entry is missing.
-        """
-        if '/' not in distribution_id:
-            logger.log(
-                log_level,
-                f"[RecordsetCuration]: unexpected id format '{distribution_id}',expected 'dataset/field'",
-            )
-            return None
-
-        dataset, field_path = distribution_id.split('/', 1)
-        entry = self._load_dataset(dataset).get(field_path)
-        if entry is None:
-            logger.log(
-                log_level,
-                f"[RecordsetCuration]: no curation entry found for '{distribution_id}'",
-            )
-        return entry

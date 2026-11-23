@@ -1,8 +1,8 @@
 """Croissant distribution metadata for an Open Targets Platform data release."""
 
 from mlcroissant import Context, FileObject, FileSet
+from ot_datamodels.spec import DatasetSpec
 
-from pos.croissant.curation import DistributionCuration
 from pos.croissant.schema import partition_columns
 
 
@@ -16,9 +16,6 @@ class PlatformOutputDistribution:
         self.ctx = ctx or Context()
         self.distribution = []
         self.contained_in = []
-        self.curation = DistributionCuration()
-
-        super().__init__()
 
     def get_metadata(self):
         """Return the distribution metadata."""
@@ -92,11 +89,10 @@ class PlatformOutputDistribution:
 
         return self
 
-    def add_assets_from_paths(self, paths: list[str]):
-        """Add files from a list to the distribution."""
-        for path in paths:
-            # Extracting dataset name:
-            dataset_id = path.split('/')[-1]
+    def add_datasets(self, datasets: list[tuple[str, DatasetSpec]]):
+        """Add one file set per dataset folder, named by its model."""
+        for path, spec in datasets:
+            dataset_id = spec.name
 
             # Get columns the dataset is partitioned by:
             partitioned_by = partition_columns(path)
@@ -111,11 +107,9 @@ class PlatformOutputDistribution:
             if len(partitioned_by) > 0:
                 description += f' partitioned by {",".join(partitioned_by)}'
 
-            # Generating fileset description:
-            ann = self.curation.get(dataset_id, log_level='DEBUG')
             fileset = FileSet(
                 id=dataset_id + '-fileset',
-                name=ann.nice_name if ann else f"Automatic nice_name of the file set/object '{dataset_id}'.",
+                name=spec.title,
                 description=description,
                 encoding_formats=['application/vnd.apache.parquet'],
                 includes=includes,

@@ -40,8 +40,9 @@ changes need a `pts_version` bump.
   speaks `gs://`, as polars does). In production every relative destination is a
   `gs://` URI; `pathlib` collapses it to a local `gs:/bucket/...` path, the write
   succeeds, the step goes green, and the release is missing the file.
-- **An output column added, renamed or removed changes croissant curation in the
-  same PR.** Nothing fails without it; `pos/AGENTS.md` says what to edit under `pos/src/pos/croissant/assets/`.
+- An output column's model `description` (and `Bioregistry`, `PrimaryKey`, `Reference`)
+  is what pos publishes in the release's croissant descriptor; there is no croissant
+  curation to edit.
 - Output datasets are declared once, as models in `datamodels/` (`ot_datamodels.outputs`);
   a transformer's `validate` imports its model from there (`datamodels/AGENTS.md`).
   The views written to `view/` have models too (`ot_datamodels.views`), declared and
