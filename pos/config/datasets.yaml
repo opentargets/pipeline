@@ -46,12 +46,10 @@ clickhouse:
     table: baseline_expression_log
     input_dir: output/baseline_expression
     model: baseline_expression
-    postload_script: config/clickhouse/scripts/baseline_expression.sql
   biosample:
     table: biosample_log
     input_dir: output/biosample
     model: biosample
-    postload_script: config/clickhouse/scripts/biosample.sql
   colocalisation:
     table: colocalisation_log
     input_dir: output/colocalisation
@@ -92,19 +90,32 @@ clickhouse:
     table: enhancer_to_gene_log
     input_dir: output/enhancer_to_gene
     model: enhancer_to_gene
-    postload_script: config/clickhouse/scripts/enhancer_to_gene.sql
   evidence:
     table: evidence_log
     input_dir: output
     models: 'evidence_*'
     # each member gets its own table, then all load into evidence_log; list here the members allowed to have no output
     optional_models: []
-    postload_script: config/clickhouse/scripts/evidence.sql
+    # built from evidence_log, the union
+    clickhouse:
+      - {name: evidence, engine: rocksdb, key: id}
+      - name: evidence_by_variant
+        engine: mergetree
+        order_by: [datasourceId, variantId, score]
+        columns: [datasourceId, variantId, score, id]
+        where: variantId IS NOT NULL
+        optimize: true
+      - name: evidence_by_disease_and_target
+        engine: mergetree
+        order_by: [datasourceId, diseaseId, targetId, score]
+        columns: [datasourceId, diseaseId, targetId, score, id]
+        where: diseaseId IS NOT NULL AND targetId IS NOT NULL
+        optimize: true
+        allow_nullable_key: true
   go:
     table: gene_ontology_log
     input_dir: output/go
     model: go
-    postload_script: config/clickhouse/scripts/go.sql
   interaction:
     table: interaction_log
     input_dir: output/interaction
@@ -119,7 +130,6 @@ clickhouse:
     table: hpo_log
     input_dir: output/disease_hpo
     model: disease_hpo
-    postload_script: config/clickhouse/scripts/hpo.sql
   l2g_predictions:
     table: l2g_predictions_log
     input_dir: output/l2g_prediction
@@ -129,7 +139,6 @@ clickhouse:
     table: literature_entity_lut_log
     input_dir: output/literature_entity_lut
     model: literature_entity_lut
-    postload_script: config/clickhouse/scripts/literature_entity_lut.sql
   mechanism_of_action:
     table: mechanism_of_action_log
     input_dir: output/drug_mechanism_of_action
@@ -144,7 +153,6 @@ clickhouse:
     table: association_time_series_log
     input_dir: view/association_timeseries
     model: association_timeseries
-    postload_script: config/clickhouse/scripts/association_time_series.sql
   pharmacovigilance:
     table: pharmacovigilance_log
     input_dir: output/pharmacovigilance
@@ -156,7 +164,6 @@ clickhouse:
     input_dir: output/otar
     optional: true
     model: otar
-    postload_script: config/clickhouse/scripts/otar_projects.sql
   pharmacogenomics:
     table: pharmacogenomics_log
     input_dir: output/pharmacogenomics
@@ -171,7 +178,6 @@ clickhouse:
     table: ml_w2v_log
     input_dir: output/literature_vector
     model: literature_vector
-    postload_script: config/clickhouse/scripts/w2v.sql
   studies:
     table: studies_log
     input_dir: output/study
@@ -181,12 +187,10 @@ clickhouse:
     table: sequence_ontology_log
     input_dir: output/so
     model: so
-    postload_script: config/clickhouse/scripts/so.sql
   target_essentiality:
     table: target_essentiality_log
     input_dir: output/target_essentiality
     model: target_essentiality
-    postload_script: config/clickhouse/scripts/target_essentiality.sql
   target_prioritisation:
     table: target_prioritisation_log
     input_dir: output/target_prioritisation
@@ -229,14 +233,11 @@ clickhouse:
     table: clinical_indication_log
     input_dir: output/clinical_indication
     model: clinical_indication
-    postload_script: config/clickhouse/scripts/clinical_indication.sql
   clinical_report:
     table: clinical_report_log
     input_dir: output/clinical_report
     model: clinical_report
-    postload_script: config/clickhouse/scripts/clinical_report.sql
   clinical_target:
     table: clinical_target_log
     input_dir: output/clinical_target
     model: clinical_target
-    postload_script: config/clickhouse/scripts/clinical_target.sql

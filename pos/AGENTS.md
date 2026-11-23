@@ -62,6 +62,18 @@ it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out
 load. Only `derived` entries (built from loaded tables) have a `preload_script`, under `scripts/`; a config
 test checks each entry has exactly one of `model`, `models`, `preload_script`.
 
+Storage is declared on the model: `clickhouse` lists the tables and dictionaries built from
+the dataset (`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickhouse`).
+`clickhouse_load` checks each RocksDB key is unique in the landing table, builds the
+tables and dictionaries from it, then drops it. The `evidence` union declares its tables
+under `clickhouse:` in `datasets.yaml`, built from `evidence_log`. Declared datasets load
+in `explode load declared datasets`; a `postload_script` (under `scripts/`) is only for an
+undeclared dataset (`explode load all datasets` requires the declared explode). No script may read a declared
+landing table (`test_no_script_reads_a_declared_landing_table`).
+`test_declared_tables_match_scripts` builds each declared dataset from the same fixture rows
+with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`) and
+compares tables, columns, keys, dictionaries and rows.
+
 Print the generated DDL:
 
 ```sh

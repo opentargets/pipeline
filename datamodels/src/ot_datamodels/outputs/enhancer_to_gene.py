@@ -8,7 +8,15 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
+from ot_datamodels import (
+    Bioregistry,
+    ClickHouseTable,
+    ClickHouseType,
+    DatasetModel,
+    PolarsDtype,
+    Reference,
+    StructModel,
+)
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, MD5_HEX, ONTOLOGY_ID
 from ot_datamodels.vocabularies import Chromosome, IntervalDatasource, IntervalType
 
@@ -31,6 +39,9 @@ class EnhancerToGene(DatasetModel):
     dataset_title: ClassVar[str] = 'Enhancer to gene'
     dataset_description: ClassVar[str] = 'Genomic regions associated with genes based on epigenetics evidence'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target', 'Genetics')
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
+        ClickHouseTable('enhancer_to_gene', 'mergetree', order_by=('chromosome', 'start', 'end'), optimize=True),
+    )
     example: ClassVar[dict] = {
         'chromosome': '1',
         'start': 778366,

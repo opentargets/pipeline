@@ -21,6 +21,7 @@ from pos.clickhouse_ddl import (
     columns,
     create_table,
     ddl_for,
+    declarations,
     declared_tables,
     dictionary_sql,
     drop_dictionary_sql,
@@ -485,6 +486,34 @@ def test_dictionary_sql_identity_columns_have_no_expression():
         'CREATE OR REPLACE DICTIONARY `d` (`id` String, `name` String) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
+
+
+def test_dictionary_sql_drops_low_cardinality():
+    d = ClickHouseDictionary('sequence_ontology', 'sequence_ontology_source', key='id', attributes=('label',))
+    low = CHType('String', low_cardinality=True)
+    assert dictionary_sql(d, [('id', low), ('label', low)]).startswith(
+        'CREATE OR REPLACE DICTIONARY `sequence_ontology` (`id` String, `label` String) PRIMARY KEY `id` '
+    )
+
+
+def test_declared_allow_nullable_key_without_a_nullable_order_by():
+    table = ClickHouseTable('t', 'mergetree', order_by=('id',), columns=('id',), allow_nullable_key=True)
+    assert table_sql(table, LANDING, 'l')[1] == (
+        'CREATE TABLE `t` (`id` String) ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1'
+    )
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_union_declarations_name_union_columns(product):
+    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+    for name, entry in entries.items():
+        tables, _ = declarations(entry, product)
+        if 'models' not in entry or not tables:
+            continue
+        union = {c for c, _ in landing_columns(entry, product) or []}
+        for table in tables:
+            used = {*(table.columns or ()), *table.order_by, *table.primary_key, *((table.key,) if table.key else ())}
+            assert used <= union, f'{name}.{table.name}: {sorted(used - union)} not in the union'
 
 
 def test_drop_dictionary_sql():

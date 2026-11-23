@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import ClickHouseTable, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ONTOLOGY_ID
 from ot_datamodels.vocabularies import (
@@ -81,6 +81,7 @@ class ClinicalReport(DatasetModel):
         'and trial outcomes'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug', 'Disease')
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('clinical_report', 'rocksdb', key='id'),)
     example: ClassVar[dict] = {
         'id': '00011703-bc55-4c0c-858c-149dc674bc3c',
         'clinicalStage': 'APPROVAL',

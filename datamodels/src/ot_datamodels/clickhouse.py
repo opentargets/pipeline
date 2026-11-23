@@ -26,6 +26,7 @@ class ClickHouseTable:
         renames: dataset column to table column.
         where: a row filter, as a ClickHouse expression.
         optimize: run `OPTIMIZE FINAL` after loading.
+        allow_nullable_key: set the MergeTree `allow_nullable_key`, also set when an `order_by` column is nullable.
         products: the products the table is built for; the dataset's own when `None`.
     """
 
@@ -38,6 +39,7 @@ class ClickHouseTable:
     renames: Mapping[str, str] = field(default_factory=dict)
     where: str | None = None
     optimize: bool = False
+    allow_nullable_key: bool = False
     products: tuple[str, ...] | None = None
 
 

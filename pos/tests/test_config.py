@@ -246,7 +246,7 @@ def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
     config = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
     tasks = config['steps']['backend_clickhouse']
     if where == 'explode':
-        (explode,) = [t for t in tasks if t['name'].startswith('explode ')]
+        explode = next(t for t in tasks if t['name'].startswith('explode '))
         tasks = explode['do']
     first = next(t for t in tasks if t['name'].startswith('clickhouse_load '))
     del first['product']

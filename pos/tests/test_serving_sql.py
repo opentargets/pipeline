@@ -8,6 +8,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import urllib.request
 import uuid
 from collections.abc import Generator, Iterator
@@ -23,7 +24,22 @@ from clickhouse_connect.driver.tools import insert_file
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.polars import to_polars_schema
 
-from pos.clickhouse_ddl import canonical, columns, create_table, ddl_for, member_table, members, parse_type, type_at
+from pos.clickhouse_ddl import (
+    canonical,
+    columns,
+    create_table,
+    ddl_for,
+    declarations,
+    declared_sql,
+    is_declared,
+    landing_columns,
+    member_table,
+    members,
+    parse_type,
+    render,
+    type_at,
+    uniqueness_sql,
+)
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.tasks.clickhouse_load import INSERT_SETTINGS, member_drops, union_inserts
@@ -51,23 +67,27 @@ def _reachable(host: str, port: int) -> bool:
 
 
 def _tasks(product: str) -> list[dict]:
-    """The step's tasks for the product, explode children expanded, in `requires:` order."""
+    """The step's tasks for the product, explode children expanded, in `requires:` order; requiring an explode
+    requires its children."""
     by_name: dict[str, dict] = {}
+    children: dict[str, list[str]] = {}
     for task in STEP:
         if product not in task.get('products', [product]):
             continue
         if 'foreach' in task:
+            children[task['name']] = []
             for each in task['foreach']:
                 for child in task['do']:
                     expanded = yaml.safe_load(yaml.safe_dump(child).replace('${each}', each))
                     by_name[expanded['name']] = expanded | {'requires': task.get('requires', [])}
+                    children[task['name']].append(expanded['name'])
         else:
             by_name[task['name']] = task
     graph = {}
     for name, task in by_name.items():
-        unknown = [r for r in task.get('requires', []) if r not in by_name]
+        unknown = [r for r in task.get('requires', []) if r not in by_name and r not in children]
         assert not unknown, f'{name}: unknown requirement {unknown}'
-        graph[name] = task.get('requires', [])
+        graph[name] = [c for r in task.get('requires', []) for c in children.get(r, [r])]
     try:
         order = list(TopologicalSorter(graph).static_order())
     except CycleError as e:
@@ -90,6 +110,7 @@ def _statements(dataset: str, product: str) -> list[tuple[str, str]]:
     else:
         script = entry['preload_script']
         out += [(script, sql) for sql in split_statements((ROOT / script).read_text())]
+    out += [('declared tables', sql) for sql in declared_sql(entry, product)]
     if script := entry.get('postload_script'):
         out += [(script, sql) for sql in split_statements((ROOT / script).read_text())]
     return out
@@ -219,3 +240,149 @@ def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
     for want, got in zip(frame.to_dicts(), back, strict=True):
         for name, dtype in schema.items():
             assert list(_labels(got[name], dtype, name)) == list(_labels(want[name], dtype, name)), name
+
+
+def test_no_script_reads_a_declared_landing_table():
+    """A declared load drops its landing table, so no remaining script may read it."""
+    landings = {e['table'] for e in DATASETS.values() if is_declared(e)}
+    scripts = {e[k] for e in DATASETS.values() for k in ('preload_script', 'postload_script') if k in e}
+    assert landings
+    reads = [
+        (script, table)
+        for script in sorted(scripts)
+        for table in sorted(landings)
+        if re.search(rf'\b{table}\b', (ROOT / script).read_text())
+    ]
+    assert not reads, f'scripts reading a declared landing table: {reads}'
+
+
+#: The datasets whose storage-only scripts became declarations; the scripts are frozen under BEFORE.
+DECLARED = (
+    'association_time_series', 'baseline_expression', 'biosample', 'clinical_indication', 'clinical_report',
+    'clinical_target', 'enhancer_to_gene', 'evidence', 'go', 'hpo', 'literature_entity_lut', 'otar_projects', 'so',
+    'target_essentiality', 'w2v',
+)  # fmt: skip
+BEFORE = ROOT / 'tests' / 'fixtures' / 'serving_scripts_before'
+#: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped.
+NOT_REBUILT = {'biosample_names_source', 'otar_projects_log'}
+#: Scaffolding the script left unsorted (`ORDER BY tuple()`); credible_sets_build_cleanup drops it before release.
+RESORTED = {'biosample_mergetree'}
+#: Fixture rows per landing table; generateRandom makes a few percent of a Nullable column NULL.
+FIXTURE_ROWS = 300
+#: The `IS NOT NULL` filters on columns the landing table has not Nullable.
+NON_NULL_FILTERS = (
+    ('clinical_target', 'targetId'),
+    ('clinical_indication_drug', 'drugId'),
+    ('clinical_indication_disease', 'diseaseId'),
+    ('evidence_by_disease_and_target', 'diseaseId'),
+    ('evidence_by_disease_and_target', 'targetId'),
+)  # fmt: skip
+#: The scripts' RocksDB keys, made unique in the fixture rows.
+KEYS = {'biosampleId', 'efo_id', 'id', 'targetId'}
+
+
+def _fill(client, table: str, cols, seed: int) -> None:
+    """`FIXTURE_ROWS` rows into `table`, the same for the same `seed` on every database."""
+    structure = ', '.join(f'`{name}` {render(t)}' for name, t in cols)
+    literal = structure.replace('\\', '\\\\').replace("'", "\\'")
+    unique = [f"concat('{seed}-', toString(rowNumberInAllBlocks()), `{n}`) AS `{n}`" for n, _ in cols if n in KEYS]
+    replace = f' REPLACE ({", ".join(unique)})' if unique else ''
+    client.command(
+        f"INSERT INTO `{table}` SELECT *{replace} FROM generateRandom('{literal}', {seed}, 12, 3) "  # noqa: S608 generated names
+        f'LIMIT {FIXTURE_ROWS}'
+    )
+
+
+def _land(client, dataset: str, product: str) -> None:
+    """The dataset's landing table, filled with fixture rows."""
+    entry = DATASETS[dataset]
+    for _, sql in ddl_for(entry, product):
+        client.command(sql)
+    if 'models' not in entry:
+        _fill(client, entry['table'], landing_columns(entry, product), 1)
+        return
+    loaded = members(entry['models'], product)
+    for seed, model in enumerate(loaded, 1):
+        _fill(client, member_table(model), columns(model), seed)
+    for sql in union_inserts(entry['table'], loaded) + member_drops(loaded):
+        client.command(sql)
+
+
+def _shape(client) -> dict:
+    """Every table's engine, keys and columns, every dictionary's structure, and the rows of both."""
+    d = {'d': client.database}
+    tables = client.query(
+        'SELECT name, engine, engine_full, sorting_key, primary_key FROM system.tables '
+        "WHERE database = {d:String} AND engine != 'Dictionary'",
+        parameters=d,
+    ).result_rows
+    cols = client.query(
+        'SELECT table, name, type, position FROM system.columns WHERE database = {d:String}', parameters=d
+    ).result_rows
+    names = client.query('SELECT name FROM system.dictionaries WHERE database = {d:String}', parameters=d).result_rows
+    for (name,) in names:
+        client.command(f'SYSTEM RELOAD DICTIONARY `{client.database}`.`{name}`')
+    dictionaries = client.query(
+        'SELECT name, key.names, key.types, attribute.names, attribute.types, type, lifetime_min, lifetime_max '
+        'FROM system.dictionaries WHERE database = {d:String}',
+        parameters=d,
+    ).result_rows
+    rows = {}
+    for name, engine, *_ in tables:
+        if engine != 'View':
+            rows[name] = sorted(client.raw_query(f'SELECT * FROM `{name}` FORMAT TSV').decode().splitlines())  # noqa: S608 system names
+    for name, *_ in dictionaries:
+        query = f"SELECT * FROM dictionary('{client.database}.{name}') FORMAT TSV"  # noqa: S608 system names
+        rows[f'dictionary {name}'] = sorted(client.raw_query(query).decode().splitlines())
+    return {
+        'tables': {name: tuple(rest) for name, *rest in tables},
+        'columns': {(t, n): (ty, p) for t, n, ty, p in cols},
+        'dictionaries': {name: tuple(rest) for name, *rest in dictionaries},
+        'rows': rows,
+    }
+
+
+def _without(shape: dict, names: set[str]) -> dict:
+    return {
+        'tables': {n: v for n, v in shape['tables'].items() if n not in names},
+        'columns': {k: v for k, v in shape['columns'].items() if k[0] not in names},
+        'dictionaries': shape['dictionaries'],
+        'rows': {n: v for n, v in shape['rows'].items() if n not in names},
+    }
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_declared_tables_match_scripts(product):
+    """From the same landing rows, the declarations build what the scripts they replace built: tables, engines, keys,
+    columns, dictionaries and rows."""
+    loaded = {task['dataset'] for task in _tasks(product) if 'dataset' in task}
+    datasets = [d for d in DECLARED if d in loaded]
+    with _database() as before, _database() as after:
+        for dataset in datasets:
+            entry = DATASETS[dataset]
+            _land(before, dataset, product)
+            for sql in split_statements((BEFORE / f'{dataset}.sql').read_text()):
+                before.command(sql)
+            _land(after, dataset, product)
+            for table in declarations(entry, product)[0]:
+                if table.engine == 'rocksdb':
+                    after.command(uniqueness_sql(table, entry['table']))
+            for sql in declared_sql(entry, product):
+                after.command(sql)
+        old, new = _shape(before), _shape(after)
+    assert set(old['tables']) - NOT_REBUILT == set(new['tables'])
+    for name in RESORTED:
+        assert old['tables'][name][0] == new['tables'][name][0] == 'MergeTree', name
+        assert old['rows'][name] == new['rows'][name], name
+    old, new = _without(old, NOT_REBUILT | RESORTED), _without(new, RESORTED)
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert new['dictionaries'] == old['dictionaries']
+    assert new['rows'].keys() == old['rows'].keys()
+    for name, rows in old['rows'].items():
+        assert new['rows'][name] == rows, name
+        assert rows, f'{name}: no fixture rows reached it'
+    assert 0 < len(new['rows']['evidence_by_variant']) < len(new['rows']['evidence']), 'the filter dropped nothing'
+    # the other filters cannot drop a row: their columns are not Nullable
+    for table, column in NON_NULL_FILTERS:
+        assert not new['columns'][table, column][0].startswith('Nullable'), (table, column)

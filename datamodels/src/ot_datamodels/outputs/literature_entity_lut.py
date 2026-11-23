@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype
+from ot_datamodels import ClickHouseTable, ClickHouseType, DatasetModel, PolarsDtype
 from ot_datamodels.vocabularies import LiteratureKeywordType
 
 
@@ -20,6 +20,15 @@ class LiteratureEntityLut(DatasetModel):
     dataset_title: ClassVar[str] = 'Literature'
     dataset_description: ClassVar[str] = 'Unique list of entities identified for each literature entry'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Literature',)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
+        ClickHouseTable(
+            'literature_entity_lut',
+            'mergetree',
+            order_by=('keywordId', 'year', 'month', 'relevance'),
+            columns=('pmid', 'pmcid', 'keywordId', 'relevance', 'date', 'year', 'month'),
+            optimize=True,
+        ),
+    )
     example: ClassVar[dict] = {
         'pmid': '1000336',
         'pmcid': 'PMC2132941',
