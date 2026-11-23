@@ -74,36 +74,28 @@ steps:
           product: ${product}
     - name: clickhouse_load clickhouse load credible_set_variant
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: credible_set_variant
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: interaction_evidence
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load l2g_predictions
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: l2g_predictions
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load pharmacogenomics
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: pharmacogenomics
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
