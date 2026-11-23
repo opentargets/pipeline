@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseDictionary, ClickHouseTable, DatasetModel, PrimaryKey
+from ot_datamodels import DatasetModel, PrimaryKey
 
 
 class Biosample(DatasetModel):
@@ -20,18 +20,6 @@ class Biosample(DatasetModel):
         '(biosamples) derived from the UBERON, CL and EFO ontologies'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
-    clickhouse: ClassVar[tuple[ClickHouseTable | ClickHouseDictionary, ...]] = (
-        # read by the credible-set read models: EmbeddedRocksDB scans as one stream
-        ClickHouseTable('biosample_mergetree', 'mergetree', order_by=('biosampleId',)),
-        ClickHouseTable('biosample', 'rocksdb'),
-        ClickHouseDictionary(
-            'biosample_names',
-            'biosample',
-            key='id',
-            attributes=('name',),
-            source_columns={'id': 'biosampleId', 'name': 'biosampleName'},
-        ),
-    )
     example: ClassVar[dict] = {
         'biosampleId': 'UBERON_0007958',
         'biosampleName': 'central carpal bone',

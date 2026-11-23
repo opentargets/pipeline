@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseTable, ClickHouseType, DatasetModel, PolarsDtype, Reference
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import ExpressionDatasource, ExpressionDatatype
 
@@ -22,13 +22,6 @@ class BaselineExpression(DatasetModel):
         'Aggregated expression data generated from RNA-seq and mass spectrometry proteomic data'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable(
-            'baseline_expression',
-            'mergetree',
-            order_by=('targetId', 'tissueBiosampleId', 'celltypeBiosampleId'),
-        ),
-    )
     example: ClassVar[dict] = {
         'celltypeBiosampleId': 'CL_0000775',
         'tissueBiosampleId': 'UBERON_0002118',

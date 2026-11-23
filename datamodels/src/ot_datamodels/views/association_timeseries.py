@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseTable, DatasetModel, from_output
+from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect, Timeseries
 from ot_datamodels.vocabularies import AggregationType, enum_of
 
@@ -31,17 +31,6 @@ class AssociationTimeseries(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     products: ClassVar[tuple[str, ...]] = ('ppp',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable(
-            'association_time_series',
-            'mergetree',
-            order_by=('diseaseId', 'targetId', 'isDirect', 'aggregationValue', 'year'),
-            columns=(
-                'diseaseId', 'targetId', 'aggregationType', 'aggregationValue', 'year', 'associationScore', 'novelty',
-                'yearlyEvidenceCount', 'isDirect',
-            ),
-        ),
-    )  # fmt: skip
     example: ClassVar[dict] = {
         'diseaseId': 'EFO_0000180',
         'targetId': 'ENSG00000009413',

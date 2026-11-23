@@ -19,15 +19,12 @@ from ot_datamodels.base import (
     RowCheck,
     StructModel,
 )
-from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable, validate_declarations
 from ot_datamodels.derive import from_output, row_of
 from ot_datamodels.polars import to_polars_schema
 from ot_datamodels.spec import SchemaDefinitionError
 
 __all__ = [
     'Bioregistry',
-    'ClickHouseDictionary',
-    'ClickHouseTable',
     'ClickHouseType',
     'DatasetModel',
     'Note',
@@ -40,5 +37,4 @@ __all__ = [
     'from_output',
     'row_of',
     'to_polars_schema',
-    'validate_declarations',
 ]

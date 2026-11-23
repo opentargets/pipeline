@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseTable, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 
 
@@ -32,9 +32,6 @@ class Otar(DatasetModel):
     dataset_tags: ClassVar[tuple[str, ...]] = ()
     products: ClassVar[tuple[str, ...]] = ('ppp',)
     # Platform serves the table empty
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable('otar_projects', 'rocksdb'),
-    )
     example: ClassVar[dict] = {
         'efo_id': 'EFO_0000651',
         'projects': [

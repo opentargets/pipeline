@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseTable, DatasetModel, PrimaryKey
+from ot_datamodels import DatasetModel, PrimaryKey
 
 
 class LiteratureVector(DatasetModel):
@@ -17,14 +17,6 @@ class LiteratureVector(DatasetModel):
     dataset_title: ClassVar[str] = 'Literature vector'
     dataset_description: ClassVar[str] = 'Word to Vector representation of entity matches in literature'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Literature',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable(
-            'ml_w2v',
-            'mergetree',
-            order_by=('word',),
-            columns=('category', 'word', 'norm', 'vector'),
-        ),
-    )
     example: ClassVar[dict] = {
         'category': 'disease',
         'word': 'MONDO_0017258',

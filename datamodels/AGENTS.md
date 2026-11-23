@@ -73,27 +73,6 @@ No generator exists; write the model by hand.
 3. `discover_datasets()` finds it; nothing is registered.
 4. Run the tests here, then pts's and pos's.
 
-## ClickHouse declarations
-
-A model lists the tables and dictionaries pos builds from it in the `clickhouse` class attribute
-(`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickhouse`); storage is declared here, not in
-pos scripts. `validate_declarations` checks them for every model (`test_every_declaration_is_valid`).
-
-A table states only what the model cannot: `ClickHouseTable(name, engine, order_by=(), columns=None, where=None)`.
-Everything else is derived, so nothing can drift from the model:
-
-- `engine='rocksdb'` keys on the model's one `PrimaryKey` column; a model without exactly one is an error, and
-  `order_by` is refused. `engine='mergetree'` needs `order_by`, which is also its primary key.
-- A table is built for the model's `products`; a PPP-only model builds nothing on Platform.
-- A MergeTree table gets `allow_nullable_key` when an `order_by` column is nullable, and `OPTIMIZE FINAL` after
-  loading.
-- `columns` keeps a subset of the model's top-level columns, in that order (the API reads some tables
-  positionally, so the served column set must not grow). `order_by` and the RocksDB key must be among them.
-- `where` filters rows; the identifiers it names (not keywords, functions or strings) must be model columns.
-- A dictionary's columns map through `source_columns` to its source table's columns.
-- The `evidence` union has no model of its own: its tables are declared in pos `datasets.yaml`, keyed on the
-  `PrimaryKey` its members share.
-
 ## Deriving a view's columns
 
 A view column that copies an output column is derived from the output model, never

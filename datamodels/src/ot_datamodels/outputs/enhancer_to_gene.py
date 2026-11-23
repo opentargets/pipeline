@@ -10,7 +10,6 @@ from pydantic import Field
 
 from ot_datamodels import (
     Bioregistry,
-    ClickHouseTable,
     ClickHouseType,
     DatasetModel,
     PolarsDtype,
@@ -39,9 +38,6 @@ class EnhancerToGene(DatasetModel):
     dataset_title: ClassVar[str] = 'Enhancer to gene'
     dataset_description: ClassVar[str] = 'Genomic regions associated with genes based on epigenetics evidence'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target', 'Genetics')
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable('enhancer_to_gene', 'mergetree', order_by=('chromosome', 'start', 'end')),
-    )
     example: ClassVar[dict] = {
         'chromosome': '1',
         'start': 778366,

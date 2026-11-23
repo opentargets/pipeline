@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseTable, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import ClinicalStage
 
@@ -24,22 +24,6 @@ class ClinicalIndication(DatasetModel):
         'pair'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug', 'Disease')
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable(
-            'clinical_indication_drug',
-            'mergetree',
-            order_by=('drugId', 'id'),
-            columns=('id', 'drugId', 'diseaseId', 'maxClinicalStage', 'clinicalReportIds'),
-            where='drugId IS NOT NULL',
-        ),
-        ClickHouseTable(
-            'clinical_indication_disease',
-            'mergetree',
-            order_by=('diseaseId', 'id'),
-            columns=('id', 'drugId', 'diseaseId', 'maxClinicalStage', 'clinicalReportIds'),
-            where='diseaseId IS NOT NULL',
-        ),
-    )
     example: ClassVar[dict] = {
         'id': 'bcae49c2072f6bce9286dcced5374756568bbc17c3c389e188a091351dc06607',
         'maxClinicalStage': 'APPROVAL',

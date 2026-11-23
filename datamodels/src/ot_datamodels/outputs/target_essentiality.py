@@ -10,7 +10,6 @@ from pydantic import Field
 
 from ot_datamodels import (
     Bioregistry,
-    ClickHouseTable,
     ClickHouseType,
     DatasetModel,
     PolarsDtype,
@@ -67,9 +66,6 @@ class TargetEssentiality(DatasetModel):
         'can be considered dependencies'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable('target_essentiality', 'rocksdb'),
-    )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000000003',
         'isEssential': False,
