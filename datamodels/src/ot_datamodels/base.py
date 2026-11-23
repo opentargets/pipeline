@@ -19,6 +19,8 @@ from typing import Any, ClassVar
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
+
 
 class SchemaModel(BaseModel):
     """Shared configuration of every model making up a dataset schema.
@@ -71,6 +73,7 @@ class DatasetModel(SchemaModel):
             in it should hold at least one element, so every nested field is exercised.
         row_checks: rules across a row's columns that no field constraint states. Inherited, so a
             dataset adds to its base's with `Base.row_checks + (...)`.
+        clickhouse: the ClickHouse tables and dictionaries pos builds from the dataset.
     """
 
     dataset_name: ClassVar[str]
@@ -80,6 +83,7 @@ class DatasetModel(SchemaModel):
     products: ClassVar[tuple[str, ...]] = ('platform', 'ppp')
     example: ClassVar[dict[str, Any]]
     row_checks: ClassVar[tuple[RowCheck, ...]] = ()
+    clickhouse: ClassVar[tuple[ClickHouseTable | ClickHouseDictionary, ...]] = ()
 
     @classmethod
     def is_concrete(cls) -> bool:
