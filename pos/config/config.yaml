@@ -44,7 +44,6 @@ steps:
         - go
         - hpo
         - literature_entity_lut
-        - otar_projects
         - so
         - target_essentiality
         - w2v
@@ -107,6 +106,16 @@ steps:
         - sync_bucket etl view files
         - clickhouse_create_database release database
       dataset: association_time_series
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+      product: ${product}
+    - name: clickhouse_load clickhouse load otar_projects
+      products: [ppp]
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: otar_projects
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}

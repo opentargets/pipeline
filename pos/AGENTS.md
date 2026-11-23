@@ -64,17 +64,25 @@ test checks each entry has exactly one of `model`, `models`, `preload_script`.
 
 Storage is declared on the model: `clickhouse` lists the tables and dictionaries built from
 the dataset (`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickhouse`).
-`clickhouse_load` checks each RocksDB key is unique in the landing table, builds the
-tables and dictionaries from it, then drops it. The `evidence` union declares its tables
-under `clickhouse:` in `datasets.yaml`, built from `evidence_log`. Declared datasets load
-in `explode load declared datasets`; a `postload_script` (under `scripts/`) is only for an
-undeclared dataset. Every undeclared load, top-level ones included, requires the declared
-explode, directly or through another task; a declared dataset outside it must be
-product-gated (`test_undeclared_loads_wait_for_the_declared_ones`). No script may read a declared
+A table declares only its name, engine, `order_by`, `columns` and `where`; the RocksDB key
+(the model's `PrimaryKey`), the products (the model's), `allow_nullable_key` and `OPTIMIZE
+FINAL` are derived (`datamodels/AGENTS.md`). `clickhouse_load` checks each RocksDB key is
+unique in the landing table, builds the tables and dictionaries from it, then drops it. The
+`evidence` union declares its tables under `clickhouse:` in `datasets.yaml`, built from
+`evidence_log` and keyed on the `PrimaryKey` its members share (`entry_problems` checks
+them). Declared datasets load in `explode load declared datasets`; a `postload_script`
+(under `scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones
+included, requires the declared explode, directly or through another task; a declared
+dataset outside it must be product-gated (`test_undeclared_loads_wait_for_the_declared_ones`).
+A declared model loads only for its products, so a PPP-only one (`otar_projects`,
+`association_time_series`) is a top-level task with `products: [ppp]`
+(`test_a_declared_model_loads_only_for_its_products`). No script may read a declared
 landing table (`test_no_script_reads_a_declared_landing_table`).
 `test_declared_tables_match_scripts` builds each declared dataset from the same fixture rows
 with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`) and
-compares tables, columns, keys, dictionaries and rows.
+compares tables, columns, sort keys, dictionaries and rows. Engine settings may differ
+only as listed there: the primary key is the sort key, `allow_nullable_key` only on a
+nullable `order_by`, every MergeTree table optimised, and no `otar_projects` on Platform.
 
 Print the generated DDL:
 

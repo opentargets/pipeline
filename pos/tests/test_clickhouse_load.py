@@ -1,6 +1,7 @@
 """clickhouse_load connects to the running server and runs each script statement by statement."""
 
 from pathlib import Path
+from typing import Annotated
 from unittest.mock import MagicMock
 
 import polars as pl
@@ -8,7 +9,7 @@ import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 from loguru import logger
-from ot_datamodels.base import DatasetModel
+from ot_datamodels.base import DatasetModel, PrimaryKey
 from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 
 from pos import clickhouse_ddl
@@ -182,7 +183,7 @@ class Toy(DatasetModel):
     dataset_description = 'Toy.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
 
 
 class EvidenceA(DatasetModel):
@@ -191,7 +192,7 @@ class EvidenceA(DatasetModel):
     dataset_description = 'A.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     score: float | None
 
 
@@ -201,7 +202,7 @@ class EvidenceB(DatasetModel):
     dataset_description = 'B.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     extra: str
 
 
@@ -212,7 +213,7 @@ class EvidencePpp(DatasetModel):
     products = ('ppp',)
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     assays: str
 
 
@@ -342,7 +343,7 @@ def test_evidence_loads_each_member_into_its_own_table(tmp_path, monkeypatch, in
 
 EVIDENCE_DECLARED = EVIDENCE + (
     '    clickhouse:\n'
-    '      - {name: evidence, engine: rocksdb, key: id}\n'
+    '      - {name: evidence, engine: rocksdb}\n'
     '      - {name: evidence_by_score, engine: mergetree, order_by: [score], columns: [score, id], '
     'where: score IS NOT NULL}\n'
 )
@@ -371,13 +372,14 @@ def test_declared_union_is_built_from_the_union_after_a_key_check(tmp_path, monk
             'ENGINE = MergeTree() ORDER BY (`score`) SETTINGS allow_nullable_key = 1'
         ),
         'INSERT INTO `evidence_by_score` SELECT `score`, `id` FROM `evidence_log` WHERE score IS NOT NULL',
+        'OPTIMIZE TABLE `evidence_by_score` FINAL',
         'DROP TABLE `evidence_log` SYNC',
     ]
 
 
 def test_unknown_union_declaration_fields_fail(tmp_path, monkeypatch):
-    datasets = EVIDENCE + '    clickhouse:\n      - {name: e, engine: rocksdb, key: id, keys: [id]}\n'
-    with pytest.raises(ValueError, match=r"evidence_log: unknown ClickHouseTable fields \['keys'\]"):
+    datasets = EVIDENCE + '    clickhouse:\n      - {name: e, engine: rocksdb, key: id, optimize: true}\n'
+    with pytest.raises(ValueError, match=r"evidence_log: unknown ClickHouseTable fields \['key', 'optimize'\]"):
         _generated_task(tmp_path, monkeypatch, datasets, {'evidence_a': 1, 'evidence_b': 1})
 
 
@@ -506,21 +508,18 @@ class Declared(DatasetModel):
     dataset_description = 'Declared.'
     example = {}
     clickhouse = (
-        ClickHouseTable('declared_by_id', 'rocksdb', key='declaredId', renames={'id': 'declaredId'}),
+        ClickHouseTable('declared_by_id', 'rocksdb'),
         ClickHouseTable(
             'declared_by_target',
             'mergetree',
             order_by=('target', 'id'),
             columns=('id', 'target'),
             where='target IS NOT NULL',
-            optimize=True,
         ),
-        ClickHouseDictionary(
-            'declared_names', 'declared_by_id', key='id', attributes=('name',), source_columns={'id': 'declaredId'}
-        ),
+        ClickHouseDictionary('declared_names', 'declared_by_id', key='id', attributes=('name',)),
     )
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     name: str
     target: str | None
 
@@ -558,7 +557,7 @@ def _tables(client) -> set[str]:
 
 def test_declared_tables_are_built_and_the_landing_dropped(tmp_path, live, clickhouse_server):
     _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
-    assert live.query('SELECT declaredId, name, target FROM declared_by_id ORDER BY declaredId').result_rows == [
+    assert live.query('SELECT id, name, target FROM declared_by_id ORDER BY id').result_rows == [
         ('a', 'na', 't1'), ('b', 'nb', None), ('c', 'nc', 't2'),
     ]  # fmt: skip
     assert live.query('SELECT id, target FROM declared_by_target ORDER BY id').result_rows == [
@@ -595,7 +594,7 @@ def test_no_count_on_a_rocksdb_table(tmp_path, live, clickhouse_server, monkeypa
 
 def test_duplicate_rocksdb_key_fails_the_load(tmp_path, live, clickhouse_server):
     duplicated = {'id': ['a', 'a'], 'name': ['n1', 'n2'], 'target': ['t1', 't2']}
-    with pytest.raises(ClickhouseLoadError, match='duplicate declaredId in declared_by_id'):
+    with pytest.raises(ClickhouseLoadError, match='duplicate id in declared_by_id'):
         _run(_declared_task(tmp_path, live, clickhouse_server, duplicated))
 
 
@@ -626,13 +625,13 @@ def test_rerun_after_a_failed_build_loads_one_copy(tmp_path, live, clickhouse_se
 
 
 def test_null_rocksdb_key_is_not_a_duplicate(clickhouse_database):
-    table = ClickHouseTable('t', 'rocksdb', key='k')
+    table = ClickHouseTable('t', 'rocksdb')
     clickhouse_database.command('CREATE TABLE t_log (k Nullable(String)) ENGINE = Log')
     clickhouse_database.command("INSERT INTO t_log VALUES (NULL), ('a')")
-    clickhouse_database.command(uniqueness_sql(table, 't_log'))
+    clickhouse_database.command(uniqueness_sql(table, 'k', 't_log'))
     clickhouse_database.command('INSERT INTO t_log VALUES (NULL)')
     with pytest.raises(DatabaseError, match='duplicate k in t'):
-        clickhouse_database.command(uniqueness_sql(table, 't_log'))
+        clickhouse_database.command(uniqueness_sql(table, 'k', 't_log'))
 
 
 class DeclaredPpp(DatasetModel):
@@ -640,9 +639,10 @@ class DeclaredPpp(DatasetModel):
     dataset_title = 'Declared'
     dataset_description = 'Declared.'
     example = {}
-    clickhouse = (ClickHouseTable('declared_by_id', 'rocksdb', key='id', products=('ppp',)),)
+    products = ('ppp',)
+    clickhouse = (ClickHouseTable('declared_by_id', 'rocksdb'),)
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
 
 
 def test_declarations_building_nothing_for_the_product_fail_at_spec_time(tmp_path, monkeypatch):

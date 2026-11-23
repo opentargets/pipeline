@@ -15,6 +15,7 @@ from pos.clickhouse_ddl import (
     ddl_for,
     declarations,
     declared_sql,
+    entry_key,
     is_declared,
     member_table,
     members,
@@ -165,16 +166,16 @@ class ClickhouseLoad(Task):
         tables, _ = declarations(self._entry, self.spec.product)
         for table in tables:
             if table.engine == 'rocksdb':
-                self._check_unique(client, table, self._table_name)
+                self._check_unique(client, table, entry_key(self._entry, self.spec.product), self._table_name)
         self._run_logged(client, declared_sql(self._entry, self.spec.product))
         for table in tables:
             if table.engine == 'mergetree':
                 self._log_count(client, table.name)
 
     @staticmethod
-    def _check_unique(client, table, landing: str) -> None:
+    def _check_unique(client, table, key: str, landing: str) -> None:
         try:
-            client.command(uniqueness_sql(table, landing))
+            client.command(uniqueness_sql(table, key, landing))
         except ClickHouseError as e:
             raise ClickhouseLoadError(f'loading {table.name} failed: {e}') from e
 

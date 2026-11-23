@@ -31,6 +31,7 @@ from pos.clickhouse_ddl import (
     ddl_for,
     declarations,
     declared_sql,
+    entry_key,
     is_declared,
     landing_columns,
     member_table,
@@ -265,6 +266,13 @@ DECLARED = (
 BEFORE = ROOT / 'tests' / 'fixtures' / 'serving_scripts_before'
 #: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped.
 NOT_REBUILT = {'biosample_names_source', 'otar_projects_log'}
+#: Declared datasets a product no longer loads: `otar_projects` was built empty on Platform, its model is PPP-only.
+NOT_LOADED = {'platform': {'association_time_series', 'otar_projects'}, 'ppp': set()}
+#: Engine settings the declarations derive rather than copy. The primary key is the sort key:
+PRIMARY_KEY_IS_SORT_KEY = {'clinical_indication_disease', 'clinical_indication_drug', 'clinical_target', 'ml_w2v'}
+#: `allow_nullable_key` only where an `order_by` column is nullable:
+NULLABLE_KEY_DROPPED = {'evidence_by_disease_and_target'}
+# Every MergeTree table is optimised, `biosample_mergetree` too: the rows compared are the same.
 #: Scaffolding the script left unsorted (`ORDER BY tuple()`); credible_sets_build_cleanup drops it before release.
 RESORTED = {'biosample_mergetree'}
 #: Fixture rows per landing table; generateRandom makes a few percent of a Nullable column NULL.
@@ -342,6 +350,23 @@ def _shape(client) -> dict:
     }
 
 
+def _accepted(old: dict) -> dict:
+    """The script tables `old` with the accepted engine differences applied, each checked to be there.
+
+    A table is (engine, engine_full, sorting_key, primary_key).
+    """
+    accepted = dict(old)
+    for name in PRIMARY_KEY_IS_SORT_KEY & old.keys():
+        engine, full, sorting, _ = old[name]
+        assert ' PRIMARY KEY ' in full, f'{name}: the script declared no primary key'
+        accepted[name] = (engine, re.sub(r' PRIMARY KEY .*? ORDER BY ', ' ORDER BY ', full), sorting, sorting)
+    for name in NULLABLE_KEY_DROPPED & old.keys():
+        engine, full, *keys = accepted[name]
+        assert 'allow_nullable_key = 1, ' in full, f'{name}: the script set no allow_nullable_key'
+        accepted[name] = (engine, full.replace('allow_nullable_key = 1, ', ''), *keys)
+    return accepted
+
+
 def _without(shape: dict, names: set[str]) -> dict:
     return {
         'tables': {n: v for n, v in shape['tables'].items() if n not in names},
@@ -353,9 +378,10 @@ def _without(shape: dict, names: set[str]) -> dict:
 
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_declared_tables_match_scripts(product):
-    """From the same landing rows, the declarations build what the scripts they replace built: tables, engines, keys,
-    columns, dictionaries and rows."""
+    """From the same landing rows, the declarations build what the scripts they replace built: tables, sort keys,
+    columns, dictionaries and rows; engines and engine settings but for the accepted differences."""
     loaded = {task['dataset'] for task in _tasks(product) if 'dataset' in task}
+    assert set(DECLARED) - loaded == NOT_LOADED[product]
     datasets = [d for d in DECLARED if d in loaded]
     with _database() as before, _database() as after:
         for dataset in datasets:
@@ -366,7 +392,7 @@ def test_declared_tables_match_scripts(product):
             _land(after, dataset, product)
             for table in declarations(entry, product)[0]:
                 if table.engine == 'rocksdb':
-                    after.command(uniqueness_sql(table, entry['table']))
+                    after.command(uniqueness_sql(table, entry_key(entry, product), entry['table']))
             for sql in declared_sql(entry, product):
                 after.command(sql)
         old, new = _shape(before), _shape(after)
@@ -375,7 +401,7 @@ def test_declared_tables_match_scripts(product):
         assert old['tables'][name][0] == new['tables'][name][0] == 'MergeTree', name
         assert old['rows'][name] == new['rows'][name], name
     old, new = _without(old, NOT_REBUILT | RESORTED), _without(new, RESORTED)
-    assert new['tables'] == old['tables']
+    assert new['tables'] == _accepted(old['tables'])
     assert new['columns'] == old['columns']
     assert new['dictionaries'] == old['dictionaries']
     assert new['rows'].keys() == old['rows'].keys()

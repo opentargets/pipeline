@@ -13,7 +13,7 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
-from pos.clickhouse_ddl import declarations, is_declared, landing_columns
+from pos.clickhouse_ddl import declarations, entry_model, is_declared
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
@@ -312,6 +312,17 @@ def test_undeclared_loads_wait_for_the_declared_ones():
         assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
 
 
+def test_a_declared_model_loads_only_for_its_products(load):
+    """A declared model builds no table for a product it lacks, so its load runs only for its products."""
+    _load, _ = load
+    for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
+        loaded = {s.dataset for s in _built_loads(_load('backend_clickhouse', run=run)[0])}
+        for name in loaded:
+            model = entry_model(DATASETS['clickhouse'][name])
+            if model is not None and model.clickhouse:
+                assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
+        assert ('otar_projects' in loaded) == (product == 'ppp')
+
 
 @pytest.mark.parametrize('product', sorted(PRODUCTS))
 def test_declared_names_are_unique(product):
@@ -321,21 +332,3 @@ def test_declared_names_are_unique(product):
         tables, dictionaries = declarations(entry, product)
         names += [t.name for t in tables] + [d.name for d in dictionaries]
     assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)
-
-
-@pytest.mark.parametrize('product', sorted(PRODUCTS))
-def test_yaml_declarations_use_landing_columns(product):
-    """The `clickhouse` lists of `datasets.yaml` entries name columns of their landing table."""
-    for name, entry in DATASETS['clickhouse'].items():
-        if 'clickhouse' not in entry:
-            continue
-        landing = {c for c, _ in landing_columns(entry, product) or []}
-        assert landing, f'{name}: a clickhouse list needs a model'
-        for table in declarations(entry, product)[0]:
-            kept = set(table.columns) if table.columns is not None else landing
-            present = {table.renames.get(c, c) for c in kept}
-            assert kept <= landing, f'{name}.{table.name}: {sorted(kept - landing)} not in the landing table'
-            assert set(table.renames) <= landing, f'{name}.{table.name}: renames of unknown columns'
-            used = {c for c in (table.key, *table.order_by, *table.primary_key) if c}
-            assert used <= present, f'{name}.{table.name}: {sorted(used - present)} not in the table'
-            assert table.primary_key == table.order_by[: len(table.primary_key)], f'{name}.{table.name}'

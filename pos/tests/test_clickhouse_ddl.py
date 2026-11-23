@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import polars as pl
 import pytest
 import yaml
-from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
+from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
@@ -21,10 +21,12 @@ from pos.clickhouse_ddl import (
     columns,
     create_table,
     ddl_for,
-    declarations,
+    declared_sql,
     declared_tables,
     dictionary_sql,
     drop_dictionary_sql,
+    entry_problems,
+    entry_tables,
     landing_columns,
     member_table,
     members,
@@ -32,6 +34,7 @@ from pos.clickhouse_ddl import (
     parse_table,
     parse_type,
     render,
+    rocksdb_key,
     table_sql,
     type_at,
     union_columns,
@@ -395,9 +398,9 @@ LANDING = [
 ]
 
 
-def test_rocksdb_table_sql():
-    table = ClickHouseTable('gene_ontology', 'rocksdb', key='id')
-    assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log') == [
+def test_rocksdb_table_sql_keys_on_the_given_key():
+    table = ClickHouseTable('gene_ontology', 'rocksdb')
+    assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log', key='id') == [
         'DROP TABLE IF EXISTS `gene_ontology` SYNC',
         (
             'CREATE TABLE `gene_ontology` (`id` String, `name` String) '
@@ -407,7 +410,12 @@ def test_rocksdb_table_sql():
     ]
 
 
-def test_mergetree_nullable_order_by_allows_nullable_key():
+def test_rocksdb_table_sql_needs_a_key():
+    with pytest.raises(ValueError, match='gene_ontology: rocksdb needs a key'):
+        table_sql(ClickHouseTable('gene_ontology', 'rocksdb'), [('id', STR)], 'l')
+
+
+def test_mergetree_nullable_order_by_allows_nullable_key_and_is_optimised():
     table = ClickHouseTable('t', 'mergetree', order_by=('targetId', 'id'), columns=('id', 'targetId'))
     assert table_sql(table, LANDING, 't_log') == [
         'DROP TABLE IF EXISTS `t` SYNC',
@@ -416,54 +424,45 @@ def test_mergetree_nullable_order_by_allows_nullable_key():
             'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
         ),
         'INSERT INTO `t` SELECT `id`, `targetId` FROM `t_log`',
+        'OPTIMIZE TABLE `t` FINAL',
     ]
 
 
-def test_mergetree_primary_key_prefix_and_where_with_optimize():
+def test_mergetree_without_a_nullable_order_by_has_no_settings():
+    table = ClickHouseTable('t', 'mergetree', order_by=('id',), columns=('id',))
+    assert table_sql(table, LANDING, 'l')[1] == 'CREATE TABLE `t` (`id` String) ENGINE = MergeTree() ORDER BY (`id`)'
+
+
+def test_mergetree_where_and_columns_order():
     table = ClickHouseTable(
         'clinical_target',
         'mergetree',
         order_by=('targetId', 'id'),
-        primary_key=('targetId',),
-        columns=('id', 'drugId', 'targetId'),
+        columns=('targetId', 'drugId', 'id'),
         where='targetId IS NOT NULL',
-        optimize=True,
     )
     assert table_sql(table, LANDING, 'clinical_target_log') == [
         'DROP TABLE IF EXISTS `clinical_target` SYNC',
         (
-            'CREATE TABLE `clinical_target` (`id` String, `drugId` String, `targetId` Nullable(String)) '
-            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) PRIMARY KEY (`targetId`) SETTINGS allow_nullable_key = 1'
+            'CREATE TABLE `clinical_target` (`targetId` Nullable(String), `drugId` String, `id` String) '
+            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
         ),
         (
-            'INSERT INTO `clinical_target` SELECT `id`, `drugId`, `targetId` FROM `clinical_target_log` '
+            'INSERT INTO `clinical_target` SELECT `targetId`, `drugId`, `id` FROM `clinical_target_log` '
             'WHERE targetId IS NOT NULL'
         ),
         'OPTIMIZE TABLE `clinical_target` FINAL',
     ]
 
 
-def test_subset_rename_follow_columns_order():
-    table = ClickHouseTable('t', 'mergetree', order_by=('gene',), columns=('score', 'id'), renames={'id': 'gene'})
-    assert table_sql(table, LANDING, 'l') == [
-        'DROP TABLE IF EXISTS `t` SYNC',
-        (
-            'CREATE TABLE `t` (`score` Nullable(Float64), `gene` String) '
-            'ENGINE = MergeTree() ORDER BY (`gene`)'
-        ),
-        'INSERT INTO `t` SELECT `score`, `id` AS `gene` FROM `l`',
-    ]
-
-
 def test_no_columns_keeps_every_landing_column():
-    table = ClickHouseTable('t', 'rocksdb', key='id')
-    assert table_sql(table, LANDING, 'l')[2] == (
+    table = ClickHouseTable('t', 'rocksdb')
+    assert table_sql(table, LANDING, 'l', key='id')[2] == (
         'INSERT INTO `t` SELECT `id`, `drugId`, `targetId`, `score`, `tags` FROM `l`'
     )
 
 
 def test_dictionary_sql_renames_through_expression():
-    table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
     d = ClickHouseDictionary(
         'biosample_names',
         'biosample',
@@ -477,7 +476,6 @@ def test_dictionary_sql_renames_through_expression():
         '(`id` String EXPRESSION `biosampleId`, `name` String EXPRESSION `biosampleName`) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 'biosample')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
-    assert table.name == d.source_table
 
 
 def test_dictionary_sql_identity_columns_have_no_expression():
@@ -496,69 +494,121 @@ def test_dictionary_sql_drops_low_cardinality():
     )
 
 
-def test_declared_allow_nullable_key_without_a_nullable_order_by():
-    table = ClickHouseTable('t', 'mergetree', order_by=('id',), columns=('id',), allow_nullable_key=True)
-    assert table_sql(table, LANDING, 'l')[1] == (
-        'CREATE TABLE `t` (`id` String) ENGINE = MergeTree() ORDER BY (`id`) SETTINGS allow_nullable_key = 1'
-    )
-
-
-@pytest.mark.parametrize('product', ['platform', 'ppp'])
-def test_union_declarations_name_union_columns(product):
-    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    for name, entry in entries.items():
-        tables, _ = declarations(entry, product)
-        if 'models' not in entry or not tables:
-            continue
-        union = {c for c, _ in landing_columns(entry, product) or []}
-        for table in tables:
-            used = {*(table.columns or ()), *table.order_by, *table.primary_key, *((table.key,) if table.key else ())}
-            assert used <= union, f'{name}.{table.name}: {sorted(used - union)} not in the union'
-
-
 def test_drop_dictionary_sql():
     d = ClickHouseDictionary('biosample_names', 'biosample', key='id', attributes=('name',))
     assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
 
 
-def test_uniqueness_sql():
-    table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
-    assert uniqueness_sql(table, 'biosample_log') == (
+def test_uniqueness_sql_reads_the_key_through_the_filter():
+    table = ClickHouseTable('biosample', 'rocksdb', where='biosampleId != 3')
+    assert uniqueness_sql(table, 'biosampleId', 'biosample_log') == (
         "SELECT throwIf(count() != uniqExact(tuple(`biosampleId`)), 'duplicate biosampleId in biosample') "
-        'FROM `biosample_log`'
+        'FROM `biosample_log` WHERE biosampleId != 3'
     )
 
 
-def test_uniqueness_sql_reads_the_renamed_key_through_the_filter():
-    table = ClickHouseTable('t', 'rocksdb', key='gene', renames={'id': 'gene'}, where='id != 3')
-    assert uniqueness_sql(table, 't_log') == (
-        "SELECT throwIf(count() != uniqExact(tuple(`id`)), 'duplicate gene in t') FROM `t_log` WHERE id != 3"
-    )
-
-
-class Declared(DatasetModel):
-    dataset_name = 'declared'
-    dataset_title = 'Declared'
-    dataset_description = 'Declared.'
+class Keyed(DatasetModel):
+    dataset_name = 'keyed'
+    dataset_title = 'Keyed'
+    dataset_description = 'Keyed.'
     example = {}
     products = ('platform', 'ppp')
     clickhouse = (
-        ClickHouseTable('both', 'rocksdb', key='id'),
-        ClickHouseTable('ppp_only', 'rocksdb', key='id', products=('ppp',)),
-        ClickHouseDictionary('both_names', 'both', key='id', attributes=('id',)),
+        ClickHouseTable('keyed', 'rocksdb'),
+        ClickHouseDictionary('keyed_names', 'keyed', key='id', attributes=('id',)),
     )
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
 
 
-def test_declared_tables_filter_by_product():
-    assert [t.name for t in declared_tables(Declared, 'platform')] == ['both']
-    assert [t.name for t in declared_tables(Declared, 'ppp')] == ['both', 'ppp_only']
+class KeyedPppOnly(DatasetModel):
+    dataset_name = 'keyed_ppp_only'
+    dataset_title = 'PPP only'
+    dataset_description = 'PPP only.'
+    example = {}
+    products = ('ppp',)
+    clickhouse = (ClickHouseTable('ppp_only', 'rocksdb'),)
+
+    id: Annotated[str, PrimaryKey()]
+
+
+class OtherKey(DatasetModel):
+    dataset_name = 'other_key'
+    dataset_title = 'Other key'
+    dataset_description = 'Other key.'
+    example = {}
+
+    gene: Annotated[str, PrimaryKey()]
+
+
+class TwoKeys(DatasetModel):
+    dataset_name = 'two_keys'
+    dataset_title = 'Two keys'
+    dataset_description = 'Two keys.'
+    example = {}
+
+    a: Annotated[str, PrimaryKey()]
+    b: Annotated[str, PrimaryKey()]
+
+
+def test_declared_tables_follow_the_model_products():
+    assert [t.name for t in declared_tables(Keyed, 'platform')] == ['keyed']
+    assert declared_tables(KeyedPppOnly, 'platform') == []
+    assert [t.name for t in declared_tables(KeyedPppOnly, 'ppp')] == ['ppp_only']
+
+
+def test_rocksdb_key_is_the_one_primary_key_the_models_share():
+    assert rocksdb_key([Keyed]) == 'id'
+    assert rocksdb_key([Keyed, KeyedPppOnly]) == 'id'
+    with pytest.raises(ValueError, match='disagree'):
+        rocksdb_key([Keyed, OtherKey])
+    with pytest.raises(ValueError, match='one PrimaryKey column'):
+        rocksdb_key([TwoKeys])
+
+
+def test_declared_sql_keys_rocksdb_on_the_model_primary_key(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed})
+    statements = declared_sql({'table': 'keyed_log', 'model': 'keyed'}, 'platform')
+    assert 'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`' in statements[2]
+
+
+def test_entry_tables_take_only_the_table_fields():
+    entry = {'table': 'e_log', 'clickhouse': [{'name': 'e', 'engine': 'rocksdb', 'key': 'id'}]}
+    with pytest.raises(ValueError, match=r"unknown ClickHouseTable fields \['key'\]"):
+        entry_tables(entry)
+
+
+def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'other_key': OtherKey})
+    good = {'table': 'u_log', 'models': 'keyed', 'clickhouse': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert entry_problems(good, 'platform') == []
+    bad = {
+        'table': 'u_log',
+        'models': '*',
+        'clickhouse': [{'name': 'u', 'engine': 'mergetree', 'order_by': ['nope'], 'where': 'zip IS NULL'}],
+    }
+    assert entry_problems(bad, 'platform') == [
+        "u_log.u: where 'zip' is not a column of the model",
+        "u_log.u: order_by 'nope' is not a column of the table",
+    ]
+    disagree = {'table': 'u_log', 'models': '*', 'clickhouse': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert entry_problems(disagree, 'platform') == [
+        "u_log: members disagree on PrimaryKey: keyed ('id',), other_key ('gene',)",
+        'u_log.u: rocksdb needs one PrimaryKey column on the model, it has none',
+    ]
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_yaml_declarations_are_valid(product):
+    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+    declared = [e for e in entries.values() if 'clickhouse' in e]
+    assert declared
+    assert [p for e in declared for p in entry_problems(e, product)] == []
 
 
 def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
     client = clickhouse_database
-    table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3', optimize=True)
+    table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3')
     cols = [('id', CHType('Int64')), ('name', STR)]
     client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
     client.command('CREATE TABLE ddl_rerun_log (id Int64, name String) ENGINE = Log')
@@ -575,7 +625,7 @@ def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
 
 def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
     client = clickhouse_database
-    table = ClickHouseTable('ddl_dict_src', 'rocksdb', key='k')
+    table = ClickHouseTable('ddl_dict_src', 'rocksdb')
     cols = [('k', STR), ('v', STR)]
     d = ClickHouseDictionary(
         'ddl_dict', 'ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
@@ -586,7 +636,7 @@ def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
     try:
         for _ in range(2):
             client.command(drop_dictionary_sql(d))
-            for statement in table_sql(table, cols, 'ddl_dict_log'):
+            for statement in table_sql(table, cols, 'ddl_dict_log', key='k'):
                 client.command(statement)
             client.command(dictionary_sql(d, cols))
         assert client.command("SELECT dictGet('ddl_dict', 'name', tuple('x'))") == 'nx'
