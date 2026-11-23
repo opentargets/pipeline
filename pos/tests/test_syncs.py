@@ -1,6 +1,7 @@
 """rclone bucket syncs and the packaged FTP script."""
 
 import configparser
+import re
 import subprocess
 from importlib.resources import files
 from pathlib import Path
@@ -99,10 +100,31 @@ def test_gcs_sync_excludes_view():
     assert task['exclude'] == ['view/']
 
 
-def test_ftp_script_excludes_view():
+def _ftp_exclude():
     script = files('pos.scripts').joinpath('ftp_sync.sh').read_text()
     (line,) = [ln for ln in script.splitlines() if 'gcloud storage rsync' in ln]
-    assert ' -x ^view/ ' in line
+    assert line.count(' -x ') == 1  # gcloud keeps only the last -x
+    (pattern,) = re.findall(r" -x '([^']+)'", line)
+    return re.compile(pattern)
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        'view/x',
+        'view/a/b.parquet',
+        'input/fda-inputs/x',
+        'output/etl/parquet/failedMatches/p',
+        'output/etl/json/failedMatches/j',
+    ],
+)
+def test_ftp_script_excludes(path):
+    assert _ftp_exclude().search(path)
+
+
+@pytest.mark.parametrize('path', ['output/x/p', 'viewer/x', 'output/x/view/f', 'input/other/x', 'manifest.json'])
+def test_ftp_script_keeps(path):
+    assert not _ftp_exclude().search(path)
 
 
 def test_aws_include_list_leaves_out_view():
