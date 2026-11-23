@@ -1,23 +1,28 @@
 """Constants for the OT-Croissant package."""
 
 import mlcroissant as mlc
+import polars as pl
 
-# Maps Spark type names, as `pos.croissant.schema.type_name` gives them, to their Croissant DataType equivalents.
+# Maps the polars dtype of a model value to its Croissant DataType. Each unsigned integer maps to the next
+# wider signed type (UInt64 to FLOAT64).
 TYPE_DICT = {
     # Text / boolean
-    'string': mlc.DataType.TEXT,
-    'boolean': mlc.DataType.BOOL,
-    # Signed integers — ordered by width
-    'byte': mlc.DataType.INT8,
-    'short': mlc.DataType.INT16,
-    'integer': mlc.DataType.INT32,
-    'long': mlc.DataType.INT64,
-    # Floating-point — ordered by width
-    'float': mlc.DataType.FLOAT32,
-    'double': mlc.DataType.FLOAT64,
-    'decimal': mlc.DataType.FLOAT64,  # arbitrary-precision; best approximation
+    pl.String: mlc.DataType.TEXT,
+    pl.Enum: mlc.DataType.TEXT,
+    pl.Boolean: mlc.DataType.BOOL,
+    # Integers
+    pl.Int8: mlc.DataType.INT8,
+    pl.Int16: mlc.DataType.INT16,
+    pl.Int32: mlc.DataType.INT32,
+    pl.Int64: mlc.DataType.INT64,
+    pl.UInt8: mlc.DataType.INT16,
+    pl.UInt16: mlc.DataType.INT32,
+    pl.UInt32: mlc.DataType.INT64,
+    pl.UInt64: mlc.DataType.FLOAT64,
+    # Floating point
+    pl.Float32: mlc.DataType.FLOAT32,
+    pl.Float64: mlc.DataType.FLOAT64,
     # Date / time
-    'date': mlc.DataType.DATE,
-    'timestamp': mlc.DataType.DATETIME,
-    'timestamp_ntz': mlc.DataType.DATETIME,
+    pl.Date: mlc.DataType.DATE,
+    pl.Datetime: mlc.DataType.DATETIME,
 }

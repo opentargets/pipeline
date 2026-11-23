@@ -31,7 +31,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | Step | Does | Needs |
 | --- | --- | --- |
 | `backend_clickhouse` | syncs `output/` and `view/` to the work dir, creates and loads the ClickHouse database | ClickHouse `:8123` on an empty disk: it fails if the database has tables |
-| `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists |
+| `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists; a complete `output/` (every dataset another dataset references must be present, or croissant generation fails) |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket | |
@@ -214,52 +214,40 @@ to `open` if the ClickHouse type changes and a serving script reads the column. 
 
 `pos.croissant` (`src/pos/croissant/`, script `ot_croissant`) builds the
 [Croissant](https://docs.mlcommons.org/croissant/docs/croissant-spec.html) descriptor
-(`croissant.json`) for a release: one distribution per output dataset and one record
-set describing its fields. It reads the parquet schemas of the output datasets and
-fills in descriptions, keys and foreign keys from curated JSON in
-`src/pos/croissant/assets/`. The `ot_croissant` task (`pos/tasks/ot_croissant.py`)
-runs in `backend_opensearch`.
+(`croissant.json`) for a release: one file set per output dataset folder and one record
+set describing its fields. Both come from the dataset's `ot_datamodels` output model
+(`discover_datasets()`, `dataset_spec`); no parquet is read, only the folder names
+(`<column>=<value>` hive partitions set the file set's `includes`). The `ot_croissant`
+task (`pos/tasks/ot_croissant.py`) runs in `backend_opensearch`.
 
-Curation assets:
+| Croissant | From the model |
+| --- | --- |
+| file set `name` | `dataset_title` |
+| record set `description` | `dataset_description`, then `dataset_tags` as `[Tag, Tag]` |
+| record set `key` | the `PrimaryKey` columns |
+| field `description` | the field's `description`, then ` [bioregistry:<prefix>]` for a `Bioregistry` value |
+| field `references` | the value's `Reference` (on a list, its element's) as `<dataset>/<column>` |
+| field `dataType` | the polars dtype (`TYPE_DICT` in `constants.py`; an Enum is Text) |
 
-| File | Describes | Model (`models.py`) |
-| --- | --- | --- |
-| `assets/distribution.json` | each dataset: `nice_name`, `description`, `tags`, `key` | `DistributionAnnotation` |
-| `assets/recordset/<dataset>.json` | each field of a dataset: `description`, `isPrimaryKey`, `foreign_key` | `RecordsetFieldAnnotation` |
-| `assets/instance.json` | the Platform instances (public, ppp) | `InstanceAnnotation` |
+- A list is `repeated`, a struct has `subField`s, a list of lists is flattened with a WARNING.
+- A dataset folder with no output model is left out with a WARNING; views are never described.
+- A field with no description fails the build (and pos's tests).
+- `assets/instance.json` (model `InstanceAnnotation`) is the only curation left: the Platform
+  instances (public, ppp).
 
-- Every model is `extra='forbid'`: an unknown key fails validation.
-- Field ids are relative to the dataset (`targetId`, not `evidence/targetId`). Struct
-  and array-of-struct sub-fields need their own entries, keyed `parent/field`
-  (e.g. `trialSponsor/agencyClass`).
-- `foreign_key` is a full `dataset/field` id and must exist in the corpus.
-
-Missing curation never fails; each gap is a WARNING in the log and a silent defect in
-the descriptor:
-
-- A field with no description ships the literal `PLACEHOLDER for <field> description`.
-  A description in the parquet field metadata takes precedence over the curation.
-- A curated key component missing from the schema is dropped from the record set key.
-  The key still validates, but may no longer be unique; check it against the data
-  after an output schema change.
-- A dataset missing from `distribution.json` ships "Description of the distribution
-  '<id>' is not available."
-- A snake_case column is warned about; output columns are camelCase.
-
-So a pts change that adds, renames or removes an output column is a two-package
-change: update `assets/recordset/<dataset>.json` in the same PR. A new dataset also
-needs a `distribution.json` entry.
+So a pts change that adds, renames or removes an output column changes croissant through its
+model; there is nothing to edit in pos. A `Reference` to a dataset the release lacks makes the
+descriptor fail mlcroissant validation.
 
 ```sh
 cd pos && uv run ot_croissant --help
 cd pos && uv run --frozen pytest tests/croissant -rxs
 ```
 
-The tests (`tests/croissant/`) check the curation files against the models, unique
-ids, the absence of dataset prefixes, that every foreign key points at an existing
-field, and that the assets ship in the wheel. They do not check curation against the
-real output schemas: to see the warnings for a release, run `ot_croissant` on its
-output datasets and read the log.
+The tests (`tests/croissant/`) build record sets from fixture models (types, shapes, keys,
+references, file sets of a flat and a partitioned folder, a folder with no model) and from every
+output model (a description on every field, keys and references matching the models, every
+reference pointing at an existing field), and validate the result with mlcroissant.
 
 ## Cut-over
 

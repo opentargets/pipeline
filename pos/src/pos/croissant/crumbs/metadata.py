@@ -8,6 +8,7 @@ from mlcroissant import Context, Metadata
 from pos.croissant.crumbs.distribution import PlatformOutputDistribution
 from pos.croissant.crumbs.record_sets import PlatformOutputRecordSets
 from pos.croissant.curation import InstanceCuration
+from pos.croissant.schema import dataset_specs
 
 
 class PlatformOutputMetadata(Metadata):
@@ -38,6 +39,7 @@ class PlatformOutputMetadata(Metadata):
         logger.info(f'Generating metadata for the {instance} Platform instance.')
         ann = InstanceCuration().get(instance)
 
+        modelled = dataset_specs(datasets)
         ctx = Context(is_live_dataset=True) if data_integrity_hash is None else Context()
 
         super().__init__(
@@ -54,8 +56,8 @@ class PlatformOutputMetadata(Metadata):
                 .add_ftp_location(ftp_location, data_integrity_hash)
                 .add_gcp_location(gcp_location, data_integrity_hash)
                 .add_aws_location(aws_location, data_integrity_hash)
-                .add_assets_from_paths(paths=datasets)
+                .add_datasets(modelled)
                 .get_metadata()
             ),
-            record_sets=PlatformOutputRecordSets().add_assets_from_paths(paths=datasets).get_metadata(),
+            record_sets=PlatformOutputRecordSets().add_datasets([spec for _, spec in modelled]).get_metadata(),
         )

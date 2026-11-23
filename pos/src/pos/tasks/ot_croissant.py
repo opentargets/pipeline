@@ -28,8 +28,7 @@ class OtCroissantSpec(Spec):
         - gcp_address (str): The URL of the google bucket where \
           the data is going to be published.
         - dataset_path (Path): The path where the parquet outputs \
-          are stored. These outputs are going to be used to extract \
-          the schema.
+          are stored; only the folder names are read.
         - output (str): Path (relative to `work_path` or `release_uri`) \
           to store the metadata at.
         - prepared_data_parent (Path): The parent path where the prepared data \

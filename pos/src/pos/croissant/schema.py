@@ -1,145 +1,51 @@
-"""Read dataset schemas from parquet footers, with Spark's type names."""
+"""The release's dataset folders, their models and their hive partitions."""
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, field
-
-import pyarrow as pa
-import pyarrow.parquet as pq
+from loguru import logger
+from ot_datamodels.base import DatasetModel
+from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.spec import DatasetSpec, dataset_spec, walk
 from pyarrow import fs
 
-SPARK_METADATA_KEY = 'org.apache.spark.sql.parquet.row.metadata'
-"""Footer key under which Spark stores its schema, including per-field metadata."""
+NO_MODEL_WARNING = '[{dataset}]: no dataset model, left out of the croissant descriptor'
 
-
-@dataclass(frozen=True)
-class SchemaType:
-    """A column type: its Spark type name and, for nested types, its children."""
-
-    name: str
-    element: SchemaType | None = None
-    fields: list[SchemaField] = field(default_factory=list)
-    key: SchemaType | None = None
-    value: SchemaType | None = None
-
-
-@dataclass(frozen=True)
-class SchemaField:
-    """A named column with its type and its Spark field metadata."""
-
-    name: str
-    type: SchemaType
-    metadata: dict[str, str] = field(default_factory=dict)
-
-
-def type_name(arrow_type: pa.DataType) -> str:
-    """The name Spark gives a parquet column of this Arrow type."""
-    match arrow_type:
-        case _ if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
-            return 'string'
-        case _ if pa.types.is_boolean(arrow_type):
-            return 'boolean'
-        case _ if pa.types.is_int8(arrow_type):
-            return 'byte'
-        case _ if pa.types.is_int16(arrow_type) or pa.types.is_uint8(arrow_type):
-            return 'short'
-        case _ if pa.types.is_int32(arrow_type) or pa.types.is_uint16(arrow_type):
-            return 'integer'
-        case _ if pa.types.is_int64(arrow_type) or pa.types.is_uint32(arrow_type):
-            return 'long'
-        case _ if pa.types.is_uint64(arrow_type) or pa.types.is_decimal(arrow_type):
-            return 'decimal'
-        case _ if pa.types.is_float32(arrow_type):
-            return 'float'
-        case _ if pa.types.is_float64(arrow_type):
-            return 'double'
-        case _ if pa.types.is_date(arrow_type):
-            return 'date'
-        case _ if pa.types.is_timestamp(arrow_type):
-            return 'timestamp' if arrow_type.tz else 'timestamp_ntz'
-        case _ if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
-            return 'array'
-        case _ if pa.types.is_struct(arrow_type):
-            return 'struct'
-        case _ if pa.types.is_map(arrow_type):
-            return 'map'
-        case _ if pa.types.is_dictionary(arrow_type):
-            return 'dictionary'
-        case _ if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
-            return 'binary'
-        case _:
-            return str(arrow_type)
-
-
-def _spark_metadata(spark_fields: list[dict]) -> dict[str, dict]:
-    """Spark field metadata by field name, nested fields under their parent's name."""
-    out: dict[str, dict] = {}
-    for spark_field in spark_fields:
-        name = spark_field['name']
-        out[name] = {'metadata': spark_field.get('metadata') or {}, 'children': {}}
-        spark_type = spark_field['type']
-        while isinstance(spark_type, dict) and spark_type.get('type') == 'array':
-            spark_type = spark_type['elementType']
-        if isinstance(spark_type, dict) and spark_type.get('type') == 'struct':
-            out[name]['children'] = _spark_metadata(spark_type['fields'])
-    return out
-
-
-def _convert_type(arrow_type: pa.DataType, spark: dict[str, dict]) -> SchemaType:
-    name = type_name(arrow_type)
-    if name == 'array':
-        return SchemaType(name, element=_convert_type(arrow_type.value_type, spark))
-    if name == 'struct':
-        fields = [_convert_field(arrow_type.field(i), spark) for i in range(arrow_type.num_fields)]
-        return SchemaType(name, fields=fields)
-    if name == 'map':
-        key, value = _convert_type(arrow_type.key_type, {}), _convert_type(arrow_type.item_type, {})
-        return SchemaType(name, key=key, value=value)
-    if name == 'dictionary':
-        return SchemaType(type_name(arrow_type.value_type))
-    return SchemaType(name)
-
-
-def _convert_field(arrow_field: pa.Field, spark: dict[str, dict]) -> SchemaField:
-    entry = spark.get(arrow_field.name, {})
-    return SchemaField(
-        name=arrow_field.name,
-        type=_convert_type(arrow_field.type, entry.get('children', {})),
-        metadata=dict(entry.get('metadata', {})),
-    )
+MISSING_REFERENCE_ERROR = 'a referenced dataset is missing from the release: {details}'
 
 
 def _filesystem(path: str) -> tuple[fs.FileSystem, str]:
     return fs.FileSystem.from_uri(path if '://' in path else f'file://{path}')
 
 
-def _parquet_files(path: str) -> list[str]:
-    filesystem, root = _filesystem(path)
-    infos = filesystem.get_file_info(fs.FileSelector(root, recursive=True))
-    return sorted(
-        info.path
-        for info in infos
-        if info.type == fs.FileType.File
-        and info.base_name.endswith('.parquet')
-        and not info.base_name.startswith(('_', '.'))
-    )
+def dataset_specs(
+    paths: list[str], models: dict[str, type[DatasetModel]] | None = None
+) -> list[tuple[str, DatasetSpec]]:
+    """Each dataset folder in `paths` that has an output model, with the model's spec.
 
-
-def read_schema(path: str) -> list[SchemaField]:
-    """The columns of the dataset at `path`, from the footer of its first parquet file.
-
-    Raises:
-        ValueError: If the dataset has no readable parquet file.
+    A folder is named after its dataset; one with no model is left out with a warning.
     """
-    try:
-        filesystem, _ = _filesystem(path)
-        schema = pq.read_schema(_parquet_files(path)[0], filesystem=filesystem)
-    except (IndexError, OSError, pa.ArrowException) as error:
-        raise ValueError(f'Could not read dataset: {path}') from error
-    spark_blob = (schema.metadata or {}).get(SPARK_METADATA_KEY.encode())
-    spark = _spark_metadata(json.loads(spark_blob)['fields']) if spark_blob else {}
-    return [_convert_field(arrow_field, spark) for arrow_field in schema]
+    models = discover_datasets() if models is None else models
+    out: list[tuple[str, DatasetSpec]] = []
+    for path in paths:
+        dataset = path.rstrip('/').split('/')[-1]
+        if (model := models.get(dataset)) is None:
+            logger.warning(NO_MODEL_WARNING.format(dataset=dataset))
+            continue
+        out.append((path, dataset_spec(model)))
+    _check_references(out)
+    return out
+
+
+def _check_references(specs: list[tuple[str, DatasetSpec]]) -> None:
+    """Raise if a dataset references one that is not among `specs`."""
+    present = {spec.name for _, spec in specs}
+    missing: list[str] = []
+    for _, spec in specs:
+        for column, node in walk(spec):
+            if node.reference is not None and node.reference.dataset not in present:
+                missing.append(f'{spec.name}/{column} references {node.reference.dataset}')
+    if missing:
+        raise ValueError(MISSING_REFERENCE_ERROR.format(details='; '.join(missing)))
 
 
 def partition_columns(path: str) -> list[str]:

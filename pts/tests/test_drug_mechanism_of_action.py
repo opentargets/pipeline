@@ -334,7 +334,7 @@ class TestConsolidateDuplicateReferences:
     def test_the_drug_anchor_does_not_reach_the_output(self) -> None:
         """`parentChemblId` groups the rows and is then dropped.
 
-        It is internal: a new published column would need a croissant recordset entry.
+        It is internal: it is not a column of the output model.
         """
         df = pl.DataFrame(
             [

@@ -1,6 +1,6 @@
 """Credible-set colocalisation: the `colocalisation` output, written by gentropy.
 
-Descriptions are copied verbatim from croissant's `colocalisation.json`, as are its `isPrimaryKey`
+Descriptions are copied verbatim from croissant's former curation, as are its `isPrimaryKey`
 and `foreign_key` tags (as `PrimaryKey`/`Reference`).
 
 Rules confirmed against the 26.12 release (310,901,029 rows in 200 parts):

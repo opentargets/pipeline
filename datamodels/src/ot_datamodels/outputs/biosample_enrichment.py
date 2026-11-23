@@ -35,7 +35,7 @@ class BiosampleEnrichment(DatasetModel):
         'Enrichment of biosample-specific expression among the genes prioritised by locus-to-gene for a GWAS study, '
         'or for the studies of one disease pooled together'
     )
-    dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics', 'Disease')
     example: ClassVar[dict] = {
         'diseaseId': 'EFO_0000270',
         'studyId': None,

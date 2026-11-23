@@ -4,16 +4,11 @@ from __future__ import annotations
 
 import mlcroissant as mlc
 from loguru import logger
+from ot_datamodels.spec import DatasetSpec, FieldSpec, Node
 
 from pos.croissant.constants import TYPE_DICT
-from pos.croissant.curation import DistributionCuration, RecordsetCuration
-from pos.croissant.schema import SchemaField, read_schema
 
 SNAKE_CASE_WARNING = "column '{field_name}' is snake_case, camelCase is expected"
-MISSING_KEY_WARNING = (
-    "[{dataset}]: primary key component(s) '{fields}' are curated but absent "
-    'from the schema, the declared key is incomplete'
-)
 
 
 def _warn_if_snake_case(field_name: str) -> None:
@@ -22,233 +17,108 @@ def _warn_if_snake_case(field_name: str) -> None:
         logger.warning(SNAKE_CASE_WARNING.format(field_name=field_name))
 
 
+def data_type(node: Node):
+    """The Croissant data type of a primitive model value."""
+    for dtype, croissant_type in TYPE_DICT.items():
+        if isinstance(node.dtype, dtype):
+            return croissant_type
+    raise ValueError(f'no croissant data type for polars dtype {node.dtype}')
+
+
+def dataset_description(spec: DatasetSpec) -> str:
+    """The dataset's description, followed by its tags."""
+    if not spec.tags:
+        return spec.description
+    return f'{spec.description} [{", ".join(spec.tags)}]'
+
+
 class PlatformOutputRecordSets:
-    """Class to  in the Open Targets Platform data."""
+    """The record sets of the Open Targets Platform data: one per dataset, from its model."""
 
     record_sets: list[mlc.RecordSet]
-    DISTRIBUTION_ID: str
 
     def __init__(self: PlatformOutputRecordSets) -> None:
         self.record_sets = []
-        super().__init__()  # <- What is the parent class here?
 
     def get_metadata(self: PlatformOutputRecordSets) -> list[mlc.RecordSet]:
-        """Return the distribution metadata."""
+        """Return the record sets."""
         return self.record_sets
 
-    def add_assets_from_paths(self: PlatformOutputRecordSets, paths: list[str]):
-        """Add files from a list to the distribution."""
-        for path in paths:
-            self.DISTRIBUTION_ID = path.split('/')[-1]
-            record_set = self.get_fileset_recordset(path)
-
-            # Append the recordset to the record sets list:
-            self.record_sets.append(record_set)
-
+    def add_datasets(self: PlatformOutputRecordSets, specs: list[DatasetSpec]):
+        """Add one record set per dataset spec."""
+        for spec in specs:
+            self.record_sets.append(self.get_fileset_recordset(spec))
         return self
 
-    def generate_distribution_description(self: PlatformOutputRecordSets, id: str) -> str:
-        """Generate the description of the distribution."""
-        ann = DistributionCuration().get(id)
-
-        if ann is None:
-            return f"Description of the distribution '{id}' is not available."
-
-        if not ann.tags:
-            return ann.description
-
-        return f'{ann.description} [{", ".join(ann.tags)}]'
-
-    def get_fileset_recordset(
-        self: PlatformOutputRecordSets,
-        path: str,
-    ) -> mlc.RecordSet:
-        """Returns the recordset for a fileset."""
-        # Get the schema from the recordset:
-        logger.info(f"processing '{self.DISTRIBUTION_ID}'")
-        try:
-            schema = read_schema(path)
-        except ValueError:
-            logger.error(f'could not read parquet: {path}')
-            raise
-
-        fields = [self.parse_field(field) for field in schema]
-
-        # Collect primary key field IDs from recordset curation:
-        recordset_curation = RecordsetCuration()
-
-        # A curated key component that no longer exists in the schema is dropped
-        # silently by the comprehension below, quietly weakening the declared key.
-        # Surface it, the same way a missing description is surfaced.
-        curated_key = recordset_curation.primary_key_fields(self.DISTRIBUTION_ID)
-        if absent := sorted(curated_key - {field.name for field in schema}):
-            logger.warning(MISSING_KEY_WARNING.format(dataset=self.DISTRIBUTION_ID, fields=', '.join(absent)))
-
-        primary_key = [
-            f'{self.DISTRIBUTION_ID}/{field.name}'
-            for field in schema
-            if (ann := recordset_curation.get_field(f'{self.DISTRIBUTION_ID}/{field.name}', log_level='DEBUG'))
-            and ann.is_primary_key
-        ]
-
+    def get_fileset_recordset(self: PlatformOutputRecordSets, spec: DatasetSpec) -> mlc.RecordSet:
+        """Returns the recordset for a dataset."""
+        logger.info(f"processing '{spec.name}'")
         record_set = mlc.RecordSet(
-            id=self.DISTRIBUTION_ID,
-            name=self.DISTRIBUTION_ID,
-            fields=fields,
+            id=spec.name,
+            name=spec.name,
+            fields=[self.parse_field(spec.name, field) for field in spec.fields],
         )
-        if primary_key:
-            record_set.key = primary_key
-
-        # Extract description of dataset:
-        record_set.description = self.generate_distribution_description(
-            self.DISTRIBUTION_ID,
-        )
-
-        # Return record set
+        if spec.primary_key:
+            record_set.key = [f'{spec.name}/{name}' for name in spec.primary_key]
+        record_set.description = dataset_description(spec)
         return record_set
 
     def parse_field(
         self: PlatformOutputRecordSets,
-        field: SchemaField,
+        dataset: str,
+        field: FieldSpec,
         parent: str | None = None,
     ) -> mlc.Field:
-        """Parse a dataset column into a Croissant Field.
-
-        The parsing is recursive with arrays, structs, and maps.
-        """
-
-        def get_field_description(field: SchemaField, field_id: str) -> str:
-            """Get the field description."""
-            # Get the description from the data:
-            description = get_field_description_from_data(field)
-            if description:
-                return description
-
-            # If no description is found in the data, get it from the curation:
-            description = get_field_description_from_curation(field_id)
-            if description:
-                return description
-
-            # No description found, return a placeholder:
-            return f'PLACEHOLDER for {field.name} description'
-
-        def get_field_description_from_curation(field_id: str) -> str | None:
-            """Get the field description from the curation."""
-            ann = RecordsetCuration().get_field(field_id)
-            return ann.description if ann else None
-
-        def get_field_description_from_data(field: SchemaField) -> str | None:
-            metadata: dict[str, str] | None = field.metadata
-
-            if metadata and 'description' in metadata:
-                return metadata['description']
-            else:
-                return None
-
-        def get_field_id(
-            parent: str | None,
-            field: SchemaField,
-            include_distribution_id: bool = True,
-        ) -> str:
-            """Get the field id."""
-            column_id: str
-            if parent:
-                column_id = f'{parent}/{field.name}'
-            else:
-                column_id = field.name
-            if include_distribution_id:
-                column_id = f'{self.DISTRIBUTION_ID}/{column_id}'
-            return column_id
-
-        def get_foreign_key(field: SchemaField, field_id: str) -> str | None:
-            """Get the foreign key from the curation."""
-            metadata: dict[str, str] | None = field.metadata
-
-            # If the data contains a foreign key, use it:
-            if metadata and 'foreign_key' in metadata:
-                return metadata['foreign_key']
-
-            # If the data does not contain a foreign key, get it from the curation:
-            ann = RecordsetCuration().get_field(field_id, log_level='DEBUG')
-            return ann.foreign_key if ann else None
-
+        """Parse a model field into a Croissant Field, recursing into lists and structs."""
         _warn_if_snake_case(field.name)
+        column = f'{parent}/{field.name}' if parent else field.name
+        field_id = f'{dataset}/{column}'
+        node = field.node
+        # Markers on a list's values sit on its element.
+        value = node
+        while value.element is not None:
+            value = value.element
 
-        field_type: str = field.type.name
+        if not field.description:
+            raise ValueError(f'{field_id} has no description in its dataset model')
+        description = field.description
+        if value.bioregistry:
+            description += f' [bioregistry:{value.bioregistry}]'
 
-        # Get the field description from the data:
-        column_description: str = get_field_description(field, get_field_id(parent, field))
-
-        # Get foreign key from the data:
-
-        # Initialise field:
         croissant_field = mlc.Field(
-            id=get_field_id(parent, field),
+            id=field_id,
             name=field.name,
-            description=column_description,
+            description=description,
             source=mlc.Source(
-                file_set=self.DISTRIBUTION_ID + '-fileset',
-                extract=mlc.Extract(column=get_field_id(parent, field, False)),
+                file_set=f'{dataset}-fileset',
+                extract=mlc.Extract(column=column),
             ),
         )
         croissant_field.data_types = []
 
-        if foreign_key := get_foreign_key(field, get_field_id(parent, field)):
-            croissant_field.references = mlc.Source(field=foreign_key)
+        if value.reference is not None:
+            croissant_field.references = mlc.Source(field=f'{value.reference.dataset}/{value.reference.column}')
 
-        if field_type in TYPE_DICT:
-            croissant_field.data_types.append(TYPE_DICT[field_type])
-
-        # Test if the field is a list:
-        if field_type == 'array':
-            element_type = field.type.element
-            assert element_type is not None
+        if node.kind == 'primitive':
+            croissant_field.data_types.append(data_type(node))
+        elif node.kind == 'struct':
+            croissant_field.sub_fields = [self.parse_field(dataset, sub, column) for sub in node.fields]
+        else:
+            element = node.element
+            assert element is not None
             croissant_field.repeated = True
-
-            # A list of struct:
-            if element_type.name == 'struct':
-                croissant_field.sub_fields = [
-                    self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in element_type.fields
-                ]
-
-            # If element type is a primitive type:
-            elif element_type.name in TYPE_DICT:
-                # Append data type of the primitive type
-                if (type_name := TYPE_DICT.get(element_type.name)) is not None:
-                    croissant_field.data_types.append(type_name)
-
-            # If the element type is another array, we flatten it
-            if element_type.name == 'array' and element_type.element is not None:
+            if element.kind == 'struct':
+                croissant_field.sub_fields = [self.parse_field(dataset, sub, column) for sub in element.fields]
+            elif element.kind == 'primitive':
+                croissant_field.data_types.append(data_type(element))
+            else:
                 logger.warning(
                     f'field {field.name} is of type array of array, this is not yet supported by croissant, flattening'
                 )
-                sub_type_name = element_type.element.name
-                if sub_type_name in TYPE_DICT:
-                    croissant_field.data_types.append(TYPE_DICT[sub_type_name])
-
-        # Test if the field is a struct:
-        elif field_type == 'struct':
-            croissant_field.sub_fields = [
-                self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in field.type.fields
-            ]
-        elif field_type == 'map':
-            logger.warning(
-                f'field {self.DISTRIBUTION_ID}/{field.name} is of type map,this is not yet supported by croissant'
-            )
-
-            key_type = field.type.key
-            value_type = field.type.value
-            assert key_type is not None and value_type is not None
-
-            # Constructing an artifical struct:
-            struct = [SchemaField('key', key_type), SchemaField('value', value_type)]
-
-            # Modelling maps as arrays:
-            croissant_field.repeated = True
-
-            # Adding key/value fields:
-            croissant_field.sub_fields = [
-                self.parse_field(subfield, get_field_id(parent, field, False)) for subfield in struct
-            ]
+                assert element.element is not None
+                if element.element.kind != 'primitive':
+                    kind = element.element.kind
+                    raise ValueError(f'{field_id} is a list of lists of {kind}, which croissant cannot type')
+                croissant_field.data_types.append(data_type(element.element))
 
         return croissant_field

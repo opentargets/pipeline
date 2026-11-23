@@ -104,7 +104,7 @@ Validation lives in pts: a model's pandera schema (`to_pandera`) and
 validates what it writes against its model.
 
 A change here also needs the pts and pos tests: pts checks every output task
-against its model and the models against its enums, and pos needs a croissant record set
-entry for every new column.
+against its model and the models against its enums, and pos builds the release's croissant
+descriptor from the models (a field with no description fails pos's tests).
 
 Run `uv run --frozen pytest`, `ruff check` and `ty check` from this directory.
