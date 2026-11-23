@@ -11,6 +11,7 @@ from pathlib import Path
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
+from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
@@ -284,6 +285,71 @@ def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = '
     """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted."""
     body = ', '.join(f'{_name(name)} {render(t)}' for name, t in cols)
     return f'CREATE TABLE IF NOT EXISTS {_name(table)} ({body}) ENGINE = {engine}'
+
+
+def declared_tables(model: type[DatasetModel], product: str) -> list[ClickHouseTable]:
+    """The tables the model declares for `product`; a table with no `products` follows the model's."""
+    return [
+        t for t in model.clickhouse if isinstance(t, ClickHouseTable) and product in (t.products or model.products)
+    ]
+
+
+def _kept(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]]) -> list[str]:
+    return [name for name, _ in cols] if table.columns is None else list(table.columns)
+
+
+def table_columns(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]]) -> list[tuple[str, CHType]]:
+    """The table's columns from the dataset's `cols`: those in `columns` (all when None), renamed, in order."""
+    by_name = dict(cols)
+    return [(table.renames.get(name, name), by_name[name]) for name in _kept(table, cols)]
+
+
+def table_sql(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landing: str) -> list[str]:
+    """The statements that create and fill a declared table from its landing table; `cols` are the dataset's."""
+    own = table_columns(table, cols)
+    types = dict(own)
+    if table.engine == 'rocksdb':
+        engine = f'EmbeddedRocksDB() PRIMARY KEY {_name(table.key or "")}'
+    else:
+        engine = f'MergeTree() ORDER BY ({_names(table.order_by)})'
+        if table.primary_key:
+            engine += f' PRIMARY KEY ({_names(table.primary_key)})'
+        if any(types[c].nullable for c in table.order_by):
+            engine += ' SETTINGS allow_nullable_key = 1'
+    select = ', '.join(
+        f'{_name(c)} AS {_name(table.renames[c])}' if c in table.renames else _name(c) for c in _kept(table, cols)
+    )
+    insert = f'INSERT INTO {_name(table.name)} SELECT {select} FROM {_name(landing)}'  # noqa: S608 quoted identifiers
+    if table.where:
+        insert += f' WHERE {table.where}'
+    statements = [create_table(table.name, own, engine), insert]
+    if table.optimize:
+        statements.append(f'OPTIMIZE TABLE {_name(table.name)} FINAL')
+    return statements
+
+
+def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) -> str:
+    """`CREATE DICTIONARY` over its source table; `cols` are the table's own. Renames go through EXPRESSION."""
+    types = dict(cols)
+    parts = []
+    for name in (d.key, *d.attributes):
+        source = d.source_columns.get(name, name)
+        expression = f' EXPRESSION {_name(source)}' if source != name else ''
+        parts.append(f'{_name(name)} {render(types[source])}{expression}')
+    return (
+        f'CREATE DICTIONARY IF NOT EXISTS {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
+        f"SOURCE(CLICKHOUSE(TABLE '{d.source_table}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+
+
+def uniqueness_sql(table: ClickHouseTable) -> str:
+    """A query that throws when the table's RocksDB key repeats."""
+    key = table.key
+    return f"SELECT throwIf(count() != uniqExact({key}), 'duplicate {key} in {table.name}') FROM {table.name}"  # noqa: S608 declared names
+
+
+def _names(names: Sequence[str]) -> str:
+    return ', '.join(_name(n) for n in names)
 
 
 def members(pattern: str, product: str) -> list[type[DatasetModel]]:

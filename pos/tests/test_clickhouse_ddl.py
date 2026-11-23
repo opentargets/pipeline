@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
+from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.target_view import TargetView
@@ -20,6 +21,8 @@ from pos.clickhouse_ddl import (
     columns,
     create_table,
     ddl_for,
+    declared_tables,
+    dictionary_sql,
     landing_columns,
     member_table,
     members,
@@ -27,8 +30,10 @@ from pos.clickhouse_ddl import (
     parse_table,
     parse_type,
     render,
+    table_sql,
     type_at,
     union_columns,
+    uniqueness_sql,
 )
 
 ROOT = Path(__file__).parents[1]
@@ -374,3 +379,131 @@ def test_target_view_keeps_landing_types(path, expected):
     t = type_at(columns(TargetView), path)
     assert t is not None
     assert render(t) == expected
+
+
+# declared tables
+
+STR = CHType('String')
+LANDING = [
+    ('id', STR),
+    ('drugId', STR),
+    ('targetId', CHType('String', nullable=True)),
+    ('score', CHType('Float64', nullable=True)),
+    ('tags', CHType('Array', element=STR)),
+]
+
+
+def test_rocksdb_table_sql():
+    table = ClickHouseTable('gene_ontology', 'rocksdb', key='id')
+    assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log') == [
+        (
+            'CREATE TABLE IF NOT EXISTS `gene_ontology` (`id` String, `name` String) '
+            'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
+        ),
+        'INSERT INTO `gene_ontology` SELECT `id`, `name` FROM `gene_ontology_log`',
+    ]
+
+
+def test_mergetree_nullable_order_by_allows_nullable_key():
+    table = ClickHouseTable('t', 'mergetree', order_by=('targetId', 'id'), columns=('id', 'targetId'))
+    assert table_sql(table, LANDING, 't_log') == [
+        (
+            'CREATE TABLE IF NOT EXISTS `t` (`id` String, `targetId` Nullable(String)) '
+            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
+        ),
+        'INSERT INTO `t` SELECT `id`, `targetId` FROM `t_log`',
+    ]
+
+
+def test_mergetree_primary_key_prefix_and_where_with_optimize():
+    table = ClickHouseTable(
+        'clinical_target',
+        'mergetree',
+        order_by=('targetId', 'id'),
+        primary_key=('targetId',),
+        columns=('id', 'drugId', 'targetId'),
+        where='targetId IS NOT NULL',
+        optimize=True,
+    )
+    assert table_sql(table, LANDING, 'clinical_target_log') == [
+        (
+            'CREATE TABLE IF NOT EXISTS `clinical_target` (`id` String, `drugId` String, `targetId` Nullable(String)) '
+            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) PRIMARY KEY (`targetId`) SETTINGS allow_nullable_key = 1'
+        ),
+        (
+            'INSERT INTO `clinical_target` SELECT `id`, `drugId`, `targetId` FROM `clinical_target_log` '
+            'WHERE targetId IS NOT NULL'
+        ),
+        'OPTIMIZE TABLE `clinical_target` FINAL',
+    ]
+
+
+def test_subset_rename_follow_columns_order():
+    table = ClickHouseTable('t', 'mergetree', order_by=('gene',), columns=('score', 'id'), renames={'id': 'gene'})
+    assert table_sql(table, LANDING, 'l') == [
+        (
+            'CREATE TABLE IF NOT EXISTS `t` (`score` Nullable(Float64), `gene` String) '
+            'ENGINE = MergeTree() ORDER BY (`gene`)'
+        ),
+        'INSERT INTO `t` SELECT `score`, `id` AS `gene` FROM `l`',
+    ]
+
+
+def test_no_columns_keeps_every_landing_column():
+    table = ClickHouseTable('t', 'rocksdb', key='id')
+    assert table_sql(table, LANDING, 'l')[1] == (
+        'INSERT INTO `t` SELECT `id`, `drugId`, `targetId`, `score`, `tags` FROM `l`'
+    )
+
+
+def test_dictionary_sql_renames_through_expression():
+    table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
+    d = ClickHouseDictionary(
+        'biosample_names',
+        'biosample',
+        key='id',
+        attributes=('name',),
+        source_columns={'id': 'biosampleId', 'name': 'biosampleName'},
+    )
+    cols = [('biosampleId', STR), ('biosampleName', STR), ('other', STR)]
+    assert dictionary_sql(d, cols) == (
+        'CREATE DICTIONARY IF NOT EXISTS `biosample_names` '
+        '(`id` String EXPRESSION `biosampleId`, `name` String EXPRESSION `biosampleName`) PRIMARY KEY `id` '
+        "SOURCE(CLICKHOUSE(TABLE 'biosample')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+    assert table.name == d.source_table
+
+
+def test_dictionary_sql_identity_columns_have_no_expression():
+    d = ClickHouseDictionary('d', 't', key='id', attributes=('name',))
+    assert dictionary_sql(d, [('id', STR), ('name', STR)]) == (
+        'CREATE DICTIONARY IF NOT EXISTS `d` (`id` String, `name` String) PRIMARY KEY `id` '
+        "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+
+
+def test_uniqueness_sql():
+    table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
+    assert uniqueness_sql(table) == (
+        "SELECT throwIf(count() != uniqExact(biosampleId), 'duplicate biosampleId in biosample') FROM biosample"
+    )
+
+
+class Declared(DatasetModel):
+    dataset_name = 'declared'
+    dataset_title = 'Declared'
+    dataset_description = 'Declared.'
+    example = {}
+    products = ('platform', 'ppp')
+    clickhouse = (
+        ClickHouseTable('both', 'rocksdb', key='id'),
+        ClickHouseTable('ppp_only', 'rocksdb', key='id', products=('ppp',)),
+        ClickHouseDictionary('both_names', 'both', key='id', attributes=('id',)),
+    )
+
+    id: str
+
+
+def test_declared_tables_filter_by_product():
+    assert [t.name for t in declared_tables(Declared, 'platform')] == ['both']
+    assert [t.name for t in declared_tables(Declared, 'ppp')] == ['both', 'ppp_only']
