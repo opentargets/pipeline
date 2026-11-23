@@ -348,7 +348,7 @@ def test_every_entry_round_trips():
         checked += 1
     assert checked > 20
     views = {entries[n]['model'] for n in ('aotf', 'association_time_series', 'protein_coding_coords', 'targets')}
-    assert views == set(discover_datasets(VIEWS_PACKAGE))
+    assert views == set(discover_datasets(VIEWS_PACKAGE)) - {'drug_view'}  # declared with the drug table
     for product in ('platform', 'ppp'):
         found = members(entries['evidence']['models'], product)
         assert found, product

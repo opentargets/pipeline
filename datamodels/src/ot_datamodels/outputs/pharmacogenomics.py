@@ -8,7 +8,15 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
+from ot_datamodels import (
+    Bioregistry,
+    ClickHouseType,
+    DatasetModel,
+    PolarsDtype,
+    PrimaryKey,
+    Reference,
+    StructModel,
+)
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, RS_ID, VARIANT_ID
 from ot_datamodels.vocabularies import (
     PgxCategory,
@@ -64,6 +72,7 @@ class Pharmacogenomics(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target', 'Genetics')
     example: ClassVar[dict] = {
+        'pharmacogenomicsId': 1,
         'datasourceId': 'clinpgx',
         'datasourceVersion': '2026-07-05',
         'datatypeId': 'clinical_annotation',
@@ -109,6 +118,9 @@ class Pharmacogenomics(DatasetModel):
         'drugs': [{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}],
     }
 
+    pharmacogenomicsId: Annotated[int, PrimaryKey(), ClickHouseType('UInt64')] = Field(
+        ge=0, description='Identifier of the record, unique within a release; not stable across releases'
+    )
     datasourceId: Annotated[PharmacogenomicsDatasource, PolarsDtype(pl.Enum)] = Field(
         description='Identifier for the data provider'
     )
