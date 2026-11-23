@@ -24,7 +24,7 @@ def list_folders_in_directory(user_path: str) -> list[str]:
         user_path (str): The absolute or relative path provided by the user.
 
     Returns:
-        list[str]: A list of absolute paths to the folders in the directory.
+        list[str]: The sorted absolute paths to the folders in the directory.
     """
     # Resolve the user-provided path to an absolute path
     directory = Path(user_path).expanduser().resolve()
@@ -34,7 +34,7 @@ def list_folders_in_directory(user_path: str) -> list[str]:
         raise ValueError(f"The provided path '{user_path}' is not a valid directory.")
 
     # List all folders in the directory and return their absolute paths
-    return [str(folder.resolve()) for folder in directory.iterdir() if folder.is_dir()]
+    return sorted(str(folder.resolve()) for folder in directory.iterdir() if folder.is_dir())
 
 
 parser = argparse.ArgumentParser()

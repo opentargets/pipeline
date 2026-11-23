@@ -5,10 +5,12 @@ from __future__ import annotations
 from loguru import logger
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets
-from ot_datamodels.spec import DatasetSpec, dataset_spec
+from ot_datamodels.spec import DatasetSpec, dataset_spec, walk
 from pyarrow import fs
 
 NO_MODEL_WARNING = '[{dataset}]: no dataset model, left out of the croissant descriptor'
+
+MISSING_REFERENCE_ERROR = 'a referenced dataset is missing from the release: {details}'
 
 
 def _filesystem(path: str) -> tuple[fs.FileSystem, str]:
@@ -30,7 +32,20 @@ def dataset_specs(
             logger.warning(NO_MODEL_WARNING.format(dataset=dataset))
             continue
         out.append((path, dataset_spec(model)))
+    _check_references(out)
     return out
+
+
+def _check_references(specs: list[tuple[str, DatasetSpec]]) -> None:
+    """Raise if a dataset references one that is not among `specs`."""
+    present = {spec.name for _, spec in specs}
+    missing: list[str] = []
+    for _, spec in specs:
+        for column, node in walk(spec):
+            if node.reference is not None and node.reference.dataset not in present:
+                missing.append(f'{spec.name}/{column} references {node.reference.dataset}')
+    if missing:
+        raise ValueError(MISSING_REFERENCE_ERROR.format(details='; '.join(missing)))
 
 
 def partition_columns(path: str) -> list[str]:

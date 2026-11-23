@@ -116,7 +116,9 @@ class PlatformOutputRecordSets:
                     f'field {field.name} is of type array of array, this is not yet supported by croissant, flattening'
                 )
                 assert element.element is not None
-                if element.element.kind == 'primitive':
-                    croissant_field.data_types.append(data_type(element.element))
+                if element.element.kind != 'primitive':
+                    kind = element.element.kind
+                    raise ValueError(f'{field_id} is a list of lists of {kind}, which croissant cannot type')
+                croissant_field.data_types.append(data_type(element.element))
 
         return croissant_field

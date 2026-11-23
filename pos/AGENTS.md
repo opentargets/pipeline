@@ -31,7 +31,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | Step | Does | Needs |
 | --- | --- | --- |
 | `backend_clickhouse` | syncs `output/` and `view/` to the work dir, creates and loads the ClickHouse database | ClickHouse `:8123` on an empty disk: it fails if the database has tables |
-| `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists |
+| `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists; a complete `output/` (every dataset another dataset references must be present, or croissant generation fails) |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket | |

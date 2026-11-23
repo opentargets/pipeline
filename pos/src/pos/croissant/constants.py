@@ -3,8 +3,8 @@
 import mlcroissant as mlc
 import polars as pl
 
-# Maps the polars dtype of a model value to its Croissant DataType. Unsigned integers widen as their parquet
-# columns did through Spark's types.
+# Maps the polars dtype of a model value to its Croissant DataType. Each unsigned integer maps to the next
+# wider signed type (UInt64 to FLOAT64).
 TYPE_DICT = {
     # Text / boolean
     pl.String: mlc.DataType.TEXT,

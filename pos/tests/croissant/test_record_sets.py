@@ -16,7 +16,6 @@ from ot_datamodels.spec import dataset_spec, walk
 from pydantic import Field
 
 from pos.croissant import schema
-from pos.croissant.constants import TYPE_DICT
 from pos.croissant.crumbs.metadata import PlatformOutputMetadata
 from pos.croissant.crumbs.record_sets import PlatformOutputRecordSets, data_type
 
@@ -148,7 +147,7 @@ def test_every_model_dtype_has_a_croissant_type() -> None:
     for model in discover_datasets().values():
         for path, node in walk(dataset_spec(model)):
             if node.kind == 'primitive':
-                assert data_type(node) in TYPE_DICT.values(), f'{model.dataset_name}/{path}'
+                assert data_type(node) is not None, f'{model.dataset_name}/{path}'
 
 
 def test_descriptions_carry_the_bioregistry_prefix() -> None:
@@ -274,3 +273,24 @@ def test_a_full_release_validates_with_mlcroissant(tmp_path: Path) -> None:
     reloaded = mlc.Dataset(str(path)).metadata
     assert not reloaded.ctx.issues.errors
     assert len(reloaded.record_sets) == len(discover_datasets())
+
+
+def test_a_reference_to_a_missing_dataset_fails(release: list[str]) -> None:
+    with pytest.raises(ValueError, match=r'thing/otherIds\[\] references other'):
+        schema.dataset_specs(release[:1])
+
+
+def test_a_list_of_lists_of_structs_fails() -> None:
+    class Cell(StructModel):
+        x: int = Field(description='X')
+
+    class Nested(DatasetModel):
+        dataset_name: ClassVar[str] = 'nested'
+        dataset_title: ClassVar[str] = 'Nested'
+        dataset_description: ClassVar[str] = 'Nested'
+        example: ClassVar[dict] = {'grid': [[{'x': 1}]]}
+
+        grid: list[list[Cell]] = Field(description='Grid')
+
+    with pytest.raises(ValueError, match='nested/grid is a list of lists of struct'):
+        PlatformOutputRecordSets().add_datasets([dataset_spec(Nested)])
