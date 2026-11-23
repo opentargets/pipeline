@@ -13,7 +13,7 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
-from pos.clickhouse_ddl import is_declared
+from pos.clickhouse_ddl import declarations, is_declared, landing_columns
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
@@ -311,3 +311,31 @@ def test_undeclared_loads_wait_for_the_declared_ones():
             continue
         assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
 
+
+
+@pytest.mark.parametrize('product', sorted(PRODUCTS))
+def test_declared_names_are_unique(product):
+    """A table or dictionary name declared twice would drop the first one's table at load time."""
+    names = []
+    for entry in DATASETS['clickhouse'].values():
+        tables, dictionaries = declarations(entry, product)
+        names += [t.name for t in tables] + [d.name for d in dictionaries]
+    assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)
+
+
+@pytest.mark.parametrize('product', sorted(PRODUCTS))
+def test_yaml_declarations_use_landing_columns(product):
+    """The `clickhouse` lists of `datasets.yaml` entries name columns of their landing table."""
+    for name, entry in DATASETS['clickhouse'].items():
+        if 'clickhouse' not in entry:
+            continue
+        landing = {c for c, _ in landing_columns(entry, product) or []}
+        assert landing, f'{name}: a clickhouse list needs a model'
+        for table in declarations(entry, product)[0]:
+            kept = set(table.columns) if table.columns is not None else landing
+            present = {table.renames.get(c, c) for c in kept}
+            assert kept <= landing, f'{name}.{table.name}: {sorted(kept - landing)} not in the landing table'
+            assert set(table.renames) <= landing, f'{name}.{table.name}: renames of unknown columns'
+            used = {c for c in (table.key, *table.order_by, *table.primary_key) if c}
+            assert used <= present, f'{name}.{table.name}: {sorted(used - present)} not in the table'
+            assert table.primary_key == table.order_by[: len(table.primary_key)], f'{name}.{table.name}'

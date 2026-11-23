@@ -34,9 +34,9 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists; a complete `output/` (every dataset another dataset references must be present, or croissant generation fails) |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
-| `gcs_sync` | `<release_uri>` to the public release bucket | |
-| `aws_sync` | rclone to S3 (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
-| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
+| `gcs_sync` | `<release_uri>` to the public release bucket, except `view/` | |
+| `aws_sync` | rclone to S3, without `view/` (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
+| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs; leaves out `view/`, `input/fda-inputs/` and `output/etl/{parquet,json}/failedMatches/` (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
 | `publish_manifest` | last, after every other step: copies `<release_uri>/manifest.json` to the release bucket and S3 (S3 Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
 | `scratch_cleanup` | scratch mode only: drops the scratch BigQuery datasets (Platform only; for PPP it does nothing and exits 0) | BigQuery access |
 
@@ -68,7 +68,9 @@ the dataset (`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickho
 tables and dictionaries from it, then drops it. The `evidence` union declares its tables
 under `clickhouse:` in `datasets.yaml`, built from `evidence_log`. Declared datasets load
 in `explode load declared datasets`; a `postload_script` (under `scripts/`) is only for an
-undeclared dataset (`explode load all datasets` requires the declared explode). No script may read a declared
+undeclared dataset. Every undeclared load, top-level ones included, requires the declared
+explode, directly or through another task; a declared dataset outside it must be
+product-gated (`test_undeclared_loads_wait_for_the_declared_ones`). No script may read a declared
 landing table (`test_no_script_reads_a_declared_landing_table`).
 `test_declared_tables_match_scripts` builds each declared dataset from the same fixture rows
 with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`) and
