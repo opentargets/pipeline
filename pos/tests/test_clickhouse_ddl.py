@@ -1,12 +1,9 @@
 """pos.clickhouse_ddl: ClickHouse landing DDL generated from the dataset models."""
 
 import datetime
-import os
-import urllib.request
 from pathlib import Path
 from typing import Annotated, Literal
 
-import clickhouse_connect
 import polars as pl
 import pytest
 import yaml
@@ -498,7 +495,7 @@ def test_drop_dictionary_sql():
 def test_uniqueness_sql():
     table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
     assert uniqueness_sql(table, 'biosample_log') == (
-        "SELECT throwIf(count() != uniqExact(`biosampleId`), 'duplicate biosampleId in biosample') "
+        "SELECT throwIf(count() != uniqExact(tuple(`biosampleId`)), 'duplicate biosampleId in biosample') "
         'FROM `biosample_log`'
     )
 
@@ -506,7 +503,7 @@ def test_uniqueness_sql():
 def test_uniqueness_sql_reads_the_renamed_key_through_the_filter():
     table = ClickHouseTable('t', 'rocksdb', key='gene', renames={'id': 'gene'}, where='id != 3')
     assert uniqueness_sql(table, 't_log') == (
-        "SELECT throwIf(count() != uniqExact(`id`), 'duplicate gene in t') FROM `t_log` WHERE id != 3"
+        "SELECT throwIf(count() != uniqExact(tuple(`id`)), 'duplicate gene in t') FROM `t_log` WHERE id != 3"
     )
 
 
@@ -530,24 +527,8 @@ def test_declared_tables_filter_by_product():
     assert [t.name for t in declared_tables(Declared, 'ppp')] == ['both', 'ppp_only']
 
 
-# read at import: the autouse fixture clears POS_* before each test; no env, no live test
-SERVER = os.environ.get('POS_TEST_CLICKHOUSE')
-
-
-def _live_client():
-    if SERVER is None:
-        pytest.skip('POS_TEST_CLICKHOUSE not set')
-    host, _, port = SERVER.partition(':')
-    try:
-        with urllib.request.urlopen(f'http://{host}:{port}/ping', timeout=2) as r:
-            assert r.read().decode().strip() == 'Ok.'
-    except (OSError, AssertionError):
-        pytest.skip('no ClickHouse server')
-    return clickhouse_connect.get_client(host=host, port=int(port))
-
-
-def test_table_sql_rerun_keeps_one_copy_of_the_rows():
-    client = _live_client()
+def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
+    client = clickhouse_database
     table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3', optimize=True)
     cols = [('id', CHType('Int64')), ('name', STR)]
     client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
@@ -563,8 +544,8 @@ def test_table_sql_rerun_keeps_one_copy_of_the_rows():
         client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
 
 
-def test_dictionary_sql_rerun_reads_the_rebuilt_table():
-    client = _live_client()
+def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
+    client = clickhouse_database
     table = ClickHouseTable('ddl_dict_src', 'rocksdb', key='k')
     cols = [('k', STR), ('v', STR)]
     d = ClickHouseDictionary(
