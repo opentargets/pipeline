@@ -1,16 +1,22 @@
 """clickhouse_load connects to the running server and runs each script statement by statement."""
 
+import os
+import urllib.request
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import polars as pl
 import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 from loguru import logger
 from ot_datamodels.base import DatasetModel
+from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import ddl_for
+from pos.services.clickhouse import connect
 from pos.tasks import clickhouse_load
 from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, ClickhouseLoadSpec
 
@@ -453,3 +459,117 @@ def test_scripts_log_every_statement(tmp_path, monkeypatch, info):
                   'DROP TABLE d']  # fmt: skip
     assert [e[1] for e in events] == statements
     assert [line for line in info if line in statements] == statements
+
+
+# declared tables, on a live ClickHouse
+
+# read at import: the autouse fixture clears POS_* before each test; no env, no live test
+SERVER = os.environ.get('POS_TEST_CLICKHOUSE')
+
+
+class Declared(DatasetModel):
+    dataset_name = 'declared'
+    dataset_title = 'Declared'
+    dataset_description = 'Declared.'
+    example = {}
+    clickhouse = (
+        ClickHouseTable('declared_by_id', 'rocksdb', key='declaredId', renames={'id': 'declaredId'}),
+        ClickHouseTable(
+            'declared_by_target',
+            'mergetree',
+            order_by=('target', 'id'),
+            columns=('id', 'target'),
+            where='target IS NOT NULL',
+            optimize=True,
+        ),
+        ClickHouseDictionary(
+            'declared_names', 'declared_by_id', key='id', attributes=('name',), source_columns={'id': 'declaredId'}
+        ),
+    )
+
+    id: str
+    name: str
+    target: str | None
+
+
+DECLARED = 'clickhouse:\n  declared:\n    table: declared_log\n    input_dir: output/declared\n    model: declared\n'
+ROWS = {'id': ['a', 'b', 'c'], 'name': ['na', 'nb', 'nc'], 'target': ['t1', None, 't2']}
+
+
+@pytest.fixture
+def live(monkeypatch):
+    """A client on a fresh database of the test server, dropped afterwards; `Declared` discoverable."""
+    if SERVER is None:
+        pytest.skip('POS_TEST_CLICKHOUSE not set')
+    host, _, port = SERVER.partition(':')
+    try:
+        with urllib.request.urlopen(f'http://{host}:{port}/ping', timeout=2) as r:
+            assert r.read().decode().strip() == 'Ok.'
+    except (OSError, AssertionError):
+        pytest.skip(f'no ClickHouse at {SERVER}')
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': Declared})
+    database = f'pos_test_{uuid.uuid4().hex}'
+    admin = connect(host=host, port=int(port))
+    admin.command(f'CREATE DATABASE {database}')
+    try:
+        yield connect(host=host, port=int(port), database=database)
+    finally:
+        admin.command(f'DROP DATABASE IF EXISTS {database} SYNC')
+
+
+def _declared_task(tmp_path, client, rows: dict) -> ClickhouseLoad:
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(DECLARED)
+    data = tmp_path / 'release_data' / 'output' / 'declared'
+    data.mkdir(parents=True, exist_ok=True)
+    schema = {'id': pl.String, 'name': pl.String, 'target': pl.String}
+    pl.DataFrame(rows, schema=schema).write_parquet(data / 'part-0.parquet')
+    assert SERVER is not None
+    host, _, port = SERVER.partition(':')
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
+        dataset_config_path=str(config), product='platform', clickhouse_host=host, clickhouse_port=int(port),
+        clickhouse_database=client.database,
+    )  # fmt: skip
+    return ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+
+
+def _tables(client) -> set[str]:
+    return set(client.query('SELECT name FROM system.tables WHERE database = currentDatabase()').result_columns[0])
+
+
+def test_declared_tables_are_built_and_the_landing_dropped(tmp_path, live):
+    _run(_declared_task(tmp_path, live, ROWS))
+    assert live.query('SELECT declaredId, name, target FROM declared_by_id ORDER BY declaredId').result_rows == [
+        ('a', 'na', 't1'), ('b', 'nb', None), ('c', 'nc', 't2'),
+    ]  # fmt: skip
+    assert live.query('SELECT id, target FROM declared_by_target ORDER BY id').result_rows == [
+        ('a', 't1'), ('c', 't2'),
+    ]  # fmt: skip
+    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb'
+    assert 'declared_log' not in _tables(live)
+
+
+def test_declared_load_reruns_over_its_dictionary(tmp_path, live):
+    _run(_declared_task(tmp_path, live, ROWS))
+    _run(_declared_task(tmp_path, live, ROWS | {'name': ['na', 'nb2', 'nc']}))
+    assert live.command('SELECT count() FROM declared_by_id') == 3
+    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb2'
+
+
+def test_duplicate_rocksdb_key_fails_the_load(tmp_path, live):
+    duplicated = {'id': ['a', 'a'], 'name': ['n1', 'n2'], 'target': ['t1', 't2']}
+    with pytest.raises(ClickhouseLoadError, match='duplicate declaredId in declared_by_id'):
+        _run(_declared_task(tmp_path, live, duplicated))
+
+
+def test_declarations_with_a_postload_script_fail_at_spec_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': Declared})
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(DECLARED + '    postload_script: post.sql\n')
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
+        dataset_config_path=str(config), product='platform',
+    )  # fmt: skip
+    with pytest.raises(ClickhouseLoadError, match='declared: declares ClickHouse tables and has a postload_script'):
+        ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
