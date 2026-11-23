@@ -46,6 +46,13 @@ jobs:
           version: '0.13.4'
           prune-cache: true # v9 flipped the default; keep the cache free of pre-built wheels
 
+      # the pps tests start a spark session
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: matrix.package == 'pps'
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Sync dependencies
         working-directory: ${{ matrix.package }}
         run: uv sync --locked --all-groups --all-extras
