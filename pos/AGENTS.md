@@ -36,7 +36,7 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
 | `gcs_sync` | `<release_uri>` to the public release bucket, except `view/` | |
 | `aws_sync` | rclone to S3, without `view/` (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
-| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs; leaves out `view/`, `input/fda-inputs/` and `output/etl/{parquet,json}/failedMatches/` (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
+| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs; leaves out `view/` and `excluded/` (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
 | `publish_manifest` | last, after every other step: copies `<release_uri>/manifest.json` to the release bucket and S3 (S3 Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
 | `scratch_cleanup` | scratch mode only: drops the scratch BigQuery datasets (Platform only; for PPP it does nothing and exits 0) | BigQuery access |
 

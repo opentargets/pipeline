@@ -113,16 +113,18 @@ def _ftp_exclude():
     [
         'view/x',
         'view/a/b.parquet',
-        'input/fda-inputs/x',
-        'output/etl/parquet/failedMatches/p',
-        'output/etl/json/failedMatches/j',
+        'excluded/x',
+        'excluded/evidence/part-0.parquet',
     ],
 )
 def test_ftp_script_excludes(path):
     assert _ftp_exclude().search(path)
 
 
-@pytest.mark.parametrize('path', ['output/x/p', 'viewer/x', 'output/x/view/f', 'input/other/x', 'manifest.json'])
+@pytest.mark.parametrize(
+    'path',
+    ['output/x/p', 'viewer/x', 'output/x/view/f', 'output/excluded/x', 'input/openfda/x', 'manifest.json'],
+)
 def test_ftp_script_keeps(path):
     assert not _ftp_exclude().search(path)
 
