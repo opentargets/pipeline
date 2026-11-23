@@ -497,8 +497,16 @@ def test_drop_dictionary_sql():
 
 def test_uniqueness_sql():
     table = ClickHouseTable('biosample', 'rocksdb', key='biosampleId')
-    assert uniqueness_sql(table) == (
-        "SELECT throwIf(count() != uniqExact(biosampleId), 'duplicate biosampleId in biosample') FROM biosample"
+    assert uniqueness_sql(table, 'biosample_log') == (
+        "SELECT throwIf(count() != uniqExact(`biosampleId`), 'duplicate biosampleId in biosample') "
+        'FROM `biosample_log`'
+    )
+
+
+def test_uniqueness_sql_reads_the_renamed_key_through_the_filter():
+    table = ClickHouseTable('t', 'rocksdb', key='gene', renames={'id': 'gene'}, where='id != 3')
+    assert uniqueness_sql(table, 't_log') == (
+        "SELECT throwIf(count() != uniqExact(`id`), 'duplicate gene in t') FROM `t_log` WHERE id != 3"
     )
 
 

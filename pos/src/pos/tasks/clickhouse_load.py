@@ -10,7 +10,20 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.clickhouse_ddl import columns, ddl_for, member_table, members
+from pos.clickhouse_ddl import (
+    columns,
+    ddl_for,
+    declared_dictionaries,
+    declared_tables,
+    dictionary_sql,
+    drop_dictionary_sql,
+    entry_model,
+    member_table,
+    members,
+    table_columns,
+    table_sql,
+    uniqueness_sql,
+)
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.utils import get_config
@@ -69,6 +82,10 @@ class ClickhouseLoad(Task):
             self._file: Path | None = None  # the file being inserted
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
+        self._model = entry_model(self._entry)
+        self._declared = self._model is not None and bool(self._model.clickhouse)
+        if self._declared and self._post_load_sql is not None:
+            raise ClickhouseLoadError(f'{self.spec.dataset}: declares ClickHouse tables and has a postload_script')
 
     @report
     def run(self) -> Task:
@@ -88,6 +105,8 @@ class ClickhouseLoad(Task):
                 self._execute_script(client, self._pre_load_sql)
             if not self._derived:
                 self._load_named(client, self.spec.dataset, self._table_name, files, create)
+            if self._declared:
+                self._build_declared(client)
         if self._post_load_sql is not None:
             self._execute_script(client, self._post_load_sql)
         return self
@@ -138,6 +157,37 @@ class ClickhouseLoad(Task):
             self._run_all(client, inserts)
         self._log_count(client, self._table_name)
         for sql in member_drops(loaded):
+            client.command(sql)
+
+    def _build_declared(self, client) -> None:
+        """The model's tables and dictionaries for the product, from the landing table, which is then dropped."""
+        assert self._model is not None
+        landing, cols = self._table_name, columns(self._model)
+        tables = declared_tables(self._model, self.spec.product)
+        dictionaries = declared_dictionaries(self._model, tables)
+        by_name = {t.name: t for t in tables}
+        for table in tables:
+            if table.engine == 'rocksdb':
+                self._check_unique(client, table, landing)
+        self._run_logged(client, [drop_dictionary_sql(d) for d in dictionaries])
+        for table in tables:
+            self._run_logged(client, table_sql(table, cols, landing))
+            self._log_count(client, table.name)
+        for d in dictionaries:
+            self._run_logged(client, [dictionary_sql(d, table_columns(by_name[d.source_table], cols))])
+        self._run_logged(client, [f'DROP TABLE {quote_identifier(landing)} SYNC'])
+
+    @staticmethod
+    def _check_unique(client, table, landing: str) -> None:
+        try:
+            client.command(uniqueness_sql(table, landing))
+        except ClickHouseError as e:
+            raise ClickhouseLoadError(f'loading {table.name} failed: {e}') from e
+
+    @staticmethod
+    def _run_logged(client, statements: list[str]) -> None:
+        for sql in statements:
+            logger.info(sql)
             client.command(sql)
 
     @staticmethod

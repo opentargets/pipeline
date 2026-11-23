@@ -355,10 +355,18 @@ def drop_dictionary_sql(d: ClickHouseDictionary) -> str:
     return f'DROP DICTIONARY IF EXISTS {_name(d.name)} SYNC'
 
 
-def uniqueness_sql(table: ClickHouseTable) -> str:
-    """A query that throws when the table's RocksDB key repeats."""
-    key = table.key
-    return f"SELECT throwIf(count() != uniqExact({key}), 'duplicate {key} in {table.name}') FROM {table.name}"  # noqa: S608 declared names
+def uniqueness_sql(table: ClickHouseTable, landing: str) -> str:
+    """A query that throws when the table's RocksDB key repeats in the rows it takes from `landing`.
+
+    It reads the landing table: RocksDB keeps the last row of a repeated key, so the table itself never repeats one.
+    """
+    key = table.key or ''
+    source = next((c for c, renamed in table.renames.items() if renamed == key), key)
+    where = f' WHERE {table.where}' if table.where else ''
+    return (
+        f"SELECT throwIf(count() != uniqExact({_name(source)}), 'duplicate {key} in {table.name}') "  # noqa: S608 declared names
+        f'FROM {_name(landing)}{where}'
+    )
 
 
 def _names(names: Sequence[str]) -> str:
@@ -379,9 +387,20 @@ def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]] | 
     """
     if 'models' in entry:
         return union_columns(members(entry['models'], product))
-    if 'model' in entry:
-        return columns(discover_models()[entry['model']])
+    if (model := entry_model(entry)) is not None:
+        return columns(model)
     return None
+
+
+def entry_model(entry: Mapping) -> type[DatasetModel] | None:
+    """The model of a `model` entry of `datasets.yaml`; None for any other entry."""
+    return discover_models()[entry['model']] if 'model' in entry else None
+
+
+def declared_dictionaries(model: type[DatasetModel], tables: Sequence[ClickHouseTable]) -> list[ClickHouseDictionary]:
+    """The model's dictionaries over the given tables."""
+    names = {t.name for t in tables}
+    return [d for d in model.clickhouse if isinstance(d, ClickHouseDictionary) and d.source_table in names]
 
 
 def member_table(model: type[DatasetModel]) -> str:
