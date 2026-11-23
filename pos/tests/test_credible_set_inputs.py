@@ -4,9 +4,8 @@ import re
 from pathlib import Path
 
 import yaml
-from ot_datamodels.clickhouse import ClickHouseTable
 
-from pos.clickhouse_ddl import entry_model, entry_tables, is_declared
+from pos.clickhouse_tables import entry_tables
 from pos.sql import split_statements
 
 POS = Path(__file__).parents[1]
@@ -45,10 +44,7 @@ def _declared() -> dict[str, str]:
     """Each declared `<t>_mergetree` table to the dataset whose load builds it."""
     found = {}
     for dataset, entry in DATASETS.items():
-        if not is_declared(entry):
-            continue
-        model = entry_model(entry)
-        tables = [t for t in model.clickhouse if isinstance(t, ClickHouseTable)] if model else entry_tables(entry)
+        tables = entry_tables(entry)
         found |= {t.name.removesuffix('_mergetree'): dataset for t in tables if t.name.endswith('_mergetree')}
     return found
 

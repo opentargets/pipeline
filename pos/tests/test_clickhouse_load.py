@@ -10,10 +10,10 @@ import yaml
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 from loguru import logger
 from ot_datamodels.base import DatasetModel, PrimaryKey
-from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import ddl_for, uniqueness_sql
+from pos.clickhouse_tables import ClickHouseTable
 from pos.tasks import clickhouse_load
 from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, ClickhouseLoadSpec
 
@@ -342,7 +342,7 @@ def test_evidence_loads_each_member_into_its_own_table(tmp_path, monkeypatch, in
 
 
 EVIDENCE_DECLARED = EVIDENCE + (
-    '    clickhouse:\n'
+    '    tables:\n'
     '      - {name: evidence, engine: rocksdb}\n'
     '      - {name: evidence_by_score, engine: mergetree, order_by: [score], columns: [score, id], '
     'where: score IS NOT NULL}\n'
@@ -378,7 +378,7 @@ def test_declared_union_is_built_from_the_union_after_a_key_check(tmp_path, monk
 
 
 def test_unknown_union_declaration_fields_fail(tmp_path, monkeypatch):
-    datasets = EVIDENCE + '    clickhouse:\n      - {name: e, engine: rocksdb, key: id, optimize: true}\n'
+    datasets = EVIDENCE + '    tables:\n      - {name: e, engine: rocksdb, key: id, optimize: true}\n'
     with pytest.raises(ValueError, match=r"evidence_log: unknown ClickHouseTable fields \['key', 'optimize'\]"):
         _generated_task(tmp_path, monkeypatch, datasets, {'evidence_a': 1, 'evidence_b': 1})
 
@@ -507,24 +507,28 @@ class Declared(DatasetModel):
     dataset_title = 'Declared'
     dataset_description = 'Declared.'
     example = {}
-    clickhouse = (
-        ClickHouseTable('declared_by_id', 'rocksdb'),
-        ClickHouseTable(
-            'declared_by_target',
-            'mergetree',
-            order_by=('target', 'id'),
-            columns=('id', 'target'),
-            where='target IS NOT NULL',
-        ),
-        ClickHouseDictionary('declared_names', 'declared_by_id', key='id', attributes=('name',)),
-    )
 
     id: Annotated[str, PrimaryKey()]
     name: str
     target: str | None
 
 
-DECLARED = 'clickhouse:\n  declared:\n    table: declared_log\n    input_dir: output/declared\n    model: declared\n'
+DECLARED = """\
+clickhouse:
+  declared:
+    table: declared_log
+    input_dir: output/declared
+    model: declared
+    tables:
+      - {name: declared_by_id, engine: rocksdb}
+      - name: declared_by_target
+        engine: mergetree
+        order_by: [target, id]
+        columns: [id, target]
+        where: target IS NOT NULL
+    dictionaries:
+      - {name: declared_names, source: declared_by_id, key: id, attributes: [name]}
+"""
 ROWS = {'id': ['a', 'b', 'c'], 'name': ['na', 'nb', 'nc'], 'target': ['t1', None, 't2']}
 
 
@@ -640,7 +644,6 @@ class DeclaredPpp(DatasetModel):
     dataset_description = 'Declared.'
     example = {}
     products = ('ppp',)
-    clickhouse = (ClickHouseTable('declared_by_id', 'rocksdb'),)
 
     id: Annotated[str, PrimaryKey()]
 

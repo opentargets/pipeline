@@ -2,6 +2,8 @@
 # input_dir is relative to the synced release data; croissant is written by ot_croissant.
 # A clickhouse entry with `model:` (or `models:`, a glob) gets its landing table from the ot_datamodels model
 # (`pos-ddl <dataset>` prints it); `engine:` defaults to Log. Derived entries run their `preload_script`.
+# `tables:` and `dictionaries:` declare what a load builds from the landing table, which it then drops
+# (pos.clickhouse_tables).
 opensearch:
   croissant:
     index: downloads
@@ -46,10 +48,24 @@ clickhouse:
     table: baseline_expression_log
     input_dir: output/baseline_expression
     model: baseline_expression
+    tables:
+      - name: baseline_expression
+        engine: mergetree
+        order_by: [targetId, tissueBiosampleId, celltypeBiosampleId]
   biosample:
     table: biosample_log
     input_dir: output/biosample
     model: biosample
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: biosample_mergetree, engine: mergetree, order_by: [biosampleId]}
+      - {name: biosample, engine: rocksdb}
+    dictionaries:
+      - name: biosample_names
+        source: biosample
+        key: id
+        attributes: [name]
+        source_columns: {id: biosampleId, name: biosampleName}
   colocalisation:
     table: colocalisation_log
     input_dir: output/colocalisation
@@ -90,6 +106,8 @@ clickhouse:
     table: enhancer_to_gene_log
     input_dir: output/enhancer_to_gene
     model: enhancer_to_gene
+    tables:
+      - {name: enhancer_to_gene, engine: mergetree, order_by: [chromosome, start, end]}
   evidence:
     table: evidence_log
     input_dir: output
@@ -97,7 +115,7 @@ clickhouse:
     # each member gets its own table, then all load into evidence_log; list here the members allowed to have no output
     optional_models: []
     # built from evidence_log, the union
-    clickhouse:
+    tables:
       - {name: evidence, engine: rocksdb}
       - name: evidence_by_variant
         engine: mergetree
@@ -113,6 +131,8 @@ clickhouse:
     table: gene_ontology_log
     input_dir: output/go
     model: go
+    tables:
+      - {name: gene_ontology, engine: rocksdb}
   interaction:
     table: interaction_log
     input_dir: output/interaction
@@ -127,6 +147,8 @@ clickhouse:
     table: hpo_log
     input_dir: output/disease_hpo
     model: disease_hpo
+    tables:
+      - {name: hpo, engine: rocksdb}
   l2g_predictions:
     table: l2g_predictions_log
     input_dir: output/l2g_prediction
@@ -136,6 +158,11 @@ clickhouse:
     table: literature_entity_lut_log
     input_dir: output/literature_entity_lut
     model: literature_entity_lut
+    tables:
+      - name: literature_entity_lut
+        engine: mergetree
+        order_by: [keywordId, year, month, relevance]
+        columns: [pmid, pmcid, keywordId, relevance, date, year, month]
   mechanism_of_action:
     table: mechanism_of_action_log
     input_dir: output/drug_mechanism_of_action
@@ -150,6 +177,12 @@ clickhouse:
     table: association_time_series_log
     input_dir: view/association_timeseries
     model: association_timeseries
+    tables:
+      - name: association_time_series
+        engine: mergetree
+        order_by: [diseaseId, targetId, isDirect, aggregationValue, year]
+        columns: [diseaseId, targetId, aggregationType, aggregationValue, year, associationScore, novelty,
+                  yearlyEvidenceCount, isDirect]
   pharmacovigilance:
     table: pharmacovigilance_log
     input_dir: output/pharmacovigilance
@@ -160,6 +193,8 @@ clickhouse:
     input_dir: output/otar
     optional: true
     model: otar
+    tables:
+      - {name: otar_projects, engine: rocksdb}
   pharmacogenomics:
     table: pharmacogenomics_log
     input_dir: output/pharmacogenomics
@@ -174,6 +209,8 @@ clickhouse:
     table: ml_w2v_log
     input_dir: output/literature_vector
     model: literature_vector
+    tables:
+      - {name: ml_w2v, engine: mergetree, order_by: [word], columns: [category, word, norm, vector]}
   studies:
     table: studies_log
     input_dir: output/study
@@ -183,10 +220,16 @@ clickhouse:
     table: sequence_ontology_log
     input_dir: output/so
     model: so
+    tables:
+      - {name: sequence_ontology_source, engine: rocksdb}
+    dictionaries:
+      - {name: sequence_ontology, source: sequence_ontology_source, key: id, attributes: [label]}
   target_essentiality:
     table: target_essentiality_log
     input_dir: output/target_essentiality
     model: target_essentiality
+    tables:
+      - {name: target_essentiality, engine: rocksdb}
   target_prioritisation:
     table: target_prioritisation_log
     input_dir: output/target_prioritisation
@@ -229,11 +272,30 @@ clickhouse:
     table: clinical_indication_log
     input_dir: output/clinical_indication
     model: clinical_indication
+    tables:
+      - name: clinical_indication_drug
+        engine: mergetree
+        order_by: [drugId, id]
+        columns: [id, drugId, diseaseId, maxClinicalStage, clinicalReportIds]
+        where: drugId IS NOT NULL
+      - name: clinical_indication_disease
+        engine: mergetree
+        order_by: [diseaseId, id]
+        columns: [id, drugId, diseaseId, maxClinicalStage, clinicalReportIds]
+        where: diseaseId IS NOT NULL
   clinical_report:
     table: clinical_report_log
     input_dir: output/clinical_report
     model: clinical_report
+    tables:
+      - {name: clinical_report, engine: rocksdb}
   clinical_target:
     table: clinical_target_log
     input_dir: output/clinical_target
     model: clinical_target
+    tables:
+      - name: clinical_target
+        engine: mergetree
+        order_by: [targetId, id]
+        columns: [id, drugId, targetId, diseases, maxClinicalStage, clinicalReportIds]
+        where: targetId IS NOT NULL

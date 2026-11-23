@@ -62,17 +62,19 @@ it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out
 load. Only `derived` entries (built from loaded tables) have a `preload_script`, under `scripts/`; a config
 test checks each entry has exactly one of `model`, `models`, `preload_script`.
 
-Storage is declared on the model: `clickhouse` lists the tables and dictionaries built from
-the dataset (`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickhouse`).
-A table declares only its name, engine, `order_by`, `columns` and `where`; the RocksDB key
-(the model's `PrimaryKey`), the products (the model's), `allow_nullable_key` and `OPTIMIZE
-FINAL` are derived (`datamodels/AGENTS.md`). `clickhouse_load` checks each RocksDB key is
-unique in the landing table, builds the tables and dictionaries from it, then drops it. The
-`evidence` union declares its tables under `clickhouse:` in `datasets.yaml`, built from
-`evidence_log` and keyed on the `PrimaryKey` its members share (`entry_problems` checks
-them). Declared datasets load in `explode load declared datasets`; a `postload_script`
-(under `scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones
-included, requires the declared explode, directly or through another task; a declared
+Storage is declared in `config/datasets.yaml`: an entry's `tables` and `dictionaries` list what
+its load builds from the landing table (`ClickHouseTable`, `ClickHouseDictionary` in
+`pos.clickhouse_tables`). A table declares only its name, engine, `order_by`, `columns` and
+`where`; a dictionary its name, `source` table, `key`, `attributes` and `source_columns`. The
+rest is derived from the model: the RocksDB key is its one `PrimaryKey` column (for `evidence`,
+the one its members share), a `model` entry builds only for the model's products,
+`allow_nullable_key` is set when an `order_by` column is nullable, and every MergeTree table gets
+`OPTIMIZE FINAL`. `clickhouse_load` checks each RocksDB key is unique in the landing table,
+builds the tables and dictionaries from it, then drops it. `entry_problems` checks the
+declarations against the landing columns (`test_yaml_declarations_are_valid`).
+Declared datasets load in `explode load declared datasets`; a `postload_script` (under
+`scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones included,
+requires the declared explode, directly or through another task; a declared
 dataset outside it must be product-gated (`test_undeclared_loads_wait_for_the_declared_ones`).
 A declared model loads only for its products, so a PPP-only one (`otar_projects`,
 `association_time_series`) is a top-level task with `products: [ppp]`

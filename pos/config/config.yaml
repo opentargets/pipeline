@@ -27,7 +27,7 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    # tables declared on the models; the explode below runs the serving scripts after them
+    # tables declared in datasets.yaml; the explode below runs the serving scripts after them
     - name: explode load declared datasets
       requires:
         - sync_bucket etl output files

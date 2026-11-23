@@ -4,16 +4,24 @@ import argparse
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 from pathlib import Path
 
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable, table_problems
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec
+
+from pos.clickhouse_tables import (
+    ClickHouseDictionary,
+    ClickHouseTable,
+    dictionary_problems,
+    entry_dictionaries,
+    entry_tables,
+    table_problems,
+)
 
 ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
@@ -288,11 +296,6 @@ def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = '
     return f'CREATE TABLE {exists}{_name(table)} ({body}) ENGINE = {engine}'
 
 
-def declared_tables(model: type[DatasetModel], product: str) -> list[ClickHouseTable]:
-    """The tables the model declares, for one of the model's products; none for any other."""
-    return [t for t in model.clickhouse if isinstance(t, ClickHouseTable)] if product in model.products else []
-
-
 def _primary_keys(models: Sequence[type[DatasetModel]]) -> dict[str, tuple[str, ...]]:
     return {m.dataset_name: dataset_spec(m).primary_key for m in models}
 
@@ -365,7 +368,7 @@ def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) 
         parts.append(f'{_name(name)} {render(replace(types[source], low_cardinality=False))}{expression}')
     return (
         f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
-        f"SOURCE(CLICKHOUSE(TABLE '{d.source_table}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+        f"SOURCE(CLICKHOUSE(TABLE '{d.source}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
 
 
@@ -415,31 +418,6 @@ def entry_model(entry: Mapping) -> type[DatasetModel] | None:
     return discover_models()[entry['model']] if 'model' in entry else None
 
 
-def declared_dictionaries(model: type[DatasetModel], tables: Sequence[ClickHouseTable]) -> list[ClickHouseDictionary]:
-    """The model's dictionaries over the given tables."""
-    names = {t.name for t in tables}
-    return [d for d in model.clickhouse if isinstance(d, ClickHouseDictionary) and d.source_table in names]
-
-
-def entry_tables(entry: Mapping) -> list[ClickHouseTable]:
-    """The tables listed under `clickhouse` in a `datasets.yaml` entry."""
-    known = {f.name for f in fields(ClickHouseTable)}
-    tables = []
-    for t in entry.get('clickhouse', []):
-        if unknown := set(t) - known:
-            raise ValueError(f'{entry["table"]}: unknown ClickHouseTable fields {sorted(unknown)}')
-        tables.append(
-            ClickHouseTable(
-                name=t['name'],
-                engine=t['engine'],
-                order_by=tuple(t.get('order_by', ())),
-                columns=tuple(t['columns']) if 'columns' in t else None,
-                where=t.get('where'),
-            )
-        )
-    return tables
-
-
 def _entry_models(entry: Mapping, product: str) -> list[type[DatasetModel]]:
     """The models an entry loads for `product`: its members, or its one model."""
     model = entry_model(entry)
@@ -455,32 +433,36 @@ def entry_key(entry: Mapping, product: str) -> str:
 
 
 def entry_problems(entry: Mapping, product: str) -> list[str]:
-    """The problems in the tables a `datasets.yaml` entry lists under `clickhouse`, checked against its members."""
+    """The problems in the tables and dictionaries a `datasets.yaml` entry declares, checked against its members."""
     tables = entry_tables(entry)
+    owner = entry['table']
     keys = _primary_keys(_entry_models(entry, product))
     shared = set(keys.values())
     keyed = any(t.engine == 'rocksdb' for t in tables)
-    problems = [f'{entry["table"]}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
+    problems = []
+    if tables and 'postload_script' in entry:
+        problems.append(f'{owner}: declares ClickHouse tables and has a postload_script')
+    problems +=[f'{owner}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
     key = next(iter(shared)) if len(shared) == 1 else ()
     fields = [name for name, _ in landing_columns(entry, product) or []]
-    return problems + [p for t in tables for p in table_problems(t, entry['table'], fields, key)]
+    problems += [p for t in tables for p in table_problems(t, owner, fields, key)]
+    return problems + [p for d in entry_dictionaries(entry) for p in dictionary_problems(d, owner, tables, fields)]
 
 
 def is_declared(entry: Mapping) -> bool:
-    """Whether the entry's tables are declared, on its model or under its `clickhouse`."""
-    model = entry_model(entry)
-    return bool(model.clickhouse) if model is not None else bool(entry.get('clickhouse'))
+    """Whether the entry declares tables under `tables`."""
+    return bool(entry.get('tables'))
 
 
 def declarations(entry: Mapping, product: str) -> tuple[list[ClickHouseTable], list[ClickHouseDictionary]]:
-    """The tables and dictionaries an entry declares for `product`.
+    """The tables and dictionaries an entry declares, for `product`.
 
-    A `model` entry's come from its model; any other entry's from its `clickhouse` list, which has no dictionaries.
+    A `model` entry builds them only for its model's products; a `models` entry for any product.
     """
-    if (model := entry_model(entry)) is not None:
-        tables = declared_tables(model, product)
-        return tables, declared_dictionaries(model, tables)
-    return entry_tables(entry), []
+    model = entry_model(entry)
+    if model is not None and product not in model.products:
+        return [], []
+    return entry_tables(entry), entry_dictionaries(entry)
 
 
 def declared_sql(entry: Mapping, product: str) -> list[str]:
@@ -498,7 +480,7 @@ def declared_sql(entry: Mapping, product: str) -> list[str]:
     statements = [drop_dictionary_sql(d) for d in dictionaries]
     for table in tables:
         statements += table_sql(table, cols, landing, key)
-    statements += [dictionary_sql(d, table_columns(by_name[d.source_table], cols)) for d in dictionaries]
+    statements += [dictionary_sql(d, table_columns(by_name[d.source], cols)) for d in dictionaries]
     return [*statements, f'DROP TABLE {_name(landing)} SYNC']
 
 

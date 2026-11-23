@@ -8,7 +8,6 @@ import polars as pl
 import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
-from ot_datamodels.clickhouse import ClickHouseDictionary, ClickHouseTable
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.target_view import TargetView
@@ -21,12 +20,11 @@ from pos.clickhouse_ddl import (
     columns,
     create_table,
     ddl_for,
+    declarations,
     declared_sql,
-    declared_tables,
     dictionary_sql,
     drop_dictionary_sql,
     entry_problems,
-    entry_tables,
     landing_columns,
     member_table,
     members,
@@ -40,6 +38,7 @@ from pos.clickhouse_ddl import (
     union_columns,
     uniqueness_sql,
 )
+from pos.clickhouse_tables import ClickHouseDictionary, ClickHouseTable, entry_tables
 
 ROOT = Path(__file__).parents[1]
 
@@ -513,10 +512,6 @@ class Keyed(DatasetModel):
     dataset_description = 'Keyed.'
     example = {}
     products = ('platform', 'ppp')
-    clickhouse = (
-        ClickHouseTable('keyed', 'rocksdb'),
-        ClickHouseDictionary('keyed_names', 'keyed', key='id', attributes=('id',)),
-    )
 
     id: Annotated[str, PrimaryKey()]
 
@@ -527,7 +522,6 @@ class KeyedPppOnly(DatasetModel):
     dataset_description = 'PPP only.'
     example = {}
     products = ('ppp',)
-    clickhouse = (ClickHouseTable('ppp_only', 'rocksdb'),)
 
     id: Annotated[str, PrimaryKey()]
 
@@ -551,10 +545,27 @@ class TwoKeys(DatasetModel):
     b: Annotated[str, PrimaryKey()]
 
 
-def test_declared_tables_follow_the_model_products():
-    assert [t.name for t in declared_tables(Keyed, 'platform')] == ['keyed']
-    assert declared_tables(KeyedPppOnly, 'platform') == []
-    assert [t.name for t in declared_tables(KeyedPppOnly, 'ppp')] == ['ppp_only']
+KEYED = {
+    'table': 'keyed_log',
+    'model': 'keyed',
+    'tables': [{'name': 'keyed', 'engine': 'rocksdb'}],
+    'dictionaries': [{'name': 'keyed_names', 'source': 'keyed', 'key': 'id', 'attributes': ['id']}],
+}
+PPP_ONLY = {'table': 'ppp_only_log', 'model': 'keyed_ppp_only', 'tables': [{'name': 'ppp_only', 'engine': 'rocksdb'}]}
+
+
+def test_declarations_follow_the_model_products(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'keyed_ppp_only': KeyedPppOnly})
+    tables, dictionaries = declarations(KEYED, 'platform')
+    assert [t.name for t in tables] == ['keyed']
+    assert [d.name for d in dictionaries] == ['keyed_names']
+    assert declarations(PPP_ONLY, 'platform') == ([], [])
+    assert [t.name for t in declarations(PPP_ONLY, 'ppp')[0]] == ['ppp_only']
+
+
+def test_a_models_entry_declares_for_every_product():
+    entry = {'table': 'u_log', 'models': 'keyed*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert declarations(entry, 'platform') == declarations(entry, 'ppp') == ([ClickHouseTable('u', 'rocksdb')], [])
 
 
 def test_rocksdb_key_is_the_one_primary_key_the_models_share():
@@ -568,30 +579,33 @@ def test_rocksdb_key_is_the_one_primary_key_the_models_share():
 
 def test_declared_sql_keys_rocksdb_on_the_model_primary_key(monkeypatch):
     monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed})
-    statements = declared_sql({'table': 'keyed_log', 'model': 'keyed'}, 'platform')
+    statements = declared_sql(KEYED, 'platform')
     assert 'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`' in statements[2]
+    assert statements[0] == 'DROP DICTIONARY IF EXISTS `keyed_names` SYNC'
+    assert statements[-2].startswith('CREATE OR REPLACE DICTIONARY `keyed_names`')
+    assert statements[-1] == 'DROP TABLE `keyed_log` SYNC'
 
 
 def test_entry_tables_take_only_the_table_fields():
-    entry = {'table': 'e_log', 'clickhouse': [{'name': 'e', 'engine': 'rocksdb', 'key': 'id'}]}
+    entry = {'table': 'e_log', 'tables': [{'name': 'e', 'engine': 'rocksdb', 'key': 'id'}]}
     with pytest.raises(ValueError, match=r"unknown ClickHouseTable fields \['key'\]"):
         entry_tables(entry)
 
 
 def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch):
     monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'other_key': OtherKey})
-    good = {'table': 'u_log', 'models': 'keyed', 'clickhouse': [{'name': 'u', 'engine': 'rocksdb'}]}
+    good = {'table': 'u_log', 'models': 'keyed', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
     assert entry_problems(good, 'platform') == []
     bad = {
         'table': 'u_log',
         'models': '*',
-        'clickhouse': [{'name': 'u', 'engine': 'mergetree', 'order_by': ['nope'], 'where': 'zip IS NULL'}],
+        'tables': [{'name': 'u', 'engine': 'mergetree', 'order_by': ['nope'], 'where': 'zip IS NULL'}],
     }
     assert entry_problems(bad, 'platform') == [
         "u_log.u: where 'zip' is not a column of the model",
         "u_log.u: order_by 'nope' is not a column of the table",
     ]
-    disagree = {'table': 'u_log', 'models': '*', 'clickhouse': [{'name': 'u', 'engine': 'rocksdb'}]}
+    disagree = {'table': 'u_log', 'models': '*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
     assert entry_problems(disagree, 'platform') == [
         "u_log: members disagree on PrimaryKey: keyed ('id',), other_key ('gene',)",
         'u_log.u: rocksdb needs one PrimaryKey column on the model, it has none',
@@ -601,7 +615,7 @@ def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_yaml_declarations_are_valid(product):
     entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    declared = [e for e in entries.values() if 'clickhouse' in e]
+    declared = [e for e in entries.values() if 'tables' in e or 'dictionaries' in e]
     assert declared
     assert [p for e in declared for p in entry_problems(e, product)] == []
 

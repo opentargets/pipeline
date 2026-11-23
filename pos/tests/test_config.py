@@ -318,8 +318,9 @@ def test_a_declared_model_loads_only_for_its_products(load):
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         loaded = {s.dataset for s in _built_loads(_load('backend_clickhouse', run=run)[0])}
         for name in loaded:
-            model = entry_model(DATASETS['clickhouse'][name])
-            if model is not None and model.clickhouse:
+            entry = DATASETS['clickhouse'][name]
+            model = entry_model(entry)
+            if model is not None and is_declared(entry):
                 assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
         assert ('otar_projects' in loaded) == (product == 'ppp')
 
