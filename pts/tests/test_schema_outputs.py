@@ -14,12 +14,12 @@ import pandera.errors as pa_errors
 import polars as pl
 import pytest
 from ot_datamodels import DatasetModel, to_polars_schema
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 
 from pts.schemas.dataset.converter import to_pandera
 from pts.schemas.dataset.validate import format_report, validation_report
 
-DATASETS = discover_datasets()
+DATASETS = discover_models()
 MODELS = sorted(DATASETS.values(), key=lambda model: model.dataset_name)
 
 

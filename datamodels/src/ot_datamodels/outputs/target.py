@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import Chromosome, ConstraintType, GoAspect, GoEvidenceCode
 
@@ -19,9 +19,13 @@ class GenomicLocation(StructModel):
     chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
         description='Chromosome on which the target located'
     )
-    start: int = Field(ge=0, description='Genomic start position of the target gene')
-    end: int = Field(ge=0, description='Genomic end position of the target gene')
-    strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
+    start: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Genomic start position of the target gene'
+    )
+    end: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Genomic end position of the target gene'
+    )
+    strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
         description=('Strand orientation of the target gene: 1 for the forward strand, -1 for the reverse strand')
     )
 
@@ -54,8 +58,8 @@ class Go(StructModel):
 class Attributes(StructModel):
     """`hallmarks/attributes[]`."""
 
-    pmid: Annotated[int, Bioregistry('pubmed')] | None = Field(
-        ge=0, description='PubMed ID of the supporting literature for the hallmark attribute'
+    pmid: Annotated[int, Bioregistry('pubmed'), ClickHouseType('UInt32')] | None = Field(
+        ge=0, le=4294967295, description='PubMed ID of the supporting literature for the hallmark attribute'
     )
     description: str = Field(min_length=1, description='Description of the hallmark attribute')
     name: str = Field(min_length=1, description='Name of the hallmark attribute')
@@ -64,8 +68,8 @@ class Attributes(StructModel):
 class CancerHallmarks(StructModel):
     """`hallmarks/cancerHallmarks[]`."""
 
-    pmid: Annotated[int, Bioregistry('pubmed')] = Field(
-        ge=0, description='PubMed ID of the supporting literature for the cancer hallmark'
+    pmid: Annotated[int, Bioregistry('pubmed'), ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='PubMed ID of the supporting literature for the cancer hallmark'
     )
     description: str = Field(min_length=1, description='Description of the cancer hallmark')
     impact: str | None = Field(min_length=1, description='Impact of the cancer hallmark on the target')
@@ -111,7 +115,9 @@ class SubcellularLocations(StructModel):
 class TargetClass(StructModel):
     """`targetClass[]`."""
 
-    id: int = Field(ge=0, description='Unique identifier for the target class')
+    id: Annotated[int, ClickHouseType('UInt32')] = Field(
+        ge=0, le=4294967295, description='Unique identifier for the target class'
+    )
     label: str = Field(min_length=1, description='Label for the target class')
     level: str = Field(min_length=1, description='Hierarchical level of the target class')
 
@@ -131,27 +137,31 @@ class Constraint(StructModel):
     constraintType: Annotated[ConstraintType, PolarsDtype(pl.Enum)] = Field(
         description='Type of constraint applied to the target'
     )
-    score: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
+    score: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
         description='Constraint score indicating gene intolerance'
     )
-    exp: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(ge=0.0, description='Expected constraint score')
-    obs: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, description='Observed constraint score')
-    oe: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
+    exp: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
+        ge=0.0, description='Expected constraint score'
+    )
+    obs: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
+        ge=0, description='Observed constraint score'
+    )
+    oe: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
         ge=0.0, description='Observed/Expected (OE) constraint score'
     )
-    oeLower: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
+    oeLower: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
         ge=0.0, description='Lower bound of the OE constraint score'
     )
-    oeUpper: Annotated[float, PolarsDtype(pl.Float32)] | None = Field(
+    oeUpper: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] | None = Field(
         ge=0.0, description='Upper bound of the OE constraint score'
     )
-    upperRank: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    upperRank: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
         ge=0, description='Rank of the target gene in constraint analysis'
     )
-    upperBin: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    upperBin: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
         ge=0, description='Binned category for the constraint score'
     )
-    upperBin6: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
+    upperBin6: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
         ge=0, description='Six-bin classification of the constraint score'
     )
 

@@ -5,9 +5,13 @@ from pathlib import Path
 import polars as pl
 import pytest
 from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.coding_variant import CodingVariant
 
-from pts.schemas.coding_variant import datasource
 from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.validate import validate_dataset
+from pts.task_outputs import OutputValidation
+from pts.transformers import coding_variant as module
 from pts.transformers.coding_variant import (
     HARMONIC_SUM_CONSTANT,
     build_view,
@@ -37,19 +41,7 @@ GWAS = {
     'score': pl.Float64,
     'id': pl.String,
 }
-OUTPUT_SCHEMA = {
-    'targetId': pl.String,
-    'variantId': pl.String,
-    'therapeuticAreas': pl.List(pl.String),
-    'diseases': pl.List(pl.String),
-    'datasources': pl.List(datasource),
-    'variantEffect': pl.Float32,
-    'variantFunctionalConsequenceIds': pl.List(pl.String),
-    'uniprotAccessions': pl.List(pl.String),
-    'referenceAminoAcid': pl.String,
-    'aminoAcidPosition': pl.Int32,
-    'alternateAminoAcid': pl.String,
-}
+OUTPUT_SCHEMA = to_polars_schema(CodingVariant)
 
 
 def tc(target, aa, uniprot=None, so=None) -> dict:
@@ -459,7 +451,7 @@ def test_coding_variant_null_and_empty_lists() -> None:
 
 def test_build_view_matches_spark() -> None:
     out = view(world())
-    assert out.schema == pl.Schema(OUTPUT_SCHEMA)
+    assert out.schema == OUTPUT_SCHEMA
     assert out.to_dicts() == EXPECTED
 
 
@@ -482,7 +474,7 @@ def test_coding_variant_end_to_end_is_deterministic(tmp_path: Path) -> None:
         files = sorted(destination.glob('*.parquet'))
         outputs.append([f.read_bytes() for f in files])
         out = pl.read_parquet(files)
-        assert out.schema == pl.Schema(OUTPUT_SCHEMA)
+        assert out.schema == OUTPUT_SCHEMA
         assert out.to_dicts() == EXPECTED
     assert outputs[0] == outputs[1]
 
@@ -514,3 +506,50 @@ def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
     coding_variant(source, str(tmp_path / 'out'), None, None)
 
     assert pl.read_parquet(tmp_path / 'out').to_dicts() == EXPECTED
+
+
+def write_one_clinvar_variant(tmp_path: Path, aa: str) -> None:
+    """The view of a variant with one consequence (change `aa`) and one ClinVar evidence, at `tmp_path / 'out'`."""
+    target, variant, disease = 'ENSG00000141510', '17_7674220_C_T', 'MONDO_0007903'
+    frames = {name: frame.clear() for name, frame in world().items()}
+    frames['variant'] = pl.DataFrame(
+        {
+            'variantId': [variant],
+            'variantEffect': [[{'method': 'AlphaMissense', 'score': 0.98}]],
+            'transcriptConsequences': [[tc(target, aa, ['P04637'], ['SO_0001583'])]],
+        },
+        schema=frames['variant'].schema,
+    )
+    frames['target'] = pl.DataFrame(
+        {'id': [target], 'proteinIds': [[{'id': 'P04637', 'source': 'uniprot_swissprot'}]]},
+        schema=frames['target'].schema,
+    )
+    frames['disease'] = pl.DataFrame(
+        {'id': [disease], 'therapeuticAreas': [['MONDO_0045024']]}, schema=frames['disease'].schema
+    )
+    frames['evidence_eva'] = evidence([('eva', variant, 0.5, 'e1', disease)])
+    source = {}
+    for name, frame in frames.items():
+        write_parts(frame, tmp_path / 'in' / name)
+        source[name] = str(tmp_path / 'in' / name)
+
+    coding_variant(source, str(tmp_path / 'out'), None, None)
+
+
+def test_writes_its_model(tmp_path: Path) -> None:
+    """On a variant with one consequence and one ClinVar evidence, with real identifiers, the view passes its model."""
+    write_one_clinvar_variant(tmp_path, 'R248Q')
+
+    assert OutputValidation.of(coding_variant, module).outputs == {None: CodingVariant}
+    validate_dataset(CodingVariant, str(tmp_path / 'out'))
+    written = pl.read_parquet(tmp_path / 'out')
+    assert written.schema == OUTPUT_SCHEMA
+    assert written['datasources'].to_list() == [[ds(1, 'eva', 'ClinVar')]]
+
+
+def test_a_change_without_a_position_breaks_the_model(tmp_path: Path) -> None:
+    write_one_clinvar_variant(tmp_path, 'AV')
+
+    assert pl.read_parquet(tmp_path / 'out')['aminoAcidPosition'].to_list() == [None]
+    with pytest.raises(ValueError, match='breaks its model CodingVariant'):
+        validate_dataset(CodingVariant, str(tmp_path / 'out'))

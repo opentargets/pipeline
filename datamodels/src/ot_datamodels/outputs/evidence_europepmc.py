@@ -107,10 +107,10 @@ class EvidenceEuropepmc(DatasetModel):
         ge=0, le=65535, description='Year of publication of the article'
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id')] = Field(
+    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

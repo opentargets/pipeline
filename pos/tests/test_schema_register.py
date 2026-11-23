@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip('ot_datamodels')
 
 import yaml
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import dataset_spec, walk
 
 from pos.clickhouse_ddl import canonical, landing_columns, members, parse_type, render, type_at
@@ -84,7 +84,7 @@ DOCS_HEADERS = {
     'phase5_landing_before.csv': ['dataset', 'field', 'ddl_type', 'position'],
     'phase5_register.csv': COLUMNS,
     'phase5_register_piece1.csv': COLUMNS,
-    'phase5_sql_edits.csv': ['dataset', 'field', 'edit', 'table', 'served'],
+    'phase5_sql_edits.csv': ['dataset', 'field', 'edit', 'table', 'path', 'served'],
 }
 
 
@@ -164,7 +164,12 @@ def test_after_matches_the_generator(register):
             continue
         cols = tables[row['dataset']]
         found = type_at(cols, row['field']) if cols is not None else None
-        if row['category'] in {'ddl_only', 'ppp_only', 'no_model'}:
+        if row['category'] == 'no_model':
+            modelled = row['outcome'] == 'model (piece 3)'
+            assert (cols is not None) == modelled, f'{key}: outcome {row["outcome"]!r}'
+            assert row['after'] == '', key
+            continue
+        if row['category'] in {'ddl_only', 'ppp_only'}:
             assert found is None, f'{key}: the generated Platform table has it'
         if row['category'] in ORDER:
             kept = set(row['before'].split(', '))
@@ -271,7 +276,7 @@ def test_cast_back_rows(register):
 
 def test_every_clickhouse_marker_parses():
     """Piece 2 generates DDL from the markers, so each one must parse."""
-    for name, model in discover_datasets().items():
+    for name, model in discover_models().items():
         for path, node in walk(dataset_spec(model)):
             if node.clickhouse:
                 assert parse_type(node.clickhouse), f'{name}.{path}: {node.clickhouse}'

@@ -11,7 +11,7 @@ from pathlib import Path
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
 ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
@@ -288,7 +288,7 @@ def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = '
 
 def members(pattern: str, product: str) -> list[type[DatasetModel]]:
     """The models whose `dataset_name` matches the glob and that are loaded for `product`, by name."""
-    models = discover_datasets()
+    models = discover_models()
     return [m for name, m in sorted(models.items()) if fnmatch(name, pattern) and product in m.products]
 
 
@@ -301,7 +301,7 @@ def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]] | 
     if 'models' in entry:
         return union_columns(members(entry['models'], product))
     if 'model' in entry:
-        return columns(discover_datasets()[entry['model']])
+        return columns(discover_models()[entry['model']])
     return None
 
 

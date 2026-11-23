@@ -8,8 +8,9 @@ import polars as pl
 import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
+from ot_datamodels.views.target_view import TargetView
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -233,14 +234,14 @@ class PppOnly(DatasetModel):
 
 def test_members_filters_product(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     assert members('*_*', 'platform') == [MemberA, MemberB]
     assert members('*_*', 'ppp') == [MemberA, MemberB, PppOnly]
 
 
 def test_landing_columns(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     glob = {'input_dir': 'output', 'models': 'member_*'}
     assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
     assert landing_columns({'input_dir': 'output/x', 'model': 'toy_ppp'}, 'platform') == columns(PppOnly)
@@ -250,7 +251,7 @@ def test_landing_columns(monkeypatch):
 
 def test_ddl_for(monkeypatch):
     models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: models)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
     one = {'table': 't_log', 'model': 'toy_ppp', 'engine': 'MergeTree ORDER BY id'}
     assert ddl_for(one, 'platform') == [('t_log', create_table('t_log', columns(PppOnly), 'MergeTree ORDER BY id'))]
     union = {'table': 'u_log', 'models': 'member_*'}
@@ -293,7 +294,7 @@ def test_pos_ddl_all_prints_every_modelled_entry(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '`disease_log`' in out
     assert '`evidence_log`' in out
-    assert '`targets_log`' not in out  # hand-written
+    assert '`targets_log`' in out
 
 
 def test_type_at():
@@ -328,7 +329,7 @@ def test_create_table_quotes_identifiers():
 
 def test_every_entry_round_trips():
     entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    models = discover_datasets()
+    models = discover_models()
     checked = 0
     for name, entry in entries.items():
         if 'model' not in entry:
@@ -337,6 +338,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
+    views = {entries[n]['model'] for n in ('aotf', 'association_time_series', 'protein_coding_coords', 'targets')}
+    assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
         found = members(entries['evidence']['models'], product)
         assert found, product
@@ -344,3 +347,30 @@ def test_every_entry_round_trips():
         tables.append((entries['evidence']['table'], union_columns(found)))
         for table, cols in tables:
             assert list(parse_table(create_table(table, cols)).items()) == cols, (product, table)
+
+
+#: The `targets` landing types the markers on the `target` model keep.
+TARGET_VIEW_TYPES = {
+    'genomicLocation/start': 'UInt32',
+    'genomicLocation/end': 'UInt32',
+    'genomicLocation/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+    'constraint[]/exp': 'Nullable(Float64)',
+    'constraint[]/oe': 'Nullable(Float64)',
+    'constraint[]/oeLower': 'Nullable(Float64)',
+    'constraint[]/oeUpper': 'Nullable(Float64)',
+    'constraint[]/score': 'Nullable(Float64)',
+    'constraint[]/obs': 'Nullable(UInt32)',
+    'constraint[]/upperBin': 'Nullable(UInt32)',
+    'constraint[]/upperBin6': 'Nullable(UInt32)',
+    'constraint[]/upperRank': 'Nullable(UInt32)',
+    'hallmarks/attributes[]/pmid': 'Nullable(UInt32)',
+    'hallmarks/cancerHallmarks[]/pmid': 'UInt32',
+    'targetClass[]/id': 'UInt32',
+}
+
+
+@pytest.mark.parametrize(('path', 'expected'), TARGET_VIEW_TYPES.items())
+def test_target_view_keeps_landing_types(path, expected):
+    t = type_at(columns(TargetView), path)
+    assert t is not None
+    assert render(t) == expected

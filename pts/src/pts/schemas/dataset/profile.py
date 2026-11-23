@@ -1,6 +1,7 @@
 """Profile a run's outputs against the dataset models, to see what pts actually wrote.
 
-For every modelled dataset under `<run>/output/<dataset_name>` two summaries are written:
+For every modelled dataset, an output under `<run>/output/<dataset_name>` and a view under
+`<run>/view/<dataset_name>`, two summaries are written:
 
 * `validation.parquet`: the `validation_report` rows of every dataset, plus one `missing` row for a
   dataset whose folder is absent or holds no parquet parts.
@@ -22,7 +23,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import VIEWS_PACKAGE, discover_models
 from ot_datamodels.spec import Node, dataset_spec, walk
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
@@ -188,6 +189,11 @@ def _write(frame: pl.DataFrame, path: str) -> None:
         raise RuntimeError(f'could not write {path}: {error}') from error
 
 
+def run_folder(model: type[DatasetModel]) -> str:
+    """The folder of a run that holds the dataset of `model`: `view` for a view, `output` otherwise."""
+    return 'view' if model.__module__.startswith(f'{VIEWS_PACKAGE}.') else 'output'
+
+
 def profile_run(run_uri: str, out_dir: str) -> None:
     """Validate and profile every modelled dataset of a run, writing parquet summaries.
 
@@ -197,14 +203,15 @@ def profile_run(run_uri: str, out_dir: str) -> None:
     combine all datasets.
 
     Args:
-        run_uri: the run, local or `gs://`; dataset `x` is read from `<run_uri>/output/x`.
+        run_uri: the run, local or `gs://`; dataset `x` is read from `<run_uri>/output/x`, or
+            `<run_uri>/view/x` for a view (`run_folder`).
         out_dir: where the summaries are written, local or `gs://`.
     """
     out = out_dir.rstrip('/')
     validations = [REPORT_SCHEMA.to_frame()]
     profiles = [PROFILE_SCHEMA.to_frame()]
-    for name, model in sorted(discover_datasets().items()):
-        location = f'{run_uri.rstrip("/")}/output/{name}'
+    for name, model in sorted(discover_models().items()):
+        location = f'{run_uri.rstrip("/")}/{run_folder(model)}/{name}'
         validation, profile = REPORT_SCHEMA.to_frame(), PROFILE_SCHEMA.to_frame()
         try:
             list_parts(location, '*.parquet')

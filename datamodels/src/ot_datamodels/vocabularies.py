@@ -31,6 +31,7 @@ __all__ = [
     'Chromosome',
     'ClinicalReportType',
     'ClinicalStage',
+    'CodingVariantDatasource',
     'ColocalisationMethod',
     'ConstraintType',
     'Datasource',
@@ -165,6 +166,9 @@ IntervalDatasource = Literal['E2G']
 # pharmacogenomics provider and data type
 PharmacogenomicsDatasource = Literal['clinpgx']
 PharmacogenomicsDatatype = Literal['clinical_annotation']
+# pts `coding_variant` datasources: its variant evidence, GWAS credible sets, `mol_qtl` and pharmacogenomics;
+# sorted, as pts sorts `datasources[]` by it
+CodingVariantDatasource = Literal['clinpgx', 'eva', 'eva_somatic', 'gwas_credible_sets', 'mol_qtl', 'uniprot_variants']
 # API `AggregationType`, then datatypeId
 AggregationType = Literal['overall', 'datasourceId', 'datatypeId']
 OverallAggregationValue = Literal['None']

@@ -11,11 +11,13 @@ from typing import Any
 import numpy as np
 import polars as pl
 from loguru import logger
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.coding_variant import CodingVariant
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.coding_variant import datasource
-from pts.schemas.dataset.conform import without_enums
+from pts.schemas.dataset.conform import conform, enums_as_strings, without_enums
+from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 HARMONIC_SUM_CONSTANT = sum(1 / ((i + 1) ** 2) for i in range(1000))
@@ -30,19 +32,7 @@ DATASOURCE_NICE_NAMES = {
 
 EVIDENCE_SOURCES = ['evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_variant']
 
-OUTPUT_COLUMNS = [
-    'targetId',
-    'variantId',
-    'therapeuticAreas',
-    'diseases',
-    'datasources',
-    'variantEffect',
-    'variantFunctionalConsequenceIds',
-    'uniprotAccessions',
-    'referenceAminoAcid',
-    'aminoAcidPosition',
-    'alternateAminoAcid',
-]
+OUTPUT_SCHEMA = to_polars_schema(CodingVariant)
 
 SORT_COLUMNS = [
     'variantId',
@@ -56,6 +46,7 @@ SORT_COLUMNS = [
 ]
 
 
+@writes(CodingVariant)
 def coding_variant(
     source: dict[str, str],
     destination: str,
@@ -100,7 +91,7 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         frames: the other input datasets, keyed as the transformer's `source`.
 
     Returns:
-        One row per amino acid changing consequence of a variant with evidence.
+        One row per amino acid changing consequence of a variant with evidence, conformed to `CodingVariant`.
     """
     variant_ids = variants.select('variantId')
     diseases = process_diseases(frames['disease'])
@@ -119,8 +110,8 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         ],
         how='diagonal_relaxed',
     )
-    empty_datasources = pl.lit([], dtype=pl.List(datasource))
-    return (
+    empty_datasources = pl.lit([], dtype=enums_as_strings(OUTPUT_SCHEMA['datasources']))
+    view = (
         variants
         .join(aggregate_evidence(pooled), on='variantId', how='inner')
         .with_columns(
@@ -128,9 +119,10 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         )
         .join(process_target_index(frames['target']), on='targetId', how='left')
         .with_columns(uniprot_accessions(pl.col('uniprotAccessions'), pl.col('refUniprotAccessions')))
-        .select(OUTPUT_COLUMNS)
+        .select(OUTPUT_SCHEMA.names())
         .sort(SORT_COLUMNS, nulls_last=True, maintain_order=True)
     )
+    return conform(view, CodingVariant)
 
 
 def aggregate_evidence(pooled: pl.LazyFrame) -> pl.LazyFrame:

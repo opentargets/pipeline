@@ -7,9 +7,14 @@ from pathlib import Path
 import polars as pl
 import pytest
 from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.association_timeseries import AssociationTimeseries
 
-from pts.schemas.association import association_schema, association_timeseries_schema
+from pts.schemas.association import association_schema
 from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.validate import validate_dataset
+from pts.task_outputs import OutputValidation
+from pts.transformers import association_timeseries_view as module
 from pts.transformers.association_timeseries_view import association_timeseries_view
 
 NAMES = ['overall_direct', 'overall_indirect', 'by_datasource_direct', 'by_datasource_indirect']
@@ -23,8 +28,8 @@ def _row(target: str, disease: str, value: str | None, years: list[int] | None) 
     return {
         'diseaseId': disease,
         'targetId': target,
-        'aggregationType': None if value is None else 'datasource',
-        'aggregationValue': value,
+        'aggregationType': 'overall' if value is None else 'datasourceId',
+        'aggregationValue': 'None' if value is None else value,
         'associationScore': 0.5,
         'evidenceCount': 1,
         'timeseries': None if years is None else [_entry(y) for y in years],
@@ -72,7 +77,7 @@ def test_explodes_every_timeseries_entry(tmp_path: Path) -> None:
     }
     out = _run(tmp_path, rows)
     assert out.height == 6
-    assert out.schema == association_timeseries_schema()
+    assert out.schema == to_polars_schema(AssociationTimeseries)
 
 
 def test_by_datasource_int32_counts_upcast_to_int64(tmp_path: Path) -> None:
@@ -84,7 +89,7 @@ def test_by_datasource_int32_counts_upcast_to_int64(tmp_path: Path) -> None:
 def test_empty_timeseries_rows_vanish(tmp_path: Path) -> None:
     out = _run(tmp_path, {'overall_direct': [_row('T1', 'D1', None, []), _row('T2', 'D1', None, None)]})
     assert out.height == 0
-    assert out.schema == association_timeseries_schema()
+    assert out.schema == to_polars_schema(AssociationTimeseries)
 
 
 def test_each_partition_key_in_exactly_one_file_and_files_sorted(tmp_path: Path) -> None:
@@ -170,6 +175,22 @@ def test_worker_failure_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert not (tmp_path / 'out' / 'part-00001.parquet').exists()
 
 
+def test_writes_its_model(tmp_path: Path) -> None:
+    target, disease = 'ENSG00000000001', 'EFO_0000001'
+    rows = {
+        'overall_direct': [_row(target, disease, None, [2019, 2020])],
+        'overall_indirect': [_row(target, disease, None, [2020])],
+        'by_datasource_direct': [_row(target, disease, 'eva', [2020])],
+        'by_datasource_indirect': [_row(target, disease, 'europepmc', [2021])],
+    }
+    destination = str(tmp_path / 'out')
+    association_timeseries_view(_write(tmp_path, rows), destination, {'file_count': 2}, None)
+
+    assert OutputValidation.of(association_timeseries_view, module).outputs == {None: AssociationTimeseries}
+    validate_dataset(AssociationTimeseries, destination)
+    assert isinstance(pl.read_parquet_schema(f'{destination}/part-00000.parquet')['aggregationType'], pl.Enum)
+
+
 def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
     """The overall and by-datasource `aggregationValue` Enums differ; both are read as strings."""
     rows = {
@@ -177,9 +198,6 @@ def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
         'by_datasource_direct': [_row('T1', 'D1', 'eva', [2020]), _row('T2', 'D1', 'europepmc', [2021])],
     }
     models = discover_datasets()
-    rows['overall_direct'][0] |= {'aggregationType': 'overall', 'aggregationValue': 'None'}
-    for row in rows['by_datasource_direct']:
-        row['aggregationType'] = 'datasourceId'
     (tmp_path / 'strings').mkdir()
     (tmp_path / 'typed').mkdir()
     strings = _run(tmp_path / 'strings', rows)

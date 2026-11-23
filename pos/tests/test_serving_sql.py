@@ -20,7 +20,7 @@ import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from clickhouse_connect.driver.tools import insert_file
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.polars import to_polars_schema
 
 from pos.clickhouse_ddl import canonical, columns, create_table, ddl_for, member_table, members, parse_type, type_at
@@ -126,16 +126,13 @@ def test_serving_sql(product):
         query = (
             'SELECT type FROM system.columns WHERE database = {d:String} AND table = {t:String} AND name = {c:String}'
         )
-        for edit in SQL_EDITS:
-            served = client.query(query, parameters={'d': client.database, 't': edit['table'], 'c': edit['field']})
-            assert served.result_rows == [(edit['served'],)], f'phase5_sql_edits.csv: {edit}'
-        for entry in CAST_BACK:
+        for entry in SQL_EDITS + CAST_BACK:
             column = entry['path'].split('/', 1)[0].removesuffix('[]')
             served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': column})
-            assert len(served.result_rows) == 1, f'phase5_cast_back.csv: {entry}: no column {column}'
+            assert len(served.result_rows) == 1, f'{entry}: no column {column}'
             found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
-            assert found is not None, f'phase5_cast_back.csv: {entry}: no {entry["path"]}'
-            assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_cast_back.csv: {entry}'
+            assert found is not None, f'{entry}: no {entry["path"]}'
+            assert canonical(found) == canonical(parse_type(entry['served'])), str(entry)
         for entry in DERIVED:
             served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': entry['field']})
             assert len(served.result_rows) == 1, f'phase5_derived_changes.csv: {entry}: no column'
@@ -161,9 +158,12 @@ SCALARS = {
 
 
 def _value(dtype, pick: int):
-    """A value of `dtype`: an Enum gets its `pick`-th label, a list two elements (first and last label)."""
+    """A value of `dtype`: an Enum gets its `pick`-th label, a Boolean `pick == 0`, a list two elements (first and
+    last label)."""
     if isinstance(dtype, pl.Enum):
         return dtype.categories[pick]
+    if isinstance(dtype, pl.Boolean):
+        return pick == 0
     if isinstance(dtype, pl.List):
         return [_value(dtype.inner, 0), _value(dtype.inner, -1)]
     if isinstance(dtype, pl.Struct):
@@ -172,8 +172,8 @@ def _value(dtype, pick: int):
 
 
 def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
-    """(path, label) of every Enum value in `value`."""
-    if isinstance(dtype, pl.Enum):
+    """(path, value) of every Enum and Boolean value in `value`."""
+    if isinstance(dtype, (pl.Enum, pl.Boolean)):
         yield path, value
     elif isinstance(dtype, pl.List):
         for i, v in enumerate(value):
@@ -183,19 +183,22 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
             yield from _labels(value[f.name], f.dtype, f'{path}/{f.name}')
 
 
-#: Models with an Enum at the top level, in a list and in a struct, and the dataset each loads into.
+#: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs),
+#: and the dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
     'variant': 'variants',
     'interaction': 'interaction',
     'evidence_gene_burden': 'evidence',
+    'target_view': 'targets',
 }
 
 
 @pytest.mark.parametrize('model_name', sorted(ENUM_MODELS))
 def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
-    """Polars-written Enum parquet (dictionary-encoded strings) loads into the generated Enum8 columns, labels kept."""
-    model = discover_datasets()[model_name]
+    """Polars-written Enum parquet (dictionary-encoded strings) loads into the generated Enum8 columns, labels kept;
+    Booleans load into Bool."""
+    model = discover_models()[model_name]
     schema = to_polars_schema(model)
     rows = [{n: _value(t, pick) for n, t in schema.items()} for pick in (0, -1)]
     strings = pl.DataFrame(rows, schema={n: _as_strings(t) for n, t in schema.items()})

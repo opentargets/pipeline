@@ -18,9 +18,11 @@ Inputs:
   hand-written landing DDL columns at the end of piece 1. It decides whether a DDL-only column was dropped, gives the
   `before` of the `ppp_only` rows, and is compared with the generated Platform tables, Enum values included: a type
   change no row shows gets a `type_unrecorded` row, an order change of the shared columns a `column_order` row.
-- `docs/phase5_sql_edits.csv` (`dataset, field, edit, table, served`): serving-script edits a generated type forces.
-  One `serving_sql` row each, `before` the piece 1 landing type, `after` the type `table` serves
-  (`tests/test_serving_sql.py` checks it). Where `after` is the landing type, the field's other rows are
+  It also holds the view tables (hand-written until piece 3): a table the drift lists as `no_model` that has a
+  model now gets the drift of its model against these columns (`schema_drift.dataset_rows`), outcomes `(piece 3)`.
+- `docs/phase5_sql_edits.csv` (`dataset, field, edit, table, path, served`): serving-script edits a generated type
+  forces. One `serving_sql` row each, `before` the piece 1 landing type of `field`, `after` the type at `path` in
+  `table` (`tests/test_serving_sql.py` checks it). Where `after` is the landing type, the field's other rows are
   `superseded by serving_sql`, follow-up `none`.
 - `docs/phase5_api_follow_ups.csv` (`dataset, field, follow_up`): API changes that are no ClickHouse schema diff. One
   `api_follow_up` row each, outcome the text, follow-up `open`.
@@ -50,7 +52,7 @@ from pathlib import Path
 
 import polars as pl
 import yaml
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec, walk
 
 from pos.clickhouse_ddl import CHType, canonical, landing_columns, parse_type, render, type_at
@@ -88,7 +90,7 @@ def _load_drift():
 
 
 sd = _load_drift()
-MODELS = discover_datasets()
+MODELS = discover_models()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
 CLICKHOUSE = POS / 'config' / 'clickhouse'
 SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
@@ -281,22 +283,23 @@ def _marker_added(rows: list[dict[str, str]]) -> bool:
 
 
 def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], before: str, after: str,
-            no_output: set[str]) -> str:  # fmt: skip
+            no_output: set[str], piece: str = 'piece 2') -> str:  # fmt: skip
+    """`piece` names the piece that generates the table."""
     evidenced = {r['model'] for r in rows if r['model']} - no_output
     if category == 'no_model':
-        return 'no model (piece 3)'
+        return 'no model (piece 3)' if platform_table(dataset) is None else 'model (piece 3)'
     if category == 'ppp_only':
         return PPP_ONLY
     if category == 'column_order':
-        return 'model order (piece 2)'
+        return f'model order ({piece})'
     if category == 'struct_order':
-        return 'model order (piece 2)' if evidenced else 'no evidence; unchanged'
+        return f'model order ({piece})' if evidenced else 'no evidence; unchanged'
     if category in UNLANDED:
-        return 'API addition (piece 2)' if evidenced else 'no evidence; unchanged'
-    if category == 'ddl_only' and (dataset, path) not in LANDING:
+        return f'API addition ({piece})' if evidenced else 'no evidence; unchanged'
+    if category == 'ddl_only' and piece == 'piece 2' and (dataset, path) not in LANDING:
         return 'API removal (dropped)'
     if category == 'ddl_only':
-        return 'API removal (piece 2)' if rows[0]['serving_read'] != 'no' else 'removal (piece 2)'
+        return f'API removal ({piece})' if rows[0]['serving_read'] != 'no' else f'removal ({piece})'
     if not evidenced:
         return 'no evidence; unchanged'
     if category in {'type', 'kind', 'low_cardinality'}:
@@ -305,7 +308,7 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
     if category == 'open_vs_enum':
         if _marker_added(rows):
             return 'marker'
-        return 'Enum in the model' if after and parse_type(after).name.startswith('Enum') else 'open string (piece 2)'
+        return 'Enum in the model' if after and parse_type(after).name.startswith('Enum') else f'open string ({piece})'
     if category == 'literal_vs_string':
         return 'String → Enum' if after and parse_type(after).name.startswith('Enum') else 'String kept, no Enum'
     if category == 'list_nullability':
@@ -330,7 +333,7 @@ def outcome(category: str, dataset: str, path: str, rows: list[dict[str, str]], 
 def sql_edit(edit: dict[str, str], evidence: Evidence) -> dict[str, str]:
     """The `serving_sql` row of one serving-script edit."""
     dataset, path, after = edit['dataset'], edit['field'], edit['served']
-    before = LANDING[dataset, path]
+    before = landing_type(dataset, path)
     read = sd._serving(CONFIG[dataset], SCRIPTS).read(path, landed=True)
     models = sd._models_for(CONFIG[dataset], MODELS) or []
     text = evidence.text(dataset, [{'model': m.dataset_name} for m in models], path)
@@ -354,6 +357,15 @@ def derived_row(entry: dict[str, str]) -> dict[str, str]:
     return dict(zip(COLUMNS, values, strict=True))
 
 
+def landing_type(dataset: str, path: str) -> str:
+    """The frozen landing type at `path` (`a`, `a/b`, `a[]/b`)."""
+    column = path.split('/', 1)[0].removesuffix('[]')
+    found = type_at([(column, parse_type(LANDING[dataset, column]))], path)
+    if found is None:
+        raise KeyError(f'{dataset}: no {path} in the frozen landing table')
+    return LANDING[dataset, path] if path == column else render(found)
+
+
 def same(a: str, b: str) -> bool:
     return canonical(parse_type(a)) == canonical(parse_type(b))
 
@@ -361,7 +373,7 @@ def same(a: str, b: str) -> bool:
 @cache
 def kept_by_sql_edit() -> frozenset[tuple[str, str]]:
     """(dataset, field) of each serving-script edit that serves the landing type."""
-    kept = (e for e in SQL_EDITS if same(e['served'], LANDING[e['dataset'], e['field']]))
+    kept = (e for e in SQL_EDITS if same(e['served'], landing_type(e['dataset'], e['field'])))
     return frozenset((e['dataset'], e['field']) for e in kept)
 
 
@@ -406,7 +418,7 @@ def describe(before: CHType, after: CHType) -> str:
     return '; '.join(parts)
 
 
-def unrecorded(rows: list[dict[str, str]], evidence: Evidence) -> list[dict[str, str]]:
+def unrecorded(rows: list[dict[str, str]], evidence: Evidence, piece3: set[str]) -> list[dict[str, str]]:
     """A `type_unrecorded` row per landing type change no row shows, a `column_order` row per unrecorded order."""
     keyed: dict[tuple[str, str], list[dict[str, str]]] = {}
     for r in rows:
@@ -428,16 +440,31 @@ def unrecorded(rows: list[dict[str, str]], evidence: Evidence) -> list[dict[str,
         if any(r['category'] == 'column_order' for r in keyed.get((dataset, ''), [])):
             continue
         read = sd._serving(CONFIG[dataset], SCRIPTS).read('', landed=True)
-        values = (dataset, '', 'column_order', outcome('column_order', dataset, '', [], before, after, set()),
-                  before, after, '', read, api_follow_up('column_order', before, after, read))  # fmt: skip
+        result = outcome('column_order', dataset, '', [], before, after, set(), _piece(dataset, piece3))
+        values = (dataset, '', 'column_order', result, before, after, '', read,
+                  api_follow_up('column_order', before, after, read))  # fmt: skip
         out.append(dict(zip(COLUMNS, values, strict=True)))
     return out
+
+
+def frozen_ddl(dataset: str) -> dict[str, CHType]:
+    """The dataset's landing columns in `phase5_landing_before.csv`, in DDL order."""
+    return {f: parse_type(LANDING[dataset, f]) for f in LANDING_ORDER[dataset]}
+
+
+def _piece(dataset: str, piece3: set[str]) -> str:
+    return 'piece 3' if dataset in piece3 else 'piece 2'
 
 
 def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
     groups: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for r in drift.iter_rows(named=True):
         groups.setdefault((r['dataset'], r['field'], r['category']), []).append(r)
+    # tables with no model in the snapshot that have one now: their drift against the frozen landing DDL
+    piece3 = {d for d, _, c in groups if c == 'no_model' and platform_table(d) is not None}
+    for dataset in sorted(piece3):
+        for r in sd.dataset_rows(dataset, CONFIG[dataset], frozen_ddl(dataset), SCRIPTS, MODELS):
+            groups.setdefault((r['dataset'], r['field'], r['category']), []).append(r)
     for dataset, entry in CONFIG.items():
         if 'models' not in entry:
             continue
@@ -465,7 +492,9 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             before, after = first['ddl_type'], ''
         else:
             before, after = first['ddl_type'], after_type(dataset, path)
-        if category == 'ddl_only':
+        if category == 'ddl_only' and dataset in piece3:
+            text = 'not in the model'
+        elif category == 'ddl_only':
             where = ' on every member with output' if dataset == 'evidence' else ''
             text = f'absent: strict validation clean{where}'
         elif category in {'column_order', 'no_model'}:
@@ -480,7 +509,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
         elif category != 'serving_sql' and (dataset, path) in kept_by_sql_edit():
             result, follow_up = SUPERSEDED_SQL, 'none'
         else:
-            result = outcome(category, dataset, path, rows, before, after, no_output)
+            result = outcome(category, dataset, path, rows, before, after, no_output, _piece(dataset, piece3))
             if category not in ORDER and becomes_enum(before, after) and 'Enum' not in result:
                 result = f'{result}; String → Enum'
             follow_up = api_follow_up(category, before, after, read)
@@ -488,7 +517,7 @@ def build(drift: pl.DataFrame, evidence: Evidence) -> list[dict[str, str]]:
             result = f'{result}; {OUTCOME_NOTES[dataset, path, category]}'
         values = (dataset, path, category, result, before, after, text, read, follow_up)
         out.append(dict(zip(COLUMNS, values, strict=True)))
-    out += unrecorded(out, evidence)
+    out += unrecorded(out, evidence, piece3)
     return sorted(out, key=lambda r: (r['dataset'], r['field'], r['category']))
 
 
@@ -566,10 +595,6 @@ not serve; the API's `AggregationType` reads `association_time_series`, built fr
 (`overall`, `datasourceId`).
 - `evidence.sql` `ORDER BY` `datasourceId` (and any sort key on an Enum column) now sorts by the Enum's order (the \
 API's `Datasource` order), not alphabetically.
-- Served via the hand-written `targets` table; type unchanged until piece 3: `homology.homologyType`, \
-`target_tractability.modality`, \
-`target.genomicLocation.chromosome`, `target.go[].evidence`, `target.go[].aspect`, \
-`target.constraint[].constraintType`. pts `target_view` keeps writing what `targets.sql` expects.
 """
 
 
@@ -589,6 +614,15 @@ casts the column back to the landing type, the outcome says so and the follow-up
 changed from the piece 1 register:
 """
 
+PIECE3 = """
+## Piece 3
+
+The view tables (`aotf`, `association_time_series`, `protein_coding_coords`, `targets`) are generated from their \
+`ot_datamodels.views` models. Their rows compare the generated Platform table with the hand-written landing DDL \
+frozen in `pos/docs/phase5_landing_before.csv`, in the piece 1 categories, outcomes `(piece 3)`; the `no_model` row \
+of each says `model (piece 3)`.
+"""
+
 Changes = list[tuple[dict[str, str], dict[str, str]]]
 
 
@@ -604,7 +638,7 @@ def note(rows: list[dict[str, str]], changes: Changes) -> str:
     frame = pl.DataFrame(rows)
     counts = frame.group_by('outcome').agg(rows=pl.len(), open=(pl.col('API follow-up') == 'open').sum())
     n_open = sum(r['API follow-up'] == 'open' for r in rows)
-    out = [NOTE_HEAD, HINTS, ENUMS, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
+    out = [NOTE_HEAD, HINTS, ENUMS, PIECE3, PIECE2, '| dataset | field | category | outcome | after | API follow-up |',
            '| --- | --- | --- | --- | --- | --- |']  # fmt: skip
     for o, r in changes:
         after = f'`{o["after"]}` → `{r["after"]}`' if r['after'] else f'`{o["after"]}` → empty'

@@ -1,1 +1,2 @@
-dataset,field,edit,table,served
+dataset,field,edit,table,path,served
+targets,homologues[]/isHighConfidence,targets_by_region casts the row tuple's `homologues[].isHighConfidence` to Nullable(Bool) (was Nullable(String)),targets_by_region,target/homologues[]/isHighConfidence,Nullable(Bool)

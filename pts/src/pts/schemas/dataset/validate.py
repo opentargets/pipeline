@@ -23,9 +23,10 @@ Memory is bounded by the largest part plus 8 bytes per row.
 
 The result is a report with one row per broken rule -- the failures summed over the parts -- empty
 for a valid dataset. Run it over a local
-output directory, one folder per dataset::
+output or view directory, one folder per dataset::
 
     uv run python -m pts.schemas.dataset.validate ../work/output [dataset ...]
+    uv run python -m pts.schemas.dataset.validate ../work/view target_view
 """
 
 import sys
@@ -36,7 +37,7 @@ import pandera.errors as pe
 import polars as pl
 from loguru import logger
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import dataset_spec
 from otter.storage.synchronous.handle import StorageHandle
 from otter.util.errors import NotFoundError
@@ -267,12 +268,12 @@ def _duplicate_keys(parts: list[str], key: list[str], repeated: pl.Series, model
 
 
 def main(argv: list[str]) -> int:
-    """Validate every modelled dataset found under an output directory; exit 1 on any violation."""
+    """Validate every modelled dataset, output or view, found under a directory; exit 1 on any violation."""
     if not argv:
-        print('usage: python -m pts.schemas.dataset.validate <output_dir> [dataset ...]', file=sys.stderr)  # noqa: T201
+        print('usage: python -m pts.schemas.dataset.validate <output_or_view_dir> [dataset ...]', file=sys.stderr)  # noqa: T201
         return 2
     output_dir, names = Path(argv[0]), argv[1:]
-    models = discover_datasets()
+    models = discover_models()
     unknown = sorted(set(names) - set(models))
     if unknown:
         print(f'no model for {unknown}; modelled datasets: {sorted(models)}', file=sys.stderr)  # noqa: T201

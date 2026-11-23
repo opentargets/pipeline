@@ -123,6 +123,14 @@ retrying:
 gcloud compute instances list --project open-targets-eu-dev --filter='name~^up-'
 ```
 
+### Outputs from an older image can break a newer consumer
+
+A rerun step reads its inputs as the original run wrote them. `target_view` fails in
+`conform` on a `homology` written before opentargets/pipeline#411 (`isHighConfidence` a
+string, not a bool): on a pre-#411 run, rerun `homology` together with `target_view`
+(delete both outputs first). Never load views written before POS phase 5 piece 3 with a
+newer pos without a live check first.
+
 ### Config changed on the VM? Wait for the parse
 
 A task cleared before the DAG re-parses runs the old configuration. See

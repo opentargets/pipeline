@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 from loguru import logger
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_models
 from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
@@ -262,14 +262,17 @@ def test_clickhouse_entries_have_one_ddl_source():
     for name, entry in DATASETS['clickhouse'].items():
         sources = [k for k in ('model', 'models', 'preload_script') if k in entry]
         assert len(sources) == 1, f'{name}: {sources}'
+    hand_written = [n for n, e in DATASETS['clickhouse'].items() if 'preload_script' in e and not e.get('derived')]
+    assert not hand_written, f'landing tables with no model: {hand_written}'
 
 
 def test_clickhouse_models_are_datasets():
-    models = discover_datasets()
+    models = discover_models()
     for name, entry in DATASETS['clickhouse'].items():
-        output = entry.get('input_dir', '').removeprefix('output/')
-        if output in models:
-            assert entry.get('model') == output, f'{name}: output/{output} has a model'
+        input_dir = entry.get('input_dir', '')
+        for prefix in ('output/', 'view/'):
+            if input_dir.startswith(prefix) and input_dir.removeprefix(prefix) in models:
+                assert entry.get('model') == input_dir.removeprefix(prefix), f'{name}: {input_dir} has a model'
         if 'model' in entry:
             assert entry['model'] in models, name
         if 'models' in entry:
@@ -278,8 +281,9 @@ def test_clickhouse_models_are_datasets():
             assert optional in models and fnmatch(optional, entry.get('models', '')), f'{name}: {optional}'
 
 
-def test_every_schema_file_is_referenced():
-    scripts = {e['preload_script'] for e in DATASETS['clickhouse'].values() if 'preload_script' in e}
-    files = {str(p.relative_to(ROOT)) for p in (ROOT / 'config' / 'clickhouse' / 'schema').glob('*')}
-    assert files <= scripts
+def test_no_hand_written_landing_ddl():
+    assert not list((ROOT / 'config' / 'clickhouse' / 'schema').glob('*'))
+    for name, entry in DATASETS['clickhouse'].items():
+        if 'preload_script' in entry:
+            assert entry['preload_script'].startswith('config/clickhouse/scripts/'), name
 

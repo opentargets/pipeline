@@ -208,7 +208,7 @@ order by
             `targetGeneId` String,
             `targetGeneSymbol` String,
             `targetPercentageIdentity` Float64,
-            `isHighConfidence` Nullable(String)
+            `isHighConfidence` Nullable(Bool)
           )
         ),
         `pathways` Array(

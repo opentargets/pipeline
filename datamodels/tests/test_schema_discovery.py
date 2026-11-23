@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ot_datamodels.discovery import discover_datasets
+from ot_datamodels.discovery import discover_datasets, discover_models
 
 _HEADER = """\
 from typing import ClassVar
@@ -73,3 +73,16 @@ def test_rejects_a_dataset_name_declared_twice(tmp_path: Path, monkeypatch) -> N
 
     with pytest.raises(ValueError, match="'same' is declared twice"):
         discover_datasets('_outputs_twice')
+
+
+def test_discover_models_rejects_a_name_in_both(tmp_path: Path, monkeypatch) -> None:
+    model = """
+        class {cls}(DatasetModel):
+            dataset_name: ClassVar[str] = 'same'
+    """
+    _package(tmp_path, '_outputs_both', {'a': model.format(cls='Output')})
+    _package(tmp_path, '_views_both', {'a': model.format(cls='View')})
+    monkeypatch.syspath_prepend(tmp_path)
+
+    with pytest.raises(ValueError, match="'same' is declared twice"):
+        discover_models(('_outputs_both', '_views_both'))
