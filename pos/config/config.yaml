@@ -295,6 +295,7 @@ steps:
     - name: sync_bucket gcs release data
       source: ${data_source}/
       destination: ${release_gcs_bucket}/${release}/
+      exclude: [view/]
   aws_sync:
     - name: rclone_sync aws release data
       products: [platform]
