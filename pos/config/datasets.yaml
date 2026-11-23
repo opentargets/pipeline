@@ -158,6 +158,7 @@ clickhouse:
   otar_projects:
     table: otar_projects_log
     input_dir: output/otar
+    optional: true
     model: otar
   pharmacogenomics:
     table: pharmacogenomics_log
