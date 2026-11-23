@@ -23,10 +23,10 @@ def _rclone(mocker, returncode=0, stderr=''):
     return mocker.patch('subprocess.run', return_value=subprocess.CompletedProcess([], returncode, '', stderr))
 
 
-def _run_sync_bucket(tmp_path, mocker, source, destination, returncode=0, stderr=''):
+def _run_sync_bucket(tmp_path, mocker, source, destination, returncode=0, stderr='', **spec):
     run = _rclone(mocker, returncode, stderr)
     context = SimpleNamespace(config=SimpleNamespace(work_path=tmp_path, pool_size=7))
-    task = SyncBucket(SyncBucketSpec(name='sync_bucket x', source=source, destination=destination), context)  # ty: ignore[invalid-argument-type]
+    task = SyncBucket(SyncBucketSpec(name='sync_bucket x', source=source, destination=destination, **spec), context)  # ty: ignore[invalid-argument-type]
     task.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
     return run
 
@@ -81,6 +81,33 @@ def test_rclone_sync_raises_with_stderr(tmp_path, mocker):
 def test_sync_bucket_gcs_to_gcs(tmp_path, mocker):
     argv = _run_sync_bucket(tmp_path, mocker, 'gs://a/r/', 'gs://b/26.12/').call_args.args[0]
     assert argv[argv.index('copy') + 1 :][:2] == ['gcs:a/r/', 'gcs:b/26.12/']
+
+
+def test_sync_bucket_exclude_anchors_at_the_root(tmp_path, mocker):
+    argv = _run_sync_bucket(tmp_path, mocker, 'gs://a/r/', 'gs://b/26.12/', exclude=['view/']).call_args.args[0]
+    assert argv[argv.index('--exclude') + 1] == '/view/**'
+    assert argv[-len(STATS) :] == STATS
+
+
+def test_sync_bucket_without_exclude_has_no_filter(tmp_path, mocker):
+    assert '--exclude' not in _run_sync_bucket(tmp_path, mocker, 'gs://a/r/', 'gs://b/26.12/').call_args.args[0]
+
+
+def test_gcs_sync_excludes_view():
+    config = yaml.safe_load((Path(__file__).parents[1] / 'config' / 'config.yaml').read_text())
+    (task,) = config['steps']['gcs_sync']
+    assert task['exclude'] == ['view/']
+
+
+def test_ftp_script_excludes_view():
+    script = files('pos.scripts').joinpath('ftp_sync.sh').read_text()
+    (line,) = [ln for ln in script.splitlines() if 'gcloud storage rsync' in ln]
+    assert ' -x ^view/ ' in line
+
+
+def test_aws_include_list_leaves_out_view():
+    lines = (Path(__file__).parents[1] / 'config' / 'aws_sync.txt').read_text().splitlines()
+    assert lines and not any('view' in ln for ln in lines)
 
 
 def test_ftp_script_packaged():

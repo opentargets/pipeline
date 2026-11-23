@@ -15,10 +15,12 @@ class SyncBucketSpec(Spec):
         - source (str): The `gs://` URL of the directory to copy.
         - destination (Path): The path, relative to `work_path` to download the
             outputs to.
+        - exclude (list[str]): Directories, relative to `source`, to leave out.
     """
 
     source: str
     destination: str
+    exclude: list[str] = []
 
 
 class SyncBucket(Task):
@@ -51,6 +53,7 @@ class SyncBucket(Task):
             pool,
             '--checkers',
             pool,
+            *[a for e in self.spec.exclude for a in ('--exclude', f'/{e.strip("/")}/**')],
             *STATS_FLAGS,
         ]
         run_rclone(command, f'copy {self.spec.source} {destination_folder}')
