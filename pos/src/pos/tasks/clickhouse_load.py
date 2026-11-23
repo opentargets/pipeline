@@ -168,7 +168,8 @@ class ClickhouseLoad(Task):
                 self._check_unique(client, table, self._table_name)
         self._run_logged(client, declared_sql(self._entry, self.spec.product))
         for table in tables:
-            self._log_count(client, table.name)
+            if table.engine == 'mergetree':
+                self._log_count(client, table.name)
 
     @staticmethod
     def _check_unique(client, table, landing: str) -> None:

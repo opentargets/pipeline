@@ -575,6 +575,24 @@ def test_declared_load_reruns_over_its_dictionary(tmp_path, live, clickhouse_ser
     assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb2'
 
 
+def test_no_count_on_a_rocksdb_table(tmp_path, live, clickhouse_server, monkeypatch, info):
+    sent: list[str] = []
+    real_connect = clickhouse_load.connect
+
+    def recording_connect(**kw):
+        client = real_connect(**kw)
+        command = client.command
+        monkeypatch.setattr(client, 'command', lambda sql, *a, **k: sent.append(sql) or command(sql, *a, **k))
+        return client
+
+    monkeypatch.setattr(clickhouse_load, 'connect', recording_connect)
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    counts = [sql for sql in sent if 'count()' in sql and 'throwIf' not in sql]
+    assert counts == ['SELECT count() FROM `declared_log`', 'SELECT count() FROM `declared_by_target`']
+    assert 'declared_log: 3 rows' in info
+    assert 'declared_by_target: 2 rows' in info
+
+
 def test_duplicate_rocksdb_key_fails_the_load(tmp_path, live, clickhouse_server):
     duplicated = {'id': ['a', 'a'], 'name': ['n1', 'n2'], 'target': ['t1', 't2']}
     with pytest.raises(ClickhouseLoadError, match='duplicate declaredId in declared_by_id'):
