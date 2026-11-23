@@ -165,7 +165,7 @@ destinations, for test runs that must not touch the public release:
   4. Run `tarballs` (disks also mounted into the pos container), `bigquery`, `gcs_sync`
      and `aws_sync`; delete the VM and disks.
 
-  The DAG builds ClickHouse on 300 GB and copies it onto 170 GB before snapshotting; a
+  The DAG builds ClickHouse on 400 GB and copies it onto 250 GB before snapshotting; a
   manual build may snapshot the build disk.
 
 ## Tests

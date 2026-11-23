@@ -182,8 +182,8 @@ each side, whatever happened: delete that side's disks this run created
 ```
 
 - **ClickHouse** (VM `up-release-candidate-clickhouse-*`, `clickhouse_machine_type`) runs
-  pos `backend_clickhouse`. It builds on a 300 GB disk (`pos-<prefix>-<run>-ch-build`)
-  and, if the step succeeded, is copied onto a 170 GB disk (`pos-<prefix>-<run>-ch`) and
+  pos `backend_clickhouse`. It builds on a 400 GB disk (`pos-<prefix>-<run>-ch-build`)
+  and, if the step succeeded, is copied onto a 250 GB disk (`pos-<prefix>-<run>-ch`) and
   compared with it (`cp -a`, then `diff -r`, in a container of the pos image).
 - **OpenSearch** (VM `up-release-candidate-opensearch-*`, `opensearch_machine_type`) runs
   pos `backend_opensearch` on an 80 GB disk (`pos-<prefix>-<run>-os`).
