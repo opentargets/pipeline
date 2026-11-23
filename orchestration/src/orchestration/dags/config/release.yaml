@@ -4,7 +4,7 @@ clickhouse_machine_type: n2d-highmem-96
 opensearch_machine_type: n2d-highmem-32
 backend_max_run_hours: 4
 clickhouse_build_disk_gb: 300
-clickhouse_disk_gb: 170
+clickhouse_disk_gb: 250
 opensearch_disk_gb: 80
 clickhouse_work_disk_gb: 100
 opensearch_work_disk_gb: 100
