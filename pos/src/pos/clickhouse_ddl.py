@@ -281,10 +281,11 @@ def union_columns(models: Sequence[type[DatasetModel]]) -> list[tuple[str, CHTyp
     return out
 
 
-def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log') -> str:
-    """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted."""
+def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log', *, replace: bool = False) -> str:
+    """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted; plain `CREATE TABLE` for `replace`."""
     body = ', '.join(f'{_name(name)} {render(t)}' for name, t in cols)
-    return f'CREATE TABLE IF NOT EXISTS {_name(table)} ({body}) ENGINE = {engine}'
+    exists = '' if replace else 'IF NOT EXISTS '
+    return f'CREATE TABLE {exists}{_name(table)} ({body}) ENGINE = {engine}'
 
 
 def declared_tables(model: type[DatasetModel], product: str) -> list[ClickHouseTable]:
@@ -305,7 +306,10 @@ def table_columns(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]]) ->
 
 
 def table_sql(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landing: str) -> list[str]:
-    """The statements that create and fill a declared table from its landing table; `cols` are the dataset's."""
+    """The statements that rebuild a declared table from its landing table; `cols` are the dataset's.
+
+    They drop the table first, so a re-run leaves one copy of the rows.
+    """
     own = table_columns(table, cols)
     types = dict(own)
     if table.engine == 'rocksdb':
@@ -322,7 +326,11 @@ def table_sql(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landin
     insert = f'INSERT INTO {_name(table.name)} SELECT {select} FROM {_name(landing)}'  # noqa: S608 quoted identifiers
     if table.where:
         insert += f' WHERE {table.where}'
-    statements = [create_table(table.name, own, engine), insert]
+    statements = [
+        f'DROP TABLE IF EXISTS {_name(table.name)} SYNC',
+        create_table(table.name, own, engine, replace=True),
+        insert,
+    ]
     if table.optimize:
         statements.append(f'OPTIMIZE TABLE {_name(table.name)} FINAL')
     return statements
@@ -337,9 +345,14 @@ def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) 
         expression = f' EXPRESSION {_name(source)}' if source != name else ''
         parts.append(f'{_name(name)} {render(types[source])}{expression}')
     return (
-        f'CREATE DICTIONARY IF NOT EXISTS {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
+        f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
         f"SOURCE(CLICKHOUSE(TABLE '{d.source_table}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
+
+
+def drop_dictionary_sql(d: ClickHouseDictionary) -> str:
+    """Drops the dictionary; run it before `table_sql` on the source table, which ClickHouse will not drop under it."""
+    return f'DROP DICTIONARY IF EXISTS {_name(d.name)} SYNC'
 
 
 def uniqueness_sql(table: ClickHouseTable) -> str:

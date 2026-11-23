@@ -1,9 +1,12 @@
 """pos.clickhouse_ddl: ClickHouse landing DDL generated from the dataset models."""
 
 import datetime
+import os
+import urllib.request
 from pathlib import Path
 from typing import Annotated, Literal
 
+import clickhouse_connect
 import polars as pl
 import pytest
 import yaml
@@ -23,6 +26,7 @@ from pos.clickhouse_ddl import (
     ddl_for,
     declared_tables,
     dictionary_sql,
+    drop_dictionary_sql,
     landing_columns,
     member_table,
     members,
@@ -396,8 +400,9 @@ LANDING = [
 def test_rocksdb_table_sql():
     table = ClickHouseTable('gene_ontology', 'rocksdb', key='id')
     assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log') == [
+        'DROP TABLE IF EXISTS `gene_ontology` SYNC',
         (
-            'CREATE TABLE IF NOT EXISTS `gene_ontology` (`id` String, `name` String) '
+            'CREATE TABLE `gene_ontology` (`id` String, `name` String) '
             'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
         ),
         'INSERT INTO `gene_ontology` SELECT `id`, `name` FROM `gene_ontology_log`',
@@ -407,8 +412,9 @@ def test_rocksdb_table_sql():
 def test_mergetree_nullable_order_by_allows_nullable_key():
     table = ClickHouseTable('t', 'mergetree', order_by=('targetId', 'id'), columns=('id', 'targetId'))
     assert table_sql(table, LANDING, 't_log') == [
+        'DROP TABLE IF EXISTS `t` SYNC',
         (
-            'CREATE TABLE IF NOT EXISTS `t` (`id` String, `targetId` Nullable(String)) '
+            'CREATE TABLE `t` (`id` String, `targetId` Nullable(String)) '
             'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
         ),
         'INSERT INTO `t` SELECT `id`, `targetId` FROM `t_log`',
@@ -426,8 +432,9 @@ def test_mergetree_primary_key_prefix_and_where_with_optimize():
         optimize=True,
     )
     assert table_sql(table, LANDING, 'clinical_target_log') == [
+        'DROP TABLE IF EXISTS `clinical_target` SYNC',
         (
-            'CREATE TABLE IF NOT EXISTS `clinical_target` (`id` String, `drugId` String, `targetId` Nullable(String)) '
+            'CREATE TABLE `clinical_target` (`id` String, `drugId` String, `targetId` Nullable(String)) '
             'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) PRIMARY KEY (`targetId`) SETTINGS allow_nullable_key = 1'
         ),
         (
@@ -441,8 +448,9 @@ def test_mergetree_primary_key_prefix_and_where_with_optimize():
 def test_subset_rename_follow_columns_order():
     table = ClickHouseTable('t', 'mergetree', order_by=('gene',), columns=('score', 'id'), renames={'id': 'gene'})
     assert table_sql(table, LANDING, 'l') == [
+        'DROP TABLE IF EXISTS `t` SYNC',
         (
-            'CREATE TABLE IF NOT EXISTS `t` (`score` Nullable(Float64), `gene` String) '
+            'CREATE TABLE `t` (`score` Nullable(Float64), `gene` String) '
             'ENGINE = MergeTree() ORDER BY (`gene`)'
         ),
         'INSERT INTO `t` SELECT `score`, `id` AS `gene` FROM `l`',
@@ -451,7 +459,7 @@ def test_subset_rename_follow_columns_order():
 
 def test_no_columns_keeps_every_landing_column():
     table = ClickHouseTable('t', 'rocksdb', key='id')
-    assert table_sql(table, LANDING, 'l')[1] == (
+    assert table_sql(table, LANDING, 'l')[2] == (
         'INSERT INTO `t` SELECT `id`, `drugId`, `targetId`, `score`, `tags` FROM `l`'
     )
 
@@ -467,7 +475,7 @@ def test_dictionary_sql_renames_through_expression():
     )
     cols = [('biosampleId', STR), ('biosampleName', STR), ('other', STR)]
     assert dictionary_sql(d, cols) == (
-        'CREATE DICTIONARY IF NOT EXISTS `biosample_names` '
+        'CREATE OR REPLACE DICTIONARY `biosample_names` '
         '(`id` String EXPRESSION `biosampleId`, `name` String EXPRESSION `biosampleName`) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 'biosample')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
@@ -477,9 +485,14 @@ def test_dictionary_sql_renames_through_expression():
 def test_dictionary_sql_identity_columns_have_no_expression():
     d = ClickHouseDictionary('d', 't', key='id', attributes=('name',))
     assert dictionary_sql(d, [('id', STR), ('name', STR)]) == (
-        'CREATE DICTIONARY IF NOT EXISTS `d` (`id` String, `name` String) PRIMARY KEY `id` '
+        'CREATE OR REPLACE DICTIONARY `d` (`id` String, `name` String) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
+
+
+def test_drop_dictionary_sql():
+    d = ClickHouseDictionary('biosample_names', 'biosample', key='id', attributes=('name',))
+    assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
 
 
 def test_uniqueness_sql():
@@ -507,3 +520,59 @@ class Declared(DatasetModel):
 def test_declared_tables_filter_by_product():
     assert [t.name for t in declared_tables(Declared, 'platform')] == ['both']
     assert [t.name for t in declared_tables(Declared, 'ppp')] == ['both', 'ppp_only']
+
+
+# read at import: the autouse fixture clears POS_* before each test; no env, no live test
+SERVER = os.environ.get('POS_TEST_CLICKHOUSE')
+
+
+def _live_client():
+    if SERVER is None:
+        pytest.skip('POS_TEST_CLICKHOUSE not set')
+    host, _, port = SERVER.partition(':')
+    try:
+        with urllib.request.urlopen(f'http://{host}:{port}/ping', timeout=2) as r:
+            assert r.read().decode().strip() == 'Ok.'
+    except (OSError, AssertionError):
+        pytest.skip('no ClickHouse server')
+    return clickhouse_connect.get_client(host=host, port=int(port))
+
+
+def test_table_sql_rerun_keeps_one_copy_of_the_rows():
+    client = _live_client()
+    table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3', optimize=True)
+    cols = [('id', CHType('Int64')), ('name', STR)]
+    client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
+    client.command('CREATE TABLE ddl_rerun_log (id Int64, name String) ENGINE = Log')
+    client.command("INSERT INTO ddl_rerun_log VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+    try:
+        for _ in range(2):
+            for statement in table_sql(table, cols, 'ddl_rerun_log'):
+                client.command(statement)
+        assert client.command('SELECT count() FROM ddl_rerun') == 2
+    finally:
+        client.command('DROP TABLE IF EXISTS ddl_rerun SYNC')
+        client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
+
+
+def test_dictionary_sql_rerun_reads_the_rebuilt_table():
+    client = _live_client()
+    table = ClickHouseTable('ddl_dict_src', 'rocksdb', key='k')
+    cols = [('k', STR), ('v', STR)]
+    d = ClickHouseDictionary(
+        'ddl_dict', 'ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
+    )
+    client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
+    client.command('CREATE TABLE ddl_dict_log (k String, v String) ENGINE = Log')
+    client.command("INSERT INTO ddl_dict_log VALUES ('x', 'nx')")
+    try:
+        for _ in range(2):
+            client.command(drop_dictionary_sql(d))
+            for statement in table_sql(table, cols, 'ddl_dict_log'):
+                client.command(statement)
+            client.command(dictionary_sql(d, cols))
+        assert client.command("SELECT dictGet('ddl_dict', 'name', tuple('x'))") == 'nx'
+    finally:
+        client.command('DROP DICTIONARY IF EXISTS ddl_dict')
+        client.command('DROP TABLE IF EXISTS ddl_dict_src SYNC')
+        client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
