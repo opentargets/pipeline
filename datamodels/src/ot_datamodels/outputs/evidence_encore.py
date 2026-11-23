@@ -27,10 +27,14 @@ class DiseaseCellLines(StructModel):
 class ValidationReadouts(StructModel):
     """`validationReadouts[]`."""
 
-    hsaValue: float
-    isValidated: bool
-    readoutMethodName: str = Field(min_length=1)
-    screen: str = Field(min_length=1)
+    hsaValue: float = Field(
+        description='Highest single agent (HSA) value of the genetic interaction in the validation readout'
+    )
+    isValidated: bool = Field(description='Whether the genetic interaction was validated by the readout')
+    readoutMethodName: str = Field(
+        min_length=1, description="Method of the validation readout (e.g. 'CTG', 'CellTox', 'Confluence')"
+    )
+    screen: str = Field(min_length=1, description="Validation screen the readout comes from (e.g. 'V2')")
 
 
 class EvidenceEncore(DatasetModel):
@@ -97,7 +101,12 @@ class EvidenceEncore(DatasetModel):
             'as well: antagonistics < 0 < cooperative'
         ),
     )
-    geneticInteractionType: str = Field(min_length=1)
+    geneticInteractionType: str = Field(
+        min_length=1,
+        description=(
+            'Type of genetic interaction between the target and the interacting target (antagonistic or cooperative)'
+        ),
+    )
     interactingTargetFromSourceId: str = Field(min_length=1, description='Identifer of the interacting target')
     interactingTargetRole: str = Field(min_length=1, description='Role of a target in the genetic interaction test')
     phenotypicConsequenceLogFoldChange: float = Field(description='Log 2 fold change of the cell survival')
@@ -107,7 +116,9 @@ class EvidenceEncore(DatasetModel):
     releaseVersion: str = Field(min_length=1, description='Open Targets data release version')
     statisticalMethod: str = Field(min_length=1, description='Statistical method used to calculate the association')
     targetRole: str = Field(min_length=1, description='Role of a target in the genetic interaction test')
-    validationReadouts: list[ValidationReadouts]
+    validationReadouts: list[ValidationReadouts] = Field(
+        description='Readouts of the validation screens of the genetic interaction'
+    )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'

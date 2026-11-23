@@ -107,3 +107,59 @@ def test_integer_markers_have_bounds(model: type[DatasetModel], path: str, node:
             upper = min(upper, int(limit) + value)
     assert lower >= low, f'{where}: lower bound below {low}'
     assert upper <= high, f'{where}: upper bound above {high}'
+
+
+def _described(fields, prefix=''):
+    for field in fields:
+        node = field.node
+        yield f'{prefix}{field.name}', field.description
+        while node.kind == 'list' and node.element is not None:
+            node = node.element
+        if node.kind == 'struct':
+            yield from _described(node.fields, f'{prefix}{field.name}/')
+
+
+def test_every_output_field_has_a_description() -> None:
+    missing = [
+        f'{name}:{path}'
+        for name, model in DATASETS.items()
+        for path, description in _described(dataset_spec(model).fields)
+        if not (description and description.strip())
+    ]
+
+    assert not missing
+
+
+def test_references_resolve() -> None:
+    unresolved = []
+    for model in MODELS.values():
+        for path, node in walk(dataset_spec(model)):
+            if node.reference is None:
+                continue
+            target = DATASETS.get(node.reference.dataset)
+            if target is None or all(f.name != node.reference.column for f in dataset_spec(target).fields):
+                unresolved.append(f'{model.dataset_name}:{path} -> {node.reference.dataset}/{node.reference.column}')
+
+    assert not unresolved
+
+
+LIST_REFERENCES = {
+    ('clinical_indication', 'clinicalReportIds'): ('clinical_report', 'id'),
+    ('clinical_target', 'clinicalReportIds'): ('clinical_report', 'id'),
+    ('drug_mechanism_of_action', 'chemblIds'): ('drug_molecule', 'id'),
+    ('drug_warning', 'chemblIds'): ('drug_molecule', 'id'),
+    ('drug_mechanism_of_action', 'targets'): ('target', 'id'),
+    ('gene_sets', 'entityIds'): ('target', 'id'),
+    ('evidence_expression_atlas', 'biosamplesFromSource'): ('biosample', 'biosampleId'),
+    ('study', 'diseaseIds'): ('disease', 'id'),
+}
+
+
+@pytest.mark.parametrize(('key', 'expected'), LIST_REFERENCES.items(), ids=[f'{d}:{c}' for d, c in LIST_REFERENCES])
+def test_list_references(key: tuple[str, str], expected: tuple[str, str]) -> None:
+    dataset, column = key
+    field = next(f for f in dataset_spec(DATASETS[dataset]).fields if f.name == column)
+    element = field.node.element
+
+    assert element is not None
+    assert element.reference == Reference(*expected)
