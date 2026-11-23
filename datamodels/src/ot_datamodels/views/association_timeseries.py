@@ -40,8 +40,6 @@ class AssociationTimeseries(DatasetModel):
                 'diseaseId', 'targetId', 'aggregationType', 'aggregationValue', 'year', 'associationScore', 'novelty',
                 'yearlyEvidenceCount', 'isDirect',
             ),
-            optimize=True,
-            products=('ppp',),
         ),
     )  # fmt: skip
     example: ClassVar[dict] = {

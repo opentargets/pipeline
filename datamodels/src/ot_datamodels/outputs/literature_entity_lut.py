@@ -26,7 +26,6 @@ class LiteratureEntityLut(DatasetModel):
             'mergetree',
             order_by=('keywordId', 'year', 'month', 'relevance'),
             columns=('pmid', 'pmcid', 'keywordId', 'relevance', 'date', 'year', 'month'),
-            optimize=True,
         ),
     )
     example: ClassVar[dict] = {

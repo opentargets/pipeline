@@ -33,7 +33,7 @@ class Otar(DatasetModel):
     products: ClassVar[tuple[str, ...]] = ('ppp',)
     # Platform serves the table empty
     clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable('otar_projects', 'rocksdb', key='efo_id', products=('platform', 'ppp')),
+        ClickHouseTable('otar_projects', 'rocksdb'),
     )
     example: ClassVar[dict] = {
         'efo_id': 'EFO_0000651',

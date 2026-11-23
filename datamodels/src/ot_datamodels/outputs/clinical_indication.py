@@ -29,19 +29,15 @@ class ClinicalIndication(DatasetModel):
             'clinical_indication_drug',
             'mergetree',
             order_by=('drugId', 'id'),
-            primary_key=('drugId',),
             columns=('id', 'drugId', 'diseaseId', 'maxClinicalStage', 'clinicalReportIds'),
             where='drugId IS NOT NULL',
-            optimize=True,
         ),
         ClickHouseTable(
             'clinical_indication_disease',
             'mergetree',
             order_by=('diseaseId', 'id'),
-            primary_key=('diseaseId',),
             columns=('id', 'drugId', 'diseaseId', 'maxClinicalStage', 'clinicalReportIds'),
             where='diseaseId IS NOT NULL',
-            optimize=True,
         ),
     )
     example: ClassVar[dict] = {

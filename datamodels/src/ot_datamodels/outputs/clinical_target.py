@@ -30,10 +30,8 @@ class ClinicalTarget(DatasetModel):
             'clinical_target',
             'mergetree',
             order_by=('targetId', 'id'),
-            primary_key=('targetId',),
             columns=('id', 'drugId', 'targetId', 'diseases', 'maxClinicalStage', 'clinicalReportIds'),
             where='targetId IS NOT NULL',
-            optimize=True,
         ),
     )
     example: ClassVar[dict] = {

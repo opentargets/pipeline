@@ -18,7 +18,7 @@ class DiseaseHpo(DatasetModel):
     dataset_title: ClassVar[str] = 'Human Phenotype Ontology'
     dataset_description: ClassVar[str] = 'Human Phenotype Ontology subset of information included in the Platform'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('hpo', 'rocksdb', key='id'),)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('hpo', 'rocksdb'),)
     example: ClassVar[dict] = {
         'id': 'CHEBI_10545',
         'name': 'electron',

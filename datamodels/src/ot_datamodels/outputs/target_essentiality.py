@@ -68,7 +68,7 @@ class TargetEssentiality(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)
     clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (
-        ClickHouseTable('target_essentiality', 'rocksdb', key='targetId'),
+        ClickHouseTable('target_essentiality', 'rocksdb'),
     )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000000003',

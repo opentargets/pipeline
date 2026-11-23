@@ -22,9 +22,7 @@ class LiteratureVector(DatasetModel):
             'ml_w2v',
             'mergetree',
             order_by=('word',),
-            primary_key=('word',),
             columns=('category', 'word', 'norm', 'vector'),
-            optimize=True,
         ),
     )
     example: ClassVar[dict] = {

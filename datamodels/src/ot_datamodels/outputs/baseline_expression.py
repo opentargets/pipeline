@@ -27,7 +27,6 @@ class BaselineExpression(DatasetModel):
             'baseline_expression',
             'mergetree',
             order_by=('targetId', 'tissueBiosampleId', 'celltypeBiosampleId'),
-            optimize=True,
         ),
     )
     example: ClassVar[dict] = {

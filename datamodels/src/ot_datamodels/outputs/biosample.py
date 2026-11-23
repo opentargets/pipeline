@@ -23,7 +23,7 @@ class Biosample(DatasetModel):
     clickhouse: ClassVar[tuple[ClickHouseTable | ClickHouseDictionary, ...]] = (
         # read by the credible-set read models: EmbeddedRocksDB scans as one stream
         ClickHouseTable('biosample_mergetree', 'mergetree', order_by=('biosampleId',)),
-        ClickHouseTable('biosample', 'rocksdb', key='biosampleId'),
+        ClickHouseTable('biosample', 'rocksdb'),
         ClickHouseDictionary(
             'biosample_names',
             'biosample',

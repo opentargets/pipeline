@@ -23,7 +23,7 @@ class Go(DatasetModel):
         'metadata'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('gene_ontology', 'rocksdb', key='id'),)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('gene_ontology', 'rocksdb'),)
     example: ClassVar[dict] = {
         'id': 'GO:0000001',
         'label': 'mitochondrion inheritance',

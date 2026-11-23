@@ -81,7 +81,7 @@ class ClinicalReport(DatasetModel):
         'and trial outcomes'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug', 'Disease')
-    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('clinical_report', 'rocksdb', key='id'),)
+    clickhouse: ClassVar[tuple[ClickHouseTable, ...]] = (ClickHouseTable('clinical_report', 'rocksdb'),)
     example: ClassVar[dict] = {
         'id': '00011703-bc55-4c0c-858c-149dc674bc3c',
         'clinicalStage': 'APPROVAL',

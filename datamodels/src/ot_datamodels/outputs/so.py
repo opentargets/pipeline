@@ -18,7 +18,7 @@ class So(DatasetModel):
     dataset_description: ClassVar[str] = 'Sequence ontology lookup table'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
     clickhouse: ClassVar[tuple[ClickHouseTable | ClickHouseDictionary, ...]] = (
-        ClickHouseTable('sequence_ontology_source', 'rocksdb', key='id'),
+        ClickHouseTable('sequence_ontology_source', 'rocksdb'),
         ClickHouseDictionary('sequence_ontology', 'sequence_ontology_source', key='id', attributes=('label',)),
     )
     example: ClassVar[dict] = {'id': 'SO:0005854', 'label': 'gene_cassette_array'}
