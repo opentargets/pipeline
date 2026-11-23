@@ -359,12 +359,13 @@ def uniqueness_sql(table: ClickHouseTable, landing: str) -> str:
     """A query that throws when the table's RocksDB key repeats in the rows it takes from `landing`.
 
     It reads the landing table: RocksDB keeps the last row of a repeated key, so the table itself never repeats one.
+    A NULL key counts as a value.
     """
     key = table.key or ''
     source = next((c for c, renamed in table.renames.items() if renamed == key), key)
     where = f' WHERE {table.where}' if table.where else ''
     return (
-        f"SELECT throwIf(count() != uniqExact({_name(source)}), 'duplicate {key} in {table.name}') "  # noqa: S608 declared names
+        f"SELECT throwIf(count() != uniqExact(tuple({_name(source)})), 'duplicate {key} in {table.name}') "  # noqa: S608 declared names
         f'FROM {_name(landing)}{where}'
     )
 

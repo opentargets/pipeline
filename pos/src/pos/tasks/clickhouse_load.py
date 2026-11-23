@@ -86,6 +86,8 @@ class ClickhouseLoad(Task):
         self._declared = self._model is not None and bool(self._model.clickhouse)
         if self._declared and self._post_load_sql is not None:
             raise ClickhouseLoadError(f'{self.spec.dataset}: declares ClickHouse tables and has a postload_script')
+        if self._model is not None and self._declared and not declared_tables(self._model, self.spec.product):
+            raise ClickhouseLoadError(f'{self.spec.dataset}: declares no ClickHouse table for {self.spec.product}')
 
     @report
     def run(self) -> Task:
@@ -99,6 +101,8 @@ class ClickhouseLoad(Task):
             client = self._connect()
             ddl = ddl_for(self._entry, self.spec.product)
             create = ddl[0][1] if ddl else None
+            if self._declared:
+                self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
             if create is not None:
                 self._create(client, create)
             else:
