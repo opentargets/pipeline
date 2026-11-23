@@ -4,9 +4,10 @@ from unittest.mock import Mock
 
 import polars as pl
 import pytest
+from ot_datamodels import to_polars_schema
+from ot_datamodels.outputs.disease import Disease
 from otter.config.model import Config
 
-from pts.schemas.disease import schema as disease_index_schema
 from pts.schemas.drug_molecule import drug_molecule_schema, molecule_schema
 from pts.transformers.drug_molecule import (
     _generate_description,
@@ -24,7 +25,7 @@ from pts.transformers.drug_molecule import (
 # breaks these tests rather than leaving them asserting against a stale shape
 MOLECULE_SCHEMA = molecule_schema
 
-DISEASE_SCHEMA = {name: disease_index_schema[name] for name in ('id', 'name')}
+DISEASE_SCHEMA = {name: to_polars_schema(Disease)[name] for name in ('id', 'name')}
 
 # clinical_report, chemical_probes and drug_mechanism_of_action declare no schema, so
 # these are hand written and hold only the columns this step reads
