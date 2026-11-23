@@ -15,8 +15,10 @@ from ot_datamodels.outputs.association_by_datasource_indirect import Association
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
+from ot_datamodels.outputs.drug_molecule import DrugMolecule
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
+from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
@@ -26,12 +28,14 @@ from ot_datamodels.spec import Node, dataset_spec, walk
 from ot_datamodels.views.association_otf import AssociationOtf
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.target_view import TargetView
 
 VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf': AssociationOtf,
     'association_timeseries': AssociationTimeseries,
     'coding_variant': CodingVariant,
+    'drug_view': DrugView,
     'target_view': TargetView,
 }
 
@@ -65,6 +69,7 @@ PRIMARY_KEYS = {
     'association_otf': ('rowId',),
     'association_timeseries': (),
     'coding_variant': (),
+    'drug_view': ('id',),
     'target_view': ('id',),
 }
 
@@ -105,6 +110,8 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         'transcriptConsequences[]/variantFunctionalConsequenceIds',
         None,
     ),
+    **{('drug_view', f.name): (DrugMolecule, f.name, None) for f in dataset_spec(DrugMolecule).fields},
+    ('drug_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
     **{('target_view', f.name): (Target, f.name, None) for f in dataset_spec(Target).fields},
     **{
         ('target_view', f'homologues[]/{c}'): (Homology, c, None)
@@ -170,7 +177,7 @@ def _as_pts_writes(
     return dtype
 
 
-@pytest.mark.parametrize('name', sorted(VIEWS))
+@pytest.mark.parametrize('name', sorted(PTS_SCHEMAS))
 def test_view_matches_the_pre_piece_3_pts_schema(name: str) -> None:
     schema, pts = to_polars_schema(VIEWS[name]), PTS_SCHEMAS[name]
 
@@ -290,6 +297,7 @@ DECLARED: dict[str, set[str]] = {
         'aminoAcidPosition',
         'alternateAminoAcid',
     },
+    'drug_view': {'pharmacogenomicsIds'},
     'target_view': {
         'homologues',
         'homologues[]',
@@ -344,3 +352,16 @@ def test_discover_models_is_the_outputs_and_the_views() -> None:
 
     assert not set(outputs) & set(VIEWS)
     assert models == outputs | VIEWS
+
+
+def test_pharmacogenomics_id_leads_and_keys_the_output() -> None:
+    spec = dataset_spec(Pharmacogenomics)
+    assert spec.fields[0].name == 'pharmacogenomicsId'
+    assert spec.primary_key == ('pharmacogenomicsId',)
+    Pharmacogenomics.model_validate(Pharmacogenomics.example)
+
+
+def test_drug_view_is_drug_molecule_plus_the_ids() -> None:
+    drug = [f.name for f in dataset_spec(DrugMolecule).fields]
+    assert [f.name for f in dataset_spec(DrugView).fields] == [*drug, 'pharmacogenomicsIds']
+    assert discover_models()['drug_view'] is DrugView
