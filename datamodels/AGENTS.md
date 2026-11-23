@@ -73,6 +73,17 @@ No generator exists; write the model by hand.
 3. `discover_datasets()` finds it; nothing is registered.
 4. Run the tests here, then pts's and pos's.
 
+## ClickHouse declarations
+
+A model lists the tables and dictionaries pos builds from it in the `clickhouse` class attribute
+(`ClickHouseTable`, `ClickHouseDictionary` in `ot_datamodels.clickhouse`); storage is declared here, not in
+pos scripts. `validate_declarations` checks them for every model (`test_every_declaration_is_valid`).
+
+- A table's `products` overrides the model's (`otar_projects` is built empty on Platform though the model is PPP-only).
+- `key`, `order_by` and `primary_key` use column names after `columns` and `renames`.
+- A dictionary's columns map through `source_columns` to the source table's post-rename columns.
+- The `evidence` union has no model of its own: its tables are declared in pos `datasets.yaml`.
+
 ## Deriving a view's columns
 
 A view column that copies an output column is derived from the output model, never
