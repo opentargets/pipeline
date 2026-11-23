@@ -167,7 +167,7 @@ class TargetView(Target):
     chemicalProbes: list[ChemicalProbeRow] | None = Field(description='Chemical probes of the target')
     transcriptIds: list[_TranscriptIdElement] | None = Field(description='Transcripts of the target, sorted')
     transcripts: list[TranscriptRow] | None = Field(description='Transcripts of the target')
-    canonicalTranscript: CanonicalTranscript | None = Field(description='Ensembl canonical transcript of the target')
+    canonicalTranscript: CanonicalTranscript = Field(description='Ensembl canonical transcript of the target')
     canonicalExons: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description='Start and end of each exon of the canonical transcript, as strings, by start then end'
     )
