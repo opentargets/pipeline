@@ -16,6 +16,7 @@ from otter.storage.synchronous.handle import StorageHandle
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
+    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
@@ -163,6 +164,10 @@ def evaluate(
     still reported as `averagePrecisionFromLabels`, so it can be compared with metrics recorded
     before the change (W&B runs, 26.09 and earlier `metrics.json`).
 
+    The hard predictions are `model.predict` (score above 0.5). `weightedPrecision`,
+    `weightedRecall` and `f1` average both classes; `precision` and `recall` are for the positive
+    class. The four confusion counts are sums of `sample_weight` when it is given.
+
     Args:
         model: a fitted classifier.
         x: feature matrix.
@@ -184,6 +189,15 @@ def evaluate(
         'averagePrecisionFromLabels': float(average_precision_score(y, predicted, sample_weight=w)),
         'weightedRecall': float(recall_score(y, predicted, average='weighted', zero_division=0, sample_weight=w)),
         'f1': float(f1_score(y, predicted, average='weighted', zero_division=0, sample_weight=w)),
+        'precision': float(precision_score(y, predicted, zero_division=0, sample_weight=w)),
+        'recall': float(recall_score(y, predicted, zero_division=0, sample_weight=w)),
+    }
+    tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1], sample_weight=w).ravel()
+    metrics |= {
+        'truePositives': float(tp),
+        'falsePositives': float(fp),
+        'falseNegatives': float(fn),
+        'trueNegatives': float(tn),
     }
     if credible_set_ids is not None:
         metrics['topOneAccuracy'] = top_one_accuracy(credible_set_ids, y, scores, w)

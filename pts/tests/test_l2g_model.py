@@ -75,20 +75,56 @@ def test_fit_is_deterministic_for_a_fixed_seed(separable) -> None:
     np.testing.assert_array_equal(first.predict_proba(x), second.predict_proba(x))
 
 
-def test_evaluate_reports_the_seven_metrics(separable) -> None:
+METRICS = {
+    'areaUnderROC',
+    'accuracy',
+    'weightedPrecision',
+    'averagePrecision',
+    'averagePrecisionFromLabels',
+    'weightedRecall',
+    'f1',
+    'precision',
+    'recall',
+    'truePositives',
+    'falsePositives',
+    'falseNegatives',
+    'trueNegatives',
+}
+
+
+def test_evaluate_reports_the_metrics(separable) -> None:
     x, y = separable
     model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 20})
     metrics = evaluate(model, x, y)
-    assert set(metrics) == {
-        'areaUnderROC',
-        'accuracy',
-        'weightedPrecision',
-        'averagePrecision',
-        'averagePrecisionFromLabels',
-        'weightedRecall',
-        'f1',
-    }
+    assert set(metrics) == METRICS
     assert metrics['accuracy'] == pytest.approx(1.0)
+
+
+def test_evaluate_reports_the_confusion_counts_of_the_hard_predictions() -> None:
+    rng = np.random.default_rng(2)
+    y = (rng.random(200) < 0.5).astype(np.int32)
+    # weak signal: some calls of each kind
+    x = (y[:, None] + rng.normal(0.0, 1.0, (200, 2))).astype(np.float32)
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 50})
+    called = model.predict(x) == 1
+    metrics = evaluate(model, x, y)
+    tp, fp = int((called & (y == 1)).sum()), int((called & (y == 0)).sum())
+    assert metrics['truePositives'] == tp
+    assert tp and fp, 'fixture no longer gives true and false positives'
+    assert metrics['falsePositives'] == fp
+    assert metrics['falseNegatives'] == int((~called & (y == 1)).sum())
+    assert metrics['trueNegatives'] == int((~called & (y == 0)).sum())
+    assert metrics['precision'] == pytest.approx(tp / (tp + fp))
+    assert metrics['recall'] == pytest.approx(tp / int((y == 1).sum()))
+
+
+def test_evaluate_confusion_counts_sum_the_weights(overlapping) -> None:
+    x, y = overlapping
+    model = fit(x, y, {**DEFAULT_HYPERPARAMETERS, 'n_estimators': 7})
+    weights = np.where(np.arange(len(y)) % 2 == 0, 5.0, 1.0)
+    metrics = evaluate(model, x, y, weights)
+    counts = ('truePositives', 'falsePositives', 'falseNegatives', 'trueNegatives')
+    assert sum(metrics[c] for c in counts) == pytest.approx(weights.sum())
 
 
 def test_average_precision_is_computed_from_scores_as_gentropy_does(overlapping) -> None:

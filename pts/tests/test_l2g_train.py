@@ -107,7 +107,7 @@ def test_l2g_train_writes_a_loadable_model(workspace) -> None:
     assert model.get_booster().num_boosted_rounds() == 5
 
 
-def test_l2g_train_metrics_carry_the_eight_scores_and_the_run_settings(workspace) -> None:
+def test_l2g_train_metrics_carry_the_scores_and_the_run_settings(workspace) -> None:
     destination = _destination(workspace)
     l2g_train(_source(workspace), destination, dict(SETTINGS), None)
     metrics = json.loads(Path(destination['metrics']).read_text())
@@ -119,6 +119,12 @@ def test_l2g_train_metrics_carry_the_eight_scores_and_the_run_settings(workspace
         'averagePrecisionFromLabels',
         'weightedRecall',
         'f1',
+        'precision',
+        'recall',
+        'truePositives',
+        'falsePositives',
+        'falseNegatives',
+        'trueNegatives',
         'topOneAccuracy',
     }
     assert metrics['shapBackgroundSeed'] == 42
