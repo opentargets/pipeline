@@ -1,6 +1,6 @@
 """OT CRISPR (ot_crispr) evidence, from OTAR genome-wide CRISPR/Cas9 knock-out screens.
 
-- The results arrive in MAGeCK format.
+- The results arrive in MAGeCK or PhIReWORK format, as the study table's `dataFileType` says.
 - The study level metadata comes from a spreadsheet, versioned in the PPP evidence configuration repository.
 """
 
@@ -37,6 +37,8 @@ OT_CRISPR = EvidenceDatasource(
     ],
     score=pl.lit(1.0),
 )
+#: The supported values of the study table's `dataFileType`.
+DATA_FILE_TYPES = ('MAGeCK', 'PhIReWORK')
 #: Java's `\s`, which is ASCII-only.
 _LEADING_WHITESPACE = r'^[ \t\n\x0B\f\r]+'
 
@@ -93,6 +95,20 @@ STUDY_CHECKS = [
         report_fn=_study_ids,
         message_fn=lambda result: f'Studies with invalid projectId: {result}',
     ),
+    DataCheck(
+        name='DataFileType presence assertion',
+        condition=pl.col('dataFileType').is_null(),
+        action='drop',
+        report_fn=_study_ids,
+        message_fn=lambda result: f'Studies with missing dataFileType: {result}',
+    ),
+    DataCheck(
+        name='Supported dataFileType assertion',
+        condition=~pl.col('dataFileType').is_in(DATA_FILE_TYPES),
+        action='drop',
+        report_fn=_study_ids,
+        message_fn=lambda result: f'Studies with unsupported dataFileType (not one of {DATA_FILE_TYPES}): {result}',
+    ),
 ]
 
 
@@ -134,6 +150,7 @@ def process_studies(study_table: pl.DataFrame) -> pl.DataFrame:
         'cellType',
         'cellLineBackground',
         'contrast',
+        'dataFileType',
         'filterColumns',
         'threshold',
     ]
@@ -210,16 +227,53 @@ def read_and_filter_mageck_file(mageck_file: str, filter_columns: list[str], thr
     )
 
 
+def read_and_filter_phirework_file(phirework_file: str, filter_columns: list[str], threshold: float) -> pl.DataFrame:
+    """Read a PhIReWORK file and keep the genes whose smallest filter column value is below `threshold`.
+
+    PhIReWORK results are not directional: `Pheno_Score` becomes `log2FoldChangeValue`, `Padj`
+    becomes `resourceScore`, and `statisticalTestTail` is null.
+
+    Args:
+        phirework_file: location of the PhIReWORK gene table (`EnsID`, `Gene`, `Pheno_Score`, `Padj`).
+        filter_columns: the columns to filter on.
+        threshold: the significance threshold.
+
+    Returns:
+        The hits, keyed by Ensembl gene id, with the columns of `read_and_filter_mageck_file`.
+    """
+    logger.info(f'reading PhIReWORK file: {phirework_file}')
+    raw_data = scan_dataset(phirework_file, format='tsv', infer_schema=False).collect()
+    values = [pl.col(c).cast(pl.Float64, strict=False) for c in filter_columns]
+    return raw_data.filter(pl.min_horizontal(values) < pl.lit(threshold, dtype=pl.Float64)).select(
+        pl.col('EnsID').alias('targetFromSourceId'),
+        pl.col('Pheno_Score').cast(pl.Float64, strict=False).cast(pl.Float32).alias('log2FoldChangeValue'),
+        pl.lit(None, dtype=pl.String).alias('statisticalTestTail'),
+        pl.col('Padj').cast(pl.Float64, strict=False).alias('resourceScore'),
+    )
+
+
+#: The reader of each `dataFileType`.
+READERS: dict[str, Callable[[str, list[str], float], pl.DataFrame]] = {
+    'MAGeCK': read_and_filter_mageck_file,
+    'PhIReWORK': read_and_filter_phirework_file,
+}
+
+
 def process_replicate(
     data_file: str,
     control_dataset: str | None,
+    data_file_type: str,
     filter_columns: list[str],
     threshold: float,
 ) -> pl.DataFrame:
-    """Find the hits of one replicate, excluding those that are also hits in its control, if any."""
-    hits = read_and_filter_mageck_file(data_file, filter_columns, threshold)
+    """Find the hits of one replicate, excluding those that are also hits in its control, if any.
+
+    The control is read in the replicate's `data_file_type`.
+    """
+    read = READERS[data_file_type]
+    hits = read(data_file, filter_columns, threshold)
     if control_dataset:
-        control = read_and_filter_mageck_file(control_dataset, filter_columns, threshold)
+        control = read(control_dataset, filter_columns, threshold)
         hits = hits.join(control.select('targetFromSourceId').unique(), on='targetFromSourceId', how='anti')
     return hits
 
@@ -232,7 +286,7 @@ def process_study(study: dict[str, Any], data_path: str) -> pl.DataFrame:
 
     Args:
         study: one row of `process_studies`.
-        data_path: base directory of the per-project MAGeCK files.
+        data_path: base directory of the per-project data files.
 
     Returns:
         One row per hit gene.
@@ -242,6 +296,7 @@ def process_study(study: dict[str, Any], data_path: str) -> pl.DataFrame:
         process_replicate(
             data_file=f'{project}/{replicate["dataFile"]}',
             control_dataset=f'{project}/{replicate["ControlDataset"]}' if replicate['ControlDataset'] else None,
+            data_file_type=study['dataFileType'],
             filter_columns=study['filterColumns'],
             threshold=study['threshold'],
         )
@@ -269,11 +324,11 @@ def process_study(study: dict[str, Any], data_path: str) -> pl.DataFrame:
 
 
 def generate(study_table: str, ot_crispr_data: str) -> pl.LazyFrame:
-    """Build OT CRISPR evidence from the study table and the per-project MAGeCK files.
+    """Build OT CRISPR evidence from the study table and the per-project data files.
 
     Args:
         study_table: location of the study table csv.
-        ot_crispr_data: base directory of the per-project MAGeCK files.
+        ot_crispr_data: base directory of the per-project data files.
 
     Returns:
         Raw OT CRISPR evidence, one row per hit gene, study and mapped disease.

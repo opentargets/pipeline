@@ -7,6 +7,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from loguru import logger
 
 from pts.transformers.evidence.ot_crispr import (
     OT_CRISPR,
@@ -42,6 +43,7 @@ STUDY_HEADER = [
 DESCRIPTION_ROW = {c: f'Description of {c}' for c in STUDY_HEADER} | {'projectId': 'OpenTargets project identifier'}
 MAGECK_COLUMNS = ['id', 'num', 'neg|score', 'neg|p-value', 'neg|fdr', 'neg|lfc', 'pos|score', 'pos|p-value', 'pos|fdr']
 MAGECK_COLUMNS += ['pos|lfc']
+PHIREWORK_COLUMNS = ['EnsID', 'Gene', 'Pheno_Score', 'Padj']
 
 RAW_SCHEMA = {
     'projectId': pl.String,
@@ -96,6 +98,17 @@ def _write_mageck(path: Path, rows: list[dict[str, str]], separator: str = '|') 
     header = [c.replace('|', separator) for c in MAGECK_COLUMNS]
     lines = ['\t'.join(header)] + ['\t'.join(row.get(c, '1') for c in MAGECK_COLUMNS) for row in rows]
     path.write_text('\n'.join(lines) + '\n')
+
+
+def _write_phirework(path: Path, rows: list[dict[str, str]]) -> None:
+    """Write a PhIReWORK gene table; unset values are '1', so they never pass a threshold."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ['\t'.join(PHIREWORK_COLUMNS)] + ['\t'.join(row.get(c, '1') for c in PHIREWORK_COLUMNS) for row in rows]
+    path.write_text('\n'.join(lines) + '\n')
+
+
+def _phirework_study(study_id: str, **fields: str | None) -> dict[str, str | None]:
+    return _study(study_id, dataFileType='PhIReWORK', filterColumn='Padj', threshold='0.05') | fields
 
 
 def _sources(src: Path) -> dict[str, str]:
@@ -276,6 +289,70 @@ def test_generate_reads_an_unusable_threshold_as_spark_does(tmp_path: Path, thre
     assert sorted(out['targetFromSourceId'].to_list()) == expected
 
 
+def test_process_studies_drops_studies_without_a_supported_data_file_type(tmp_path: Path) -> None:
+    path = _write_study_table(
+        tmp_path / 'config.csv',
+        [
+            _study('S1'),
+            _phirework_study('S2'),
+            _study('S3', dataFileType=None),
+            _study('S4', dataFileType=None),
+            _study('S5', dataFileType='Excel'),
+        ],
+    )
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(m.record['message']), level='WARNING')
+    try:
+        studies = process_studies(pl.read_csv(path, infer_schema=False))
+    finally:
+        logger.remove(sink)
+
+    assert studies.select('studyId', 'dataFileType').rows() == [('S1', 'MAGeCK'), ('S2', 'PhIReWORK')]
+    assert 'Studies with missing dataFileType: S3, S4' in messages
+    assert "Studies with unsupported dataFileType (not one of ('MAGeCK', 'PhIReWORK')): S5" in messages
+
+
+def test_generate_reads_phirework_files(tmp_path: Path) -> None:
+    """PhIReWORK hits: `EnsID` is the target, `Pheno_Score` the lfc, `Padj` the score, and no tail.
+
+    - G1 is a hit in both replicates and takes replicate 2's smaller Padj and its Pheno_Score;
+    - G2's Padj of exactly 0.05 fails the threshold in replicate 1;
+    - G3 is a hit in both replicates but also in replicate 2's control, so it is dropped.
+    """
+    data = tmp_path / 'data' / 'OTAR001'
+    _write_phirework(
+        data / 'rep1.tsv',
+        [
+            {'EnsID': 'ENSG1', 'Gene': 'G1', 'Pheno_Score': '-0.7', 'Padj': '0.01'},
+            {'EnsID': 'ENSG2', 'Gene': 'G2', 'Pheno_Score': '0.3', 'Padj': '0.05'},
+            {'EnsID': 'ENSG3', 'Gene': 'G3', 'Pheno_Score': '1.0', 'Padj': '0.001'},
+        ],
+    )
+    _write_phirework(
+        data / 'rep2.tsv',
+        [
+            {'EnsID': 'ENSG1', 'Gene': 'G1', 'Pheno_Score': '-0.5', 'Padj': '0.001'},
+            {'EnsID': 'ENSG2', 'Gene': 'G2', 'Pheno_Score': '0.2', 'Padj': '0.001'},
+            {'EnsID': 'ENSG3', 'Gene': 'G3', 'Pheno_Score': '1.0', 'Padj': '0.001'},
+        ],
+    )
+    _write_phirework(data / 'control.tsv', [{'EnsID': 'ENSG3', 'Gene': 'G3', 'Padj': '0.01'}])
+    study_table = _write_study_table(
+        tmp_path / 'config.csv',
+        [
+            _phirework_study('S1', replicateNumber='1', dataFile='rep1.tsv'),
+            _phirework_study('S1', replicateNumber='2', dataFile='rep2.tsv', ControlDataset='control.tsv'),
+        ],
+    )
+
+    raw = generate(study_table, str(tmp_path / 'data'))
+
+    assert raw.collect_schema() == pl.Schema(RAW_SCHEMA)
+    assert raw.collect().select(
+        'targetFromSourceId', 'log2FoldChangeValue', 'resourceScore', 'statisticalTestTail'
+    ).rows() == [('ENSG1', -0.5, 0.001, None)]
+
+
 def test_score_is_one() -> None:
     assert pl.select(OT_CRISPR.score.alias('s'))['s'].to_list() == [1.0]
 
@@ -301,3 +378,29 @@ def test_ot_crispr_step_writes_scored_evidence(tmp_path: Path) -> None:
         ('ENSG2', 'EFO_1', 'S1', 1.0),
     ]
     assert pl.read_parquet(dst / 'failed').height == 3
+
+
+def test_ot_crispr_step_writes_phirework_evidence_without_a_tail(tmp_path: Path) -> None:
+    src = tmp_path / 'src'
+    dst = tmp_path / 'out'
+    _write_phirework(
+        src / 'data' / 'OTAR001' / 'a.tsv', [{'EnsID': 'ENSG1', 'Gene': 'G1', 'Pheno_Score': '-0.7', 'Padj': '0.01'}]
+    )
+    study_table = _write_study_table(src / 'config.csv', [_phirework_study('S1', dataFile='a.tsv')])
+
+    ot_crispr(
+        {
+            'study_table': study_table,
+            'ot_crispr_data': str(src / 'data'),
+            'disease': write_disease(src / 'disease', ['EFO_1']),
+            'target': write_target(src / 'target', ['ENSG1'], {'ENSG1': 'G1'}),
+        },
+        {'evidence': str(dst / 'valid'), 'failed_evidence': str(dst / 'failed')},
+        {},
+        None,
+    )
+
+    valid = pl.read_parquet(dst / 'valid')
+    assert valid.select('targetId', 'studyId', 'resourceScore', 'statisticalTestTail', 'score').rows() == [
+        ('ENSG1', 'S1', 0.01, None, 1.0)
+    ]
