@@ -466,6 +466,7 @@ steps:
       - pis_interaction
       - pts_target
   pts_interaction_view:
+    machine_type: n2d-highmem-32
     depends_on:
       - pts_interaction
 
