@@ -449,6 +449,11 @@ steps:
       - pts_target_safety_event
       - pts_chemical_probes
       - pts_transcript
+      - pts_credible_set
+  pts_target_prioritisation_view:
+    depends_on:
+      - pts_target_prioritisation
+      - pts_target_gene_essentiality
 
   pts_gene_sets:
     depends_on:
