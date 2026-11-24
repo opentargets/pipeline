@@ -1,7 +1,8 @@
-"""Coding variant view.
+"""Coding variant views: the served `protein_coding_coords_by_variant` and `protein_coding_coords_by_target`.
 
 Ported from the pyspark coding_variant step. Lists every amino acid changing consequence of a
-variant that has evidence, with the diseases, therapeutic areas and datasources behind it.
+variant that has evidence, with the diseases, therapeutic areas and datasources behind it, grouped
+by variant and by target.
 """
 
 from __future__ import annotations
@@ -12,11 +13,12 @@ import numpy as np
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
+from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
-from pts.schemas.dataset.conform import conform, enums_as_strings, without_enums
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
@@ -32,11 +34,20 @@ DATASOURCE_NICE_NAMES = {
 
 EVIDENCE_SOURCES = ['evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_variant']
 
-OUTPUT_SCHEMA = to_polars_schema(CodingVariant)
 
-SORT_COLUMNS = [
-    'variantId',
-    'targetId',
+
+def _coord_schema() -> pl.Schema:
+    dtype = to_polars_schema(CodingVariantByVariant)['proteinCodingCoords']
+    if not (isinstance(dtype, pl.List) and isinstance(dtype.inner, pl.Struct)):
+        raise TypeError(f'proteinCodingCoords is {dtype}, not a list of structs')
+    return pl.Schema(dtype.inner.to_schema())
+
+
+#: One amino acid changing consequence, as served in `proteinCodingCoords`.
+COORD_SCHEMA = _coord_schema()
+
+#: The order of a served array after its first column, the other key.
+ARRAY_ORDER = [
     'aminoAcidPosition',
     'referenceAminoAcid',
     'alternateAminoAcid',
@@ -45,28 +56,51 @@ SORT_COLUMNS = [
     'uniprotAccessions',
 ]
 
+SORT_COLUMNS = ['variantId', 'targetId', *ARRAY_ORDER]
 
-@writes(CodingVariant)
+
+@writes(variant=CodingVariantByVariant, target=CodingVariantByTarget)
 def coding_variant(
     source: dict[str, str],
-    destination: str,
+    destination: dict[str, str],
     settings: dict[str, Any] | None,
     config: Config | None,
 ) -> None:
-    """Generate the view on coding variants with their functional context.
+    """Write the coding variant consequences grouped by variant (`variant`) and by target (`target`), as served.
 
     Args:
         source: paths keyed `variant`, `target`, `disease`, `evidence_eva`, `evidence_eva_somatic`,
             `evidence_uniprot_variant`, `evidence_gwas_credible_set`, `credible_set`,
             `credible_set_variant` and `pharmacogenetics`.
-        destination: output directory.
+        destination: `variant` and `target` dataset directories.
         settings: unused.
         config: unused.
     """
     variants = read_variants(source['variant'])
     frames = {name: without_enums(scan_dataset(path)) for name, path in source.items() if name != 'variant'}
-    write_dataset(build_view(variants, frames), destination)
-    logger.info(f'wrote coding variant view to {destination}')
+    flat = build_view(variants, frames).collect().rechunk()
+    write_dataset(conform(served(flat, 'variantId', 'targetId'), CodingVariantByVariant), destination['variant'])
+    write_dataset(conform(served(flat, 'targetId', 'variantId'), CodingVariantByTarget), destination['target'])
+    logger.info(f'wrote coding variant views to {destination}')
+
+
+def served(flat: pl.DataFrame, key: str, then: str) -> pl.DataFrame:
+    """The consequences grouped by `key`, each array ordered by `then` and `ARRAY_ORDER`, duplicates kept.
+
+    Args:
+        flat: `build_view` rows.
+        key: the served table's key, `variantId` or `targetId`.
+        then: the other of the two.
+
+    Returns:
+        One row per `key`, sorted, with its `proteinCodingCoords`.
+    """
+    return (
+        flat
+        .sort([key, then, *ARRAY_ORDER], nulls_last=True, maintain_order=True)
+        .group_by(key, maintain_order=True)
+        .agg(pl.struct(COORD_SCHEMA.names()).alias('proteinCodingCoords'))
+    )
 
 
 def read_variants(path: str) -> pl.LazyFrame:
@@ -91,7 +125,7 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         frames: the other input datasets, keyed as the transformer's `source`.
 
     Returns:
-        One row per amino acid changing consequence of a variant with evidence, conformed to `CodingVariant`.
+        One row per amino acid changing consequence of a variant with evidence, in `COORD_SCHEMA`.
     """
     variant_ids = variants.select('variantId')
     diseases = process_diseases(frames['disease'])
@@ -110,7 +144,7 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         ],
         how='diagonal_relaxed',
     )
-    empty_datasources = pl.lit([], dtype=enums_as_strings(OUTPUT_SCHEMA['datasources']))
+    empty_datasources = pl.lit([], dtype=COORD_SCHEMA['datasources'])
     view = (
         variants
         .join(aggregate_evidence(pooled), on='variantId', how='inner')
@@ -119,10 +153,10 @@ def build_view(variants: pl.LazyFrame, frames: dict[str, pl.LazyFrame]) -> pl.La
         )
         .join(process_target_index(frames['target']), on='targetId', how='left')
         .with_columns(uniprot_accessions(pl.col('uniprotAccessions'), pl.col('refUniprotAccessions')))
-        .select(OUTPUT_SCHEMA.names())
+        .select(COORD_SCHEMA.names())
         .sort(SORT_COLUMNS, nulls_last=True, maintain_order=True)
     )
-    return conform(view, CodingVariant)
+    return view.cast(COORD_SCHEMA)
 
 
 def aggregate_evidence(pooled: pl.LazyFrame) -> pl.LazyFrame:
