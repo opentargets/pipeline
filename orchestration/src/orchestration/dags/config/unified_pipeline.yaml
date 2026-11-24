@@ -344,6 +344,10 @@ steps:
       - pts_chemical_probes
       - pts_drug_mechanism_of_action
       - pts_clinical_report
+  pts_drug_view:
+    depends_on:
+      - pts_drug_molecule
+      - pts_pharmacogenetics
   pts_clinical_report:
     machine_type: n2d-standard-16
     depends_on:

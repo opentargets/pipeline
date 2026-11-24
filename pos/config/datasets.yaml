@@ -94,9 +94,10 @@ clickhouse:
     postload_script: config/clickhouse/scripts/disease_hpo.sql
   drug:
     table: drug_log
-    input_dir: output/drug_molecule
-    model: drug_molecule
-    postload_script: config/clickhouse/scripts/drug.sql
+    input_dir: view/drug_view
+    model: drug_view
+    tables:
+      - {name: drug, engine: rocksdb}
   drug_warnings:
     table: drug_warnings_log
     input_dir: output/drug_warning
@@ -199,7 +200,8 @@ clickhouse:
     table: pharmacogenomics_log
     input_dir: output/pharmacogenomics
     model: pharmacogenomics
-    postload_script: config/clickhouse/scripts/pharmacogenomics.sql
+    tables:
+      - {name: pharmacogenomics, engine: rocksdb}
   protein_coding_coords:
     table: protein_coding_coords_log
     input_dir: view/coding_variant
