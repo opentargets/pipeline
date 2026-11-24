@@ -1,16 +1,17 @@
 """Study validation and annotation."""
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
 from ot_datamodels.outputs.study import Study
+from ot_datamodels.vocabularies import StudyType
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.dataset.conform import conform
-from pts.schemas.study import STUDY_TYPES, study_schema, superseded_studies_schema
+from pts.schemas.study import study_schema, superseded_studies_schema
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -107,9 +108,9 @@ def validate_duplicated_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag study types that are not one of `STUDY_TYPES`, the gentropy study types."""
+    """Flag study types that are not one of `StudyType`, the gentropy study types."""
     logger.info('Validating study types')
-    supported = pl.col('studyType').is_in(STUDY_TYPES)
+    supported = pl.col('studyType').is_in(get_args(StudyType))
     return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 

@@ -10,9 +10,7 @@ from __future__ import annotations
 from typing import get_args
 
 import polars as pl
-from ot_datamodels.vocabularies import Chromosome, FineMappingMethod
-
-from pts.schemas.study import STUDY_TYPES
+from ot_datamodels.vocabularies import Chromosome, FineMappingMethod, StudyType
 
 #: The Ensembl canonical chromosomes, in genome order, which the genes and the gnomAD variants that credible
 #: sets are joined to lie on. There is no XY: a pseudoautosomal variant is on X or Y.
@@ -45,7 +43,7 @@ credible_set_schema = pl.Schema({
 validated_credible_set_schema = pl.Schema({
     **credible_set_schema,
     'chromosome': pl.Enum(CHROMOSOMES),
-    'studyType': pl.Enum(STUDY_TYPES),
+    'studyType': pl.Enum(get_args(StudyType)),
     'fineMappingMethod': pl.Enum(FINEMAPPING_METHODS),
 })
 """The CredibleSet schema of the validated and published sets, with the columns of a fixed vocabulary as enums.
