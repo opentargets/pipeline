@@ -6,13 +6,15 @@ import polars as pl
 import pytest
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
+from ot_datamodels.views.coding_variant_by_variant import COORD_EXAMPLE, CodingVariantByVariant
 
 from pts.schemas.dataset.conform import conform
 from pts.schemas.dataset.validate import validate_dataset
 from pts.task_outputs import OutputValidation
 from pts.transformers import coding_variant as module
 from pts.transformers.coding_variant import (
+    COORD_SCHEMA,
     HARMONIC_SUM_CONSTANT,
     build_view,
     coding_variant,
@@ -22,6 +24,7 @@ from pts.transformers.coding_variant import (
     process_qtls,
     process_target_index,
     process_variants,
+    served,
 )
 from tests.credible_set_fixtures import published_credible_set, published_credible_set_variant
 
@@ -41,7 +44,8 @@ GWAS = {
     'score': pl.Float64,
     'id': pl.String,
 }
-OUTPUT_SCHEMA = to_polars_schema(CodingVariant)
+VIEWS = {'variant': CodingVariantByVariant, 'target': CodingVariantByTarget}
+KEYS = {'variant': 'variantId', 'target': 'targetId'}
 
 
 def tc(target, aa, uniprot=None, so=None) -> dict:
@@ -254,6 +258,15 @@ EXPECTED = [
 ]
 
 
+def grouped(rows: list[dict], key: str, then: str) -> list[dict]:
+    """`rows` as a served view: one row per `key`, its rows ordered by `then` and the rest of the array order."""
+    order = [then, 'aminoAcidPosition', 'referenceAminoAcid', 'alternateAminoAcid']
+    out: dict[str, list[dict]] = {}
+    for row in sorted(rows, key=lambda r: [r[c] for c in order]):
+        out.setdefault(row[key], []).append(row)
+    return [{key: k, 'proteinCodingCoords': out[k]} for k in sorted(out)]
+
+
 def view(frames: dict[str, pl.DataFrame]) -> pl.DataFrame:
     lazy = {name: frame.lazy() for name, frame in frames.items()}
     return build_view(process_variants(lazy.pop('variant')), lazy).collect()
@@ -451,8 +464,58 @@ def test_coding_variant_null_and_empty_lists() -> None:
 
 def test_build_view_matches_spark() -> None:
     out = view(world())
-    assert out.schema == OUTPUT_SCHEMA
+    assert out.schema == COORD_SCHEMA
     assert out.to_dicts() == EXPECTED
+
+
+def test_coord_schema_is_the_served_tuple() -> None:
+    for model in VIEWS.values():
+        assert to_polars_schema(model)['proteinCodingCoords'] == pl.List(pl.Struct(COORD_SCHEMA))
+
+
+def test_served_groups_by_key_in_the_array_order() -> None:
+    flat = view(world())
+    by_variant, by_target = served(flat, 'variantId', 'targetId'), served(flat, 'targetId', 'variantId')
+    assert by_variant.to_dicts() == grouped(EXPECTED, 'variantId', 'targetId')
+    assert by_target.to_dicts() == grouped(EXPECTED, 'targetId', 'variantId')
+    assert by_target['targetId'].to_list() == ['T1', 'T2', 'T3', 'T4']
+    assert [c['variantId'] for c in by_target['proteinCodingCoords'][0]] == ['V1', 'V6']
+    assert by_variant.schema == to_polars_schema(CodingVariantByVariant)
+    assert by_target.schema == to_polars_schema(CodingVariantByTarget)
+
+
+def test_served_orders_each_array_by_the_whole_tail_and_keeps_duplicates() -> None:
+    row = EXPECTED[3]
+    rows = [
+        row | {'aminoAcidPosition': 9},
+        row | {'referenceAminoAcid': 'S'},
+        row | {'alternateAminoAcid': 'A'},
+        row | {'variantEffect': 0.5},
+        row | {'variantFunctionalConsequenceIds': ['SO:2']},
+        row | {'variantFunctionalConsequenceIds': ['SO:1']},
+        row | {'uniprotAccessions': ['P2']},
+        row,
+        row,
+    ]
+    flat = pl.DataFrame(rows, schema=COORD_SCHEMA)
+    for frame in (flat, flat.reverse()):
+        (coords,) = served(frame, 'variantId', 'targetId')['proteinCodingCoords'].to_list()
+        tail = [
+            (c['aminoAcidPosition'], c['referenceAminoAcid'], c['alternateAminoAcid'], c['variantEffect'],
+             c['variantFunctionalConsequenceIds'], c['uniprotAccessions'])
+            for c in coords
+        ]  # fmt: skip
+        assert tail == [
+            (7, 'R', 'A', None, None, ['P1']),
+            (7, 'R', 'H', 0.5, None, ['P1']),
+            (7, 'R', 'H', None, ['SO:1'], ['P1']),
+            (7, 'R', 'H', None, ['SO:2'], ['P1']),
+            (7, 'R', 'H', None, None, ['P1']),
+            (7, 'R', 'H', None, None, ['P1']),
+            (7, 'R', 'H', None, None, ['P2']),
+            (7, 'S', 'H', None, None, ['P1']),
+            (9, 'R', 'H', None, None, ['P1']),
+        ]
 
 
 def write_parts(frame: pl.DataFrame, directory: Path) -> None:
@@ -469,13 +532,15 @@ def test_coding_variant_end_to_end_is_deterministic(tmp_path: Path) -> None:
         source[name] = str(tmp_path / 'in' / name)
     outputs = []
     for run in ('a', 'b'):
-        destination = tmp_path / run
-        coding_variant(source, str(destination), None, None)
-        files = sorted(destination.glob('*.parquet'))
-        outputs.append([f.read_bytes() for f in files])
-        out = pl.read_parquet(files)
-        assert out.schema == OUTPUT_SCHEMA
-        assert out.to_dicts() == EXPECTED
+        destination = {name: str(tmp_path / run / name) for name in VIEWS}
+        coding_variant(source, destination, None, None)
+        files = {name: sorted((tmp_path / run / name).glob('*.parquet')) for name in VIEWS}
+        outputs.append({name: [f.read_bytes() for f in parts] for name, parts in files.items()})
+        for name, model in VIEWS.items():
+            out = pl.read_parquet(files[name])
+            assert out.schema == to_polars_schema(model)
+            key = KEYS[name]
+            assert out.to_dicts() == grouped(EXPECTED, key, KEYS['target' if key == 'variantId' else 'variant'])
     assert outputs[0] == outputs[1]
 
 
@@ -503,9 +568,15 @@ def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path) -> None:
     stored = pl.read_parquet_schema(tmp_path / 'in' / 'pharmacogenetics' / 'part-0.parquet')
     assert isinstance(stored['datasourceId'], pl.Enum)
 
-    coding_variant(source, str(tmp_path / 'out'), None, None)
+    coding_variant(source, {name: str(tmp_path / 'out' / name) for name in VIEWS}, None, None)
 
-    assert pl.read_parquet(tmp_path / 'out').to_dicts() == EXPECTED
+    assert flatten(tmp_path / 'out' / 'variant') == EXPECTED
+    assert flatten(tmp_path / 'out' / 'target') == sorted(EXPECTED, key=lambda r: (r['targetId'], r['variantId']))
+
+
+def flatten(path: Path) -> list[dict]:
+    """The coordinates of a written view, in stored order."""
+    return [c for coords in pl.read_parquet(path)['proteinCodingCoords'].to_list() for c in coords]
 
 
 def write_one_clinvar_variant(tmp_path: Path, aa: str) -> None:
@@ -533,23 +604,43 @@ def write_one_clinvar_variant(tmp_path: Path, aa: str) -> None:
         write_parts(frame, tmp_path / 'in' / name)
         source[name] = str(tmp_path / 'in' / name)
 
-    coding_variant(source, str(tmp_path / 'out'), None, None)
+    coding_variant(source, {name: str(tmp_path / 'out' / name) for name in VIEWS}, None, None)
 
 
-def test_writes_its_model(tmp_path: Path) -> None:
-    """On a variant with one consequence and one ClinVar evidence, with real identifiers, the view passes its model."""
+def test_writes_its_models(tmp_path: Path) -> None:
+    """On a variant with one consequence and one ClinVar evidence, with real identifiers, both views pass their
+    models."""
     write_one_clinvar_variant(tmp_path, 'R248Q')
 
-    assert OutputValidation.of(coding_variant, module).outputs == {None: CodingVariant}
-    validate_dataset(CodingVariant, str(tmp_path / 'out'))
-    written = pl.read_parquet(tmp_path / 'out')
-    assert written.schema == OUTPUT_SCHEMA
-    assert written['datasources'].to_list() == [[ds(1, 'eva', 'ClinVar')]]
+    assert OutputValidation.of(coding_variant, module).outputs == VIEWS
+    for name, model in VIEWS.items():
+        validate_dataset(model, str(tmp_path / 'out' / name))
+        written = pl.read_parquet(tmp_path / 'out' / name)
+        assert written.schema == to_polars_schema(model)
+        assert written[KEYS[name]].to_list() == [EXAMPLE_KEYS[name]]
+        (coord,) = flatten(tmp_path / 'out' / name)
+        assert coord['datasources'] == [ds(1, 'eva', 'ClinVar')]
 
 
-def test_a_change_without_a_position_breaks_the_model(tmp_path: Path) -> None:
+EXAMPLE_KEYS = {'variant': '17_7674220_C_T', 'target': 'ENSG00000141510'}
+
+
+@pytest.mark.parametrize('name', sorted(VIEWS))
+def test_a_change_without_a_position_breaks_the_model(tmp_path: Path, name: str) -> None:
     write_one_clinvar_variant(tmp_path, 'AV')
 
-    assert pl.read_parquet(tmp_path / 'out')['aminoAcidPosition'].to_list() == [None]
-    with pytest.raises(ValueError, match='breaks its model CodingVariant'):
-        validate_dataset(CodingVariant, str(tmp_path / 'out'))
+    assert [c['aminoAcidPosition'] for c in flatten(tmp_path / 'out' / name)] == [None]
+    with pytest.raises(ValueError, match=f'breaks its model {VIEWS[name].__name__}'):
+        validate_dataset(VIEWS[name], str(tmp_path / 'out' / name))
+
+
+def test_an_unknown_datasource_breaks_the_model(tmp_path: Path) -> None:
+    """datasourceId is a String, still held to its vocabulary."""
+    for datasource in ('eva', 'nope'):
+        coord = COORD_EXAMPLE | {'datasources': [ds(1, datasource, 'ClinVar')]}
+        frame = served(pl.DataFrame([coord], schema=COORD_SCHEMA), 'variantId', 'targetId')
+        (tmp_path / datasource).mkdir()
+        frame.write_parquet(tmp_path / datasource / 'part-0.parquet')
+    validate_dataset(CodingVariantByVariant, str(tmp_path / 'eva'))
+    with pytest.raises(ValueError, match='breaks its model CodingVariantByVariant'):
+        validate_dataset(CodingVariantByVariant, str(tmp_path / 'nope'))

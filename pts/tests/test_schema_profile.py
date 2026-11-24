@@ -171,6 +171,8 @@ def test_run_folder_of_the_discovered_models() -> None:
         'association_otf_target',
         'association_timeseries',
         'coding_variant',
+        'coding_variant_by_target',
+        'coding_variant_by_variant',
         'disease_view',
         'drug_view',
         'target_view',
