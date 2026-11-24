@@ -53,8 +53,8 @@ class EvidenceGwasCredibleSets(DatasetModel):
     studyLocusId: Annotated[str, Reference('credible_set', 'id')] = Field(
         pattern=MD5_HEX, description=('Identifier of the GWAS credible set the locus-to-gene prediction was made for')
     )
-    literature: list[Annotated[str, Field(pattern=DIGITS)]] = Field(
-        description='PubMed identifier of the publication of the GWAS study'
+    literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
+        description='PubMed identifier of the publication of the GWAS study; null for unpublished studies'
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
     diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
@@ -66,7 +66,7 @@ class EvidenceGwasCredibleSets(DatasetModel):
     publicationDate: str | None = Field(
         pattern=ISO_DATE, description='Date of the earliest publication supporting the evidence'
     )
-    evidenceDate: str = Field(pattern=ISO_DATE, description='Earliest data for the evidence')
+    evidenceDate: str | None = Field(pattern=ISO_DATE, description='Earliest data for the evidence')
     score: float = Field(
         ge=0.0,
         le=1.0,
