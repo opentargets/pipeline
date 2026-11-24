@@ -37,7 +37,7 @@ infrastructure:
       master_machine_type: n2d-highmem-8
       master_disk_size: 128
       num_workers: 4
-      worker_machine_type: n2d-standard-16
+      worker_machine_type: n2d-highmem-16
       worker_disk_size: 128
       idle_delete_ttl: 1800
       # the init action installs pts from GitHub and PyPI
@@ -46,11 +46,11 @@ infrastructure:
         PTS_REF: '{{pipeline_ref}}'
       properties:
         'spark:spark.sql.ansi.enabled': 'false'
-        # every Spark task is one Python worker running polars and numpy: four per executor,
-        # with their memory outside the JVM
+        # every Spark task is one Python worker running polars and numpy, of up to about 2.5 GB:
+        # four per executor, with their memory outside the JVM
         'spark:spark.executor.cores': '4'
         'spark:spark.executor.memory': '2g'
-        'spark:spark.executor.memoryOverhead': '8g'
+        'spark:spark.executor.memoryOverhead': '12g'
         'spark:spark.executorEnv.POLARS_MAX_THREADS': '1'
         'spark:spark.task.maxFailures': '4'
       init_actions_uris:

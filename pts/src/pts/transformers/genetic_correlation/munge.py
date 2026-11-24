@@ -163,11 +163,15 @@ def munge_study(sumstats: pl.LazyFrame, fallback_sample_size: float | None, pane
     effect, no error, or a duplicate key are dropped.
     """
     alleles = pl.col('variantId').str.split('_')
+    positions = panel.lazy().select('chromosome', 'position').unique()
     study = (
         sumstats
+        .with_columns(pl.col('chromosome').cast(pl.String), pl.col('position').cast(pl.Int64))
+        # most of a study's variants are not on the panel: drop them before anything else is computed
+        .join(positions, on=['chromosome', 'position'], how='semi')
         .select(
-            pl.col('chromosome').cast(pl.String),
-            pl.col('position').cast(pl.Int64),
+            'chromosome',
+            'position',
             alleles.list.get(2, null_on_oob=True).alias('ref'),
             alleles.list.get(3, null_on_oob=True).alias('alt'),
             (pl.col('beta').cast(pl.Float64) / pl.col('standardError').cast(pl.Float64)).alias('z'),
