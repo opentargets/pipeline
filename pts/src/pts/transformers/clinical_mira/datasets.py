@@ -240,11 +240,6 @@ class ClinicalIndication:
         self.df = validate_schema(df, ClinicalIndicationSchema)
 
     @classmethod
-    def _get_study_metadata_columns(cls, df: pl.DataFrame) -> list[str]:
-        """Get all columns that represent study metadata (everything except aggregation fields)."""
-        return sorted(set(df.columns) - set(cls.AGGREGATION_FIELDS))
-
-    @classmethod
     def from_report(cls, report: pl.DataFrame) -> 'ClinicalIndication':
         """Aggregate drug/disease information collected in clinical report into a ClinicalIndication."""
         # Assert validity of reports
@@ -306,7 +301,3 @@ class ClinicalIndication:
             .then(pl.lit('DISEASE_MAPPED'))
             .otherwise(pl.lit('UNMAPPED'))
         )
-
-    def filter_by_report_id(self, report_id: str) -> 'ClinicalIndication':
-        """Get associations supported by a given report ID."""
-        return ClinicalIndication(df=self.df.filter(pl.col('clinicalReportIds').list.contains(report_id)))

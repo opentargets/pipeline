@@ -61,9 +61,8 @@ STOP_WORDS: frozenset[str] = frozenset(GOOGLE_STOP_WORDS) | {w.capitalize() for 
 #: The tokenizer's default context characters, peeled off either end of a candidate.
 CONTEXT_CHARS = '.,;:!?*-()"\''
 
-#: Split characters of each track, as `NLPPipeline.generate_pipeline` configures them.
+#: Split characters of the term track, as `NLPPipeline.generate_pipeline` configures them.
 TERM_SPLIT_CHARS = '-/:,;'
-SYMBOL_SPLIT_CHARS = ':,;'
 
 #: What separates candidates: Java's `\s`, which unlike Python's is ASCII only, and the
 #: tokenizer's own break marker `ↇ` (`BREAK_CHAR` in TokenizerModel.scala).
