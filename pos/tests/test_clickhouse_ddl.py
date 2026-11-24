@@ -10,6 +10,7 @@ import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
+from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.target_view import TargetView
 
 from pos import clickhouse_ddl
@@ -384,6 +385,16 @@ def test_target_view_keeps_landing_types(path, expected):
     t = type_at(columns(TargetView), path)
     assert t is not None
     assert render(t) == expected
+
+
+def test_disease_view_landing_is_the_served_disease():
+    assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(DiseaseView)) == (
+        'id String, name String, therapeuticAreas Array(LowCardinality(String)), description Nullable(String), '
+        'dbXRefs Array(String), obsoleteTerms Array(String), '
+        'synonyms Array(Tuple(relation String, terms Array(Nullable(String)))), '
+        'parents Array(LowCardinality(String)), children Array(String), ancestors Array(LowCardinality(String)), '
+        'descendants Array(String), isTherapeuticArea Bool, studyIds Array(String), indirectStudyIds Array(String)'
+    )
 
 
 # declared tables
