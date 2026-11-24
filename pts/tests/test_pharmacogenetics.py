@@ -475,6 +475,7 @@ def test_homozygous_alternate_genotype_rows_pass_writes(tmp_path: Path) -> None:
     validate_dataset(Pharmacogenomics, destination['associations'])
     out = _read_output(destination['associations'])
     assert out.columns[0] == 'pharmacogenomicsId'
+    assert out.height == 1  # the two genotype rows collapse upstream, so this never reaches the duplicate path
     assert out['pharmacogenomicsId'].n_unique() == out.height
 
 
