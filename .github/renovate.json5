@@ -170,11 +170,6 @@
       matchUpdateTypes: ['lockFileMaintenance'],
       enabled: false,
     },
-    // until cut-over from opentargets/pos
-    {
-      matchFileNames: ['pos/**'],
-      enabled: false,
-    },
     {
       matchPackageNames: ['python', 'cellex'],
       enabled: false,
