@@ -347,8 +347,9 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    views = {entries[n]['model'] for n in ('aotf', 'association_time_series', 'protein_coding_coords', 'targets')}
-    assert views == set(discover_datasets(VIEWS_PACKAGE)) - {'drug_view'}  # declared with the drug table
+    served = ('aotf', 'association_time_series', 'drug', 'protein_coding_coords', 'targets')
+    views = {entries[n]['model'] for n in served}
+    assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
         found = members(entries['evidence']['models'], product)
         assert found, product

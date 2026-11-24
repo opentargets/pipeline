@@ -39,6 +39,7 @@ steps:
         - clinical_indication
         - clinical_report
         - clinical_target
+        - drug
         - enhancer_to_gene
         - evidence
         - go
@@ -152,13 +153,6 @@ steps:
       requires:
         - clickhouse_load clickhouse load credible_sets
       dataset: studies
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load drug
-      requires:
-        - clickhouse_load clickhouse load pharmacogenomics
-      dataset: drug
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}

@@ -260,8 +260,8 @@ def test_no_script_reads_a_declared_landing_table():
 #: The datasets whose storage-only scripts became declarations; the scripts are frozen under BEFORE.
 DECLARED = (
     'association_time_series', 'baseline_expression', 'biosample', 'clinical_indication', 'clinical_report',
-    'clinical_target', 'enhancer_to_gene', 'evidence', 'go', 'hpo', 'literature_entity_lut', 'otar_projects', 'so',
-    'target_essentiality', 'w2v',
+    'clinical_target', 'drug', 'enhancer_to_gene', 'evidence', 'go', 'hpo', 'literature_entity_lut', 'otar_projects',
+    'so', 'target_essentiality', 'w2v',
 )  # fmt: skip
 BEFORE = ROOT / 'tests' / 'fixtures' / 'serving_scripts_before'
 #: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped.
@@ -286,14 +286,27 @@ NON_NULL_FILTERS = (
     ('evidence_by_disease_and_target', 'targetId'),
 )  # fmt: skip
 #: The scripts' RocksDB keys, made unique in the fixture rows.
-KEYS = {'biosampleId', 'efo_id', 'id', 'targetId'}
+KEYS = {'biosampleId', 'efo_id', 'id', 'pharmacogenomicsId', 'targetId'}
+#: Landing columns pts now writes that a frozen script computed: the landing it read lacked them.
+SCRIPT_COMPUTED = {'drug_log': {'pharmacogenomicsIds'}, 'pharmacogenomics_log': {'pharmacogenomicsId'}}
+#: Served tables a frozen script reads besides its landing table: built by their own frozen scripts, then dropped.
+SCRIPT_READS = {'drug': ['pharmacogenomics']}
+#: Declared tables compared by structure only: pts computes their content, checked in pts tests/test_drug_view.py
+#: and on real data by the release parity run.
+CONTENT_FROM_PTS = {'drug'}
+
+
+def _unique(name: str, dtype, seed: int) -> str:
+    if render(dtype).startswith('UInt'):
+        return f'rowNumberInAllBlocks() AS `{name}`'
+    return f"concat('{seed}-', toString(rowNumberInAllBlocks()), `{name}`) AS `{name}`"
 
 
 def _fill(client, table: str, cols, seed: int) -> None:
     """`FIXTURE_ROWS` rows into `table`, the same for the same `seed` on every database."""
     structure = ', '.join(f'`{name}` {render(t)}' for name, t in cols)
     literal = structure.replace('\\', '\\\\').replace("'", "\\'")
-    unique = [f"concat('{seed}-', toString(rowNumberInAllBlocks()), `{n}`) AS `{n}`" for n, _ in cols if n in KEYS]
+    unique = [_unique(n, t, seed) for n, t in cols if n in KEYS]
     replace = f' REPLACE ({", ".join(unique)})' if unique else ''
     client.command(
         f"INSERT INTO `{table}` SELECT *{replace} FROM generateRandom('{literal}', {seed}, 12, 3) "  # noqa: S608 generated names
@@ -301,9 +314,21 @@ def _fill(client, table: str, cols, seed: int) -> None:
     )
 
 
-def _land(client, dataset: str, product: str) -> None:
-    """The dataset's landing table, filled with fixture rows."""
+def _script_columns(entry, product: str) -> list:
+    """The columns of the landing table the entry's frozen script read."""
+    cols = landing_columns(entry, product)
+    assert cols is not None, entry['table']
+    return [c for c in cols if c[0] not in SCRIPT_COMPUTED.get(entry['table'], set())]
+
+
+def _land(client, dataset: str, product: str, *, script: bool = False) -> None:
+    """The dataset's landing table, filled with fixture rows; for `script`, the one its frozen script read."""
     entry = DATASETS[dataset]
+    if script and entry['table'] in SCRIPT_COMPUTED:
+        cols = _script_columns(entry, product)
+        client.command(create_table(entry['table'], cols))
+        _fill(client, entry['table'], cols, 1)
+        return
     for _, sql in ddl_for(entry, product):
         client.command(sql)
     if 'models' not in entry:
@@ -386,9 +411,15 @@ def test_declared_tables_match_scripts(product):
     with _database() as before, _database() as after:
         for dataset in datasets:
             entry = DATASETS[dataset]
-            _land(before, dataset, product)
+            for read in SCRIPT_READS.get(dataset, []):
+                _land(before, read, product, script=True)
+                for sql in split_statements((BEFORE / f'{read}.sql').read_text()):
+                    before.command(sql)
+            _land(before, dataset, product, script=True)
             for sql in split_statements((BEFORE / f'{dataset}.sql').read_text()):
                 before.command(sql)
+            for read in SCRIPT_READS.get(dataset, []):
+                before.command(f'DROP TABLE `{read}` SYNC')
             _land(after, dataset, product)
             for table in declarations(entry, product)[0]:
                 if table.engine == 'rocksdb':
@@ -406,9 +437,38 @@ def test_declared_tables_match_scripts(product):
     assert new['dictionaries'] == old['dictionaries']
     assert new['rows'].keys() == old['rows'].keys()
     for name, rows in old['rows'].items():
-        assert new['rows'][name] == rows, name
         assert rows, f'{name}: no fixture rows reached it'
+        if name not in CONTENT_FROM_PTS:
+            assert new['rows'][name] == rows, name
     assert 0 < len(new['rows']['evidence_by_variant']) < len(new['rows']['evidence']), 'the filter dropped nothing'
     # the other filters cannot drop a row: their columns are not Nullable
     for table, column in NON_NULL_FILTERS:
         assert not new['columns'][table, column][0].startswith('Nullable'), (table, column)
+
+
+def test_pharmacogenomics_serves_what_its_script_served():
+    """From the same landing rows, the rename script serves the table the frozen script served: engine, key, columns
+    and rows, but for the value of `rowId`."""
+    entry = DATASETS['pharmacogenomics']
+    script = (ROOT / entry['postload_script']).read_text()
+    with _database() as before, _database() as after:
+        _land(after, 'pharmacogenomics', 'platform')
+        before.command(create_table(entry['table'], _script_columns(entry, 'platform')))
+        before.command(
+            'INSERT INTO pharmacogenomics_log SELECT * EXCEPT (pharmacogenomicsId) '  # noqa: S608 generated names
+            f'FROM `{after.database}`.pharmacogenomics_log'
+        )
+        for client, sql in [(before, (BEFORE / 'pharmacogenomics.sql').read_text()), (after, script)]:
+            for statement in split_statements(sql):
+                client.command(statement)
+        old, new = _shape(before), _shape(after)
+        rows = [
+            sorted(c.raw_query('SELECT * EXCEPT (rowId) FROM pharmacogenomics FORMAT TSV').decode().splitlines())
+            for c in (before, after)
+        ]
+    assert set(new['tables']) == {'pharmacogenomics'}
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert new['columns']['pharmacogenomics', 'rowId'] == ('UInt64', 1)
+    assert len(rows[0]) == FIXTURE_ROWS
+    assert rows[1] == rows[0]
