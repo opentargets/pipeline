@@ -470,6 +470,22 @@ steps:
     depends_on:
       - pts_interaction
 
+  pts_disease_phenotype_by_disease:
+    depends_on:
+      - pts_disease
+  pts_mouse_phenotype_by_target:
+    depends_on:
+      - pts_mouse_phenotype
+  pts_drug_warning_by_drug:
+    depends_on:
+      - pts_drug_warning
+  pts_drug_mechanism_of_action_by_drug:
+    depends_on:
+      - pts_drug_mechanism_of_action
+  pts_pharmacovigilance_by_drug:
+    depends_on:
+      - pts_pharmacovigilance
+
   pts_search:
     depends_on:
       - pts_association
