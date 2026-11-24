@@ -93,6 +93,10 @@ landing table, read by the API.
 `test_protein_coding_coords_declarations_build_what_the_script_built` does it for the two
 `protein_coding_coords_*` entries (frozen `protein_coding_coords.sql`): their landings take the
 script's served rows, and tables, columns and rows must come back equal.
+`test_target_group_declarations_build_what_the_scripts_built` does it for `targets` (with `targets_mergetree`
+and `target_symbols`), `targets_by_region`, `transcript` and `target_prioritisation` (frozen `targets.sql`,
+`transcript.sql`, `target_prioritisation.sql`): `targets_by_region.target` is `Tuple(id String)`, and
+`targets_mergetree` is sorted by `id`. `studies.sql` and `credible_sets.sql` drop their own landing tables.
 
 Print the generated DDL:
 
@@ -242,7 +246,8 @@ to `open` if the ClickHouse type changes and a serving script reads the column. 
 record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
 `drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`) moved into declarations. A `RETIRED` dataset (`aotf`,
 `protein_coding_coords`, whose entries and models are gone) keeps its rows as last built, unchecked against the generator; the rows of an
-entry that now loads a view (`disease`, `interaction`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
+entry that now loads a view (`disease`, `interaction`, `target_prioritisation`, `transcript`) describe its
+output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 
 ## Croissant

@@ -9,6 +9,7 @@ import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
+from ot_datamodels.outputs.target import Target
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
@@ -16,8 +17,11 @@ from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.interaction_view import InteractionView
+from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
-from ot_datamodels.vocabularies import Datasource, Datatype, InteractionSource
+from ot_datamodels.views.transcript_view import TranscriptView
+from ot_datamodels.vocabularies import Chromosome, Datasource, Datatype, InteractionSource
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -355,7 +359,8 @@ def test_every_entry_round_trips():
         checked += 1
     assert checked > 20
     served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'interaction',
-              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'targets')  # fmt: skip
+              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'target_prioritisation',
+              'targets', 'targets_by_region', 'transcript')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -490,6 +495,40 @@ def test_coding_variant_views_land_the_served_columns(model, key):
     landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
     assert landed == {key: 'String', 'proteinCodingCoords': PROTEIN_CODING_COORDS}
     assert list(landed) == [key, 'proteinCodingCoords']
+
+
+_STRAND = "Enum8('-1' = -1, '0' = 0, '1' = 1)"
+#: the served tables of the target group as targets.sql, transcript.sql and target_prioritisation.sql built them
+#: (read off system.columns): no LowCardinality survives groupArray, transcript flags are Nullable(String);
+#: targets_by_region.target is Tuple(id String) (David, 2026-11-24)
+TARGET_GROUP_SERVED = {
+    TargetByRegion: (
+        f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, target Tuple(id String)'
+    ),
+    TranscriptView: (
+        'targetId String, transcripts Array(Tuple(transcriptId String, biotype String, proteinId Nullable(String), '
+        'uniprotSwissprotIds Array(String), uniprotTremblIds Array(String), uniprotIsoformIds Array(String), '
+        'alphafoldIds Array(String), dbXrefs Array(Tuple(id String, source String)), isEnsemblCanonical Bool, '
+        f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, strand {_STRAND}, '
+        'transcriptionStartSite UInt32, flags Array(Tuple(label Nullable(String), value Nullable(String))), '
+        f'exons Array(Tuple(exonId String, chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, '
+        f'strand {_STRAND}))))'
+    ),
+    TargetPrioritisationView: 'targetId String, items Array(Tuple(key String, value String))',
+}
+
+
+@pytest.mark.parametrize('model', list(TARGET_GROUP_SERVED), ids=lambda m: m.dataset_name)
+def test_target_group_views_land_the_served_columns(model):
+    assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model)) == TARGET_GROUP_SERVED[model]
+
+
+def test_target_view_lands_target_then_the_id_lists():
+    """`targets`: the target columns as before, then the two lists targets.sql joined on."""
+    landed = [(n, render(t, quote_fields=False)) for n, t in columns(TargetView)]
+    assert landed[-2:] == [('credibleSetIds', 'Array(String)'), ('pharmacogenomicsIds', 'Array(UInt64)')]
+    assert [n for n, _ in landed[: len(dataset_spec(Target).fields)]] == [f.name for f in dataset_spec(Target).fields]
+    assert len(landed) == 31
 
 
 # declared tables

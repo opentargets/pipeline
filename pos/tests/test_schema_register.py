@@ -113,9 +113,9 @@ def _platform(dataset: str):
     return landing_columns(entry, 'platform')
 
 
-@pytest.mark.parametrize('dataset', ['disease', 'interaction'])
+@pytest.mark.parametrize('dataset', ['disease', 'interaction', 'target_prioritisation', 'transcript'])
 def test_register_model_describes_the_output(dataset):
-    """The `disease` and `interaction` rows describe the output landing, not the view the entry now loads."""
+    """The rows of an entry that now loads a view describe the output landing, not the view."""
     assert CONFIG[dataset]['model'] == f'{dataset}_view'
     output = dataset_spec(discover_models()[dataset])
     assert [n for n, _ in _platform(dataset) or []] == [f.name for f in output.fields]

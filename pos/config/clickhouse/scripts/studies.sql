@@ -13,3 +13,5 @@ CREATE TABLE IF NOT EXISTS studies ENGINE = EmbeddedRocksDB () PRIMARY KEY study
 SELECT * FROM studies_mergetree;
 
 DROP TABLE IF EXISTS credible_sets_by_study SYNC;
+
+DROP TABLE IF EXISTS studies_log SYNC;

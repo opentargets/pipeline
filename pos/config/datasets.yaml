@@ -258,19 +258,32 @@ clickhouse:
       - {name: target_essentiality, engine: rocksdb}
   target_prioritisation:
     table: target_prioritisation_log
-    input_dir: output/target_prioritisation
-    model: target_prioritisation
-    postload_script: config/clickhouse/scripts/target_prioritisation.sql
+    input_dir: view/target_prioritisation_view
+    model: target_prioritisation_view
+    tables:
+      - {name: target_prioritisation, engine: rocksdb}
   targets:
     table: targets_log
     input_dir: view/target_view
     model: target_view
-    postload_script: config/clickhouse/scripts/targets.sql
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: targets_mergetree, engine: mergetree, order_by: [id]}
+      - {name: targets, engine: rocksdb}
+    dictionaries:
+      - {name: target_symbols, source: targets, key: id, attributes: [approvedSymbol]}
+  targets_by_region:
+    table: targets_by_region_log
+    input_dir: view/target_by_region
+    model: target_by_region
+    tables:
+      - {name: targets_by_region, engine: mergetree, order_by: [chromosome, start, end]}
   transcript:
     table: transcript_log
-    input_dir: output/transcript
-    model: transcript
-    postload_script: config/clickhouse/scripts/transcript.sql
+    input_dir: view/transcript_view
+    model: transcript_view
+    tables:
+      - {name: transcript, engine: rocksdb}
   variants:
     table: variants_log
     input_dir: output/variant
