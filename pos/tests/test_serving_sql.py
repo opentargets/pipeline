@@ -23,6 +23,7 @@ import yaml
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from clickhouse_connect.driver.tools import insert_file
 from ot_datamodels.discovery import discover_models
+from ot_datamodels.outputs.disease import Synonyms
 from ot_datamodels.polars import to_polars_schema
 
 from pos.clickhouse_ddl import (
@@ -261,12 +262,13 @@ def test_no_script_reads_a_declared_landing_table():
 #: The datasets whose storage-only scripts became declarations; the scripts are frozen under BEFORE.
 DECLARED = (
     'association_time_series', 'baseline_expression', 'biosample', 'clinical_indication', 'clinical_report',
-    'clinical_target', 'drug', 'enhancer_to_gene', 'evidence', 'go', 'hpo', 'literature_entity_lut', 'otar_projects',
-    'so', 'target_essentiality', 'w2v',
+    'clinical_target', 'disease', 'drug', 'enhancer_to_gene', 'evidence', 'go', 'hpo', 'literature_entity_lut',
+    'otar_projects', 'so', 'target_essentiality', 'w2v',
 )  # fmt: skip
 BEFORE = ROOT / 'tests' / 'fixtures' / 'serving_scripts_before'
-#: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped.
-NOT_REBUILT = {'biosample_names_source', 'otar_projects_log'}
+#: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped;
+#: `disease_log`, left for aotf.sql, which now reads `disease`.
+NOT_REBUILT = {'biosample_names_source', 'disease_log', 'otar_projects_log'}
 #: Declared datasets a product no longer loads: `otar_projects` was built empty on Platform, its model is PPP-only.
 NOT_LOADED = {'platform': {'association_time_series', 'otar_projects'}, 'ppp': set()}
 #: Engine settings the declarations derive rather than copy. The primary key is the sort key:
@@ -275,7 +277,7 @@ PRIMARY_KEY_IS_SORT_KEY = {'clinical_indication_disease', 'clinical_indication_d
 NULLABLE_KEY_DROPPED = {'evidence_by_disease_and_target'}
 # Every MergeTree table is optimised, `biosample_mergetree` too: the rows compared are the same.
 #: Scaffolding the script left unsorted (`ORDER BY tuple()`); credible_sets_build_cleanup drops it before release.
-RESORTED = {'biosample_mergetree'}
+RESORTED = {'biosample_mergetree', 'disease_mergetree'}
 #: Fixture rows per landing table; generateRandom makes a few percent of a Nullable column NULL.
 FIXTURE_ROWS = 300
 #: The `IS NOT NULL` filters on columns the landing table has not Nullable.
@@ -292,9 +294,13 @@ KEYS = {'biosampleId', 'efo_id', 'id', 'pharmacogenomicsId', 'targetId'}
 SCRIPT_COMPUTED = {'drug_log': {'pharmacogenomicsIds'}, 'pharmacogenomics_log': {'pharmacogenomicsId'}}
 #: Served tables a frozen script reads besides its landing table: built by their own frozen scripts, then dropped.
 SCRIPT_READS = {'drug': ['pharmacogenomics']}
-#: Declared tables compared by structure only: pts computes their content, checked in pts tests/test_drug_view.py
-#: and on real data by the release parity run.
-CONTENT_FROM_PTS = {'drug'}
+#: Landing tables a frozen script reads besides its own: landed, then dropped.
+SCRIPT_LANDINGS = {'disease': ['studies']}
+#: The model of the landing a frozen script read, where the declaration lands a view.
+SCRIPT_MODEL = {'disease': 'disease'}
+#: Declared tables compared by structure and row count only: pts computes their content, checked in pts
+#: tests/test_drug_view.py and tests/test_disease_view.py and on real data by the release parity run.
+CONTENT_FROM_PTS = {'drug', 'disease', 'disease_mergetree', 'dictionary disease_names'}
 
 
 def _unique(name: str, dtype, seed: int) -> str:
@@ -303,11 +309,14 @@ def _unique(name: str, dtype, seed: int) -> str:
     return f"concat('{seed}-', toString(rowNumberInAllBlocks()), `{name}`) AS `{name}`"
 
 
-def _fill(client, table: str, cols, seed: int) -> None:
-    """`FIXTURE_ROWS` rows into `table`, the same for the same `seed` on every database."""
+def _fill(client, table: str, cols, seed: int, overrides: dict[str, str] | None = None) -> None:
+    """`FIXTURE_ROWS` rows into `table`, the same for the same `seed` on every database; `overrides` replaces a
+    column with an expression over the random row."""
+    overrides = overrides or {}
     structure = ', '.join(f'`{name}` {render(t)}' for name, t in cols)
     literal = structure.replace('\\', '\\\\').replace("'", "\\'")
-    unique = [_unique(n, t, seed) for n, t in cols if n in KEYS]
+    unique = [_unique(n, t, seed) for n, t in cols if n in KEYS and n not in overrides]
+    unique += [f'{expr} AS `{name}`' for name, expr in overrides.items()]
     replace = f' REPLACE ({", ".join(unique)})' if unique else ''
     client.command(
         f"INSERT INTO `{table}` SELECT *{replace} FROM generateRandom('{literal}', {seed}, 12, 3) "  # noqa: S608 generated names
@@ -325,6 +334,8 @@ def _script_columns(entry, product: str) -> list:
 def _land(client, dataset: str, product: str, *, script: bool = False) -> None:
     """The dataset's landing table, filled with fixture rows; for `script`, the one its frozen script read."""
     entry = DATASETS[dataset]
+    if script and dataset in SCRIPT_MODEL:
+        entry = {'table': entry['table'], 'model': SCRIPT_MODEL[dataset]}
     if script and entry['table'] in SCRIPT_COMPUTED:
         cols = _script_columns(entry, product)
         client.command(create_table(entry['table'], cols))
@@ -416,22 +427,34 @@ def test_declared_tables_match_scripts(product):
                 _land(before, read, product, script=True)
                 for sql in split_statements((BEFORE / f'{read}.sql').read_text()):
                     before.command(sql)
+            for read in SCRIPT_LANDINGS.get(dataset, []):
+                _land(before, read, product)
             _land(before, dataset, product, script=True)
             for sql in split_statements((BEFORE / f'{dataset}.sql').read_text()):
                 before.command(sql)
             for read in SCRIPT_READS.get(dataset, []):
                 before.command(f'DROP TABLE `{read}` SYNC')
+            for read in SCRIPT_LANDINGS.get(dataset, []):
+                before.command(f'DROP TABLE `{DATASETS[read]["table"]}` SYNC')
             _land(after, dataset, product)
             for table in declarations(entry, product)[0]:
                 if table.engine == 'rocksdb':
                     after.command(uniqueness_sql(table, entry_key(entry, product), entry['table']))
             for sql in declared_sql(entry, product):
                 after.command(sql)
+        relations = before.query('SELECT DISTINCT synonyms.relation FROM disease').result_rows
         old, new = _shape(before), _shape(after)
+    # pts writes one entry per Synonyms field in field order, the order the script's tupleToNameValuePairs gives
+    assert relations == [(list(Synonyms.model_fields),)]
     assert set(old['tables']) - NOT_REBUILT == set(new['tables'])
     for name in RESORTED:
         assert old['tables'][name][0] == new['tables'][name][0] == 'MergeTree', name
-        assert old['rows'][name] == new['rows'][name], name
+        columns_of = [{k: v for k, v in shape['columns'].items() if k[0] == name} for shape in (old, new)]
+        assert columns_of[0] == columns_of[1], name
+        if name in CONTENT_FROM_PTS:
+            assert len(old['rows'][name]) == len(new['rows'][name]), name
+        else:
+            assert old['rows'][name] == new['rows'][name], name
     old, new = _without(old, NOT_REBUILT | RESORTED), _without(new, RESORTED)
     assert new['tables'] == _accepted(old['tables'])
     assert new['columns'] == old['columns']
@@ -514,3 +537,54 @@ def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
             with pytest.raises(ClickhouseLoadError, match='duplicate pharmacogenomicsId in pharmacogenomics'):
                 _build_declared(client, 'pharmacogenomics', 'platform')
             assert not client.command('EXISTS TABLE pharmacogenomics')
+
+
+AOTF = ROOT / DATASETS['aotf']['postload_script']
+#: Fixture disease ids, and the fixture associations naming one: every other row.
+DISEASE_ID = "concat('D', toString(rowNumberInAllBlocks()))"
+NAMES_A_DISEASE = (
+    f"if(rowNumberInAllBlocks() % 2 = 0, concat('D', toString(rowNumberInAllBlocks() % {FIXTURE_ROWS})), diseaseId)"
+)
+MEASUREMENT = "if(rowNumberInAllBlocks() % 3 = 0, arrayPushBack(therapeuticAreas, 'EFO_0001444'), therapeuticAreas)"
+
+
+def test_aotf_reads_the_served_disease_table():
+    """From the same association and disease rows, aotf.sql over the declared `disease` builds the
+    `associations_otf_*` tables the frozen script built over `disease_log`; the target side forces a hash join."""
+    statements = split_statements(AOTF.read_text())
+    (target,) = [s for s in statements if 'CREATE TABLE IF NOT EXISTS associations_otf_target' in s]
+    assert re.search(r'LEFT OUTER JOIN disease ON associations_otf_log\.diseaseId = disease\.id\b', target)
+    assert re.search(r"SETTINGS\s+join_algorithm\s*=\s*'hash'\s*$", target.strip()), target
+    served = {'associations_otf_disease', 'associations_otf_target'}
+    entry, aotf = DATASETS['disease'], DATASETS['aotf']
+    with _database() as before, _database() as after:
+        for _, sql in ddl_for(entry, 'platform'):
+            after.command(sql)
+        overrides = {'id': DISEASE_ID, 'therapeuticAreas': MEASUREMENT}
+        _fill(after, entry['table'], landing_columns(entry, 'platform'), 1, overrides)
+        read = ('id', 'ancestors', 'therapeuticAreas')
+        script_landing = landing_columns({'model': SCRIPT_MODEL['disease']}, 'platform') or []
+        before.command(create_table(entry['table'], [c for c in script_landing if c[0] in read]))
+        before.command(
+            f'INSERT INTO disease_log SELECT {", ".join(read)} FROM `{after.database}`.disease_log'  # noqa: S608 fixed names
+        )
+        for client in (before, after):
+            for _, sql in ddl_for(aotf, 'platform'):
+                client.command(sql)
+            _fill(client, aotf['table'], landing_columns(aotf, 'platform'), 2, {'diseaseId': NAMES_A_DISEASE})
+        _run(before, (BEFORE / 'aotf.sql').read_text())
+        _build_declared(after, 'disease', 'platform')
+        _run(after, AOTF.read_text())
+        counts = after.query(
+            'SELECT countIf(isMeasurement), countIf(indirect != []), countIf(indirect = []), '
+            "countIf(B NOT LIKE 'D%') FROM associations_otf_target"
+        ).result_rows[0]
+        old, new = _shape(before), _shape(after)
+    assert set(old['tables']) == served
+    assert set(new['tables']) == served | {'disease', 'disease_mergetree'}
+    new = _without(new, {'disease', 'disease_mergetree', 'disease_names', 'dictionary disease_names'})
+    for part in ('tables', 'columns', 'rows'):
+        assert new[part] == old[part], part
+    measurement, matched, empty, unmatched = counts
+    assert measurement > 0 and matched > 0, counts
+    assert empty >= unmatched > 0, counts

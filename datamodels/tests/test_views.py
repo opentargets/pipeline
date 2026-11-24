@@ -15,10 +15,12 @@ from ot_datamodels.outputs.association_by_datasource_indirect import Association
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
+from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.drug_molecule import DrugMolecule
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
+from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
@@ -28,6 +30,7 @@ from ot_datamodels.spec import Node, dataset_spec, walk
 from ot_datamodels.views.association_otf import AssociationOtf
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.target_view import TargetView
 
@@ -35,6 +38,7 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf': AssociationOtf,
     'association_timeseries': AssociationTimeseries,
     'coding_variant': CodingVariant,
+    'disease_view': DiseaseView,
     'drug_view': DrugView,
     'target_view': TargetView,
 }
@@ -69,6 +73,7 @@ PRIMARY_KEYS = {
     'association_otf': ('rowId',),
     'association_timeseries': (),
     'coding_variant': (),
+    'disease_view': ('id',),
     'drug_view': ('id',),
     'target_view': ('id',),
 }
@@ -110,6 +115,24 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         'transcriptConsequences[]/variantFunctionalConsequenceIds',
         None,
     ),
+    **{
+        ('disease_view', c): (Disease, c, None)
+        for c in (
+            'id',
+            'name',
+            'therapeuticAreas',
+            'description',
+            'dbXRefs',
+            'obsoleteTerms',
+            'parents',
+            'children',
+            'ancestors',
+            'descendants',
+        )
+    },
+    ('disease_view', 'isTherapeuticArea'): (Disease, 'ontology/isTherapeuticArea', None),
+    ('disease_view', 'studyIds[]'): (Study, 'studyId', None),
+    ('disease_view', 'indirectStudyIds[]'): (Study, 'studyId', None),
     **{('drug_view', f.name): (DrugMolecule, f.name, None) for f in dataset_spec(DrugMolecule).fields},
     ('drug_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
     **{('target_view', f.name): (Target, f.name, None) for f in dataset_spec(Target).fields},
@@ -297,6 +320,15 @@ DECLARED: dict[str, set[str]] = {
         'aminoAcidPosition',
         'alternateAminoAcid',
     },
+    'disease_view': {
+        'synonyms',
+        'synonyms[]',
+        'synonyms[]/relation',
+        'synonyms[]/terms',
+        'synonyms[]/terms[]',
+        'studyIds',
+        'indirectStudyIds',
+    },
     'drug_view': {'pharmacogenomicsIds'},
     'target_view': {
         'homologues',
@@ -365,3 +397,26 @@ def test_drug_view_is_drug_molecule_plus_the_ids() -> None:
     drug = [f.name for f in dataset_spec(DrugMolecule).fields]
     assert [f.name for f in dataset_spec(DrugView).fields] == [*drug, 'pharmacogenomicsIds']
     assert discover_models()['drug_view'] is DrugView
+
+
+def test_disease_view_is_the_served_disease_columns() -> None:
+    assert [f.name for f in dataset_spec(DiseaseView).fields] == [
+        'id',
+        'name',
+        'therapeuticAreas',
+        'description',
+        'dbXRefs',
+        'obsoleteTerms',
+        'synonyms',
+        'parents',
+        'children',
+        'ancestors',
+        'descendants',
+        'isTherapeuticArea',
+        'studyIds',
+        'indirectStudyIds',
+    ]
+    assert discover_models()['disease_view'] is DiseaseView
+    synonyms = _nodes(DiseaseView)
+    assert synonyms['synonyms[]/relation'].dtype == pl.String()
+    assert synonyms['synonyms[]/terms[]'].nullable

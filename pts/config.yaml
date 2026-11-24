@@ -1076,6 +1076,17 @@ steps:
         view: view/drug_view
   ##################################################################################################
 
+  #: DISEASE_VIEW STEP :###########################################################################
+  disease_view:
+    - name: transform disease_view
+      transformer: disease_view
+      source:
+        disease: output/disease
+        study: output/study
+      destination:
+        view: view/disease_view
+  ##################################################################################################
+
   #: AACT_TRIAL_EXTRACTION_V2 STEP :###############################################################
   # Not part of a release. The `clinical_staging` DAG runs this step with
   # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below

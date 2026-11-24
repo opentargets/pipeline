@@ -84,9 +84,14 @@ clickhouse:
     postload_script: config/clickhouse/scripts/credible_sets.sql
   disease:
     table: disease_log
-    input_dir: output/disease
-    model: disease
-    postload_script: config/clickhouse/scripts/disease.sql
+    input_dir: view/disease_view
+    model: disease_view
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: disease_mergetree, engine: mergetree, order_by: [id]}
+      - {name: disease, engine: rocksdb}
+    dictionaries:
+      - {name: disease_names, source: disease, key: id, attributes: [name]}
   disease_hpo:
     table: disease_hpo_log
     input_dir: output/disease_phenotype
