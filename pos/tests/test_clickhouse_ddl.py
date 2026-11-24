@@ -2,7 +2,7 @@
 
 import datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 import polars as pl
 import pytest
@@ -14,6 +14,7 @@ from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.target_view import TargetView
+from ot_datamodels.vocabularies import Datasource, Datatype
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -400,24 +401,19 @@ def test_disease_view_landing_is_the_served_disease():
     )
 
 
+def _enum8(vocabulary) -> str:
+    """The Enum8 pos generates for a vocabulary: its values numbered from 1 in order."""
+    return f"Enum8({', '.join(f"'{v}' = {i}" for i, v in enumerate(get_args(vocabulary), 1))})"
+
+
 #: the columns of the served associations_otf_* tables as aotf.sql built them (read off system.columns), but
 #: for target isMeasurement, UInt8 there
 AOTF_SERVED = {
     'rowId': 'String',
     'A': 'LowCardinality(String)',
     'B': 'LowCardinality(String)',
-    'datatypeId': (
-        "Enum8('affected_pathway' = 1, 'animal_model' = 2, 'clinical' = 3, 'genetic_association' = 4, "
-        "'genetic_literature' = 5, 'known_drug' = 6, 'literature' = 7, 'ot_partner' = 8, 'ot_validation_lab' = 9, "
-        "'rna_expression' = 10, 'somatic_mutation' = 11)"
-    ),
-    'datasourceId': (
-        "Enum8('clinical_precedence' = 1, 'gwas_credible_sets' = 2, 'gene_burden' = 3, 'eva' = 4, "
-        "'genomics_england' = 5, 'gene2phenotype' = 6, 'uniprot_literature' = 7, 'uniprot_variants' = 8, "
-        "'orphanet' = 9, 'clingen' = 10, 'cancer_gene_census' = 11, 'intogen' = 12, 'eva_somatic' = 13, "
-        "'cancer_biomarkers' = 14, 'crispr_screen' = 15, 'crispr' = 16, 'reactome' = 17, 'europepmc' = 18, "
-        "'expression_atlas' = 19, 'impc' = 20, 'encore' = 21, 'ot_crispr' = 22, 'ot_crispr_validation' = 23)"
-    ),
+    'datatypeId': _enum8(Datatype),
+    'datasourceId': _enum8(Datasource),
     'rowScore': 'Float64',
     'searchA': 'Nullable(String)',
     'searchB': 'Nullable(String)',
