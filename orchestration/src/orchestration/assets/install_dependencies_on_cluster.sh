@@ -77,7 +77,8 @@ function main() {
     src=$(mktemp -d)
     git -C "${src}" init -q
     git -C "${src}" remote add origin "${REPO_URI}.git"
-    git -C "${src}" sparse-checkout set pts
+    # pts depends on ../datamodels as a path dependency, so both are checked out
+    git -C "${src}" sparse-checkout set pts datamodels
     run_with_retry git -C "${src}" fetch -q --depth 1 --filter=blob:none origin "${ref}"
     # blob:none fetches file contents lazily, during checkout
     run_with_retry git -C "${src}" checkout -q FETCH_HEAD
