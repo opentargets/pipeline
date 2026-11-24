@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS variants_mergetree ENGINE = MergeTree ORDER BY tuple(
     left outer join (
         select
             assumeNotNull(variantId) as variantId,
-            groupArray(rowId) as pharmacogenomicsIds
+            groupArray(pharmacogenomicsId) as pharmacogenomicsIds
         from pharmacogenomics
         where variantId is not null
         group by variantId

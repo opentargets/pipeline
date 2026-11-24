@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS targets_mergetree ENGINE = MergeTree ORDER BY tuple()
     left outer join (
       select
         assumeNotNull(targetFromSourceId) as pgxTargetId,
-        groupArray(rowId) as pharmacogenomicsIds
+        groupArray(pharmacogenomicsId) as pharmacogenomicsIds
       from
         pharmacogenomics
       where
