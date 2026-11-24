@@ -1506,7 +1506,9 @@ steps:
         target: output/target
         association_direct: output/association_overall_direct
         association_indirect: output/association_overall_indirect
-      destination: view/association_otf
+      destination:
+        disease: view/association_otf_disease
+        target: view/association_otf_target
   ##################################################################################################
 
   #: L2G STEP :#####################################################################################

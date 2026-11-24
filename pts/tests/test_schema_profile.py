@@ -168,6 +168,8 @@ def test_run_folder_of_the_discovered_models() -> None:
     assert views == set(models) - set(discover_datasets())
     assert views == {
         'association_otf',
+        'association_otf_disease',
+        'association_otf_target',
         'association_timeseries',
         'coding_variant',
         'disease_view',
