@@ -6,6 +6,7 @@ were reused are copied from it, and the previous pairs no longer current are kep
 
 from __future__ import annotations
 
+import math
 import tempfile
 import time
 from functools import partial
@@ -39,6 +40,19 @@ def _pairs_task(tile: Tile, munged: str, m_snps: dict[str, int], options: PairsS
     rows = run_tile(tile, munged, m_snps, options, _scratch)
     rows[0]['_seconds'] = time.monotonic() - start
     return rows
+
+
+_TASKS_PER_CORE = 3
+"""Tiles per core of the cluster that the tile size is shrunk to give, so that a small run still
+spreads over every executor."""
+
+
+def _tile_size(studies: pl.DataFrame, largest: int, cores: int) -> int:
+    """The largest tile size up to `largest` that gives at least `_TASKS_PER_CORE` tiles per core."""
+    biggest_ancestry = int(studies.group_by('ldAncestry').len()['len'].max() or 1)
+    # an ancestry of n studies in blocks of s has about (n / s)^2 / 2 tiles
+    size = math.floor(biggest_ancestry / math.sqrt(2 * _TASKS_PER_CORE * cores))
+    return max(1, min(largest, size))
 
 
 def _read(path: str) -> pl.DataFrame:
@@ -96,14 +110,18 @@ def genetic_correlation_pairs(
     studies = index.filter(pl.col('isUsable'))
     m_snps = dict(_read(sources.panels).select('ldAncestry', 'mSnps').iter_rows())
     previous, reused = _previous(sources, destinations, index, options)
-    work = tiles(studies, options.tile_studies, reused)
+    spark = Session(app_name='genetic_correlation_pairs', properties=properties).spark
+    size = _tile_size(studies, options.tile_studies, spark.sparkContext.defaultParallelism)
+    work = tiles(studies, size, reused)
     n_pairs = sum(len(tile.pairs()) for tile in work)
     n_reused = 0 if reused is None else reused.height
-    logger.info(f'{studies.height} studies ({n_reused} reused): computing {n_pairs} pairs in {len(work)} tiles')
+    logger.info(
+        f'{studies.height} studies ({n_reused} reused): computing {n_pairs} pairs in {len(work)} tiles of up '
+        f'to {size} studies a side'
+    )
 
     rows: list[dict[str, Any]] = []
     if work:
-        spark = Session(app_name='genetic_correlation_pairs', properties=properties).spark
         task = partial(_pairs_task, munged=sources.munged, m_snps=m_snps, options=options)
         rows = spark.sparkContext.parallelize(work, numSlices=len(work)).flatMap(task).collect()
     seconds = sum(row.pop('_seconds', 0.0) for row in rows)

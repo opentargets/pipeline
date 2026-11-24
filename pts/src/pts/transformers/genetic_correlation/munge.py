@@ -186,14 +186,16 @@ def munge_study(sumstats: pl.LazyFrame, fallback_sample_size: float | None, pane
         .drop('_se')
         .unique(VARIANT_KEY)
     )
-    keys = panel.lazy().select('snp', *VARIANT_KEY, 'ldScore')
-    swapped = keys.rename({'ref': 'alt', 'alt': 'ref'})
+    keys = panel.lazy().select(
+        'snp', 'chromosome', 'position', pl.col('ref').alias('_ref'), pl.col('alt').alias('_alt'), 'ldScore'
+    )
+    direct = (pl.col('ref') == pl.col('_ref')) & (pl.col('alt') == pl.col('_alt'))
+    swapped = (pl.col('ref') == pl.col('_alt')) & (pl.col('alt') == pl.col('_ref'))
     return (
-        pl
-        .concat([
-            study.join(keys, on=VARIANT_KEY).with_columns(pl.lit(0).alias('_swapped')),
-            study.join(swapped, on=VARIANT_KEY).with_columns(-pl.col('z'), pl.lit(1).alias('_swapped')),
-        ])
+        study
+        .join(keys, on=['chromosome', 'position'])
+        .filter(direct | swapped)
+        .with_columns(pl.when(direct).then(pl.col('z')).otherwise(-pl.col('z')).alias('z'), swapped.alias('_swapped'))
         .sort('snp', '_swapped')
         .unique('snp', keep='first', maintain_order=True)
         .select(list(MUNGED_SCHEMA))
