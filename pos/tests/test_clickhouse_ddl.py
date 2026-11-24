@@ -12,6 +12,8 @@ from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_m
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
+from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
+from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.vocabularies import Datasource, Datatype
@@ -351,8 +353,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'protein_coding_coords',
-              'targets')  # fmt: skip
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug',
+              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'targets')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -439,6 +441,28 @@ def test_aotf_views_land_the_served_columns(model, extra):
     landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
     assert list(landed) == order
     assert landed == served
+
+
+#: `proteinCodingCoords` as protein_coding_coords.sql served it (read off system.columns): groupArray strips
+#: LowCardinality, and the CAST turned the landing Enum8 datasourceId back into a String
+PROTEIN_CODING_COORDS = (
+    'Array(Tuple(targetId String, uniprotAccessions Array(String), aminoAcidPosition Int32, '
+    'alternateAminoAcid String, referenceAminoAcid String, variantFunctionalConsequenceIds Array(String), '
+    'variantEffect Nullable(Float64), variantId String, diseases Array(String), '
+    'datasources Array(Tuple(datasourceCount UInt32, datasourceId String, datasourceNiceName String)), '
+    'therapeuticAreas Array(String)))'
+)
+
+
+@pytest.mark.parametrize(
+    ('model', 'key'),
+    [(CodingVariantByVariant, 'variantId'), (CodingVariantByTarget, 'targetId')],
+    ids=['variant', 'target'],
+)
+def test_coding_variant_views_land_the_served_columns(model, key):
+    landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
+    assert landed == {key: 'String', 'proteinCodingCoords': PROTEIN_CODING_COORDS}
+    assert list(landed) == [key, 'proteinCodingCoords']
 
 
 # declared tables

@@ -218,11 +218,18 @@ clickhouse:
     model: pharmacogenomics
     tables:
       - {name: pharmacogenomics, engine: rocksdb}
-  protein_coding_coords:
-    table: protein_coding_coords_log
-    input_dir: view/coding_variant
-    model: coding_variant
-    postload_script: config/clickhouse/scripts/protein_coding_coords.sql
+  protein_coding_coords_by_target:
+    table: protein_coding_coords_by_target_log
+    input_dir: view/coding_variant_by_target
+    model: coding_variant_by_target
+    tables:
+      - {name: protein_coding_coords_by_target, engine: rocksdb}
+  protein_coding_coords_by_variant:
+    table: protein_coding_coords_by_variant_log
+    input_dir: view/coding_variant_by_variant
+    model: coding_variant_by_variant
+    tables:
+      - {name: protein_coding_coords_by_variant, engine: rocksdb}
   w2v:
     table: ml_w2v_log
     input_dir: output/literature_vector

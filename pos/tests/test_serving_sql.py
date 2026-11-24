@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from graphlib import CycleError, TopologicalSorter
 from io import BytesIO
 from pathlib import Path
+from typing import get_args
 
 import polars as pl
 import pytest
@@ -25,6 +26,7 @@ from clickhouse_connect.driver.tools import insert_file
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.outputs.disease import Synonyms
 from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.vocabularies import CodingVariantDatasource
 
 from pos.clickhouse_ddl import (
     canonical,
@@ -601,3 +603,68 @@ def test_aotf_declarations_build_what_aotf_sql_built(product):
     assert new['columns'] == old['columns']
     counts = {name: len(rows) for name, rows in new['rows'].items()}
     assert counts == {name: len(rows) for name, rows in old['rows'].items()} == dict.fromkeys(served, FIXTURE_ROWS)
+
+
+#: The protein_coding_coords declarations, which replace the frozen protein_coding_coords.sql.
+PCC = ('protein_coding_coords_by_target', 'protein_coding_coords_by_variant')
+_CODING_VARIANT_DATASOURCE = ', '.join(f"'{v}' = {i}" for i, v in enumerate(get_args(CodingVariantDatasource), 1))
+#: The landing protein_coding_coords.sql read: the removed flat `coding_variant` view, as pos generated it.
+PCC_LANDING = [
+    ('targetId', 'String'),
+    ('variantId', 'String'),
+    ('therapeuticAreas', 'Array(String)'),
+    ('diseases', 'Array(String)'),
+    (
+        'datasources',
+        (
+            f'Array(Tuple(datasourceCount UInt32, datasourceId Enum8({_CODING_VARIANT_DATASOURCE}), '
+            'datasourceNiceName LowCardinality(String)))'
+        ),
+    ),
+    ('variantEffect', 'Nullable(Float64)'),
+    ('variantFunctionalConsequenceIds', 'Array(String)'),
+    ('uniprotAccessions', 'Array(String)'),
+    ('referenceAminoAcid', 'LowCardinality(String)'),
+    ('aminoAcidPosition', 'Int32'),
+    ('alternateAminoAcid', 'LowCardinality(String)'),
+]
+#: Fixture keys, repeated so that groupArray collects several rows per key.
+PCC_KEYS = {
+    'variantId': "concat('V', toString(rowNumberInAllBlocks() % 40))",
+    'targetId': "concat('T', toString(rowNumberInAllBlocks() % 30))",
+}
+
+
+def test_protein_coding_coords_loads_from_its_declarations():
+    """Both entries load in the declared explode; the scripted `protein_coding_coords` load is gone."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(PCC) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in PCC)
+    assert 'protein_coding_coords' not in DATASETS
+    assert not [t for t in STEP if 'protein_coding_coords' in (t.get('dataset'), *t.get('foreach', []))]
+    assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / 'protein_coding_coords.sql').exists()
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_protein_coding_coords_declarations_build_what_the_script_built(product):
+    """The declarations build the `protein_coding_coords_*` tables the frozen script built: tables, engines,
+    keys and columns (no LowCardinality left in the tuple, `datasourceId` a String). pts groups the rows
+    (tests/test_coding_variant.py), so the declared landings take the script's served rows, which must come back
+    unchanged."""
+    landing = [(name, parse_type(t)) for name, t in PCC_LANDING]
+    with _database() as before, _database() as after:
+        before.command(create_table('protein_coding_coords_log', landing))
+        _fill(before, 'protein_coding_coords_log', landing, 2, PCC_KEYS)
+        _run(before, (BEFORE / 'protein_coding_coords.sql').read_text())
+        for dataset in PCC:
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            after.command(f'INSERT INTO `{entry["table"]}` SELECT * FROM `{before.database}`.`{dataset}`')  # noqa: S608 fixed names
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+    assert set(old['tables']) == set(PCC)
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert {n: len(r) for n, r in new['rows'].items()} == {PCC[0]: 30, PCC[1]: 40}
+    assert new['rows'] == old['rows']

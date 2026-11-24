@@ -49,6 +49,8 @@ steps:
         - hpo
         - literature_entity_lut
         - pharmacogenomics
+        - protein_coding_coords_by_target
+        - protein_coding_coords_by_variant
         - so
         - target_essentiality
         - w2v
@@ -68,7 +70,6 @@ steps:
         - mechanism_of_action
         - mouse_phenotypes
         - pharmacovigilance
-        - protein_coding_coords
         - transcript
       do:
         - name: clickhouse_load clickhouse load ${each}
