@@ -92,8 +92,8 @@ def _load_drift():
 sd = _load_drift()
 MODELS = discover_models()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
-#: The model a dataset's rows describe, where its entry now loads another (`disease` loads its view).
-REGISTER_MODEL = {'disease': 'disease'}
+#: The model a dataset's rows describe, where its entry now loads another (`disease`, `interaction` load views).
+REGISTER_MODEL = {'disease': 'disease', 'interaction': 'interaction'}
 #: Datasets whose entry and model are gone; their rows stay as last built.
 RETIRED = {'aotf'}
 CLICKHOUSE = POS / 'config' / 'clickhouse'

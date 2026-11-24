@@ -13,8 +13,9 @@ from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.disease_view import DiseaseView
+from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.target_view import TargetView
-from ot_datamodels.vocabularies import Datasource, Datatype
+from ot_datamodels.vocabularies import Datasource, Datatype, InteractionSource
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -351,8 +352,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'protein_coding_coords',
-              'targets')  # fmt: skip
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'interaction',
+              'protein_coding_coords', 'targets')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -439,6 +440,32 @@ def test_aotf_views_land_the_served_columns(model, extra):
     landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
     assert list(landed) == order
     assert landed == served
+
+
+_DETECTION = 'Array(Tuple(miIdentifier Nullable(String), shortName Nullable(String)))'
+#: the served interaction table as interaction.sql built it (read off system.columns): no LowCardinality survives
+#: groupArray, the speciesA names and interactionResources.sourceDatabase are String, taxon ids UInt32
+INTERACTION_SERVED = (
+    'targetA String, interactions Array(Tuple('
+    'targetA String, intA String, targetB Nullable(String), intB String, '
+    'intABiologicalRole String, intBBiologicalRole String, scoring Nullable(Float64), count UInt8, '
+    f'sourceDatabase {_enum8(InteractionSource)}, '
+    'speciesA Tuple(mnemonic String, scientificName String, taxonId UInt32), '
+    'speciesB Tuple(mnemonic String, scientificName Nullable(String), taxonId Nullable(UInt32)), '
+    'evidences Array(Tuple('
+    'evidenceScore Nullable(Float64), expansionMethodMiIdentifier Nullable(String), '
+    'expansionMethodShortName Nullable(String), hostOrganismScientificName Nullable(String), '
+    'hostOrganismTaxId Nullable(UInt32), interactionDetectionMethodMiIdentifier String, '
+    'interactionDetectionMethodShortName String, interactionIdentifier Nullable(String), '
+    'interactionResources Tuple(databaseVersion String, sourceDatabase String), '
+    'interactionTypeMiIdentifier Nullable(String), interactionTypeShortName Nullable(String), '
+    f'participantDetectionMethodA {_DETECTION}, participantDetectionMethodB {_DETECTION}, '
+    'pubmedId Nullable(String)))))'
+)
+
+
+def test_interaction_view_lands_the_served_interaction():
+    assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(InteractionView)) == INTERACTION_SERVED
 
 
 # declared tables

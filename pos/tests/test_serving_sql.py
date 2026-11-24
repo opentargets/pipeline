@@ -207,12 +207,12 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
             yield from _labels(value[f.name], f.dtype, f'{path}/{f.name}')
 
 
-#: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs),
-#: and the dataset each loads into.
+#: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs;
+#: interaction_view: in a list of structs), and the dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
     'variant': 'variants',
-    'interaction': 'interaction',
+    'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
     'target_view': 'targets',
 }
@@ -601,3 +601,53 @@ def test_aotf_declarations_build_what_aotf_sql_built(product):
     assert new['columns'] == old['columns']
     counts = {name: len(rows) for name, rows in new['rows'].items()}
     assert counts == {name: len(rows) for name, rows in old['rows'].items()} == dict.fromkeys(served, FIXTURE_ROWS)
+
+
+#: Fixture rows: interactions with unique targetA and interactionId, each named by one evidence.
+UNIQUE_TARGET = "concat('T', toString(rowNumberInAllBlocks()))"
+EVIDENCE_OF = {'interactionId': f'rowNumberInAllBlocks() % {FIXTURE_ROWS}'}
+
+
+def test_interaction_loads_from_its_declaration():
+    """`interaction` loads in the declared explode; `interaction_evidence` stays an undeclared landing table with no
+    script, which the API reads."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert 'interaction' in explode['foreach']
+    assert is_declared(DATASETS['interaction'])
+    assert not [t['name'] for t in STEP if t.get('dataset') == 'interaction']
+    evidence = DATASETS['interaction_evidence']
+    assert not is_declared(evidence)
+    assert 'postload_script' not in evidence
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_interaction_declaration_builds_what_interaction_sql_built(product):
+    """The declaration builds the `interaction` table the frozen interaction.sql built from `interaction_log` and
+    `interaction_evidence_log`: engine, key and columns. pts computes its rows (tests/test_interaction_view.py), so
+    only the counts are compared. `interaction_log` is no longer left behind; `interaction_evidence_log` stays."""
+    evidence = DATASETS['interaction_evidence']
+    script_landing = {'table': 'interaction_log', 'model': 'interaction'}
+    with _database() as before, _database() as after:
+        for client in (before, after):
+            for _, sql in ddl_for(evidence, product):
+                client.command(sql)
+            _fill(client, evidence['table'], landing_columns(evidence, product), 2, EVIDENCE_OF)
+        for _, sql in ddl_for(script_landing, product):
+            before.command(sql)
+        overrides = {'targetA': UNIQUE_TARGET, 'interactionId': 'rowNumberInAllBlocks()'}
+        _fill(before, 'interaction_log', landing_columns(script_landing, product), 1, overrides)
+        _run(before, (BEFORE / 'interaction.sql').read_text())
+        entry = DATASETS['interaction']
+        for _, sql in ddl_for(entry, product):
+            after.command(sql)
+        _fill(after, entry['table'], landing_columns(entry, product), 1, {'targetA': UNIQUE_TARGET})
+        _build_declared(after, 'interaction', product)
+        empty = before.query('SELECT countIf(empty(i.evidences)) FROM interaction ARRAY JOIN interactions AS i')
+        old, new = _shape(before), _shape(after)
+    assert empty.result_rows == [(0,)], 'an interaction got no evidence'
+    old = _without(old, {'interaction_log'})
+    assert set(new['tables']) == {'interaction', 'interaction_evidence_log'}
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert new['rows']['interaction_evidence_log'] == old['rows']['interaction_evidence_log']
+    assert len(new['rows']['interaction']) == len(old['rows']['interaction']) == FIXTURE_ROWS

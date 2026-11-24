@@ -29,7 +29,7 @@ def test_split_quotes_and_escapes():
 def test_split_real_scripts(script):
     sql = script.read_text()
     statements = split_statements(sql)
-    assert bool(statements) == bool(sql.strip())  # scripts/interaction_evidence.sql is empty
+    assert statements
     assert all(s.strip() for s in statements)
 
 

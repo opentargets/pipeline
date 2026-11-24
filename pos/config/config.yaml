@@ -47,6 +47,7 @@ steps:
         - evidence
         - go
         - hpo
+        - interaction
         - literature_entity_lut
         - pharmacogenomics
         - so
@@ -121,13 +122,6 @@ steps:
       requires:
         - explode load declared datasets
       dataset: target_prioritisation
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load interaction
-      requires:
-        - clickhouse_load clickhouse load interaction_evidence
-      dataset: interaction
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
