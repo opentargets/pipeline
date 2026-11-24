@@ -1721,6 +1721,17 @@ steps:
         string_version: ${string_version}
   ##################################################################################################
 
+  #: INTERACTION_VIEW STEP :#######################################################################
+  interaction_view:
+    - name: transform interaction_view
+      transformer: interaction_view
+      source:
+        interaction: output/interaction
+        evidence: output/interaction_evidence
+      destination:
+        view: view/interaction_view
+  ##################################################################################################
+
   #: RELEASE_METRICS STEP :#########################################################################
   release_metrics:
     - name: transform release_metrics

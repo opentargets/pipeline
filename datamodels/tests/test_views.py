@@ -19,6 +19,8 @@ from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.drug_molecule import DrugMolecule
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
+from ot_datamodels.outputs.interaction import Interaction
+from ot_datamodels.outputs.interaction_evidence import InteractionEvidence
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
@@ -26,13 +28,14 @@ from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.outputs.variant import Variant
-from ot_datamodels.spec import Node, dataset_spec, walk
+from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_view import DrugView
+from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.target_view import TargetView
 
 VIEWS: dict[str, type[DatasetModel]] = {
@@ -42,6 +45,7 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'coding_variant': CodingVariant,
     'disease_view': DiseaseView,
     'drug_view': DrugView,
+    'interaction_view': InteractionView,
     'target_view': TargetView,
 }
 
@@ -76,6 +80,7 @@ PRIMARY_KEYS = {
     'coding_variant': (),
     'disease_view': ('id',),
     'drug_view': ('id',),
+    'interaction_view': ('targetA',),
     'target_view': ('id',),
 }
 
@@ -143,6 +148,29 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     ('disease_view', 'indirectStudyIds[]'): (Study, 'studyId', None),
     **{('drug_view', f.name): (DrugMolecule, f.name, None) for f in dataset_spec(DrugMolecule).fields},
     ('drug_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
+    ('interaction_view', 'targetA'): (Interaction, 'targetA', None),
+    **{
+        ('interaction_view', f'interactions[]/{c}'): (Interaction, c, None)
+        for c in ('targetA', 'intA', 'targetB', 'intB', 'scoring', 'count', 'sourceDatabase')
+    },
+    ('interaction_view', 'interactions[]/speciesA/taxonId'): (Interaction, 'speciesA/taxonId', None),
+    **{
+        ('interaction_view', f'interactions[]/evidences[]/{c}'): (InteractionEvidence, c, None)
+        for c in (
+            'evidenceScore',
+            'expansionMethodMiIdentifier',
+            'expansionMethodShortName',
+            'hostOrganismScientificName',
+            'interactionDetectionMethodMiIdentifier',
+            'interactionDetectionMethodShortName',
+            'interactionIdentifier',
+            'interactionTypeMiIdentifier',
+            'interactionTypeShortName',
+            'participantDetectionMethodA',
+            'participantDetectionMethodB',
+            'pubmedId',
+        )
+    },
     **{('target_view', f.name): (Target, f.name, None) for f in dataset_spec(Target).fields},
     **{
         ('target_view', f'homologues[]/{c}'): (Homology, c, None)
@@ -306,6 +334,8 @@ MARKERS = {
     ('coding_variant', 'datasources[]/datasourceNiceName'): 'LowCardinality(String)',
     ('coding_variant', 'referenceAminoAcid'): 'LowCardinality(String)',
     ('coding_variant', 'alternateAminoAcid'): 'LowCardinality(String)',
+    ('interaction_view', 'interactions[]/speciesB/taxonId'): 'UInt32',
+    ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
 }
 
 
@@ -340,6 +370,25 @@ DECLARED: dict[str, set[str]] = {
         'indirectStudyIds',
     },
     'drug_view': {'pharmacogenomicsIds'},
+    'interaction_view': {
+        'interactions',
+        'interactions[]',
+        'interactions[]/intABiologicalRole',
+        'interactions[]/intBBiologicalRole',
+        'interactions[]/speciesA',
+        'interactions[]/speciesA/mnemonic',
+        'interactions[]/speciesA/scientificName',
+        'interactions[]/speciesB',
+        'interactions[]/speciesB/mnemonic',
+        'interactions[]/speciesB/scientificName',
+        'interactions[]/speciesB/taxonId',
+        'interactions[]/evidences',
+        'interactions[]/evidences[]',
+        'interactions[]/evidences[]/hostOrganismTaxId',
+        'interactions[]/evidences[]/interactionResources',
+        'interactions[]/evidences[]/interactionResources/databaseVersion',
+        'interactions[]/evidences[]/interactionResources/sourceDatabase',
+    },
     'target_view': {
         'homologues',
         'homologues[]',
@@ -456,3 +505,94 @@ def test_association_otf_views_types() -> None:
     for nodes in (disease, target):
         assert nodes['searchA'].nullable
         assert nodes['searchB'].nullable
+
+
+INTERACTION_ROW = [
+    'targetA',
+    'intA',
+    'targetB',
+    'intB',
+    'intABiologicalRole',
+    'intBBiologicalRole',
+    'scoring',
+    'count',
+    'sourceDatabase',
+    'speciesA',
+    'speciesB',
+    'evidences',
+]
+INTERACTION_EVIDENCE = [
+    'evidenceScore',
+    'expansionMethodMiIdentifier',
+    'expansionMethodShortName',
+    'hostOrganismScientificName',
+    'hostOrganismTaxId',
+    'interactionDetectionMethodMiIdentifier',
+    'interactionDetectionMethodShortName',
+    'interactionIdentifier',
+    'interactionResources',
+    'interactionTypeMiIdentifier',
+    'interactionTypeShortName',
+    'participantDetectionMethodA',
+    'participantDetectionMethodB',
+    'pubmedId',
+]
+
+
+def test_interaction_view_is_the_served_interaction_columns() -> None:
+    nodes = _nodes(InteractionView)
+
+    assert [f.name for f in dataset_spec(InteractionView).fields] == ['targetA', 'interactions']
+    assert [f.name for f in nodes['interactions[]'].fields] == INTERACTION_ROW
+    for species in ('speciesA', 'speciesB'):
+        assert [f.name for f in nodes[f'interactions[]/{species}'].fields] == ['mnemonic', 'scientificName', 'taxonId']
+    assert [f.name for f in nodes['interactions[]/evidences[]'].fields] == INTERACTION_EVIDENCE
+    resources = nodes['interactions[]/evidences[]/interactionResources']
+    assert [f.name for f in resources.fields] == ['databaseVersion', 'sourceDatabase']
+    assert nodes['interactions'].constraints.min_length == 1
+    assert nodes['interactions[]/evidences'].constraints.min_length == 1
+    assert discover_models()['interaction_view'] is InteractionView
+
+
+#: the values interaction_view declares in a served type, by the output value each serves
+INTERACTION_SERVED_AS: dict[str, tuple[type[DatasetModel], str]] = {
+    'interactions[]/intABiologicalRole': (Interaction, 'intABiologicalRole'),
+    'interactions[]/intBBiologicalRole': (Interaction, 'intBBiologicalRole'),
+    'interactions[]/speciesA/mnemonic': (Interaction, 'speciesA/mnemonic'),
+    'interactions[]/speciesA/scientificName': (Interaction, 'speciesA/scientificName'),
+    'interactions[]/speciesB/mnemonic': (Interaction, 'speciesB/mnemonic'),
+    'interactions[]/speciesB/scientificName': (Interaction, 'speciesB/scientificName'),
+    'interactions[]/speciesB/taxonId': (Interaction, 'speciesB/taxonId'),
+    'interactions[]/evidences[]/hostOrganismTaxId': (InteractionEvidence, 'hostOrganismTaxId'),
+    'interactions[]/evidences[]/interactionResources/databaseVersion': (
+        InteractionEvidence,
+        'interactionResources/databaseVersion',
+    ),
+    'interactions[]/evidences[]/interactionResources/sourceDatabase': (
+        InteractionEvidence,
+        'interactionResources/sourceDatabase',
+    ),
+}
+
+
+@pytest.mark.parametrize('path', sorted(INTERACTION_SERVED_AS))
+def test_interaction_view_declared_values_are_their_output_s_as_served(path: str) -> None:
+    """The output value without LowCardinality and Enum (a String keeping the allowed values); taxon ids Nullable
+    UInt32, IntAct's negative pseudo-taxids wrapped (David, 2026-11-24)."""
+    output, output_path = INTERACTION_SERVED_AS[path]
+    source = _nodes(output)[output_path]
+    expected = dataclasses.replace(source, clickhouse=None)
+    if isinstance(source.dtype, pl.Enum):
+        expected = dataclasses.replace(expected, dtype=pl.String())
+    if path.endswith(('/taxonId', '/hostOrganismTaxId')):
+        expected = dataclasses.replace(
+            expected, nullable=True, constraints=Constraints(ge=0, le=2**32 - 1), clickhouse='UInt32'
+        )
+
+    assert _nodes(InteractionView)[path] == expected
+
+
+def test_interaction_view_source_database_stays_the_enum() -> None:
+    nodes = _nodes(InteractionView)
+    assert nodes['interactions[]/sourceDatabase'].dtype == pl.Enum(list(get_args(v.InteractionSource)))
+    assert nodes['interactions[]/evidences[]/interactionResources/sourceDatabase'].dtype == pl.String()

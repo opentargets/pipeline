@@ -152,14 +152,15 @@ clickhouse:
       - {name: gene_ontology, engine: rocksdb}
   interaction:
     table: interaction_log
-    input_dir: output/interaction
-    model: interaction
-    postload_script: config/clickhouse/scripts/interaction.sql
+    input_dir: view/interaction_view
+    model: interaction_view
+    tables:
+      - {name: interaction, engine: rocksdb}
+  # interaction_evidence has no postload script: the API reads interaction_evidence_log.
   interaction_evidence:
     table: interaction_evidence_log
     input_dir: output/interaction_evidence
     model: interaction_evidence
-    postload_script: config/clickhouse/scripts/interaction_evidence.sql
   hpo:
     table: hpo_log
     input_dir: output/disease_hpo
