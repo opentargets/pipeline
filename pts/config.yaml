@@ -536,7 +536,9 @@ steps:
         credible_set: output/credible_set
         credible_set_variant: output/credible_set_variant
         pharmacogenetics: output/pharmacogenomics
-      destination: view/coding_variant
+      destination:
+        variant: view/coding_variant_by_variant
+        target: view/coding_variant_by_target
   ##################################################################################################
 
   #: PHARMACOVIGILANCE STEP :#######################################################################

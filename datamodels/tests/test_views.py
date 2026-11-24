@@ -5,7 +5,7 @@ from typing import get_args
 
 import polars as pl
 import pytest
-from pts_view_schemas import ASSOCIATION_TIMESERIES, CODING_VARIANT, TARGET_VIEW
+from pts_view_schemas import ASSOCIATION_TIMESERIES, TARGET_VIEW
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -32,7 +32,8 @@ from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
-from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
+from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.interaction_view import InteractionView
@@ -42,7 +43,8 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf_disease': AssociationOtfDisease,
     'association_otf_target': AssociationOtfTarget,
     'association_timeseries': AssociationTimeseries,
-    'coding_variant': CodingVariant,
+    'coding_variant_by_target': CodingVariantByTarget,
+    'coding_variant_by_variant': CodingVariantByVariant,
     'disease_view': DiseaseView,
     'drug_view': DrugView,
     'interaction_view': InteractionView,
@@ -52,7 +54,6 @@ VIEWS: dict[str, type[DatasetModel]] = {
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
 PTS_SCHEMAS = {
     'association_timeseries': ASSOCIATION_TIMESERIES,
-    'coding_variant': CODING_VARIANT,
     'target_view': TARGET_VIEW,
 }
 
@@ -60,7 +61,6 @@ PTS_SCHEMAS = {
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
     'association_timeseries': {'aggregationType'},
-    'coding_variant': {'datasources'},
     'target_view': {
         'genomicLocation',
         'go',
@@ -77,7 +77,8 @@ PRIMARY_KEYS = {
     'association_otf_disease': ('rowId',),
     'association_otf_target': ('rowId',),
     'association_timeseries': (),
-    'coding_variant': (),
+    'coding_variant_by_target': ('targetId',),
+    'coding_variant_by_variant': ('variantId',),
     'disease_view': ('id',),
     'drug_view': ('id',),
     'interaction_view': ('targetA',),
@@ -120,14 +121,18 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         ('association_timeseries', c): (AssociationOverallDirect, f'timeseries[]/{c}', None)
         for c in ('year', 'associationScore', 'novelty', 'yearlyEvidenceCount')
     },
-    ('coding_variant', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
-    ('coding_variant', 'variantId'): (Variant, 'variantId', None),
-    ('coding_variant', 'variantEffect'): (Variant, 'variantEffect[]/score', True),
-    ('coding_variant', 'variantFunctionalConsequenceIds'): (
-        Variant,
-        'transcriptConsequences[]/variantFunctionalConsequenceIds',
-        None,
-    ),
+    ('coding_variant_by_variant', 'variantId'): (Variant, 'variantId', None),
+    ('coding_variant_by_target', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
+    **{
+        (view, f'proteinCodingCoords[]/{c}'): (Variant, p, n)
+        for view in ('coding_variant_by_variant', 'coding_variant_by_target')
+        for c, p, n in (
+            ('targetId', 'transcriptConsequences[]/targetId', None),
+            ('variantId', 'variantId', None),
+            ('variantEffect', 'variantEffect[]/score', True),
+            ('variantFunctionalConsequenceIds', 'transcriptConsequences[]/variantFunctionalConsequenceIds', None),
+        )
+    },
     **{
         ('disease_view', c): (Disease, c, None)
         for c in (
@@ -314,11 +319,6 @@ def test_association_timeseries_is_ppp_only() -> None:
     assert nodes['partitionKey'].dtype == pl.String()
 
 
-def test_coding_variant_datasource_is_its_vocabulary() -> None:
-    node = _nodes(CodingVariant)['datasources[]/datasourceId']
-    assert node.dtype == pl.Enum(list(get_args(v.CodingVariantDatasource)))
-
-
 def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
     datasets = discover_datasets()
     evidence = ('evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_variants', 'evidence_gwas_credible_sets')
@@ -330,23 +330,21 @@ def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
 
 #: the ClickHouseType markers declared on view columns, from the hand-written landing SQL before piece 3
 MARKERS = {
-    ('coding_variant', 'datasources[]/datasourceCount'): 'UInt32',
-    ('coding_variant', 'datasources[]/datasourceNiceName'): 'LowCardinality(String)',
-    ('coding_variant', 'referenceAminoAcid'): 'LowCardinality(String)',
-    ('coding_variant', 'alternateAminoAcid'): 'LowCardinality(String)',
     ('interaction_view', 'interactions[]/speciesB/taxonId'): 'UInt32',
     ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
+    ('coding_variant_by_target', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
+    ('coding_variant_by_variant', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
 }
 
-
-#: every value a view declares rather than derives
-DECLARED: dict[str, set[str]] = {
-    'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
-    'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
-    'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
-    'coding_variant': {
-        'therapeuticAreas',
-        'therapeuticAreas[]',
+#: the values of a protein coding coordinate a view declares
+COORD_DECLARED = {
+    f'proteinCodingCoords[]/{p}'
+    for p in (
+        'uniprotAccessions',
+        'uniprotAccessions[]',
+        'aminoAcidPosition',
+        'alternateAminoAcid',
+        'referenceAminoAcid',
         'diseases',
         'diseases[]',
         'datasources',
@@ -354,12 +352,19 @@ DECLARED: dict[str, set[str]] = {
         'datasources[]/datasourceCount',
         'datasources[]/datasourceId',
         'datasources[]/datasourceNiceName',
-        'uniprotAccessions',
-        'uniprotAccessions[]',
-        'referenceAminoAcid',
-        'aminoAcidPosition',
-        'alternateAminoAcid',
-    },
+        'therapeuticAreas',
+        'therapeuticAreas[]',
+    )
+} | {'proteinCodingCoords', 'proteinCodingCoords[]'}
+
+
+#: every value a view declares rather than derives
+DECLARED: dict[str, set[str]] = {
+    'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
+    'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
+    'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
+    'coding_variant_by_target': COORD_DECLARED,
+    'coding_variant_by_variant': COORD_DECLARED,
     'disease_view': {
         'synonyms',
         'synonyms[]',
@@ -596,3 +601,51 @@ def test_interaction_view_source_database_stays_the_enum() -> None:
     nodes = _nodes(InteractionView)
     assert nodes['interactions[]/sourceDatabase'].dtype == pl.Enum(list(get_args(v.InteractionSource)))
     assert nodes['interactions[]/evidences[]/interactionResources/sourceDatabase'].dtype == pl.String()
+
+
+#: the served protein coding coordinate, in the tuple's field order
+COORD_FIELDS = [
+    'targetId',
+    'uniprotAccessions',
+    'aminoAcidPosition',
+    'alternateAminoAcid',
+    'referenceAminoAcid',
+    'variantFunctionalConsequenceIds',
+    'variantEffect',
+    'variantId',
+    'diseases',
+    'datasources',
+    'therapeuticAreas',
+]
+
+
+CODING_VARIANT_VIEWS = [(CodingVariantByVariant, 'variantId'), (CodingVariantByTarget, 'targetId')]
+
+
+@pytest.mark.parametrize(('model', 'key'), CODING_VARIANT_VIEWS, ids=['variant', 'target'])
+def test_coding_variant_views_are_the_served_columns(model: type[DatasetModel], key: str) -> None:
+    assert [f.name for f in dataset_spec(model).fields] == [key, 'proteinCodingCoords']
+    assert discover_models()[model.dataset_name] is model
+    coord = to_polars_schema(model)['proteinCodingCoords']
+    assert isinstance(coord, pl.List) and isinstance(coord.inner, pl.Struct)
+    assert [f.name for f in coord.inner.fields] == COORD_FIELDS
+    nodes = _nodes(model)
+    assert not nodes['proteinCodingCoords[]'].nullable
+    assert [p for p in COORD_FIELDS if nodes[f'proteinCodingCoords[]/{p}'].nullable] == ['variantEffect']
+    assert nodes['proteinCodingCoords[]/aminoAcidPosition'].dtype == pl.Int32()
+    datasources = {f.name: f.dtype for f in coord.inner.fields}['datasources']
+    assert datasources == pl.List(
+        pl.Struct({'datasourceCount': pl.Int32, 'datasourceId': pl.String, 'datasourceNiceName': pl.String})
+    )
+
+
+@pytest.mark.parametrize('model', [CodingVariantByVariant, CodingVariantByTarget], ids=['variant', 'target'])
+def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[DatasetModel]) -> None:
+    """Served as String, not Enum8: the API reads it as String by position."""
+    nodes = _nodes(model)
+    node = nodes['proteinCodingCoords[]/datasources[]/datasourceId']
+    assert node.dtype == pl.String()
+    assert node.clickhouse is None
+    assert set(node.constraints.allowed or ()) == set(get_args(v.CodingVariantDatasource))
+    for path in ('datasources[]/datasourceNiceName', 'referenceAminoAcid', 'alternateAminoAcid'):
+        assert nodes[f'proteinCodingCoords[]/{path}'].clickhouse is None, path
