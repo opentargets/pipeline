@@ -661,7 +661,13 @@ steps:
         target_safety_event: output/target_safety_event
         chemical_probes: output/chemical_probe
         transcript: output/transcript
-      destination: view/target_view
+        study: output/study
+        credible_set: output/credible_set
+        pharmacogenomics: output/pharmacogenomics
+      destination:
+        view: view/target_view
+        by_region: view/target_by_region
+        transcript: view/transcript_view
   ##################################################################################################
 
   #: TARGET_GENE_ESSENTIALITY STEP :################################################################
@@ -1261,6 +1267,17 @@ steps:
         uniprot_slterms: input/target_prioritisation/uniprot_locations.tsv.gz
         mouse_pheno_scores: input/target_prioritisation/mouse_pheno_scores.csv
       destination: output/target_prioritisation
+  ##################################################################################################
+
+  #: TARGET_PRIORITISATION_VIEW STEP :##############################################################
+  target_prioritisation_view:
+    - name: transform target_prioritisation_view
+      transformer: target_prioritisation_view
+      source:
+        target_prioritisation: output/target_prioritisation
+        target_essentiality: output/target_essentiality
+      destination:
+        view: view/target_prioritisation_view
   ##################################################################################################
 
   #: ASSOCIATION STEP :#############################################################################

@@ -7,13 +7,18 @@ import polars as pl
 import pytest
 from ot_datamodels import DatasetModel
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
+from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.homology import Homology
+from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
+from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.target_by_region import TargetByRegion
 from ot_datamodels.views.target_view import TargetView
+from ot_datamodels.views.transcript_view import TranscriptView
 
 from pts.schemas.dataset.conform import conform, without_enums
 from pts.schemas.dataset.validate import validate_dataset
@@ -21,10 +26,13 @@ from pts.schemas.target import TARGET
 from pts.task_outputs import OutputValidation
 from pts.transformers import target_view as module
 from pts.transformers.target_view import target_view
+from tests.credible_set_fixtures import published_credible_set
 from tests.target_view_spark_rows import EMPTY_TRANSCRIPT, NULLED_BY_EMPTY, OUTPUT
 
 TARGET_VIEW = to_polars_schema(TargetView)
-VIEW_COLUMNS = [name for name in TARGET_VIEW if name not in TARGET]
+#: the id lists targets.sql joined on, after the columns the spark golden rows hold
+ID_LISTS = ['credibleSetIds', 'pharmacogenomicsIds']
+VIEW_COLUMNS = [name for name in TARGET_VIEW if name not in TARGET and name not in ID_LISTS]
 
 EXON = pl.Struct({'exonId': pl.String, 'chromosome': pl.String, 'start': pl.Int64, 'end': pl.Int64, 'strand': pl.Int32})
 FLAG = pl.Struct({'label': pl.String, 'value': pl.String})
@@ -94,6 +102,7 @@ INPUT_SCHEMAS: dict[str, pl.Schema] = {
         'uniprotTremblIds': pl.List(pl.String),
         'uniprotIsoformIds': pl.List(pl.String),
         'alphafoldIds': pl.List(pl.String),
+        'dbXrefs': pl.List(pl.Struct({'id': pl.String, 'source': pl.String})),
         'isEnsemblCanonical': pl.Boolean,
         'chromosome': pl.String,
         'start': pl.Int64,
@@ -103,6 +112,8 @@ INPUT_SCHEMAS: dict[str, pl.Schema] = {
         'flags': pl.List(FLAG),
         'exons': pl.List(EXON),
     }),
+    'study': pl.Schema({'studyId': pl.String, 'geneId': pl.String}),
+    'pharmacogenomics': pl.Schema({'pharmacogenomicsId': pl.Int64, 'targetFromSourceId': pl.String}),
 }
 
 
@@ -271,6 +282,30 @@ ROWS: dict[str, list[dict]] = {
         _transcript('ENSG9', 'ENST91', True, exons=[_exon(1, 2)]),
         _transcript(None, 'ENSTN', True, exons=[_exon(1, 2)]),
     ],
+    'study': [
+        {'studyId': 'S1', 'geneId': 'ENSG1'},
+        {'studyId': 'S2', 'geneId': 'ENSG1'},
+        {'studyId': 'S3', 'geneId': None},
+        {'studyId': 'S4', 'geneId': 'ENSG9'},
+        {'studyId': 'S5', 'geneId': 'ENSG3'},
+    ],
+    'credible_set': [
+        {'id': 'cs-b', 'studyId': 'S1'},
+        {'id': 'cs-a', 'studyId': 'S1'},
+        {'id': 'cs-a', 'studyId': 'S2'},
+        {'id': 'cs-c', 'studyId': 'S2'},
+        {'id': '', 'studyId': 'S2'},
+        {'id': 'cs-x', 'studyId': 'S3'},
+        {'id': 'cs-y', 'studyId': 'S4'},
+        {'id': 'cs-z', 'studyId': 'S9'},
+    ],
+    'pharmacogenomics': [
+        {'pharmacogenomicsId': 3, 'targetFromSourceId': 'ENSG1'},
+        {'pharmacogenomicsId': 1, 'targetFromSourceId': 'ENSG1'},
+        {'pharmacogenomicsId': 2, 'targetFromSourceId': None},
+        {'pharmacogenomicsId': 5, 'targetFromSourceId': 'ENSG9'},
+        {'pharmacogenomicsId': 4, 'targetFromSourceId': 'ENSG4'},
+    ],
 }
 
 
@@ -298,13 +333,23 @@ def _write(root: Path, rows: dict[str, list[dict]], *, typed: bool = False) -> d
             frame = _as_written(name, frame)
         frame.write_parquet(root / name / 'part-0.parquet')
         source[name] = str(root / name)
+    (root / 'credible_set').mkdir()
+    published_credible_set(*rows.get('credible_set', [])).write_parquet(root / 'credible_set' / 'part-0.parquet')
+    source['credible_set'] = str(root / 'credible_set')
     return source
 
 
-def _run(tmp_path: Path, rows: dict[str, list[dict]] = ROWS, *, typed: bool = False) -> pl.DataFrame:
-    destination = str(tmp_path / 'out')
+DESTINATIONS = ('view', 'by_region', 'transcript')
+
+
+def _run_all(tmp_path: Path, rows: dict[str, list[dict]] = ROWS, *, typed: bool = False) -> dict[str, pl.DataFrame]:
+    destination = {key: str(tmp_path / 'out' / key) for key in DESTINATIONS}
     target_view(_write(tmp_path / 'src', rows, typed=typed), destination, {}, None)
-    return pl.read_parquet(destination)
+    return {key: pl.read_parquet(path) for key, path in destination.items()}
+
+
+def _run(tmp_path: Path, rows: dict[str, list[dict]] = ROWS, *, typed: bool = False) -> pl.DataFrame:
+    return _run_all(tmp_path, rows, typed=typed)['view']
 
 
 def _key(value: object) -> str:
@@ -405,26 +450,37 @@ def test_inputs_as_pts_writes_them_give_the_same_view(tmp_path: Path):
 
 
 def test_writes_its_model(tmp_path: Path):
-    """On one row of each input, its model's example for the same target, the view passes its model."""
+    """On one row of each input, its model's example for the same target, the three views pass their models."""
     target_id = Target.example['id']
-    examples: dict[str, type[DatasetModel]] = {**MODELS, 'chemical_probes': ChemicalProbe}
+    examples: dict[str, tuple[type[DatasetModel], dict]] = {
+        **{name: (model, {'targetId': target_id}) for name, model in MODELS.items() if model is not Target},
+        'target': (Target, {}),
+        'chemical_probes': (ChemicalProbe, {'targetId': target_id}),
+        'study': (Study, {'geneId': target_id}),
+        'credible_set': (CredibleSet, {'studyId': Study.example['studyId']}),
+        'pharmacogenomics': (Pharmacogenomics, {'targetFromSourceId': target_id}),
+    }
     source = {}
-    for name, model in examples.items():
-        row = model.example if model is Target else model.example | {'targetId': target_id}
+    for name, (model, overrides) in examples.items():
         (tmp_path / name).mkdir()
-        pl.DataFrame([row], schema=to_polars_schema(model)).write_parquet(tmp_path / name / 'part-0.parquet')
+        frame = pl.DataFrame([model.example | overrides], schema=to_polars_schema(model))
+        frame.write_parquet(tmp_path / name / 'part-0.parquet')
         source[name] = str(tmp_path / name)
-    destination = str(tmp_path / 'out')
+    destination = {key: str(tmp_path / 'out' / key) for key in DESTINATIONS}
 
     target_view(source, destination, {}, None)
 
-    assert OutputValidation.of(target_view, module).outputs == {None: TargetView}
-    validate_dataset(TargetView, destination)
-    written = pl.read_parquet(destination)
-    assert written.schema == TARGET_VIEW
+    models = {'view': TargetView, 'by_region': TargetByRegion, 'transcript': TranscriptView}
+    assert OutputValidation.of(target_view, module).outputs == models
+    for key, model in models.items():
+        validate_dataset(model, destination[key])
+        assert pl.read_parquet(destination[key]).schema == to_polars_schema(model), key
+    written = pl.read_parquet(destination['view'])
     assert written['homologues'].explode().struct.field('isHighConfidence').to_list() == [
         Homology.example['isHighConfidence']
     ]
+    ids = ([CredibleSet.example['id']], [Pharmacogenomics.example['pharmacogenomicsId']])
+    assert written.select(ID_LISTS).row(0) == ids
 
 
 def test_rows_in_target_order(tmp_path: Path):
@@ -452,3 +508,48 @@ def test_lists_sorted(tmp_path: Path):
 
 def test_alternative_genes_null(tmp_path: Path):
     assert _run(tmp_path)['alternativeGenes'].null_count() == len(ROWS['target']) + 1
+
+
+def test_credible_set_ids(tmp_path: Path):
+    """Distinct and sorted, from every study of the gene; `[]` for a target with none, a study without credible
+    sets included; null `geneId`, genes that are not targets, empty ids and credible sets of no study ignored."""
+    ids = dict(_run(tmp_path).select('id', 'credibleSetIds').unique('id', keep='first').iter_rows())
+    assert ids == {**{t['id']: [] for t in ROWS['target']}, 'ENSG1': ['cs-a', 'cs-b', 'cs-c']}
+
+
+def test_pharmacogenomics_ids(tmp_path: Path):
+    """Ascending; `[]` for none; null `targetFromSourceId` and ids that are not targets ignored."""
+    ids = dict(_run(tmp_path).select('id', 'pharmacogenomicsIds').unique('id', keep='first').iter_rows())
+    assert ids == {**{t['id']: [] for t in ROWS['target']}, 'ENSG1': [1, 3], 'ENSG4': [4]}
+
+
+def test_empty_id_sources_give_empty_lists(tmp_path: Path):
+    result = _run(tmp_path, ROWS | {'study': [], 'credible_set': [], 'pharmacogenomics': []})
+    assert result.schema == TARGET_VIEW
+    for column in ID_LISTS:
+        assert result[column].to_list() == [[]] * result.height, column
+
+
+def test_target_by_region_is_one_row_per_target(tmp_path: Path):
+    frames = _run_all(tmp_path)
+    view, by_region = frames['view'], frames['by_region']
+    assert by_region.schema == to_polars_schema(TargetByRegion)
+    assert sorted(by_region['target'].struct.field('id').to_list(), key=str) == sorted(view['id'].to_list(), key=str)
+    (located,) = by_region.filter(pl.col('target').struct.field('id') == 'ENSG1').to_dicts()
+    assert located == {'chromosome': '1', 'start': 1, 'end': 2, 'target': {'id': 'ENSG1'}}
+
+
+def test_transcript_view_groups_the_transcripts_by_target(tmp_path: Path):
+    """One row per targetId; each transcript row without targetId, in the transcript's column order, by
+    transcriptId; flags as strings."""
+    transcript = _run_all(tmp_path, typed=True)['transcript']
+    assert transcript.schema == to_polars_schema(TranscriptView)
+    rows = {r['targetId']: r['transcripts'] for r in transcript.to_dicts()}
+    assert set(rows) == {t['targetId'] for t in ROWS['transcript']}
+    assert [t['transcriptId'] for t in rows['ENSG1']] == [None, 'ENST11', 'ENST12', 'ENST13']
+    assert [t['transcriptId'] for t in rows['ENSG5']] == ['ENST51', 'ENST52']
+    first = rows['ENSG1'][1]
+    assert list(first) == [name for name in INPUT_SCHEMAS['transcript'] if name != 'targetId']
+    source = next(t for t in ROWS['transcript'] if t['transcriptId'] == 'ENST11')
+    (written,) = pl.DataFrame([source], schema=INPUT_SCHEMAS['transcript']).drop('targetId').to_dicts()
+    assert first == written
