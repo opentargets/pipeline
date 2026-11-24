@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from graphlib import CycleError, TopologicalSorter
+from io import BytesIO
 from pathlib import Path
 
 import polars as pl
@@ -438,7 +439,9 @@ def test_declared_tables_match_scripts(product):
     assert new['rows'].keys() == old['rows'].keys()
     for name, rows in old['rows'].items():
         assert rows, f'{name}: no fixture rows reached it'
-        if name not in CONTENT_FROM_PTS:
+        if name in CONTENT_FROM_PTS:
+            assert len(new['rows'][name]) == len(rows), name
+        else:
             assert new['rows'][name] == rows, name
     assert 0 < len(new['rows']['evidence_by_variant']) < len(new['rows']['evidence']), 'the filter dropped nothing'
     # the other filters cannot drop a row: their columns are not Nullable
@@ -472,3 +475,30 @@ def test_pharmacogenomics_serves_what_its_script_served():
     assert new['columns']['pharmacogenomics', 'rowId'] == ('UInt64', 1)
     assert len(rows[0]) == FIXTURE_ROWS
     assert rows[1] == rows[0]
+
+
+def _run(client, script: str) -> None:
+    for statement in split_statements(script):
+        client.command(statement)
+
+
+def test_pharmacogenomics_script_rejects_repeated_ids(tmp_path):
+    """A landing table with a repeated pharmacogenomicsId, or one loaded from a parquet without the column
+    (ClickHouse fills 0), fails the load instead of collapsing the served table."""
+    entry = DATASETS['pharmacogenomics']
+    script = (ROOT / entry['postload_script']).read_text()
+    with _database() as repeated, _database() as missing:
+        _land(repeated, 'pharmacogenomics', 'platform')
+        repeated.command('INSERT INTO pharmacogenomics_log SELECT * FROM pharmacogenomics_log LIMIT 1')
+        _land(missing, 'pharmacogenomics', 'platform')
+        frame = pl.read_parquet(
+            BytesIO(missing.raw_query('SELECT * EXCEPT (pharmacogenomicsId) FROM pharmacogenomics_log FORMAT Parquet'))
+        )
+        assert 'pharmacogenomicsId' not in frame.columns
+        missing.command('TRUNCATE TABLE pharmacogenomics_log')
+        file = tmp_path / 'old.parquet'
+        frame.write_parquet(file)
+        insert_file(missing, 'pharmacogenomics_log', str(file), fmt='Parquet', settings=INSERT_SETTINGS)
+        for client in (repeated, missing):
+            with pytest.raises(ClickHouseError, match='duplicate pharmacogenomicsId'):
+                _run(client, script)
