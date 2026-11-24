@@ -44,7 +44,7 @@ from pos.clickhouse_ddl import (
 )
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
-from pos.tasks.clickhouse_load import INSERT_SETTINGS, member_drops, union_inserts
+from pos.tasks.clickhouse_load import INSERT_SETTINGS, ClickhouseLoad, ClickhouseLoadError, member_drops, union_inserts
 
 ROOT = Path(__file__).parents[1]
 STEP = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_clickhouse']
@@ -449,32 +449,45 @@ def test_declared_tables_match_scripts(product):
         assert not new['columns'][table, column][0].startswith('Nullable'), (table, column)
 
 
-def test_pharmacogenomics_serves_what_its_script_served():
-    """From the same landing rows, the rename script serves the table the frozen script served: engine, key, columns
-    and rows, but for the value of `rowId`."""
-    entry = DATASETS['pharmacogenomics']
-    script = (ROOT / entry['postload_script']).read_text()
+#: Columns a declaration serves under another name than the script it replaces did, by table.
+RENAMED = {'pharmacogenomics': {'rowId': 'pharmacogenomicsId'}}
+
+
+def _renamed(old: dict) -> dict:
+    """The script shape `old` with the `RENAMED` columns renamed, each checked to be there."""
+    tables, cols = dict(old['tables']), dict(old['columns'])
+    for table, renames in RENAMED.items():
+        for before, after in renames.items():
+            assert (table, before) in cols, f'{table}: the script served no {before}'
+            cols[table, after] = cols.pop((table, before))
+            tables[table] = tuple(re.sub(rf'\b{before}\b', after, v) for v in tables[table])
+    return {**old, 'tables': tables, 'columns': cols}
+
+
+def _build_declared(client, dataset: str, product: str) -> None:
+    """The dataset's declared tables from its filled landing table, as the loader builds them."""
+    entry = DATASETS[dataset]
+    for table in declarations(entry, product)[0]:
+        if table.engine == 'rocksdb':
+            ClickhouseLoad._check_unique(client, table, entry_key(entry, product), entry['table'])
+    for sql in declared_sql(entry, product):
+        client.command(sql)
+
+
+def test_pharmacogenomics_declaration_serves_what_its_script_served():
+    """From the same landing rows, the declaration serves the table the script it replaces served: engine, key,
+    columns and rows, but for the key `rowId` renamed `pharmacogenomicsId`."""
     with _database() as before, _database() as after:
-        _land(after, 'pharmacogenomics', 'platform')
-        before.command(create_table(entry['table'], _script_columns(entry, 'platform')))
-        before.command(
-            'INSERT INTO pharmacogenomics_log SELECT * EXCEPT (pharmacogenomicsId) '  # noqa: S608 generated names
-            f'FROM `{after.database}`.pharmacogenomics_log'
-        )
-        for client, sql in [(before, (BEFORE / 'pharmacogenomics.sql').read_text()), (after, script)]:
-            for statement in split_statements(sql):
-                client.command(statement)
+        for client in (before, after):
+            _land(client, 'pharmacogenomics', 'platform')
+        _run(before, (BEFORE / 'pharmacogenomics_by_id.sql').read_text())
+        _build_declared(after, 'pharmacogenomics', 'platform')
         old, new = _shape(before), _shape(after)
-        rows = [
-            sorted(c.raw_query('SELECT * EXCEPT (rowId) FROM pharmacogenomics FORMAT TSV').decode().splitlines())
-            for c in (before, after)
-        ]
     assert set(new['tables']) == {'pharmacogenomics'}
-    assert new['tables'] == old['tables']
-    assert new['columns'] == old['columns']
-    assert new['columns']['pharmacogenomics', 'rowId'] == ('UInt64', 1)
-    assert len(rows[0]) == FIXTURE_ROWS
-    assert rows[1] == rows[0]
+    assert new['columns']['pharmacogenomics', 'pharmacogenomicsId'] == ('UInt64', 1)
+    assert new['tables']['pharmacogenomics'][3] == 'pharmacogenomicsId'
+    assert len(new['rows']['pharmacogenomics']) == FIXTURE_ROWS
+    assert new == _renamed(old)
 
 
 def _run(client, script: str) -> None:
@@ -482,11 +495,9 @@ def _run(client, script: str) -> None:
         client.command(statement)
 
 
-def test_pharmacogenomics_script_rejects_repeated_ids(tmp_path):
+def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
     """A landing table with a repeated pharmacogenomicsId, or one loaded from a parquet without the column
     (ClickHouse fills 0), fails the load instead of collapsing the served table."""
-    entry = DATASETS['pharmacogenomics']
-    script = (ROOT / entry['postload_script']).read_text()
     with _database() as repeated, _database() as missing:
         _land(repeated, 'pharmacogenomics', 'platform')
         repeated.command('INSERT INTO pharmacogenomics_log SELECT * FROM pharmacogenomics_log LIMIT 1')
@@ -500,5 +511,6 @@ def test_pharmacogenomics_script_rejects_repeated_ids(tmp_path):
         frame.write_parquet(file)
         insert_file(missing, 'pharmacogenomics_log', str(file), fmt='Parquet', settings=INSERT_SETTINGS)
         for client in (repeated, missing):
-            with pytest.raises(ClickHouseError, match='duplicate pharmacogenomicsId'):
-                _run(client, script)
+            with pytest.raises(ClickhouseLoadError, match='duplicate pharmacogenomicsId in pharmacogenomics'):
+                _build_declared(client, 'pharmacogenomics', 'platform')
+            assert not client.command('EXISTS TABLE pharmacogenomics')

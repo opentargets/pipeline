@@ -45,6 +45,7 @@ steps:
         - go
         - hpo
         - literature_entity_lut
+        - pharmacogenomics
         - so
         - target_essentiality
         - w2v
@@ -93,13 +94,6 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
-    - name: clickhouse_load clickhouse load pharmacogenomics
-      requires:
-        - explode load declared datasets
-      dataset: pharmacogenomics
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load association_time_series
       products: [ppp]
       requires:
@@ -143,7 +137,7 @@ steps:
       product: ${product}
     - name: clickhouse_load clickhouse load variants
       requires:
-        - clickhouse_load clickhouse load pharmacogenomics
+        - explode load declared datasets
         - clickhouse_load clickhouse load credible_sets
       dataset: variants
       clickhouse_database: ${database_namespace}
@@ -158,7 +152,7 @@ steps:
       product: ${product}
     - name: clickhouse_load clickhouse load targets
       requires:
-        - clickhouse_load clickhouse load pharmacogenomics
+        - explode load declared datasets
         - clickhouse_load clickhouse load studies
         - clickhouse_load clickhouse load disease
       dataset: targets

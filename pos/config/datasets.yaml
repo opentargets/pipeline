@@ -200,7 +200,8 @@ clickhouse:
     table: pharmacogenomics_log
     input_dir: output/pharmacogenomics
     model: pharmacogenomics
-    postload_script: config/clickhouse/scripts/pharmacogenomics.sql
+    tables:
+      - {name: pharmacogenomics, engine: rocksdb}
   protein_coding_coords:
     table: protein_coding_coords_log
     input_dir: view/coding_variant
