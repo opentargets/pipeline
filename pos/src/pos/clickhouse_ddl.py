@@ -14,6 +14,15 @@ from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
+from pos.clickhouse_tables import (
+    ClickHouseDictionary,
+    ClickHouseTable,
+    dictionary_problems,
+    entry_dictionaries,
+    entry_tables,
+    table_problems,
+)
+
 ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
 _ENUM8_MAX = 127
@@ -280,10 +289,109 @@ def union_columns(models: Sequence[type[DatasetModel]]) -> list[tuple[str, CHTyp
     return out
 
 
-def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log') -> str:
-    """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted."""
+def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log', *, replace: bool = False) -> str:
+    """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted; plain `CREATE TABLE` for `replace`."""
     body = ', '.join(f'{_name(name)} {render(t)}' for name, t in cols)
-    return f'CREATE TABLE IF NOT EXISTS {_name(table)} ({body}) ENGINE = {engine}'
+    exists = '' if replace else 'IF NOT EXISTS '
+    return f'CREATE TABLE {exists}{_name(table)} ({body}) ENGINE = {engine}'
+
+
+def _primary_keys(models: Sequence[type[DatasetModel]]) -> dict[str, tuple[str, ...]]:
+    return {m.dataset_name: dataset_spec(m).primary_key for m in models}
+
+
+def _disagreement(keys: Mapping[str, tuple[str, ...]]) -> str:
+    return 'members disagree on PrimaryKey: ' + ', '.join(f'{name} {key}' for name, key in sorted(keys.items()))
+
+
+def rocksdb_key(models: Sequence[type[DatasetModel]]) -> str:
+    """The RocksDB key of a table built from `models`: the one `PrimaryKey` column they all have."""
+    keys = _primary_keys(models)
+    shared = set(keys.values())
+    if len(shared) > 1:
+        raise ValueError(_disagreement(keys))
+    (key,) = shared or {()}
+    if len(key) != 1:
+        raise ValueError(f'{", ".join(sorted(keys))}: rocksdb needs one PrimaryKey column, found {key or "none"}')
+    return key[0]
+
+
+def table_columns(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]]) -> list[tuple[str, CHType]]:
+    """The table's columns from the dataset's `cols`: those in `columns` (all when None), in order."""
+    by_name = dict(cols)
+    return list(cols) if table.columns is None else [(name, by_name[name]) for name in table.columns]
+
+
+def table_sql(
+    table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landing: str, key: str | None = None
+) -> list[str]:
+    """The statements that rebuild a declared table from its landing table; `cols` are the dataset's.
+
+    A RocksDB table is keyed on `key`. A MergeTree table's primary key is its sort key; it allows a nullable key
+    when an `order_by` column is nullable and is optimised after the insert. The statements drop the table first,
+    so a re-run leaves one copy of the rows.
+    """
+    own = table_columns(table, cols)
+    types = dict(own)
+    if table.engine == 'rocksdb':
+        if key is None:
+            raise ValueError(f'{table.name}: rocksdb needs a key')
+        engine = f'EmbeddedRocksDB() PRIMARY KEY {_name(key)}'
+    else:
+        engine = f'MergeTree() ORDER BY ({_names(table.order_by)})'
+        if any(types[c].nullable for c in table.order_by):
+            engine += ' SETTINGS allow_nullable_key = 1'
+    select = _names([name for name, _ in own])
+    insert = f'INSERT INTO {_name(table.name)} SELECT {select} FROM {_name(landing)}'  # noqa: S608 quoted identifiers
+    if table.where:
+        insert += f' WHERE {table.where}'
+    statements = [
+        f'DROP TABLE IF EXISTS {_name(table.name)} SYNC',
+        create_table(table.name, own, engine, replace=True),
+        insert,
+    ]
+    if table.engine == 'mergetree':
+        statements.append(f'OPTIMIZE TABLE {_name(table.name)} FINAL')
+    return statements
+
+
+def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) -> str:
+    """`CREATE DICTIONARY` over its source table; `cols` are the table's own. Renames go through EXPRESSION.
+
+    Columns take their source's type without LowCardinality, which dictionaries do not accept.
+    """
+    types = dict(cols)
+    parts = []
+    for name in (d.key, *d.attributes):
+        source = d.source_columns.get(name, name)
+        expression = f' EXPRESSION {_name(source)}' if source != name else ''
+        parts.append(f'{_name(name)} {render(replace(types[source], low_cardinality=False))}{expression}')
+    return (
+        f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
+        f"SOURCE(CLICKHOUSE(TABLE '{d.source}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+
+
+def drop_dictionary_sql(d: ClickHouseDictionary) -> str:
+    """Drops the dictionary; run it before `table_sql` on the source table, which ClickHouse will not drop under it."""
+    return f'DROP DICTIONARY IF EXISTS {_name(d.name)} SYNC'
+
+
+def uniqueness_sql(table: ClickHouseTable, key: str, landing: str) -> str:
+    """A query that throws when the RocksDB `key` repeats in the rows the table takes from `landing`.
+
+    It reads the landing table: RocksDB keeps the last row of a repeated key, so the table itself never repeats one.
+    A NULL key counts as a value.
+    """
+    where = f' WHERE {table.where}' if table.where else ''
+    return (
+        f"SELECT throwIf(count() != uniqExact(tuple({_name(key)})), 'duplicate {key} in {table.name}') "  # noqa: S608 declared names
+        f'FROM {_name(landing)}{where}'
+    )
+
+
+def _names(names: Sequence[str]) -> str:
+    return ', '.join(_name(n) for n in names)
 
 
 def members(pattern: str, product: str) -> list[type[DatasetModel]]:
@@ -300,9 +408,80 @@ def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]] | 
     """
     if 'models' in entry:
         return union_columns(members(entry['models'], product))
-    if 'model' in entry:
-        return columns(discover_models()[entry['model']])
+    if (model := entry_model(entry)) is not None:
+        return columns(model)
     return None
+
+
+def entry_model(entry: Mapping) -> type[DatasetModel] | None:
+    """The model of a `model` entry of `datasets.yaml`; None for any other entry."""
+    return discover_models()[entry['model']] if 'model' in entry else None
+
+
+def _entry_models(entry: Mapping, product: str) -> list[type[DatasetModel]]:
+    """The models an entry loads for `product`: its members, or its one model."""
+    model = entry_model(entry)
+    return [model] if model is not None else members(entry['models'], product)
+
+
+def entry_key(entry: Mapping, product: str) -> str:
+    """The RocksDB key of an entry's tables: its model's one `PrimaryKey` column, or the one its members share."""
+    try:
+        return rocksdb_key(_entry_models(entry, product))
+    except ValueError as e:
+        raise ValueError(f'{entry["table"]}: {e}') from e
+
+
+def entry_problems(entry: Mapping, product: str) -> list[str]:
+    """The problems in the tables and dictionaries a `datasets.yaml` entry declares, checked against its members."""
+    tables = entry_tables(entry)
+    owner = entry['table']
+    keys = _primary_keys(_entry_models(entry, product))
+    shared = set(keys.values())
+    keyed = any(t.engine == 'rocksdb' for t in tables)
+    problems = []
+    if tables and 'postload_script' in entry:
+        problems.append(f'{owner}: declares ClickHouse tables and has a postload_script')
+    problems +=[f'{owner}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
+    key = next(iter(shared)) if len(shared) == 1 else ()
+    fields = [name for name, _ in landing_columns(entry, product) or []]
+    problems += [p for t in tables for p in table_problems(t, owner, fields, key)]
+    return problems + [p for d in entry_dictionaries(entry) for p in dictionary_problems(d, owner, tables, fields)]
+
+
+def is_declared(entry: Mapping) -> bool:
+    """Whether the entry declares tables under `tables`."""
+    return bool(entry.get('tables'))
+
+
+def declarations(entry: Mapping, product: str) -> tuple[list[ClickHouseTable], list[ClickHouseDictionary]]:
+    """The tables and dictionaries an entry declares, for `product`.
+
+    A `model` entry builds them only for its model's products; a `models` entry for any product.
+    """
+    model = entry_model(entry)
+    if model is not None and product not in model.products:
+        return [], []
+    return entry_tables(entry), entry_dictionaries(entry)
+
+
+def declared_sql(entry: Mapping, product: str) -> list[str]:
+    """The statements that build an entry's declared tables and dictionaries from its filled landing table.
+
+    They end by dropping the landing table. An undeclared entry has none.
+    """
+    tables, dictionaries = declarations(entry, product)
+    if not tables:
+        return []
+    cols = landing_columns(entry, product) or []
+    landing = entry['table']
+    key = entry_key(entry, product) if any(t.engine == 'rocksdb' for t in tables) else None
+    by_name = {t.name: t for t in tables}
+    statements = [drop_dictionary_sql(d) for d in dictionaries]
+    for table in tables:
+        statements += table_sql(table, cols, landing, key)
+    statements += [dictionary_sql(d, table_columns(by_name[d.source], cols)) for d in dictionaries]
+    return [*statements, f'DROP TABLE {_name(landing)} SYNC']
 
 
 def member_table(model: type[DatasetModel]) -> str:

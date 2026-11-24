@@ -10,7 +10,17 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.clickhouse_ddl import columns, ddl_for, member_table, members
+from pos.clickhouse_ddl import (
+    columns,
+    ddl_for,
+    declarations,
+    declared_sql,
+    entry_key,
+    is_declared,
+    member_table,
+    members,
+    uniqueness_sql,
+)
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.utils import get_config
@@ -69,6 +79,11 @@ class ClickhouseLoad(Task):
             self._file: Path | None = None  # the file being inserted
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
+        self._declared = is_declared(self._entry)
+        if self._declared and self._post_load_sql is not None:
+            raise ClickhouseLoadError(f'{self.spec.dataset}: declares ClickHouse tables and has a postload_script')
+        if self._declared and not declarations(self._entry, self.spec.product)[0]:
+            raise ClickhouseLoadError(f'{self.spec.dataset}: declares no ClickHouse table for {self.spec.product}')
 
     @report
     def run(self) -> Task:
@@ -76,18 +91,24 @@ class ClickhouseLoad(Task):
             ddl = dict(ddl_for(self._entry, self.spec.product))
             member_files = self._member_files()
             client = self._connect()
+            if self._declared:
+                self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
             self._load_members(client, ddl, member_files)
         else:
             files = [] if self._derived else self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
             client = self._connect()
             ddl = ddl_for(self._entry, self.spec.product)
             create = ddl[0][1] if ddl else None
+            if self._declared:
+                self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
             if create is not None:
                 self._create(client, create)
             else:
                 self._execute_script(client, self._pre_load_sql)
             if not self._derived:
                 self._load_named(client, self.spec.dataset, self._table_name, files, create)
+        if self._declared:
+            self._build_declared(client)
         if self._post_load_sql is not None:
             self._execute_script(client, self._post_load_sql)
         return self
@@ -138,6 +159,30 @@ class ClickhouseLoad(Task):
             self._run_all(client, inserts)
         self._log_count(client, self._table_name)
         for sql in member_drops(loaded):
+            client.command(sql)
+
+    def _build_declared(self, client) -> None:
+        """The entry's tables and dictionaries for the product, from the landing table, which is then dropped."""
+        tables, _ = declarations(self._entry, self.spec.product)
+        for table in tables:
+            if table.engine == 'rocksdb':
+                self._check_unique(client, table, entry_key(self._entry, self.spec.product), self._table_name)
+        self._run_logged(client, declared_sql(self._entry, self.spec.product))
+        for table in tables:
+            if table.engine == 'mergetree':
+                self._log_count(client, table.name)
+
+    @staticmethod
+    def _check_unique(client, table, key: str, landing: str) -> None:
+        try:
+            client.command(uniqueness_sql(table, key, landing))
+        except ClickHouseError as e:
+            raise ClickhouseLoadError(f'loading {table.name} failed: {e}') from e
+
+    @staticmethod
+    def _run_logged(client, statements: list[str]) -> None:
+        for sql in statements:
+            logger.info(sql)
             client.command(sql)
 
     @staticmethod

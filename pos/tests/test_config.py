@@ -13,6 +13,7 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
+from pos.clickhouse_ddl import declarations, entry_model, is_declared
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
@@ -246,7 +247,7 @@ def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
     config = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
     tasks = config['steps']['backend_clickhouse']
     if where == 'explode':
-        (explode,) = [t for t in tasks if t['name'].startswith('explode ')]
+        explode = next(t for t in tasks if t['name'].startswith('explode '))
         tasks = explode['do']
     first = next(t for t in tasks if t['name'].startswith('clickhouse_load '))
     del first['product']
@@ -287,3 +288,48 @@ def test_no_hand_written_landing_ddl():
         if 'preload_script' in entry:
             assert entry['preload_script'].startswith('config/clickhouse/scripts/'), name
 
+
+DECLARED_LOADS = 'explode load declared datasets'
+
+
+def test_undeclared_loads_wait_for_the_declared_ones():
+    """Every load of an undeclared dataset requires the declared explode, directly or through another task; a
+    declared dataset outside that explode is product-gated."""
+    tasks = {t['name']: t for t in CONFIG['steps']['backend_clickhouse']}
+    assert all(is_declared(DATASETS['clickhouse'][d]) for d in tasks[DECLARED_LOADS]['foreach'])
+
+    def waits(name: str) -> bool:
+        requires = tasks[name].get('requires', [])
+        return DECLARED_LOADS in requires or any(waits(r) for r in requires if r in tasks)
+
+    for name, task in tasks.items():
+        if name == DECLARED_LOADS or not name.startswith(('clickhouse_load', 'explode ')):
+            continue
+        datasets = task.get('foreach', [task.get('dataset')])
+        if all(is_declared(DATASETS['clickhouse'][d]) for d in datasets):
+            assert task.get('products'), f'{name}: a declared dataset outside {DECLARED_LOADS}'
+            continue
+        assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
+
+
+def test_a_declared_model_loads_only_for_its_products(load):
+    """A declared model builds no table for a product it lacks, so its load runs only for its products."""
+    _load, _ = load
+    for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
+        loaded = {s.dataset for s in _built_loads(_load('backend_clickhouse', run=run)[0])}
+        for name in loaded:
+            entry = DATASETS['clickhouse'][name]
+            model = entry_model(entry)
+            if model is not None and is_declared(entry):
+                assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
+        assert ('otar_projects' in loaded) == (product == 'ppp')
+
+
+@pytest.mark.parametrize('product', sorted(PRODUCTS))
+def test_declared_names_are_unique(product):
+    """A table or dictionary name declared twice would drop the first one's table at load time."""
+    names = []
+    for entry in DATASETS['clickhouse'].values():
+        tables, dictionaries = declarations(entry, product)
+        names += [t.name for t in tables] + [d.name for d in dictionaries]
+    assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)

@@ -34,9 +34,9 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 | `backend_opensearch` | syncs `output/` and `export/` to the work dir, writes `croissant.json` to `release_uri`, creates and loads the OpenSearch indices | OpenSearch `:9200` on an empty disk: it fails if an index exists; a complete `output/` (every dataset another dataset references must be present, or croissant generation fails) |
 | `tarballs` | streams `/mnt/clickhouse` and `/mnt/opensearch` through tar, pigz and `rclone rcat` to `<release_uri>/disk_images/` | the two disks, restored from snapshots |
 | `bigquery` | loads every modelled output into `platform_staging`, then swaps each table into `platform` (Platform only) | BigQuery access |
-| `gcs_sync` | `<release_uri>` to the public release bucket | |
-| `aws_sync` | rclone to S3 (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
-| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
+| `gcs_sync` | `<release_uri>` to the public release bucket, except `view/` | |
+| `aws_sync` | rclone to S3, without `view/` (Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
+| `ftp_sync` | manual, from a workstation: `uv run pos -s ftp_sync -r <release_uri>`; over SSH to the EBI cluster, where `gcloud` runs; leaves out `view/` and `excluded/` (Platform only) | SSH key for `$USER` (unset in a container, so paramiko would log in as root) |
 | `publish_manifest` | last, after every other step: copies `<release_uri>/manifest.json` to the release bucket and S3 (S3 Platform only) | `AWS_SHARED_CREDENTIALS_FILE` |
 | `scratch_cleanup` | scratch mode only: drops the scratch BigQuery datasets (Platform only; for PPP it does nothing and exits 0) | BigQuery access |
 
@@ -61,6 +61,30 @@ columns), and the member tables are dropped. A member with no parquet fails the 
 it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
 load. Only `derived` entries (built from loaded tables) have a `preload_script`, under `scripts/`; a config
 test checks each entry has exactly one of `model`, `models`, `preload_script`.
+
+Storage is declared in `config/datasets.yaml`: an entry's `tables` and `dictionaries` list what
+its load builds from the landing table (`ClickHouseTable`, `ClickHouseDictionary` in
+`pos.clickhouse_tables`). A table declares only its name, engine, `order_by`, `columns` and
+`where`; a dictionary its name, `source` table, `key`, `attributes` and `source_columns`. The
+rest is derived from the model: the RocksDB key is its one `PrimaryKey` column (for `evidence`,
+the one its members share), a `model` entry builds only for the model's products,
+`allow_nullable_key` is set when an `order_by` column is nullable, and every MergeTree table gets
+`OPTIMIZE FINAL`. `clickhouse_load` checks each RocksDB key is unique in the landing table,
+builds the tables and dictionaries from it, then drops it. `entry_problems` checks the
+declarations against the landing columns (`test_yaml_declarations_are_valid`).
+Declared datasets load in `explode load declared datasets`; a `postload_script` (under
+`scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones included,
+requires the declared explode, directly or through another task; a declared
+dataset outside it must be product-gated (`test_undeclared_loads_wait_for_the_declared_ones`).
+A declared model loads only for its products, so a PPP-only one (`otar_projects`,
+`association_time_series`) is a top-level task with `products: [ppp]`
+(`test_a_declared_model_loads_only_for_its_products`). No script may read a declared
+landing table (`test_no_script_reads_a_declared_landing_table`).
+`test_declared_tables_match_scripts` builds each declared dataset from the same fixture rows
+with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`) and
+compares tables, columns, sort keys, dictionaries and rows. Engine settings may differ
+only as listed there: the primary key is the sort key, `allow_nullable_key` only on a
+nullable `order_by`, every MergeTree table optimised, and no `otar_projects` on Platform.
 
 Print the generated DDL:
 

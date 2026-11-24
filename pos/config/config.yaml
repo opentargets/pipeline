@@ -27,90 +27,75 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    - name: explode load all datasets
+    # tables declared in datasets.yaml; the explode below runs the serving scripts after them
+    - name: explode load declared datasets
       requires:
         - sync_bucket etl output files
         - sync_bucket etl view files
         - clickhouse_create_database release database
       foreach:
         - baseline_expression
-        - colocalisation
-        - disease_hpo
-        - drug_warnings
+        - biosample
+        - clinical_indication
+        - clinical_report
+        - clinical_target
         - enhancer_to_gene
         - evidence
         - go
         - hpo
         - literature_entity_lut
-        - mechanism_of_action
-        - mouse_phenotypes
-        - pharmacovigilance
-        - otar_projects
-        - protein_coding_coords
         - so
-        - transcript
+        - target_essentiality
         - w2v
-        - clinical_indication
-        - clinical_report
-        - clinical_target
       do:
         - name: clickhouse_load clickhouse load ${each}
           dataset: ${each}
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
-    # top level, not in the explode: later tasks require them by name
-    - name: clickhouse_load clickhouse load biosample
+    - name: explode load all datasets
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: biosample
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
+        - explode load declared datasets
+      foreach:
+        - colocalisation
+        - disease_hpo
+        - drug_warnings
+        - mechanism_of_action
+        - mouse_phenotypes
+        - pharmacovigilance
+        - protein_coding_coords
+        - transcript
+      do:
+        - name: clickhouse_load clickhouse load ${each}
+          dataset: ${each}
+          clickhouse_database: ${database_namespace}
+          data_dir_parent: ${local_data}
+          product: ${product}
     - name: clickhouse_load clickhouse load credible_set_variant
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: credible_set_variant
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: interaction_evidence
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load l2g_predictions
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: l2g_predictions
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load pharmacogenomics
       requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
+        - explode load declared datasets
       dataset: pharmacogenomics
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load target_essentiality
-      requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: target_essentiality
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
@@ -124,9 +109,19 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
+    - name: clickhouse_load clickhouse load otar_projects
+      products: [ppp]
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      dataset: otar_projects
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse target_prioritisation
       requires:
-        - clickhouse_load clickhouse load target_essentiality
+        - explode load declared datasets
       dataset: target_prioritisation
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
@@ -193,7 +188,7 @@ steps:
     - name: clickhouse_load clickhouse load variant_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
-        - clickhouse_load clickhouse load biosample
+        - explode load declared datasets
         - clickhouse_load clickhouse load studies
         - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load disease
@@ -219,7 +214,7 @@ steps:
         - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load studies
-        - clickhouse_load clickhouse load biosample
+        - explode load declared datasets
       dataset: target_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
@@ -309,6 +304,7 @@ steps:
     - name: sync_bucket gcs release data
       source: ${data_source}/
       destination: ${release_gcs_bucket}/${release}/
+      exclude: [view/]
   aws_sync:
     - name: rclone_sync aws release data
       products: [platform]

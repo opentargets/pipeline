@@ -8,7 +8,14 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
+from ot_datamodels import (
+    Bioregistry,
+    ClickHouseType,
+    DatasetModel,
+    PolarsDtype,
+    Reference,
+    StructModel,
+)
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, MD5_HEX, ONTOLOGY_ID
 from ot_datamodels.vocabularies import Chromosome, IntervalDatasource, IntervalType
 

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import polars as pl
 import pytest
 import yaml
-from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, StructModel
+from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.target_view import TargetView
@@ -20,6 +20,11 @@ from pos.clickhouse_ddl import (
     columns,
     create_table,
     ddl_for,
+    declarations,
+    declared_sql,
+    dictionary_sql,
+    drop_dictionary_sql,
+    entry_problems,
     landing_columns,
     member_table,
     members,
@@ -27,9 +32,13 @@ from pos.clickhouse_ddl import (
     parse_table,
     parse_type,
     render,
+    rocksdb_key,
+    table_sql,
     type_at,
     union_columns,
+    uniqueness_sql,
 )
+from pos.clickhouse_tables import ClickHouseDictionary, ClickHouseTable, entry_tables
 
 ROOT = Path(__file__).parents[1]
 
@@ -374,3 +383,278 @@ def test_target_view_keeps_landing_types(path, expected):
     t = type_at(columns(TargetView), path)
     assert t is not None
     assert render(t) == expected
+
+
+# declared tables
+
+STR = CHType('String')
+LANDING = [
+    ('id', STR),
+    ('drugId', STR),
+    ('targetId', CHType('String', nullable=True)),
+    ('score', CHType('Float64', nullable=True)),
+    ('tags', CHType('Array', element=STR)),
+]
+
+
+def test_rocksdb_table_sql_keys_on_the_given_key():
+    table = ClickHouseTable('gene_ontology', 'rocksdb')
+    assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log', key='id') == [
+        'DROP TABLE IF EXISTS `gene_ontology` SYNC',
+        (
+            'CREATE TABLE `gene_ontology` (`id` String, `name` String) '
+            'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
+        ),
+        'INSERT INTO `gene_ontology` SELECT `id`, `name` FROM `gene_ontology_log`',
+    ]
+
+
+def test_rocksdb_table_sql_needs_a_key():
+    with pytest.raises(ValueError, match='gene_ontology: rocksdb needs a key'):
+        table_sql(ClickHouseTable('gene_ontology', 'rocksdb'), [('id', STR)], 'l')
+
+
+def test_mergetree_nullable_order_by_allows_nullable_key_and_is_optimised():
+    table = ClickHouseTable('t', 'mergetree', order_by=('targetId', 'id'), columns=('id', 'targetId'))
+    assert table_sql(table, LANDING, 't_log') == [
+        'DROP TABLE IF EXISTS `t` SYNC',
+        (
+            'CREATE TABLE `t` (`id` String, `targetId` Nullable(String)) '
+            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
+        ),
+        'INSERT INTO `t` SELECT `id`, `targetId` FROM `t_log`',
+        'OPTIMIZE TABLE `t` FINAL',
+    ]
+
+
+def test_mergetree_without_a_nullable_order_by_has_no_settings():
+    table = ClickHouseTable('t', 'mergetree', order_by=('id',), columns=('id',))
+    assert table_sql(table, LANDING, 'l')[1] == 'CREATE TABLE `t` (`id` String) ENGINE = MergeTree() ORDER BY (`id`)'
+
+
+def test_mergetree_where_and_columns_order():
+    table = ClickHouseTable(
+        'clinical_target',
+        'mergetree',
+        order_by=('targetId', 'id'),
+        columns=('targetId', 'drugId', 'id'),
+        where='targetId IS NOT NULL',
+    )
+    assert table_sql(table, LANDING, 'clinical_target_log') == [
+        'DROP TABLE IF EXISTS `clinical_target` SYNC',
+        (
+            'CREATE TABLE `clinical_target` (`targetId` Nullable(String), `drugId` String, `id` String) '
+            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
+        ),
+        (
+            'INSERT INTO `clinical_target` SELECT `targetId`, `drugId`, `id` FROM `clinical_target_log` '
+            'WHERE targetId IS NOT NULL'
+        ),
+        'OPTIMIZE TABLE `clinical_target` FINAL',
+    ]
+
+
+def test_no_columns_keeps_every_landing_column():
+    table = ClickHouseTable('t', 'rocksdb')
+    assert table_sql(table, LANDING, 'l', key='id')[2] == (
+        'INSERT INTO `t` SELECT `id`, `drugId`, `targetId`, `score`, `tags` FROM `l`'
+    )
+
+
+def test_dictionary_sql_renames_through_expression():
+    d = ClickHouseDictionary(
+        'biosample_names',
+        'biosample',
+        key='id',
+        attributes=('name',),
+        source_columns={'id': 'biosampleId', 'name': 'biosampleName'},
+    )
+    cols = [('biosampleId', STR), ('biosampleName', STR), ('other', STR)]
+    assert dictionary_sql(d, cols) == (
+        'CREATE OR REPLACE DICTIONARY `biosample_names` '
+        '(`id` String EXPRESSION `biosampleId`, `name` String EXPRESSION `biosampleName`) PRIMARY KEY `id` '
+        "SOURCE(CLICKHOUSE(TABLE 'biosample')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+
+
+def test_dictionary_sql_identity_columns_have_no_expression():
+    d = ClickHouseDictionary('d', 't', key='id', attributes=('name',))
+    assert dictionary_sql(d, [('id', STR), ('name', STR)]) == (
+        'CREATE OR REPLACE DICTIONARY `d` (`id` String, `name` String) PRIMARY KEY `id` '
+        "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+    )
+
+
+def test_dictionary_sql_drops_low_cardinality():
+    d = ClickHouseDictionary('sequence_ontology', 'sequence_ontology_source', key='id', attributes=('label',))
+    low = CHType('String', low_cardinality=True)
+    assert dictionary_sql(d, [('id', low), ('label', low)]).startswith(
+        'CREATE OR REPLACE DICTIONARY `sequence_ontology` (`id` String, `label` String) PRIMARY KEY `id` '
+    )
+
+
+def test_drop_dictionary_sql():
+    d = ClickHouseDictionary('biosample_names', 'biosample', key='id', attributes=('name',))
+    assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
+
+
+def test_uniqueness_sql_reads_the_key_through_the_filter():
+    table = ClickHouseTable('biosample', 'rocksdb', where='biosampleId != 3')
+    assert uniqueness_sql(table, 'biosampleId', 'biosample_log') == (
+        "SELECT throwIf(count() != uniqExact(tuple(`biosampleId`)), 'duplicate biosampleId in biosample') "
+        'FROM `biosample_log` WHERE biosampleId != 3'
+    )
+
+
+class Keyed(DatasetModel):
+    dataset_name = 'keyed'
+    dataset_title = 'Keyed'
+    dataset_description = 'Keyed.'
+    example = {}
+    products = ('platform', 'ppp')
+
+    id: Annotated[str, PrimaryKey()]
+
+
+class KeyedPppOnly(DatasetModel):
+    dataset_name = 'keyed_ppp_only'
+    dataset_title = 'PPP only'
+    dataset_description = 'PPP only.'
+    example = {}
+    products = ('ppp',)
+
+    id: Annotated[str, PrimaryKey()]
+
+
+class OtherKey(DatasetModel):
+    dataset_name = 'other_key'
+    dataset_title = 'Other key'
+    dataset_description = 'Other key.'
+    example = {}
+
+    gene: Annotated[str, PrimaryKey()]
+
+
+class TwoKeys(DatasetModel):
+    dataset_name = 'two_keys'
+    dataset_title = 'Two keys'
+    dataset_description = 'Two keys.'
+    example = {}
+
+    a: Annotated[str, PrimaryKey()]
+    b: Annotated[str, PrimaryKey()]
+
+
+KEYED = {
+    'table': 'keyed_log',
+    'model': 'keyed',
+    'tables': [{'name': 'keyed', 'engine': 'rocksdb'}],
+    'dictionaries': [{'name': 'keyed_names', 'source': 'keyed', 'key': 'id', 'attributes': ['id']}],
+}
+PPP_ONLY = {'table': 'ppp_only_log', 'model': 'keyed_ppp_only', 'tables': [{'name': 'ppp_only', 'engine': 'rocksdb'}]}
+
+
+def test_declarations_follow_the_model_products(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'keyed_ppp_only': KeyedPppOnly})
+    tables, dictionaries = declarations(KEYED, 'platform')
+    assert [t.name for t in tables] == ['keyed']
+    assert [d.name for d in dictionaries] == ['keyed_names']
+    assert declarations(PPP_ONLY, 'platform') == ([], [])
+    assert [t.name for t in declarations(PPP_ONLY, 'ppp')[0]] == ['ppp_only']
+
+
+def test_a_models_entry_declares_for_every_product():
+    entry = {'table': 'u_log', 'models': 'keyed*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert declarations(entry, 'platform') == declarations(entry, 'ppp') == ([ClickHouseTable('u', 'rocksdb')], [])
+
+
+def test_rocksdb_key_is_the_one_primary_key_the_models_share():
+    assert rocksdb_key([Keyed]) == 'id'
+    assert rocksdb_key([Keyed, KeyedPppOnly]) == 'id'
+    with pytest.raises(ValueError, match='disagree'):
+        rocksdb_key([Keyed, OtherKey])
+    with pytest.raises(ValueError, match='one PrimaryKey column'):
+        rocksdb_key([TwoKeys])
+
+
+def test_declared_sql_keys_rocksdb_on_the_model_primary_key(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed})
+    statements = declared_sql(KEYED, 'platform')
+    assert 'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`' in statements[2]
+    assert statements[0] == 'DROP DICTIONARY IF EXISTS `keyed_names` SYNC'
+    assert statements[-2].startswith('CREATE OR REPLACE DICTIONARY `keyed_names`')
+    assert statements[-1] == 'DROP TABLE `keyed_log` SYNC'
+
+
+def test_entry_tables_take_only_the_table_fields():
+    entry = {'table': 'e_log', 'tables': [{'name': 'e', 'engine': 'rocksdb', 'key': 'id'}]}
+    with pytest.raises(ValueError, match=r"unknown ClickHouseTable fields \['key'\]"):
+        entry_tables(entry)
+
+
+def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'other_key': OtherKey})
+    good = {'table': 'u_log', 'models': 'keyed', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert entry_problems(good, 'platform') == []
+    bad = {
+        'table': 'u_log',
+        'models': '*',
+        'tables': [{'name': 'u', 'engine': 'mergetree', 'order_by': ['nope'], 'where': 'zip IS NULL'}],
+    }
+    assert entry_problems(bad, 'platform') == [
+        "u_log.u: where 'zip' is not a column of the model",
+        "u_log.u: order_by 'nope' is not a column of the table",
+    ]
+    disagree = {'table': 'u_log', 'models': '*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
+    assert entry_problems(disagree, 'platform') == [
+        "u_log: members disagree on PrimaryKey: keyed ('id',), other_key ('gene',)",
+        'u_log.u: rocksdb needs one PrimaryKey column on the model, it has none',
+    ]
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_yaml_declarations_are_valid(product):
+    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+    declared = [e for e in entries.values() if 'tables' in e or 'dictionaries' in e]
+    assert declared
+    assert [p for e in declared for p in entry_problems(e, product)] == []
+
+
+def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
+    client = clickhouse_database
+    table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3')
+    cols = [('id', CHType('Int64')), ('name', STR)]
+    client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
+    client.command('CREATE TABLE ddl_rerun_log (id Int64, name String) ENGINE = Log')
+    client.command("INSERT INTO ddl_rerun_log VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+    try:
+        for _ in range(2):
+            for statement in table_sql(table, cols, 'ddl_rerun_log'):
+                client.command(statement)
+        assert client.command('SELECT count() FROM ddl_rerun') == 2
+    finally:
+        client.command('DROP TABLE IF EXISTS ddl_rerun SYNC')
+        client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
+
+
+def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
+    client = clickhouse_database
+    table = ClickHouseTable('ddl_dict_src', 'rocksdb')
+    cols = [('k', STR), ('v', STR)]
+    d = ClickHouseDictionary(
+        'ddl_dict', 'ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
+    )
+    client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
+    client.command('CREATE TABLE ddl_dict_log (k String, v String) ENGINE = Log')
+    client.command("INSERT INTO ddl_dict_log VALUES ('x', 'nx')")
+    try:
+        for _ in range(2):
+            client.command(drop_dictionary_sql(d))
+            for statement in table_sql(table, cols, 'ddl_dict_log', key='k'):
+                client.command(statement)
+            client.command(dictionary_sql(d, cols))
+        assert client.command("SELECT dictGet('ddl_dict', 'name', tuple('x'))") == 'nx'
+    finally:
+        client.command('DROP DICTIONARY IF EXISTS ddl_dict')
+        client.command('DROP TABLE IF EXISTS ddl_dict_src SYNC')
+        client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')

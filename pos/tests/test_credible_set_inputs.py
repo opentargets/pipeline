@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from pos.clickhouse_tables import entry_tables
 from pos.sql import split_statements
 
 POS = Path(__file__).parents[1]
@@ -14,6 +15,7 @@ STEP = yaml.safe_load((POS / 'config/config.yaml').read_text())['steps']['backen
 BACKEND = {t['name']: t for t in STEP}
 READ_MODELS = ('study_credible_sets', 'target_credible_sets', 'variant_credible_sets')
 CLEANUP = 'clickhouse_load clickhouse credible_sets_build_cleanup'
+DECLARED_LOADS = 'explode load declared datasets'
 
 
 def _statements(script: str) -> list[str]:
@@ -38,8 +40,17 @@ def _creates() -> dict[str, str]:
     return found
 
 
+def _declared() -> dict[str, str]:
+    """Each declared `<t>_mergetree` table to the dataset whose load builds it."""
+    found = {}
+    for dataset, entry in DATASETS.items():
+        tables = entry_tables(entry)
+        found |= {t.name.removesuffix('_mergetree'): dataset for t in tables if t.name.endswith('_mergetree')}
+    return found
+
+
 def test_read_models_read_only_mergetree_copies():
-    creates = _creates()
+    creates = _creates() | _declared()
     for name in READ_MODELS:
         sql = (SCRIPTS / f'{name}.sql').read_text()
         code = '\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
@@ -75,7 +86,7 @@ def test_cleanup_drops_every_copy_after_the_read_models():
     drops = [re.search(r'DROP TABLE IF EXISTS (\w+)_mergetree SYNC$', s) for s in statements]
     assert all(drops), statements
     dropped = {m.group(1) for m in drops if m}
-    assert dropped == set(_creates())
+    assert dropped == set(_creates()) | set(_declared())
     assert set().union(*(_reads(n) for n in READ_MODELS)) == dropped
     assert set(BACKEND[CLEANUP]['requires']) == {f'clickhouse_load clickhouse load {n}' for n in READ_MODELS}
     assert DATASETS['credible_sets_build_cleanup']['derived'] is True
@@ -86,6 +97,7 @@ def test_read_models_wait_for_the_inputs_they_read():
     for t, script in _creates().items():
         dataset = next(d for d, e in DATASETS.items() if e.get('postload_script') == script)
         task_of[t] = f'clickhouse_load clickhouse load {dataset}'
+    task_of |= dict.fromkeys(_declared(), DECLARED_LOADS)
     for name in READ_MODELS:
         requires = set(BACKEND[f'clickhouse_load clickhouse load {name}']['requires'])
         for t in _reads(name):

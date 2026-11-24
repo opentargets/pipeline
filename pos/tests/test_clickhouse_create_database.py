@@ -61,8 +61,8 @@ def test_guards_run_before_any_load():
     (create_db,) = guards
     assert not tasks[create_db].get('requires')
     for name, task in tasks.items():
-        if name.startswith('clickhouse_load') or name == 'explode load all datasets':
+        if name.startswith(('clickhouse_load', 'explode ')):
             # top-level loads require the database task directly or through another load
             assert create_db in task.get('requires', []) or any(
-                r.startswith('clickhouse_load') for r in task.get('requires', [])
+                r.startswith(('clickhouse_load', 'explode ')) for r in task.get('requires', [])
             ), name

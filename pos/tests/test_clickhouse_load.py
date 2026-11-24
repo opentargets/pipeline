@@ -1,16 +1,19 @@
 """clickhouse_load connects to the running server and runs each script statement by statement."""
 
 from pathlib import Path
+from typing import Annotated
 from unittest.mock import MagicMock
 
+import polars as pl
 import pytest
 import yaml
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 from loguru import logger
-from ot_datamodels.base import DatasetModel
+from ot_datamodels.base import DatasetModel, PrimaryKey
 
 from pos import clickhouse_ddl
-from pos.clickhouse_ddl import ddl_for
+from pos.clickhouse_ddl import ddl_for, uniqueness_sql
+from pos.clickhouse_tables import ClickHouseTable
 from pos.tasks import clickhouse_load
 from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, ClickhouseLoadSpec
 
@@ -180,7 +183,7 @@ class Toy(DatasetModel):
     dataset_description = 'Toy.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
 
 
 class EvidenceA(DatasetModel):
@@ -189,7 +192,7 @@ class EvidenceA(DatasetModel):
     dataset_description = 'A.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     score: float | None
 
 
@@ -199,7 +202,7 @@ class EvidenceB(DatasetModel):
     dataset_description = 'B.'
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     extra: str
 
 
@@ -210,7 +213,7 @@ class EvidencePpp(DatasetModel):
     products = ('ppp',)
     example = {}
 
-    id: str
+    id: Annotated[str, PrimaryKey()]
     assays: str
 
 
@@ -338,6 +341,48 @@ def test_evidence_loads_each_member_into_its_own_table(tmp_path, monkeypatch, in
         assert f'{table}: 7 rows' in info
 
 
+EVIDENCE_DECLARED = EVIDENCE + (
+    '    tables:\n'
+    '      - {name: evidence, engine: rocksdb}\n'
+    '      - {name: evidence_by_score, engine: mergetree, order_by: [score], columns: [score, id], '
+    'where: score IS NOT NULL}\n'
+)
+
+
+def test_declared_union_is_built_from_the_union_after_a_key_check(tmp_path, monkeypatch):
+    task, events = _generated_task(tmp_path, monkeypatch, EVIDENCE_DECLARED, {'evidence_a': 1, 'evidence_b': 1})
+    _run(task)
+    commands = [e[1] for e in events if e[0] == 'command' and not e[1].startswith('SELECT count()')]
+    assert commands[0] == 'DROP TABLE IF EXISTS `evidence_log` SYNC'
+    union = commands.index(UNION_CREATE)
+    check = commands.index(
+        "SELECT throwIf(count() != uniqExact(tuple(`id`)), 'duplicate id in evidence') FROM `evidence_log`"
+    )
+    assert union < check
+    assert commands[check + 1 :] == [
+        'DROP TABLE IF EXISTS `evidence` SYNC',
+        (
+            'CREATE TABLE `evidence` (`id` String, `score` Nullable(Float64), `extra` Nullable(String)) '
+            'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
+        ),
+        'INSERT INTO `evidence` SELECT `id`, `score`, `extra` FROM `evidence_log`',
+        'DROP TABLE IF EXISTS `evidence_by_score` SYNC',
+        (
+            'CREATE TABLE `evidence_by_score` (`score` Nullable(Float64), `id` String) '
+            'ENGINE = MergeTree() ORDER BY (`score`) SETTINGS allow_nullable_key = 1'
+        ),
+        'INSERT INTO `evidence_by_score` SELECT `score`, `id` FROM `evidence_log` WHERE score IS NOT NULL',
+        'OPTIMIZE TABLE `evidence_by_score` FINAL',
+        'DROP TABLE `evidence_log` SYNC',
+    ]
+
+
+def test_unknown_union_declaration_fields_fail(tmp_path, monkeypatch):
+    datasets = EVIDENCE + '    tables:\n      - {name: e, engine: rocksdb, key: id, optimize: true}\n'
+    with pytest.raises(ValueError, match=r"evidence_log: unknown ClickHouseTable fields \['key', 'optimize'\]"):
+        _generated_task(tmp_path, monkeypatch, datasets, {'evidence_a': 1, 'evidence_b': 1})
+
+
 def test_evidence_insert_lists_only_member_columns(tmp_path, monkeypatch):
     task, events = _generated_task(tmp_path, monkeypatch, EVIDENCE, {'evidence_a': 1, 'evidence_b': 1})
     _run(task)
@@ -453,3 +498,164 @@ def test_scripts_log_every_statement(tmp_path, monkeypatch, info):
                   'DROP TABLE d']  # fmt: skip
     assert [e[1] for e in events] == statements
     assert [line for line in info if line in statements] == statements
+
+
+# declared tables, on a live ClickHouse
+
+class Declared(DatasetModel):
+    dataset_name = 'declared'
+    dataset_title = 'Declared'
+    dataset_description = 'Declared.'
+    example = {}
+
+    id: Annotated[str, PrimaryKey()]
+    name: str
+    target: str | None
+
+
+DECLARED = """\
+clickhouse:
+  declared:
+    table: declared_log
+    input_dir: output/declared
+    model: declared
+    tables:
+      - {name: declared_by_id, engine: rocksdb}
+      - name: declared_by_target
+        engine: mergetree
+        order_by: [target, id]
+        columns: [id, target]
+        where: target IS NOT NULL
+    dictionaries:
+      - {name: declared_names, source: declared_by_id, key: id, attributes: [name]}
+"""
+ROWS = {'id': ['a', 'b', 'c'], 'name': ['na', 'nb', 'nc'], 'target': ['t1', None, 't2']}
+
+
+@pytest.fixture
+def live(monkeypatch, clickhouse_database):
+    """A client on a fresh database of the test server; `Declared` discoverable."""
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': Declared})
+    return clickhouse_database
+
+
+def _declared_task(tmp_path, client, server: tuple[str, int], rows: dict) -> ClickhouseLoad:
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(DECLARED)
+    data = tmp_path / 'release_data' / 'output' / 'declared'
+    data.mkdir(parents=True, exist_ok=True)
+    schema = {'id': pl.String, 'name': pl.String, 'target': pl.String}
+    pl.DataFrame(rows, schema=schema).write_parquet(data / 'part-0.parquet')
+    host, port = server
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
+        dataset_config_path=str(config), product='platform', clickhouse_host=host, clickhouse_port=port,
+        clickhouse_database=client.database,
+    )  # fmt: skip
+    return ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+
+
+def _tables(client) -> set[str]:
+    return set(client.query('SELECT name FROM system.tables WHERE database = currentDatabase()').result_columns[0])
+
+
+def test_declared_tables_are_built_and_the_landing_dropped(tmp_path, live, clickhouse_server):
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    assert live.query('SELECT id, name, target FROM declared_by_id ORDER BY id').result_rows == [
+        ('a', 'na', 't1'), ('b', 'nb', None), ('c', 'nc', 't2'),
+    ]  # fmt: skip
+    assert live.query('SELECT id, target FROM declared_by_target ORDER BY id').result_rows == [
+        ('a', 't1'), ('c', 't2'),
+    ]  # fmt: skip
+    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb'
+    assert 'declared_log' not in _tables(live)
+
+
+def test_declared_load_reruns_over_its_dictionary(tmp_path, live, clickhouse_server):
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS | {'name': ['na', 'nb2', 'nc']}))
+    assert live.command('SELECT count() FROM declared_by_id') == 3
+    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb2'
+
+
+def test_no_count_on_a_rocksdb_table(tmp_path, live, clickhouse_server, monkeypatch, info):
+    sent: list[str] = []
+    real_connect = clickhouse_load.connect
+
+    def recording_connect(**kw):
+        client = real_connect(**kw)
+        command = client.command
+        monkeypatch.setattr(client, 'command', lambda sql, *a, **k: sent.append(sql) or command(sql, *a, **k))
+        return client
+
+    monkeypatch.setattr(clickhouse_load, 'connect', recording_connect)
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    counts = [sql for sql in sent if 'count()' in sql and 'throwIf' not in sql]
+    assert counts == ['SELECT count() FROM `declared_log`', 'SELECT count() FROM `declared_by_target`']
+    assert 'declared_log: 3 rows' in info
+    assert 'declared_by_target: 2 rows' in info
+
+
+def test_duplicate_rocksdb_key_fails_the_load(tmp_path, live, clickhouse_server):
+    duplicated = {'id': ['a', 'a'], 'name': ['n1', 'n2'], 'target': ['t1', 't2']}
+    with pytest.raises(ClickhouseLoadError, match='duplicate id in declared_by_id'):
+        _run(_declared_task(tmp_path, live, clickhouse_server, duplicated))
+
+
+def test_declarations_with_a_postload_script_fail_at_spec_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': Declared})
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(DECLARED + '    postload_script: post.sql\n')
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
+        dataset_config_path=str(config), product='platform',
+    )  # fmt: skip
+    with pytest.raises(ClickhouseLoadError, match='declared: declares ClickHouse tables and has a postload_script'):
+        ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+
+
+def test_rerun_after_a_failed_build_loads_one_copy(tmp_path, live, clickhouse_server, monkeypatch):
+    def fail(self, client):
+        raise ClickhouseLoadError('build failed')
+
+    with monkeypatch.context() as m:
+        m.setattr(ClickhouseLoad, '_build_declared', fail)
+        with pytest.raises(ClickhouseLoadError, match='build failed'):
+            _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    assert live.command('SELECT count() FROM declared_log') == 3
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
+    assert live.command('SELECT count() FROM declared_by_id') == 3
+    assert live.command('SELECT count() FROM declared_by_target') == 2
+
+
+def test_null_rocksdb_key_is_not_a_duplicate(clickhouse_database):
+    table = ClickHouseTable('t', 'rocksdb')
+    clickhouse_database.command('CREATE TABLE t_log (k Nullable(String)) ENGINE = Log')
+    clickhouse_database.command("INSERT INTO t_log VALUES (NULL), ('a')")
+    clickhouse_database.command(uniqueness_sql(table, 'k', 't_log'))
+    clickhouse_database.command('INSERT INTO t_log VALUES (NULL)')
+    with pytest.raises(DatabaseError, match='duplicate k in t'):
+        clickhouse_database.command(uniqueness_sql(table, 'k', 't_log'))
+
+
+class DeclaredPpp(DatasetModel):
+    dataset_name = 'declared'
+    dataset_title = 'Declared'
+    dataset_description = 'Declared.'
+    example = {}
+    products = ('ppp',)
+
+    id: Annotated[str, PrimaryKey()]
+
+
+def test_declarations_building_nothing_for_the_product_fail_at_spec_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': DeclaredPpp})
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(DECLARED)
+    spec = ClickhouseLoadSpec(
+        name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
+        dataset_config_path=str(config), product='platform',
+    )  # fmt: skip
+    with pytest.raises(ClickhouseLoadError, match='declared: declares no ClickHouse table for platform'):
+        ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+    ClickhouseLoad(spec.model_copy(update={'product': 'ppp'}), MagicMock(config=MagicMock(work_path=tmp_path)))
