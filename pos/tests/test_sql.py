@@ -36,7 +36,7 @@ def test_split_real_scripts(script):
 @pytest.mark.parametrize(
     ('script', 'count'),
     [
-        ('scripts/aotf.sql', 6),  # the stray `;` on line 38 is empty
+        ('scripts/aotf.sql', 5),  # the stray `;` on line 39 is empty
         ('scripts/targets.sql', 12),
         ('scripts/credible_sets.sql', 9),  # leading comments belong to the first statement
     ],

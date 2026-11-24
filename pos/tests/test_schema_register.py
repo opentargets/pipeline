@@ -105,8 +105,20 @@ SUPERSEDED_SQL = 'superseded by serving_sql'
 
 
 def _platform(dataset: str):
-    """The generated Platform landing columns of a dataset; None for a table with no model."""
-    return landing_columns(CONFIG[dataset], 'platform')
+    """The generated Platform landing columns of the model a dataset's rows describe (`REGISTER_MODEL`, the
+    builder's); None for a table with no model."""
+    entry = CONFIG[dataset]
+    if dataset in build_register.REGISTER_MODEL:
+        entry = {'table': entry['table'], 'model': build_register.REGISTER_MODEL[dataset]}
+    return landing_columns(entry, 'platform')
+
+
+def test_register_model_describes_the_disease_output():
+    """The `disease` rows describe the `Disease` output landing, not the view the entry now loads."""
+    assert CONFIG['disease']['model'] == 'disease_view'
+    output = dataset_spec(discover_models()['disease'])
+    assert [n for n, _ in _platform('disease') or []] == [f.name for f in output.fields]
+    assert build_register.platform_table('disease') == tuple(_platform('disease') or [])
 
 
 def _changed(row: dict[str, str]) -> bool:
