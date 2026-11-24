@@ -139,3 +139,6 @@ class PairsSettings(BaseModel):
     tile_studies: int = Field(default=20, gt=0)
     """Studies on each side of a tile: a Spark task loads up to twice this many studies and
     correlates every pair between them."""
+    min_tiles: int = Field(default=500, gt=0)
+    """Fewest tiles a run is cut into, shrinking `tile_studies` for a small run so that it still
+    spreads over the cluster; the dynamic allocation of executors hides the cluster's size."""

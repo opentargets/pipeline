@@ -42,16 +42,11 @@ def _pairs_task(tile: Tile, munged: str, m_snps: dict[str, int], options: PairsS
     return rows
 
 
-_TASKS_PER_CORE = 3
-"""Tiles per core of the cluster that the tile size is shrunk to give, so that a small run still
-spreads over every executor."""
-
-
-def _tile_size(studies: pl.DataFrame, largest: int, cores: int) -> int:
-    """The largest tile size up to `largest` that gives at least `_TASKS_PER_CORE` tiles per core."""
+def _tile_size(studies: pl.DataFrame, largest: int, min_tiles: int) -> int:
+    """The largest tile size up to `largest` that gives at least `min_tiles` tiles."""
     biggest_ancestry = int(studies.group_by('ldAncestry').len()['len'].max() or 1)
     # an ancestry of n studies in blocks of s has about (n / s)^2 / 2 tiles
-    size = math.floor(biggest_ancestry / math.sqrt(2 * _TASKS_PER_CORE * cores))
+    size = math.floor(biggest_ancestry / math.sqrt(2 * min_tiles))
     return max(1, min(largest, size))
 
 
@@ -111,7 +106,7 @@ def genetic_correlation_pairs(
     m_snps = dict(_read(sources.panels).select('ldAncestry', 'mSnps').iter_rows())
     previous, reused = _previous(sources, destinations, index, options)
     spark = Session(app_name='genetic_correlation_pairs', properties=properties).spark
-    size = _tile_size(studies, options.tile_studies, spark.sparkContext.defaultParallelism)
+    size = _tile_size(studies, options.tile_studies, options.min_tiles)
     work = tiles(studies, size, reused)
     n_pairs = sum(len(tile.pairs()) for tile in work)
     n_reused = 0 if reused is None else reused.height

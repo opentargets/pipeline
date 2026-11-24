@@ -22,7 +22,7 @@ from pts.transformers.genetic_correlation.settings import (
     RepresentativesSettings,
     RepresentativesSource,
 )
-from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.dataset import check_destinations_absent, scan_dataset, write_dataset
 
 OUTPUT_SCHEMA = pl.Schema({
     'diseaseId': pl.String,
@@ -227,6 +227,7 @@ def representatives(
     sources = RepresentativesSource.model_validate(source)
     destinations = RepresentativesDestination.model_validate(destination)
     options = RepresentativesSettings.model_validate(settings)
+    check_destinations_absent([destinations.representatives, destinations.changes])
     studies = eligible_studies(scan_dataset(sources.study), options)
     heritability = successful_heritability(scan_dataset(sources.heritability))
     chosen = choose_representatives(heritable_studies(studies, heritability, options)).collect().cast(OUTPUT_SCHEMA)
