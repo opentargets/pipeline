@@ -31,6 +31,8 @@ from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
+from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
+from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.target_view import TargetView
@@ -40,6 +42,8 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf_target': AssociationOtfTarget,
     'association_timeseries': AssociationTimeseries,
     'coding_variant': CodingVariant,
+    'coding_variant_by_target': CodingVariantByTarget,
+    'coding_variant_by_variant': CodingVariantByVariant,
     'disease_view': DiseaseView,
     'drug_view': DrugView,
     'target_view': TargetView,
@@ -74,6 +78,8 @@ PRIMARY_KEYS = {
     'association_otf_target': ('rowId',),
     'association_timeseries': (),
     'coding_variant': (),
+    'coding_variant_by_target': ('targetId',),
+    'coding_variant_by_variant': ('variantId',),
     'disease_view': ('id',),
     'drug_view': ('id',),
     'target_view': ('id',),
@@ -123,6 +129,18 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         'transcriptConsequences[]/variantFunctionalConsequenceIds',
         None,
     ),
+    ('coding_variant_by_variant', 'variantId'): (Variant, 'variantId', None),
+    ('coding_variant_by_target', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
+    **{
+        (view, f'proteinCodingCoords[]/{c}'): (Variant, p, n)
+        for view in ('coding_variant_by_variant', 'coding_variant_by_target')
+        for c, p, n in (
+            ('targetId', 'transcriptConsequences[]/targetId', None),
+            ('variantId', 'variantId', None),
+            ('variantEffect', 'variantEffect[]/score', True),
+            ('variantFunctionalConsequenceIds', 'transcriptConsequences[]/variantFunctionalConsequenceIds', None),
+        )
+    },
     **{
         ('disease_view', c): (Disease, c, None)
         for c in (
@@ -306,7 +324,30 @@ MARKERS = {
     ('coding_variant', 'datasources[]/datasourceNiceName'): 'LowCardinality(String)',
     ('coding_variant', 'referenceAminoAcid'): 'LowCardinality(String)',
     ('coding_variant', 'alternateAminoAcid'): 'LowCardinality(String)',
+    ('coding_variant_by_target', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
+    ('coding_variant_by_variant', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
 }
+
+#: the values of a protein coding coordinate a view declares
+COORD_DECLARED = {
+    f'proteinCodingCoords[]/{p}'
+    for p in (
+        'uniprotAccessions',
+        'uniprotAccessions[]',
+        'aminoAcidPosition',
+        'alternateAminoAcid',
+        'referenceAminoAcid',
+        'diseases',
+        'diseases[]',
+        'datasources',
+        'datasources[]',
+        'datasources[]/datasourceCount',
+        'datasources[]/datasourceId',
+        'datasources[]/datasourceNiceName',
+        'therapeuticAreas',
+        'therapeuticAreas[]',
+    )
+} | {'proteinCodingCoords', 'proteinCodingCoords[]'}
 
 
 #: every value a view declares rather than derives
@@ -330,6 +371,8 @@ DECLARED: dict[str, set[str]] = {
         'aminoAcidPosition',
         'alternateAminoAcid',
     },
+    'coding_variant_by_target': COORD_DECLARED,
+    'coding_variant_by_variant': COORD_DECLARED,
     'disease_view': {
         'synonyms',
         'synonyms[]',
@@ -456,3 +499,51 @@ def test_association_otf_views_types() -> None:
     for nodes in (disease, target):
         assert nodes['searchA'].nullable
         assert nodes['searchB'].nullable
+
+
+#: the served protein coding coordinate, in the tuple's field order
+COORD_FIELDS = [
+    'targetId',
+    'uniprotAccessions',
+    'aminoAcidPosition',
+    'alternateAminoAcid',
+    'referenceAminoAcid',
+    'variantFunctionalConsequenceIds',
+    'variantEffect',
+    'variantId',
+    'diseases',
+    'datasources',
+    'therapeuticAreas',
+]
+
+
+CODING_VARIANT_VIEWS = [(CodingVariantByVariant, 'variantId'), (CodingVariantByTarget, 'targetId')]
+
+
+@pytest.mark.parametrize(('model', 'key'), CODING_VARIANT_VIEWS, ids=['variant', 'target'])
+def test_coding_variant_views_are_the_served_columns(model: type[DatasetModel], key: str) -> None:
+    assert [f.name for f in dataset_spec(model).fields] == [key, 'proteinCodingCoords']
+    assert discover_models()[model.dataset_name] is model
+    coord = to_polars_schema(model)['proteinCodingCoords']
+    assert isinstance(coord, pl.List) and isinstance(coord.inner, pl.Struct)
+    assert [f.name for f in coord.inner.fields] == COORD_FIELDS
+    nodes = _nodes(model)
+    assert not nodes['proteinCodingCoords[]'].nullable
+    assert [p for p in COORD_FIELDS if nodes[f'proteinCodingCoords[]/{p}'].nullable] == ['variantEffect']
+    assert nodes['proteinCodingCoords[]/aminoAcidPosition'].dtype == pl.Int32()
+    datasources = {f.name: f.dtype for f in coord.inner.fields}['datasources']
+    assert datasources == pl.List(
+        pl.Struct({'datasourceCount': pl.Int32, 'datasourceId': pl.String, 'datasourceNiceName': pl.String})
+    )
+
+
+@pytest.mark.parametrize('model', [CodingVariantByVariant, CodingVariantByTarget], ids=['variant', 'target'])
+def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[DatasetModel]) -> None:
+    """Served as String, not Enum8: the API reads it as String by position."""
+    nodes = _nodes(model)
+    node = nodes['proteinCodingCoords[]/datasources[]/datasourceId']
+    assert node.dtype == pl.String()
+    assert node.clickhouse is None
+    assert set(node.constraints.allowed or ()) == set(get_args(v.CodingVariantDatasource))
+    for path in ('datasources[]/datasourceNiceName', 'referenceAminoAcid', 'alternateAminoAcid'):
+        assert nodes[f'proteinCodingCoords[]/{path}'].clickhouse is None, path
