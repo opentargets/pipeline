@@ -24,8 +24,6 @@ if TYPE_CHECKING:
 
     from otter.config.model import Config
 
-TRIAL = pl.Struct({'nct_id': pl.String, 'content_sha256': pl.String})
-
 
 def pool_trials(pools: pl.DataFrame, texts: pl.DataFrame, trials: pl.DataFrame) -> pl.DataFrame:
     """List every trial of each pool with the hash of its content, within the budget or not.

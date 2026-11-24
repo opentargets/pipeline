@@ -21,8 +21,6 @@ class CellexAnalysis:
         self,
         spark: SparkSession,
         mode='parquet',
-        expression_matrix_path=None,
-        metadata_path=None,
         output_path=None,
         biosample=None,
         sample_id=None,

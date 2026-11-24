@@ -1,12 +1,10 @@
 import importlib.resources as pkg_resources
 import json
 from collections.abc import Mapping
-from enum import Enum
 from typing import Any
 
 import polars as pl
-import pyspark.sql.functions as f
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import DataFrame
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
@@ -40,54 +38,6 @@ _POLARS_TO_SPARK_TYPE: dict[Any, type[DataType]] = {
     pl.Date: DateType,
     pl.Datetime: TimestampType,
 }
-
-
-def update_quality_flag(qc: Column, flag_condition: Column, flag_text: Enum) -> Column:
-    """Update the provided quality control list with a new flag if condition is met.
-
-    Args:
-        qc (Column): Array column with the current list of qc flags.
-        flag_condition (Column): This is a column of booleans, signing which row should be flagged
-        flag_text (Enum): Text for the new quality control flag
-
-    Returns:
-        Column: Array column with the updated list of qc flags.
-
-
-    Examples:
-        >>> s = "study STRING, qualityControls ARRAY<STRING>, condition BOOLEAN"
-        >>> d =  [("S1", ["qc1"], True), ("S2", ["qc3"], False)]
-        >>> df = spark.createDataFrame(d, s)
-        >>> df.show()
-        +-----+---------------+---------+
-        |study|qualityControls|condition|
-        +-----+---------------+---------+
-        |   S1|          [qc1]|     true|
-        |   S2|          [qc3]|    false|
-        +-----+---------------+---------+
-        <BLANKLINE>
-
-        >>> class QC(Enum):
-        ...     QC1 = "qc1"
-        ...     QC2 = "qc2"
-        ...     QC3 = "qc3"
-
-        >>> condition = f.col("condition")
-        >>> new_qc = update_quality_flag(f.col("qualityControls"), condition, QC.QC2)
-        >>> df.withColumn("qualityControls", new_qc).show()
-        +-----+---------------+---------+
-        |study|qualityControls|condition|
-        +-----+---------------+---------+
-        |   S1|     [qc1, qc2]|     true|
-        |   S2|          [qc3]|    false|
-        +-----+---------------+---------+
-        <BLANKLINE>
-    """
-    qc = f.when(qc.isNull(), f.array()).otherwise(qc)
-    return f.when(
-        flag_condition,
-        f.array_sort(f.array_distinct(f.array_union(qc, f.array(f.lit(flag_text.value))))),
-    ).otherwise(qc)
 
 
 def parse_spark_schema(schema_json: str) -> StructType:

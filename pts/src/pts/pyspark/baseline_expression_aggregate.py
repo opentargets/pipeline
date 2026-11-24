@@ -34,32 +34,6 @@ class AggregateExpression:
 
         self.df = df
 
-    def drop_null_biosample_ids(self):
-        """Drop rows where any of the specified celltypeBiosample AND tissueBiosample are null."""
-        # First check if the columns exist and add them if they don't, populating with nulls
-        if 'tissueBiosampleId' not in self.df.columns:
-            self.df = self.df.withColumn('tissueBiosampleId', f.lit(None).cast('string'))
-            self.df = self.df.withColumn('tissueBiosampleFromSource', f.lit(None).cast('string'))
-            self.df = self.df.withColumn('tissueBiosampleParentId', f.lit(None).cast('string'))
-        if 'celltypeBiosampleId' not in self.df.columns:
-            self.df = self.df.withColumn('celltypeBiosampleId', f.lit(None).cast('string'))
-            self.df = self.df.withColumn('celltypeBiosampleFromSource', f.lit(None).cast('string'))
-            self.df = self.df.withColumn('celltypeBiosampleParentId', f.lit(None).cast('string'))
-
-        # Find the rows where both tissue and celltype biosample ID are null or
-        # tissue and cell biosample parent ID are null
-        nulls = self.df.filter(
-            ((self.df['tissueBiosampleId'].isNull()) & (self.df['celltypeBiosampleId'].isNull()))
-            | ((self.df['tissueBiosampleParentId'].isNull()) & (self.df['celltypeBiosampleParentId'].isNull()))
-        )
-        logger.info('The following biosample rows from source have null biosample IDs:')
-        nulls.show(truncate=False)
-        # Then drop those rows from the dataframe
-        self.df = self.df.filter(~((self.df['tissueBiosampleId'].isNull()) & (self.df['celltypeBiosampleId'].isNull())))
-        self.df = self.df.filter(
-            ~((self.df['tissueBiosampleParentId'].isNull()) & (self.df['celltypeBiosampleParentId'].isNull()))
-        )
-
     def calculate_quartiles(self, local=False):
         """This function calculates the expression quartiles of each gene across all donors."""
         # Define the grouping cols
