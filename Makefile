@@ -1,5 +1,5 @@
 ### HOUSEKEEPING TARGETS ###
-COMPONENTS := pis pts orchestration pos datamodels
+COMPONENTS := pis pps pts orchestration pos datamodels
 
 .PHONY: help clean test dev versions
 

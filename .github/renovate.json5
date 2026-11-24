@@ -73,6 +73,11 @@
       additionalBranchPrefix: 'pis-',
     },
     {
+      matchFileNames: ['pps/**'],
+      commitMessagePrefix: 'pps:',
+      additionalBranchPrefix: 'pps-',
+    },
+    {
       matchFileNames: ['pts/**'],
       commitMessagePrefix: 'pts:',
       additionalBranchPrefix: 'pts-',
