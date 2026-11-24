@@ -28,6 +28,8 @@ from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.spec import Node, dataset_spec, walk
 from ot_datamodels.views.association_otf import AssociationOtf
+from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
+from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
 from ot_datamodels.views.disease_view import DiseaseView
@@ -36,6 +38,8 @@ from ot_datamodels.views.target_view import TargetView
 
 VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf': AssociationOtf,
+    'association_otf_disease': AssociationOtfDisease,
+    'association_otf_target': AssociationOtfTarget,
     'association_timeseries': AssociationTimeseries,
     'coding_variant': CodingVariant,
     'disease_view': DiseaseView,
@@ -71,6 +75,8 @@ CHANGED: dict[str, set[str]] = {
 #: the primary key of each view
 PRIMARY_KEYS = {
     'association_otf': ('rowId',),
+    'association_otf_disease': ('rowId',),
+    'association_otf_target': ('rowId',),
     'association_timeseries': (),
     'coding_variant': (),
     'disease_view': ('id',),
@@ -101,6 +107,29 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     ('association_otf', 'rowScore'): (EvidenceEva, 'score', None),
     ('association_otf', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
     ('association_otf', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    **{
+        ('association_otf_disease', c): (src, col, null)
+        for c, (src, col, null) in {
+            'rowId': (EvidenceEva, 'id', None),
+            'A': (EvidenceEva, 'diseaseId', None),
+            'B': (EvidenceEva, 'targetId', None),
+            'rowScore': (EvidenceEva, 'score', None),
+            'noveltyDirect': (AssociationOverallDirect, 'currentNovelty', True),
+            'noveltyIndirect': (AssociationOverallIndirect, 'currentNovelty', True),
+        }.items()
+    },
+    **{
+        ('association_otf_target', c): (src, col, null)
+        for c, (src, col, null) in {
+            'rowId': (EvidenceEva, 'id', None),
+            'A': (EvidenceEva, 'targetId', None),
+            'B': (EvidenceEva, 'diseaseId', None),
+            'rowScore': (EvidenceEva, 'score', None),
+            'noveltyDirect': (AssociationOverallDirect, 'currentNovelty', True),
+            'noveltyIndirect': (AssociationOverallIndirect, 'currentNovelty', True),
+            'indirect': (Disease, 'ancestors', None),
+        }.items()
+    },
     ('association_timeseries', 'diseaseId'): (AssociationOverallDirect, 'diseaseId', None),
     ('association_timeseries', 'targetId'): (AssociationOverallDirect, 'targetId', None),
     **{
@@ -303,6 +332,8 @@ MARKERS = {
 #: every value a view declares rather than derives
 DECLARED: dict[str, set[str]] = {
     'association_otf': {'datasourceId', 'datatypeId', 'diseaseData', 'targetData'},
+    'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
+    'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
     'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
     'coding_variant': {
         'therapeuticAreas',
@@ -420,3 +451,27 @@ def test_disease_view_is_the_served_disease_columns() -> None:
     synonyms = _nodes(DiseaseView)
     assert synonyms['synonyms[]/relation'].dtype == pl.String()
     assert synonyms['synonyms[]/terms[]'].nullable
+
+
+OTF_COMMON = ['rowId', 'A', 'B', 'datatypeId', 'datasourceId', 'rowScore', 'searchA', 'searchB']
+
+
+def test_association_otf_views_are_the_served_columns() -> None:
+    disease = [f.name for f in dataset_spec(AssociationOtfDisease).fields]
+    target = [f.name for f in dataset_spec(AssociationOtfTarget).fields]
+    assert disease == [*OTF_COMMON, 'noveltyDirect', 'noveltyIndirect', 'indirect']
+    assert target == [*OTF_COMMON, 'isMeasurement', 'noveltyDirect', 'noveltyIndirect', 'indirect']
+    models = discover_models()
+    assert models['association_otf_disease'] is AssociationOtfDisease
+    assert models['association_otf_target'] is AssociationOtfTarget
+
+
+def test_association_otf_views_types() -> None:
+    disease, target = _nodes(AssociationOtfDisease), _nodes(AssociationOtfTarget)
+    assert disease['indirect'].dtype == pl.List(pl.String())
+    assert target['indirect'].dtype == pl.List(pl.String())
+    assert target['isMeasurement'].dtype == pl.Boolean()
+    assert not target['isMeasurement'].nullable
+    for nodes in (disease, target):
+        assert nodes['searchA'].nullable
+        assert nodes['searchB'].nullable
