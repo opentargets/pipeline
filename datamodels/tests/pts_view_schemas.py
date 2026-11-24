@@ -1,7 +1,7 @@
-"""The pts schemas of the four views before they had models (pts at d1a58968), copied: datamodels cannot
+"""The pts schemas of three views before they had models (pts at d1a58968), copied: datamodels cannot
 import pts.
 
-`association_otf_schema()` and `association_timeseries_schema()` (`pts/schemas/association.py`),
+`association_timeseries_schema()` (`pts/schemas/association.py`),
 `OUTPUT_SCHEMA` (`pts/tests/test_coding_variant.py`) and `TARGET_VIEW` (`pts/schemas/target_view.py`).
 """
 
@@ -145,19 +145,6 @@ VIEW_COLUMNS = pl.Schema({
 })
 
 TARGET_VIEW = pl.Schema({**TARGET, **VIEW_COLUMNS})
-
-ASSOCIATION_OTF = pl.Schema({
-    'rowId': pl.String(),
-    'diseaseId': pl.String(),
-    'targetId': pl.String(),
-    'datasourceId': pl.String(),
-    'datatypeId': pl.String(),
-    'rowScore': pl.Float64(),
-    'diseaseData': pl.String(),
-    'targetData': pl.String(),
-    'noveltyDirect': pl.Float64(),
-    'noveltyIndirect': pl.Float64(),
-})
 
 ASSOCIATION_TIMESERIES = pl.Schema({
     'diseaseId': pl.String(),

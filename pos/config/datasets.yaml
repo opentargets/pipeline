@@ -39,11 +39,22 @@ opensearch:
     input_dir: export/search_variant
     mappings: config/opensearch/search.json
 clickhouse:
-  aotf:
-    table: associations_otf_log
-    input_dir: view/association_otf
-    model: association_otf
-    postload_script: config/clickhouse/scripts/aotf.sql
+  aotf_disease:
+    table: associations_otf_disease_log
+    input_dir: view/association_otf_disease
+    model: association_otf_disease
+    tables:
+      - name: associations_otf_disease
+        engine: mergetree
+        order_by: [A, B, datasourceId]
+  aotf_target:
+    table: associations_otf_target_log
+    input_dir: view/association_otf_target
+    model: association_otf_target
+    tables:
+      - name: associations_otf_target
+        engine: mergetree
+        order_by: [A, B, datasourceId]
   baseline_expression:
     table: baseline_expression_log
     input_dir: output/baseline_expression

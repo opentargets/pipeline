@@ -94,6 +94,8 @@ MODELS = discover_models()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
 #: The model a dataset's rows describe, where its entry now loads another (`disease` loads its view).
 REGISTER_MODEL = {'disease': 'disease'}
+#: Datasets whose entry and model are gone; their rows stay as last built.
+RETIRED = {'aotf'}
 CLICKHOUSE = POS / 'config' / 'clickhouse'
 SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
 
@@ -134,6 +136,8 @@ def nodes(model: str) -> dict[str, Node]:
 @cache
 def platform_table(dataset: str) -> tuple[tuple[str, CHType], ...] | None:
     """The generated Platform landing columns of the model the rows describe; None for a table with no model."""
+    if dataset in RETIRED:
+        return None
     entry = CONFIG[dataset]
     if dataset in REGISTER_MODEL:
         entry = {'table': entry['table'], 'model': REGISTER_MODEL[dataset]}

@@ -34,7 +34,8 @@ SELECT
     ancestors AS indirect
 FROM
     associations_otf_log
-    LEFT OUTER JOIN disease_log ON associations_otf_log.diseaseId = disease_log.id;
+    LEFT OUTER JOIN disease ON associations_otf_log.diseaseId = disease.id
+SETTINGS join_algorithm = 'hash';
 ;
 
 OPTIMIZE TABLE associations_otf_disease FINAL;
@@ -42,5 +43,3 @@ OPTIMIZE TABLE associations_otf_disease FINAL;
 OPTIMIZE TABLE associations_otf_target FINAL;
 
 drop table associations_otf_log SYNC;
-
-drop table disease_log SYNC;

@@ -2,7 +2,7 @@
 
 import datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 import polars as pl
 import pytest
@@ -10,8 +10,11 @@ import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
 from ot_datamodels.spec import dataset_spec
+from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
+from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.target_view import TargetView
+from ot_datamodels.vocabularies import Datasource, Datatype
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -348,7 +351,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf', 'association_time_series', 'disease', 'drug', 'protein_coding_coords', 'targets')
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'protein_coding_coords',
+              'targets')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -395,6 +399,46 @@ def test_disease_view_landing_is_the_served_disease():
         'parents Array(LowCardinality(String)), children Array(String), ancestors Array(LowCardinality(String)), '
         'descendants Array(String), isTherapeuticArea Bool, studyIds Array(String), indirectStudyIds Array(String)'
     )
+
+
+def _enum8(vocabulary) -> str:
+    """The Enum8 pos generates for a vocabulary: its values numbered from 1 in order."""
+    return f"Enum8({', '.join(f"'{v}' = {i}" for i, v in enumerate(get_args(vocabulary), 1))})"
+
+
+#: the columns of the served associations_otf_* tables as aotf.sql built them (read off system.columns), but
+#: for target isMeasurement, UInt8 there
+AOTF_SERVED = {
+    'rowId': 'String',
+    'A': 'LowCardinality(String)',
+    'B': 'LowCardinality(String)',
+    'datatypeId': _enum8(Datatype),
+    'datasourceId': _enum8(Datasource),
+    'rowScore': 'Float64',
+    'searchA': 'Nullable(String)',
+    'searchB': 'Nullable(String)',
+    'noveltyDirect': 'Nullable(Float64)',
+    'noveltyIndirect': 'Nullable(Float64)',
+}
+
+
+@pytest.mark.parametrize(
+    ('model', 'extra'),
+    [
+        (AssociationOtfDisease, {'indirect': 'Array(String)'}),
+        (AssociationOtfTarget, {'isMeasurement': 'Bool', 'indirect': 'Array(LowCardinality(String))'}),
+    ],
+    ids=['disease', 'target'],
+)
+def test_aotf_views_land_the_served_columns(model, extra):
+    served = {**AOTF_SERVED, **extra}
+    order = ['rowId', 'A', 'B', 'datatypeId', 'datasourceId', 'rowScore', 'searchA', 'searchB']
+    if 'isMeasurement' in extra:
+        order.append('isMeasurement')
+    order += ['noveltyDirect', 'noveltyIndirect', 'indirect']
+    landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
+    assert list(landed) == order
+    assert landed == served
 
 
 # declared tables

@@ -5,7 +5,7 @@ from typing import get_args
 
 import polars as pl
 import pytest
-from pts_view_schemas import ASSOCIATION_OTF, ASSOCIATION_TIMESERIES, CODING_VARIANT, TARGET_VIEW
+from pts_view_schemas import ASSOCIATION_TIMESERIES, CODING_VARIANT, TARGET_VIEW
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -27,7 +27,8 @@ from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.spec import Node, dataset_spec, walk
-from ot_datamodels.views.association_otf import AssociationOtf
+from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
+from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant import CodingVariant
 from ot_datamodels.views.disease_view import DiseaseView
@@ -35,7 +36,8 @@ from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.target_view import TargetView
 
 VIEWS: dict[str, type[DatasetModel]] = {
-    'association_otf': AssociationOtf,
+    'association_otf_disease': AssociationOtfDisease,
+    'association_otf_target': AssociationOtfTarget,
     'association_timeseries': AssociationTimeseries,
     'coding_variant': CodingVariant,
     'disease_view': DiseaseView,
@@ -45,7 +47,6 @@ VIEWS: dict[str, type[DatasetModel]] = {
 
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
 PTS_SCHEMAS = {
-    'association_otf': ASSOCIATION_OTF,
     'association_timeseries': ASSOCIATION_TIMESERIES,
     'coding_variant': CODING_VARIANT,
     'target_view': TARGET_VIEW,
@@ -54,7 +55,6 @@ PTS_SCHEMAS = {
 #: columns whose dtype differs from the frozen pre-piece-3 baseline: Enums the baseline holds as strings, and
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
-    'association_otf': {'datasourceId', 'datatypeId'},
     'association_timeseries': {'aggregationType'},
     'coding_variant': {'datasources'},
     'target_view': {
@@ -70,7 +70,8 @@ CHANGED: dict[str, set[str]] = {
 
 #: the primary key of each view
 PRIMARY_KEYS = {
-    'association_otf': ('rowId',),
+    'association_otf_disease': ('rowId',),
+    'association_otf_target': ('rowId',),
     'association_timeseries': (),
     'coding_variant': (),
     'disease_view': ('id',),
@@ -95,12 +96,19 @@ def _nodes(model: type[DatasetModel]) -> dict[str, Node]:
 
 #: every derived value of a view: (view, path) -> (output, path, nullability the view sets, or None)
 DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
-    ('association_otf', 'rowId'): (EvidenceEva, 'id', None),
-    ('association_otf', 'diseaseId'): (EvidenceEva, 'diseaseId', None),
-    ('association_otf', 'targetId'): (EvidenceEva, 'targetId', None),
-    ('association_otf', 'rowScore'): (EvidenceEva, 'score', None),
-    ('association_otf', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
-    ('association_otf', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    ('association_otf_disease', 'rowId'): (EvidenceEva, 'id', None),
+    ('association_otf_disease', 'A'): (EvidenceEva, 'diseaseId', None),
+    ('association_otf_disease', 'B'): (EvidenceEva, 'targetId', None),
+    ('association_otf_disease', 'rowScore'): (EvidenceEva, 'score', None),
+    ('association_otf_disease', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
+    ('association_otf_disease', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    ('association_otf_target', 'rowId'): (EvidenceEva, 'id', None),
+    ('association_otf_target', 'A'): (EvidenceEva, 'targetId', None),
+    ('association_otf_target', 'B'): (EvidenceEva, 'diseaseId', None),
+    ('association_otf_target', 'rowScore'): (EvidenceEva, 'score', None),
+    ('association_otf_target', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
+    ('association_otf_target', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    ('association_otf_target', 'indirect'): (Disease, 'ancestors', None),
     ('association_timeseries', 'diseaseId'): (AssociationOverallDirect, 'diseaseId', None),
     ('association_timeseries', 'targetId'): (AssociationOverallDirect, 'targetId', None),
     **{
@@ -243,13 +251,14 @@ def test_homologue_high_confidence_is_homology_s_bool() -> None:
 
 @pytest.mark.parametrize('evidence', EVIDENCE, ids=lambda m: m.dataset_name)
 def test_otf_columns_are_every_evidence_s(evidence: type[DatasetModel]) -> None:
-    """The view derives from one evidence model; every other has the same columns, each its own datasource."""
-    otf, nodes = _nodes(AssociationOtf), _nodes(evidence)
-    assert [otf[c] for c in ('rowId', 'diseaseId', 'targetId', 'rowScore')] == [
-        nodes[c] for c in ('id', 'diseaseId', 'targetId', 'score')
-    ]
-    assert otf['datasourceId'].dtype == nodes['datasourceId'].dtype
-    assert otf['datatypeId'].dtype == nodes['datatypeId'].dtype
+    """The views derive from one evidence model; every other has the same columns, each its own datasource."""
+    nodes = _nodes(evidence)
+    sides = ((AssociationOtfDisease, 'diseaseId', 'targetId'), (AssociationOtfTarget, 'targetId', 'diseaseId'))
+    for model, a, b in sides:
+        otf = _nodes(model)
+        assert [otf[c] for c in ('rowId', 'A', 'B', 'rowScore')] == [nodes[c] for c in ('id', a, b, 'score')]
+        assert otf['datasourceId'].dtype == nodes['datasourceId'].dtype
+        assert otf['datatypeId'].dtype == nodes['datatypeId'].dtype
 
 
 @pytest.mark.parametrize('association', ASSOCIATION_INPUTS, ids=lambda m: m.dataset_name)
@@ -302,7 +311,8 @@ MARKERS = {
 
 #: every value a view declares rather than derives
 DECLARED: dict[str, set[str]] = {
-    'association_otf': {'datasourceId', 'datatypeId', 'diseaseData', 'targetData'},
+    'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
+    'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
     'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
     'coding_variant': {
         'therapeuticAreas',
@@ -420,3 +430,29 @@ def test_disease_view_is_the_served_disease_columns() -> None:
     synonyms = _nodes(DiseaseView)
     assert synonyms['synonyms[]/relation'].dtype == pl.String()
     assert synonyms['synonyms[]/terms[]'].nullable
+
+
+OTF_COMMON = ['rowId', 'A', 'B', 'datatypeId', 'datasourceId', 'rowScore', 'searchA', 'searchB']
+
+
+def test_association_otf_views_are_the_served_columns() -> None:
+    disease = [f.name for f in dataset_spec(AssociationOtfDisease).fields]
+    target = [f.name for f in dataset_spec(AssociationOtfTarget).fields]
+    assert disease == [*OTF_COMMON, 'noveltyDirect', 'noveltyIndirect', 'indirect']
+    assert target == [*OTF_COMMON, 'isMeasurement', 'noveltyDirect', 'noveltyIndirect', 'indirect']
+    models = discover_models()
+    assert models['association_otf_disease'] is AssociationOtfDisease
+    assert models['association_otf_target'] is AssociationOtfTarget
+
+
+def test_association_otf_views_types() -> None:
+    disease, target = _nodes(AssociationOtfDisease), _nodes(AssociationOtfTarget)
+    assert disease['indirect'].dtype == pl.List(pl.String())
+    assert target['indirect'].dtype == pl.List(pl.String())
+    assert target['indirect[]'].clickhouse == 'LowCardinality(String)'
+    assert disease['indirect[]'].clickhouse is None
+    assert target['isMeasurement'].dtype == pl.Boolean()
+    assert not target['isMeasurement'].nullable
+    for nodes in (disease, target):
+        assert nodes['searchA'].nullable
+        assert nodes['searchB'].nullable

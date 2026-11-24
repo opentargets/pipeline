@@ -34,6 +34,8 @@ steps:
         - sync_bucket etl view files
         - clickhouse_create_database release database
       foreach:
+        - aotf_disease
+        - aotf_target
         - baseline_expression
         - biosample
         - clinical_indication
@@ -156,13 +158,6 @@ steps:
         - explode load declared datasets
         - clickhouse_load clickhouse load studies
       dataset: targets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load aotf
-      requires:
-        - explode load declared datasets
-      dataset: aotf
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}

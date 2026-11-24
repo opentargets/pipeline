@@ -85,6 +85,9 @@ with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`)
 compares tables, columns, sort keys, dictionaries and rows. Engine settings may differ
 only as listed there: the primary key is the sort key, `allow_nullable_key` only on a
 nullable `order_by`, every MergeTree table optimised, and no `otar_projects` on Platform.
+`test_aotf_declarations_build_what_aotf_sql_built` does the same for `aotf_disease` and
+`aotf_target` (frozen `aotf.sql`) on shapes only, pts computing their rows: target
+`isMeasurement` is `Bool`, `UInt8` before.
 
 Print the generated DDL:
 
@@ -232,7 +235,8 @@ add the row to `docs/phase5_register.csv` by hand (dataset, field, category, out
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
 record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
-`drug.sql`, `pharmacogenomics.sql`, `disease.sql`) moved into declarations. Edit rows by hand (API changes that are no
+`drug.sql`, `pharmacogenomics.sql`, `disease.sql`) moved into declarations. A `RETIRED` dataset (`aotf`,
+whose entry and model are gone) keeps its rows as last built, unchecked against the generator. Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 
 ## Croissant

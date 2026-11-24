@@ -1,7 +1,7 @@
-"""Association on-the-fly: the `association_otf` view (pts `association_otf`).
+"""Association on-the-fly, disease side: the `association_otf_disease` view (pts `association_otf`).
 
-One row per evidence, from every evidence dataset, with its disease and target labels and the direct and
-indirect novelty of its association.
+One row per evidence as served in `associations_otf_disease`: the disease is `A`, the target `B`, and the
+labels are lower-cased for search.
 """
 
 from typing import Annotated, ClassVar
@@ -26,38 +26,40 @@ NoveltyDirect = from_output(AssociationOverallDirect, 'currentNovelty', nullable
 NoveltyIndirect = from_output(AssociationOverallIndirect, 'currentNovelty', nullable=True)
 
 
-class AssociationOtf(DatasetModel):
-    """Association on-the-fly."""
+class AssociationOtfDisease(DatasetModel):
+    """Association on-the-fly, disease side."""
 
-    dataset_name: ClassVar[str] = 'association_otf'
-    dataset_title: ClassVar[str] = 'Association on-the-fly'
+    dataset_name: ClassVar[str] = 'association_otf_disease'
+    dataset_title: ClassVar[str] = 'Association on-the-fly, disease side'
     dataset_description: ClassVar[str] = (
-        'Every evidence with its disease and target labels and the novelty of its direct and indirect '
-        'association, for computing associations on the fly'
+        'Every evidence keyed by its disease (A) and target (B), with lower-cased labels for search and the '
+        'novelty of its direct and indirect association, as served for associations computed on the fly'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     example: ClassVar[dict] = {
         'rowId': '0000155ec8bd9ff7b4e5e3b4e1c9c5f0f1e2d3a4',
-        'diseaseId': 'EFO_0000270',
-        'targetId': 'ENSG00000100031',
-        'datasourceId': 'eva',
+        'A': 'EFO_0000270',
+        'B': 'ENSG00000100031',
         'datatypeId': 'genetic_association',
+        'datasourceId': 'eva',
         'rowScore': 0.7,
-        'diseaseData': 'EFO_0000270 asthma',
-        'targetData': 'ENSG00000100031 gamma-glutamyltransferase 1 GGT1',
+        'searchA': 'efo_0000270 asthma',
+        'searchB': 'ensg00000100031 gamma-glutamyltransferase 1 ggt1',
         'noveltyDirect': 0.01,
         'noveltyIndirect': None,
+        'indirect': [],
     }
 
     rowId: RowId
-    diseaseId: DiseaseId
-    targetId: TargetId
-    datasourceId: Annotated[Datasource, PolarsDtype(pl.Enum)] = Field(description='Identifier of the evidence source')
+    A: DiseaseId
+    B: TargetId
     datatypeId: Annotated[Datatype, PolarsDtype(pl.Enum)] = Field(description='Type of the evidence')
+    datasourceId: Annotated[Datasource, PolarsDtype(pl.Enum)] = Field(description='Identifier of the evidence source')
     rowScore: RowScore
-    diseaseData: str | None = Field(description='Disease identifier and name, separated by a space')
-    targetData: str | None = Field(
-        description='Target identifier, approved name and approved symbol, separated by spaces'
+    searchA: str | None = Field(description='Lower-cased disease identifier and name, separated by a space')
+    searchB: str | None = Field(
+        description='Lower-cased target identifier, approved name and approved symbol, separated by spaces'
     )
     noveltyDirect: NoveltyDirect
     noveltyIndirect: NoveltyIndirect
+    indirect: list[str] = Field(description='Always empty: the disease side has no indirect keys')
