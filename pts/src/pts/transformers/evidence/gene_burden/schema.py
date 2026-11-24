@@ -21,6 +21,7 @@ STUDY = Study(
     disease='schizophrenia',
     disease_id='MONDO_0005090',
     browser='https://schema.broadinstitute.org',
+    literature=('42818077',),
 )
 
 _INTERVAL = r'^(\S+) - (\S+)$'

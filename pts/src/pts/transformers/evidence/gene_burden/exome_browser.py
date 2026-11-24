@@ -25,13 +25,17 @@ TEST_COLUMNS = ['pValue', 'oddsRatio', 'oddsRatioConfidenceIntervalLower', 'odds
 
 @dataclass(frozen=True)
 class Study:
-    """What a browser's evidence carries besides the gene results."""
+    """What a browser's evidence carries besides the gene results.
+
+    `literature` holds the PubMed ids of the study's publication; empty leaves `literature` null.
+    """
 
     project_id: str
     cohort_id: str
     disease: str
     disease_id: str
     browser: str
+    literature: tuple[str, ...] = ()
 
 
 def read_gene_results(path: str) -> pl.DataFrame:
@@ -78,6 +82,7 @@ def to_evidence(significant: pl.DataFrame, study: Study, release: str) -> pl.Laz
     """The significant genes' evidence in `GENE_BURDEN_PARSED`."""
     pvalue = pl.col('pValue')
     url = pl.concat_str(pl.lit(f'{study.browser}/gene/'), pl.col('gene_id'))
+    literature = {'literature': pl.lit(list(study.literature), dtype=pl.List(pl.String))} if study.literature else {}
     return (
         significant
         .select(
@@ -101,6 +106,7 @@ def to_evidence(significant: pl.DataFrame, study: Study, release: str) -> pl.Laz
             statisticalMethod=pl.col('statisticalMethod'),
             statisticalMethodOverview=pl.col('statisticalMethod').replace_strict(METHOD_DESCRIPTIONS),
             urls=pl.concat_list(pl.struct(url=url, niceName=pl.lit(f'{study.project_id} browser'))),
+            **literature,
         )
         .pipe(to_parsed)
         .lazy()
