@@ -123,9 +123,10 @@ def test_register_model_describes_the_output(dataset):
 
 
 def test_retired_datasets_keep_their_rows(register):
-    """A retired dataset (`aotf`: pts serves its tables) has no entry, model or generated table; its rows stay."""
-    assert {'aotf'} == build_register.RETIRED
-    assert 'association_otf' not in discover_models()
+    """A retired dataset (`aotf`, `protein_coding_coords`: pts serves their tables) has no entry, model or generated
+    table; its rows stay."""
+    assert {'aotf', 'protein_coding_coords'} == build_register.RETIRED
+    assert not {'association_otf', 'coding_variant'} & set(discover_models())
     for dataset in build_register.RETIRED:
         assert dataset not in CONFIG
         assert build_register.platform_table(dataset) is None

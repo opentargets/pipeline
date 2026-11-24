@@ -5,7 +5,7 @@ from typing import get_args
 
 import polars as pl
 import pytest
-from pts_view_schemas import ASSOCIATION_TIMESERIES, CODING_VARIANT, TARGET_VIEW
+from pts_view_schemas import ASSOCIATION_TIMESERIES, TARGET_VIEW
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -32,7 +32,6 @@ from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
-from ot_datamodels.views.coding_variant import CodingVariant
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.disease_view import DiseaseView
@@ -44,7 +43,6 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf_disease': AssociationOtfDisease,
     'association_otf_target': AssociationOtfTarget,
     'association_timeseries': AssociationTimeseries,
-    'coding_variant': CodingVariant,
     'coding_variant_by_target': CodingVariantByTarget,
     'coding_variant_by_variant': CodingVariantByVariant,
     'disease_view': DiseaseView,
@@ -56,7 +54,6 @@ VIEWS: dict[str, type[DatasetModel]] = {
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
 PTS_SCHEMAS = {
     'association_timeseries': ASSOCIATION_TIMESERIES,
-    'coding_variant': CODING_VARIANT,
     'target_view': TARGET_VIEW,
 }
 
@@ -64,7 +61,6 @@ PTS_SCHEMAS = {
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
     'association_timeseries': {'aggregationType'},
-    'coding_variant': {'datasources'},
     'target_view': {
         'genomicLocation',
         'go',
@@ -81,7 +77,6 @@ PRIMARY_KEYS = {
     'association_otf_disease': ('rowId',),
     'association_otf_target': ('rowId',),
     'association_timeseries': (),
-    'coding_variant': (),
     'coding_variant_by_target': ('targetId',),
     'coding_variant_by_variant': ('variantId',),
     'disease_view': ('id',),
@@ -126,14 +121,6 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         ('association_timeseries', c): (AssociationOverallDirect, f'timeseries[]/{c}', None)
         for c in ('year', 'associationScore', 'novelty', 'yearlyEvidenceCount')
     },
-    ('coding_variant', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
-    ('coding_variant', 'variantId'): (Variant, 'variantId', None),
-    ('coding_variant', 'variantEffect'): (Variant, 'variantEffect[]/score', True),
-    ('coding_variant', 'variantFunctionalConsequenceIds'): (
-        Variant,
-        'transcriptConsequences[]/variantFunctionalConsequenceIds',
-        None,
-    ),
     ('coding_variant_by_variant', 'variantId'): (Variant, 'variantId', None),
     ('coding_variant_by_target', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
     **{
@@ -332,11 +319,6 @@ def test_association_timeseries_is_ppp_only() -> None:
     assert nodes['partitionKey'].dtype == pl.String()
 
 
-def test_coding_variant_datasource_is_its_vocabulary() -> None:
-    node = _nodes(CodingVariant)['datasources[]/datasourceId']
-    assert node.dtype == pl.Enum(list(get_args(v.CodingVariantDatasource)))
-
-
 def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
     datasets = discover_datasets()
     evidence = ('evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_variants', 'evidence_gwas_credible_sets')
@@ -348,10 +330,6 @@ def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
 
 #: the ClickHouseType markers declared on view columns, from the hand-written landing SQL before piece 3
 MARKERS = {
-    ('coding_variant', 'datasources[]/datasourceCount'): 'UInt32',
-    ('coding_variant', 'datasources[]/datasourceNiceName'): 'LowCardinality(String)',
-    ('coding_variant', 'referenceAminoAcid'): 'LowCardinality(String)',
-    ('coding_variant', 'alternateAminoAcid'): 'LowCardinality(String)',
     ('interaction_view', 'interactions[]/speciesB/taxonId'): 'UInt32',
     ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
     ('coding_variant_by_target', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
@@ -385,22 +363,6 @@ DECLARED: dict[str, set[str]] = {
     'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
     'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
     'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
-    'coding_variant': {
-        'therapeuticAreas',
-        'therapeuticAreas[]',
-        'diseases',
-        'diseases[]',
-        'datasources',
-        'datasources[]',
-        'datasources[]/datasourceCount',
-        'datasources[]/datasourceId',
-        'datasources[]/datasourceNiceName',
-        'uniprotAccessions',
-        'uniprotAccessions[]',
-        'referenceAminoAcid',
-        'aminoAcidPosition',
-        'alternateAminoAcid',
-    },
     'coding_variant_by_target': COORD_DECLARED,
     'coding_variant_by_variant': COORD_DECLARED,
     'disease_view': {

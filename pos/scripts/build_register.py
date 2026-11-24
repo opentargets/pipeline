@@ -95,7 +95,7 @@ CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickho
 #: The model a dataset's rows describe, where its entry now loads another (`disease`, `interaction` load views).
 REGISTER_MODEL = {'disease': 'disease', 'interaction': 'interaction'}
 #: Datasets whose entry and model are gone; their rows stay as last built.
-RETIRED = {'aotf'}
+RETIRED = {'aotf', 'protein_coding_coords'}
 CLICKHOUSE = POS / 'config' / 'clickhouse'
 SCRIPTS = sd._scripts(CLICKHOUSE / 'scripts')
 

@@ -90,6 +90,9 @@ nullable `order_by`, every MergeTree table optimised, and no `otar_projects` on 
 `isMeasurement` is `Bool`, `UInt8` before. `test_interaction_declaration_builds_what_interaction_sql_built`
 does it for `interaction` (frozen `interaction.sql`); `interaction_evidence_log` stays an undeclared
 landing table, read by the API.
+`test_protein_coding_coords_declarations_build_what_the_script_built` does it for the two
+`protein_coding_coords_*` entries (frozen `protein_coding_coords.sql`): their landings take the
+script's served rows, and tables, columns and rows must come back equal.
 
 Print the generated DDL:
 
@@ -238,7 +241,7 @@ serving read, API follow-up; copy `before` and `serving read` from `schema_drift
 to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
 record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
 `drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`) moved into declarations. A `RETIRED` dataset (`aotf`,
-whose entry and model are gone) keeps its rows as last built, unchecked against the generator; the rows of an
+`protein_coding_coords`, whose entries and models are gone) keeps its rows as last built, unchecked against the generator; the rows of an
 entry that now loads a view (`disease`, `interaction`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 

@@ -1,8 +1,7 @@
-"""The pts schemas of three views before they had models (pts at d1a58968), copied: datamodels cannot
+"""The pts schemas of two views before they had models (pts at d1a58968), copied: datamodels cannot
 import pts.
 
-`association_timeseries_schema()` (`pts/schemas/association.py`),
-`OUTPUT_SCHEMA` (`pts/tests/test_coding_variant.py`) and `TARGET_VIEW` (`pts/schemas/target_view.py`).
+`association_timeseries_schema()` (`pts/schemas/association.py`) and `TARGET_VIEW` (`pts/schemas/target_view.py`).
 """
 
 import polars as pl
@@ -159,18 +158,3 @@ ASSOCIATION_TIMESERIES = pl.Schema({
     'partitionKey': pl.String(),
 })
 
-DATASOURCE = pl.Struct({'datasourceCount': pl.Int32(), 'datasourceId': pl.String(), 'datasourceNiceName': pl.String()})
-
-CODING_VARIANT = pl.Schema({
-    'targetId': pl.String,
-    'variantId': pl.String,
-    'therapeuticAreas': pl.List(pl.String),
-    'diseases': pl.List(pl.String),
-    'datasources': pl.List(DATASOURCE),
-    'variantEffect': pl.Float32,
-    'variantFunctionalConsequenceIds': pl.List(pl.String),
-    'uniprotAccessions': pl.List(pl.String),
-    'referenceAminoAcid': pl.String,
-    'aminoAcidPosition': pl.Int32,
-    'alternateAminoAcid': pl.String,
-})
