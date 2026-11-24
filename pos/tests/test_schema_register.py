@@ -122,6 +122,8 @@ VIEW_LOADED = {
     'mechanism_of_action': 'drug_mechanism_of_action_by_drug',
     'mouse_phenotypes': 'mouse_phenotype_by_target',
     'pharmacovigilance': 'pharmacovigilance_by_drug',
+    'target_prioritisation': 'target_prioritisation_view',
+    'transcript': 'transcript_view',
 }
 
 

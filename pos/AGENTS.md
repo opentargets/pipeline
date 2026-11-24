@@ -98,6 +98,10 @@ script's served rows, and tables, columns and rows must come back equal.
 serve their items in the output's order and types (Enum8, non-null, `qualifier` kept), not the scripts' narrower
 ones: only the items column of each table may differ, and its rows must come back equal once cast back to the
 script's types. `test_small_compute_views_land_the_served_columns` pins the served types.
+`test_target_group_declarations_build_what_the_scripts_built` does it for `targets` (with `targets_mergetree`
+and `target_symbols`), `targets_by_region`, `transcript` and `target_prioritisation` (frozen `targets.sql`,
+`transcript.sql`, `target_prioritisation.sql`): `targets_by_region.target` is `Tuple(id String)`, and
+`targets_mergetree` is sorted by `id`. `studies.sql` and `credible_sets.sql` drop their own landing tables.
 
 Print the generated DDL:
 
@@ -245,10 +249,11 @@ add the row to `docs/phase5_register.csv` by hand (dataset, field, category, out
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
 record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
-`drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`, the five small compute scripts) moved into declarations. A
+`drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`, the five small compute and three target scripts) moved into declarations. A
 `RETIRED` dataset (`aotf`, `protein_coding_coords`, whose entries and models are gone) keeps its rows as last built, unchecked against
 the generator; the rows of an entry that now loads a view (`disease`, `interaction`, `disease_hpo`, `drug_warnings`,
-`mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
+`mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`, `target_prioritisation`, `transcript`) describe its output
+(`REGISTER_MODEL`). Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 
 ## Croissant
