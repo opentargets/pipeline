@@ -1065,6 +1065,17 @@ steps:
           - PHASE_IV_NOT_APPROVED
   ##################################################################################################
 
+  #: DRUG_VIEW STEP :##############################################################################
+  drug_view:
+    - name: transform drug_view
+      transformer: drug_view
+      source:
+        drug_molecule: output/drug_molecule
+        pharmacogenomics: output/pharmacogenomics
+      destination:
+        view: view/drug_view
+  ##################################################################################################
+
   #: AACT_TRIAL_EXTRACTION_V2 STEP :###############################################################
   # Not part of a release. The `clinical_staging` DAG runs this step with
   # release_uri pointed at gs://clinical_staging/aact/${staging_version}, so every path below
