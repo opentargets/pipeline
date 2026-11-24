@@ -348,6 +348,9 @@ steps:
     depends_on:
       - pts_drug_molecule
       - pts_pharmacogenetics
+  pts_disease_view:
+    depends_on:
+      - pts_study
   pts_clinical_report:
     machine_type: n2d-standard-16
     depends_on:
