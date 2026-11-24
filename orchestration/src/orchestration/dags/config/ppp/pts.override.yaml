@@ -52,12 +52,21 @@ steps:
 
   # PPP validates its own study and credible-set inputs instead of the platform molQTL sources.
   study:
-    - name: transform validate study
+    - name: transform deconvolute study GWAS Catalog
+      transformer: study_deconvolution
       source:
         study:
           - input/gwas/gcca/study
           - input/gwas/gcss_pics/study
           - input/gwas/gcss_susie/study
+      destination: intermediate/gwas/gwas_catalog/deconvoluted_study
+
+    - name: transform validate study
+      requires:
+        - transform deconvolute study GWAS Catalog
+      source:
+        study:
+          - intermediate/gwas/gwas_catalog/deconvoluted_study
           - input/gwas/finngen_gwas/study
           - input/molqtl/eqtl_catalogue/study
           - input/molqtl/ukb_ppp_eur/study
@@ -77,6 +86,8 @@ steps:
         disease: output/disease
         biosample: output/biosample
         heritability: input/heritability_estimate
+        # GWAS Catalog studies superseded by PGC fine-mapping (opentargets/curation)
+        superseded_studies: input/ot_curation/genetics/superseded_studies.tsv
       destination:
         output: output/study
         excluded: excluded/study
@@ -94,6 +105,7 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
+          - SUPERSEDED_STUDY
 
   # PPP runs the platform credible set step on the platform and the PPP sources. Keep it identical
   # to the platform step apart from the sources; orchestration tests check it.

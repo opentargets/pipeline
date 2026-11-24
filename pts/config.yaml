@@ -93,12 +93,21 @@ steps:
 
   #: STUDY MIGRATION
   study:
-    - name: transform validate study
+    - name: transform deconvolute study GWAS Catalog
+      transformer: study_deconvolution
       source:
         study:
           - input/gwas/gcca/study
           - input/gwas/gcss_pics/study
           - input/gwas/gcss_susie/study
+      destination: intermediate/gwas/gwas_catalog/deconvoluted_study
+
+    - name: transform validate study
+      requires:
+        - transform deconvolute study GWAS Catalog
+      source:
+        study:
+          - intermediate/gwas/gwas_catalog/deconvoluted_study
           - input/gwas/finngen_gwas/study
           - input/molqtl/eqtl_catalogue/study
           - input/molqtl/ukb_ppp_eur/study

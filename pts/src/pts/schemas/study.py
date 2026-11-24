@@ -1,4 +1,4 @@
-"""Schema and study types of the Study dataset."""
+"""Schemas and study types of the Study dataset and its curation input."""
 
 from typing import get_args
 
@@ -61,3 +61,6 @@ study_schema = pl.Schema({
         })
     ),
 })
+
+#: The curation file of superseded studies: each study and the study that supersedes it.
+superseded_studies_schema = pl.Schema({'studyId': pl.String(), 'supersededBy': pl.String()})
