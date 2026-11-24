@@ -9,11 +9,18 @@ import numpy as np
 import polars as pl
 import pytest
 
+from pts.pyspark.genetic_correlation_munge import _reusable
 from pts.transformers.genetic_correlation import pairs as pairs_module
-from pts.transformers.genetic_correlation.munge import MUNGED_SCHEMA, munge_one, panel_size, read_panel
-from pts.transformers.genetic_correlation.pairs import Study, Tile, results, run_tile, shared, tiles
-from pts.transformers.genetic_correlation.representatives import OUTPUT_SCHEMA, ld_ancestry, representatives
-from pts.transformers.genetic_correlation.settings import PairsSettings
+from pts.transformers.genetic_correlation.munge import MUNGE_VERSION, MUNGED_SCHEMA, munge_one, panel_size, read_panel
+from pts.transformers.genetic_correlation.pairs import Study, Tile, assemble, results, run_tile, shared, tiles
+from pts.transformers.genetic_correlation.previous import previous_path
+from pts.transformers.genetic_correlation.representatives import (
+    OUTPUT_SCHEMA,
+    ld_ancestry,
+    representative_changes,
+    representatives,
+)
+from pts.transformers.genetic_correlation.settings import MungeDestination, MungeSource, PairsSettings
 from pts.transformers.study import QualityFlag
 from pts.transformers.utils.dataset import scan_dataset
 
@@ -80,6 +87,10 @@ HERITABILITY = [
 ]
 
 
+def _representatives_destination(root: Path) -> dict[str, str]:
+    return {'representatives': str(root / 'representatives'), 'changes': str(root / 'changes')}
+
+
 @pytest.fixture
 def inputs(tmp_path: Path) -> dict[str, str]:
     study = tmp_path / 'study.parquet'
@@ -104,9 +115,9 @@ def test_ld_ancestry_takes_the_dominant_population_and_breaks_ties_towards_nfe()
 
 
 def test_representatives_choose_the_best_powered_eligible_study(inputs: dict[str, str], tmp_path: Path) -> None:
-    destination = tmp_path / 'representatives'
-    representatives(inputs, str(destination), {}, Mock())
-    result = scan_dataset(str(destination)).collect().sort('diseaseId')
+    destination = _representatives_destination(tmp_path)
+    representatives(inputs, destination, {}, Mock())
+    result = scan_dataset(destination['representatives']).collect().sort('diseaseId')
     assert result.schema == OUTPUT_SCHEMA
     assert result.select('diseaseId', 'ldAncestry', 'studyId').to_dict(as_series=False) == {
         'diseaseId': ['D1', 'D2', 'D3'],
@@ -120,9 +131,11 @@ def test_representatives_choose_the_best_powered_eligible_study(inputs: dict[str
 
 
 def test_representatives_can_include_another_ancestry(inputs: dict[str, str], tmp_path: Path) -> None:
-    destination = tmp_path / 'representatives'
-    representatives(inputs, str(destination), {'ancestries': ['nfe', 'eas']}, Mock())
-    result = scan_dataset(str(destination)).collect().filter(pl.col('diseaseId') == 'D1').sort('ldAncestry')
+    destination = _representatives_destination(tmp_path)
+    representatives(inputs, destination, {'ancestries': ['nfe', 'eas']}, Mock())
+    result = (
+        scan_dataset(destination['representatives']).collect().filter(pl.col('diseaseId') == 'D1').sort('ldAncestry')
+    )
     assert result['studyId'].to_list() == ['EAS', 'BIG']
 
 
@@ -294,3 +307,138 @@ def test_pairs_skip_pairs_with_too_few_shared_snps(pairs_inputs: tuple[dict, str
     assert result['runStatus'].to_list() == ['skipped'] * 3
     assert result['skipReason'][0] == '3000 shared SNPs, fewer than 5000 jackknife blocks'
     assert result['rg'].null_count() == 3
+
+
+def test_representative_changes_compare_each_cell_with_the_previous_run(inputs: dict[str, str], tmp_path: Path) -> None:
+    first = _representatives_destination(tmp_path / 'first')
+    representatives(inputs, first, {}, Mock())
+    assert scan_dataset(first['changes']).collect()['change'].unique().to_list() == ['added']
+    second = _representatives_destination(tmp_path / 'second' / 'output')
+    representatives({**inputs, 'previous_output': str(tmp_path / 'first')}, second, {}, Mock())
+    assert scan_dataset(second['changes']).collect()['change'].unique().to_list() == ['unchanged']
+
+
+def test_representative_changes_name_every_kind_of_change() -> None:
+    def cells(rows: list[tuple[str, str]]) -> pl.DataFrame:
+        return pl.DataFrame(rows, schema=['diseaseId', 'studyId'], orient='row').with_columns(
+            pl.lit('nfe').alias('ldAncestry')
+        )
+
+    current = cells([('D1', 'A'), ('D2', 'B2'), ('D4', 'C')])
+    previous = cells([('D1', 'A'), ('D2', 'B1'), ('D3', 'X')])
+    changes = representative_changes(current, previous)
+    assert changes.select('diseaseId', 'studyId', 'previousStudyId', 'change').rows() == [
+        ('D1', 'A', 'A', 'unchanged'),
+        ('D2', 'B2', 'B1', 'replaced'),
+        ('D3', None, 'X', 'dropped'),
+        ('D4', 'C', None, 'added'),
+    ]
+
+
+def test_previous_path_reads_the_same_name_in_the_previous_output(tmp_path: Path) -> None:
+    (tmp_path / 'old' / 'munged').mkdir(parents=True)
+    assert previous_path(None, 'gs://b/run/output/munged') is None
+    assert previous_path(str(tmp_path / 'old'), 'gs://b/run/output/munged') == str(tmp_path / 'old' / 'munged')
+    with pytest.raises(FileNotFoundError, match='no'):
+        previous_path(str(tmp_path / 'old'), 'gs://b/run/output/panels')
+
+
+def test_tiles_with_reused_studies_cover_only_the_pairs_with_a_new_study() -> None:
+    ids = [f's{i}' for i in range(6)]
+    studies = pl.DataFrame({'ldAncestry': 'nfe', 'studyId': ids})
+    reused = studies.filter(pl.col('studyId').is_in(['s0', 's1', 's2', 's3']))
+    pairs = sorted(pair for tile in tiles(studies, 2, reused) for pair in tile.pairs())
+    expected = sorted((a, b) for i, a in enumerate(ids) for b in ids[i + 1 :] if not {a, b} <= {'s0', 's1', 's2', 's3'})
+    assert pairs == expected
+
+
+def _pair_rows(pairs: list[tuple[str, str]], rg: float) -> pl.DataFrame:
+    return results([
+        {'ldAncestry': 'nfe', 'leftStudyId': a, 'rightStudyId': b, 'runStatus': 'success', 'rg': rg} for a, b in pairs
+    ])
+
+
+def test_assemble_copies_reused_pairs_and_deprecates_the_rest() -> None:
+    # previous run: A, B, C, D; now D has been dropped, E added, and C has too few SNPs
+    previous = _pair_rows([('A', 'B'), ('A', 'C'), ('A', 'D'), ('B', 'C'), ('B', 'D'), ('C', 'D')], 0.5)
+    studies = pl.DataFrame({
+        'ldAncestry': 'nfe',
+        'studyId': ['A', 'B', 'C', 'E'],
+        'isUsable': [True, True, False, True],
+        'isReused': [True, True, True, False],
+    })
+    reused = pl.DataFrame({'ldAncestry': 'nfe', 'studyId': ['A', 'B']})
+    computed = _pair_rows([('A', 'E'), ('B', 'E')], 0.1)
+    output = assemble(computed, studies, previous, reused, min_snps=200_000)
+    current = output.filter(~pl.col('isDeprecated'))
+    assert current.select('leftStudyId', 'rightStudyId', 'rg').rows() == [
+        ('A', 'B', 0.5),
+        ('A', 'E', 0.1),
+        ('B', 'E', 0.1),
+    ]
+    deprecated = dict(
+        output
+        .filter(pl.col('isDeprecated'))
+        .select(pl.concat_str('leftStudyId', 'rightStudyId'), 'deprecationReason')
+        .iter_rows()
+    )
+    assert deprecated == {
+        'AC': 'C has fewer than 200000 panel SNPs',
+        'AD': 'D is no longer a representative study',
+        'BC': 'C has fewer than 200000 panel SNPs',
+        'BD': 'D is no longer a representative study',
+        'CD': 'C has fewer than 200000 panel SNPs; D is no longer a representative study',
+    }
+    # a later run keeps the deprecated pairs with their reasons, and a pair current again replaces its deprecated row
+    later = assemble(
+        _pair_rows([('A', 'D')], 0.9),
+        studies.vstack(
+            pl.DataFrame({'ldAncestry': ['nfe'], 'studyId': ['D'], 'isUsable': [True], 'isReused': [False]})
+        ),
+        output,
+        None,
+    )
+    assert later.filter(pl.col('leftStudyId') == 'A', pl.col('rightStudyId') == 'D').select(
+        'rg', 'isDeprecated'
+    ).rows() == [(0.9, False)]
+    assert later.filter(pl.col('isDeprecated'))['deprecationReason'].null_count() == 0
+
+
+def test_munge_reuses_a_study_only_with_the_same_panel_and_version(tmp_path: Path) -> None:
+    previous = tmp_path / 'previous'
+    for name, frame in {
+        'munged_studies': pl.DataFrame({
+            'studyId': ['A', 'B'],
+            'ldAncestry': ['nfe', 'eas'],
+            'nSnps': [900_000, 800_000],
+        }),
+        'panels': pl.DataFrame({
+            'ldAncestry': ['nfe', 'eas'],
+            'mSnps': [1, 1],
+            'panelChecksum': ['x', 'y'],
+            'mungeVersion': MUNGE_VERSION,
+        }),
+    }.items():
+        (previous / name).mkdir(parents=True)
+        frame.write_parquet(previous / name / 'part-0.parquet')
+    (previous / 'munged').mkdir()
+    studies = pl.DataFrame({
+        'studyId': ['A', 'B', 'C'],
+        'ldAncestry': ['nfe', 'eas', 'nfe'],
+        'effectiveSampleSize': 1.0,
+    })
+    # the eas panel changed since the previous run
+    panels = pl.DataFrame({
+        'ldAncestry': ['nfe', 'eas'],
+        'mSnps': [1, 1],
+        'panelChecksum': ['x', 'changed'],
+        'mungeVersion': MUNGE_VERSION,
+    })
+    sources = MungeSource(representatives='r', ldscore='l', sumstats='s', previous_output=str(previous))
+    run = tmp_path / 'run' / 'output'
+    destinations = MungeDestination(
+        munged=str(run / 'munged'), studies=str(run / 'munged_studies'), panels=str(run / 'panels')
+    )
+    reusable = _reusable(studies, panels, sources, destinations).sort('studyId')
+    assert reusable.select('studyId', 'previousSnps').rows() == [('A', 900_000), ('B', None), ('C', None)]
+    assert reusable['previousMunged'][0] == f'{previous}/munged/nfe/A.parquet'

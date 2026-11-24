@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pts.transformers.genetic_correlation.previous import PreviousOutput
 from pts.transformers.study import QualityFlag
 
 LD_ANCESTRIES = ('afr', 'amr', 'eas', 'fin', 'nfe')
@@ -20,6 +21,17 @@ class RepresentativesSource(BaseModel):
     study: str
     heritability: str
     """LDSC heritability estimates, one row per run, with `runStatus`, `h2`, `h2_se` and `lambda_gc`."""
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, to compare the representatives with."""
+
+
+class RepresentativesDestination(BaseModel):
+    """The representatives, and how they changed since the previous run."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    representatives: str
+    changes: str
 
 
 class RepresentativesSettings(BaseModel):
@@ -60,6 +72,8 @@ class MungeSource(BaseModel):
     """Directory of one panel per ancestry, named by `MungeSettings.ldscore_template`."""
     sumstats: str
     """Directory with one parquet dataset per study, named by its `studyId`."""
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, whose munged studies are reused where nothing changed."""
 
 
 class MungeDestination(BaseModel):
@@ -96,6 +110,18 @@ class PairsSource(BaseModel):
     studies: str
     munged: str
     panels: str
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, whose pairs are reused where nothing changed and kept,
+    flagged as deprecated, where a study is no longer correlated."""
+
+
+class PairsDestination(BaseModel):
+    """The genetic correlation of every pair, and the parameters it was computed with."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    genetic_correlation: str
+    parameters: str
 
 
 class PairsSettings(BaseModel):

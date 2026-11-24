@@ -9,6 +9,7 @@ otter, which bills the project of the surrounding `storage_context`, rather than
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,11 @@ from otter.storage.synchronous.handle import StorageHandle
 from pts.transformers.utils.dataset import list_parts
 
 COPY_BYTES = 16 * 1024 * 1024
+
+MUNGE_VERSION = 2
+"""The version of the munged format and of how it is made: a run reuses a previous run's munged
+studies only if both were made with the same version. Increment it with any change to
+`munge_study` or `read_panel` that changes what a munged study holds."""
 
 VARIANT_KEY = ['chromosome', 'position', 'ref', 'alt']
 
@@ -32,10 +38,23 @@ MUNGED_SCHEMA = pl.Schema({
 SNP's row in the panel (`read_panel`), so sorting by it is genomic order and two studies of one
 ancestry join on it."""
 
-STUDIES_SCHEMA = pl.Schema({'studyId': pl.String, 'ldAncestry': pl.String, 'nSnps': pl.Int64, 'isUsable': pl.Boolean})
-"""Each munged study's number of panel SNPs, and whether it has enough to be correlated."""
+STUDIES_SCHEMA = pl.Schema({
+    'studyId': pl.String,
+    'ldAncestry': pl.String,
+    'nSnps': pl.Int64,
+    'isUsable': pl.Boolean,
+    'isReused': pl.Boolean,
+})
+"""Each munged study's number of panel SNPs, whether it has enough to be correlated, and whether it
+was copied from the previous run rather than munged."""
 
-PANELS_SCHEMA = pl.Schema({'ldAncestry': pl.String, 'mSnps': pl.Int64})
+PANELS_SCHEMA = pl.Schema({
+    'ldAncestry': pl.String,
+    'mSnps': pl.Int64,
+    'panelChecksum': pl.String,
+    'mungeVersion': pl.Int64,
+})
+"""Each panel's M, the checksum of its files, and the `MUNGE_VERSION` its studies were munged with."""
 
 _PANEL_COLUMNS = {
     'CHR': pl.String,
@@ -105,6 +124,26 @@ def read_panel(path: str, scratch: Path) -> pl.DataFrame:
         .with_row_index('snp')
         .collect()
     )
+
+
+def panel_checksum(path: str) -> str:
+    """The SHA-256 of a panel's files, in the order `read_panel` reads them."""
+    digest = hashlib.sha256()
+    for part in list_parts(path, '*.csv*'):
+        with StorageHandle(part).open('rb') if is_remote(part) else Path(part).open('rb') as handle:
+            while block := handle.read(COPY_BYTES):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def copy(source: str, target: str, scratch: Path) -> None:
+    """Copy one file between local paths or object store URIs, through `scratch`."""
+    local = fetch(source, scratch / Path(source).name)
+    if not is_remote(source):
+        staged = scratch / f'{Path(source).name}.copy'
+        shutil.copyfile(local, staged)
+        local = staged
+    publish(local, target)
 
 
 def panel_size(panel: pl.DataFrame, maf_threshold: float) -> int:

@@ -18,6 +18,9 @@ environments:
       pipeline_ref: feat/genetic-correlation
       # billed for the requester-pays release and summary statistics buckets
       billing_project: open-targets-genetics-dev
+      # the output/ folder of the previous run, whose munged studies and pairs are reused where
+      # nothing changed and whose dropped pairs are kept as deprecated; empty for a first run
+      previous_run: ''
 
 setup:
   - from: https://raw.githubusercontent.com/opentargets/pipeline/{{pipeline_ref}}/orchestration/src/orchestration/assets/install_dependencies_on_cluster.sh
@@ -77,9 +80,13 @@ steps:
         transformer genetic_correlation.representatives '{
           "source": {
             "study": "{{output}}/input/study",
-            "heritability": "{{output}}/input/heritability_estimates"
+            "heritability": "{{output}}/input/heritability_estimates",
+            "previous_output": "{{previous_run}}"
           },
-          "destination": "{{output}}/output/representatives",
+          "destination": {
+            "representatives": "{{output}}/output/representatives",
+            "changes": "{{output}}/output/representative_changes"
+          },
           "settings": {"ancestries": ["nfe"]}
         }'
 
@@ -94,7 +101,8 @@ steps:
           "source": {
             "representatives": "{{output}}/output/representatives",
             "ldscore": "{{output}}/input/ldscore",
-            "sumstats": "{{input.sumstats}}"
+            "sumstats": "{{input.sumstats}}",
+            "previous_output": "{{previous_run}}"
           },
           "destination": {
             "munged": "{{output}}/output/munged",
@@ -115,7 +123,11 @@ steps:
           "source": {
             "studies": "{{output}}/output/munged_studies",
             "munged": "{{output}}/output/munged",
-            "panels": "{{output}}/output/panels"
+            "panels": "{{output}}/output/panels",
+            "previous_output": "{{previous_run}}"
           },
-          "destination": "{{output}}/output/genetic_correlation"
+          "destination": {
+            "genetic_correlation": "{{output}}/output/genetic_correlation",
+            "parameters": "{{output}}/output/parameters"
+          }
         }'

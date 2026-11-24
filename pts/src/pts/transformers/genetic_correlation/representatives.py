@@ -15,7 +15,13 @@ import polars as pl
 from loguru import logger
 from otter.config.model import Config
 
-from pts.transformers.genetic_correlation.settings import LD_ANCESTRIES, RepresentativesSettings, RepresentativesSource
+from pts.transformers.genetic_correlation.previous import previous_path
+from pts.transformers.genetic_correlation.settings import (
+    LD_ANCESTRIES,
+    RepresentativesDestination,
+    RepresentativesSettings,
+    RepresentativesSource,
+)
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 OUTPUT_SCHEMA = pl.Schema({
@@ -30,6 +36,18 @@ OUTPUT_SCHEMA = pl.Schema({
     'h2StandardError': pl.Float64,
     'lambdaGc': pl.Float64,
 })
+
+
+CHANGES_SCHEMA = pl.Schema({
+    'diseaseId': pl.String,
+    'ldAncestry': pl.String,
+    'studyId': pl.String,
+    'previousStudyId': pl.String,
+    'change': pl.String,
+})
+"""How each disease and ancestry's representative changed since the previous run: `added`,
+`unchanged`, `replaced` or `dropped`. `studyId` is null for a dropped one, `previousStudyId` for an
+added one, and every one is `added` without a previous run."""
 
 
 def effective_sample_size() -> pl.Expr:
@@ -161,28 +179,64 @@ def choose_representatives(candidates: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
+def representative_changes(current: pl.DataFrame, previous: pl.DataFrame | None) -> pl.DataFrame:
+    """Compare each disease and ancestry's representative with the previous run's, in `CHANGES_SCHEMA`."""
+    cells = ['diseaseId', 'ldAncestry']
+    if previous is None:
+        previous = pl.DataFrame(schema={k: OUTPUT_SCHEMA[k] for k in [*cells, 'studyId']})
+    return (
+        current
+        .select(*cells, 'studyId')
+        .join(
+            previous.select(*cells, pl.col('studyId').alias('previousStudyId')),
+            on=cells,
+            how='full',
+            coalesce=True,
+        )
+        .with_columns(
+            pl
+            .when(pl.col('previousStudyId').is_null())
+            .then(pl.lit('added'))
+            .when(pl.col('studyId').is_null())
+            .then(pl.lit('dropped'))
+            .when(pl.col('studyId') == pl.col('previousStudyId'))
+            .then(pl.lit('unchanged'))
+            .otherwise(pl.lit('replaced'))
+            .alias('change')
+        )
+        .select(list(CHANGES_SCHEMA))
+        .cast(CHANGES_SCHEMA)
+        .sort(cells)
+    )
+
+
 def representatives(
     source: dict[str, str],
-    destination: str,
+    destination: dict[str, str],
     settings: dict[str, Any],
     config: Config,
 ) -> None:
-    """Choose the representative studies.
+    """Choose the representative studies, and compare them with the previous run's.
 
     Args:
         source: the `RepresentativesSource` paths.
-        destination: the representatives dataset, one row per disease and ancestry.
+        destination: the `RepresentativesDestination` paths.
         settings: the `RepresentativesSettings`.
         config: unused.
     """
     sources = RepresentativesSource.model_validate(source)
+    destinations = RepresentativesDestination.model_validate(destination)
     options = RepresentativesSettings.model_validate(settings)
     studies = eligible_studies(scan_dataset(sources.study), options)
     heritability = successful_heritability(scan_dataset(sources.heritability))
-    chosen = choose_representatives(heritable_studies(studies, heritability, options)).collect()
+    chosen = choose_representatives(heritable_studies(studies, heritability, options)).collect().cast(OUTPUT_SCHEMA)
     logger.info(
         '{} representative studies over {} disease and ancestry cells',
         chosen['studyId'].n_unique(),
         chosen.height,
     )
-    write_dataset(chosen.cast(OUTPUT_SCHEMA), destination)
+    previous = previous_path(sources.previous_output, destinations.representatives)
+    changes = representative_changes(chosen, None if previous is None else scan_dataset(previous).collect())
+    logger.info('changes since the previous run: {}', dict(changes.group_by('change').len().iter_rows()))
+    write_dataset(chosen, destinations.representatives)
+    write_dataset(changes, destinations.changes)
