@@ -350,7 +350,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf', 'association_time_series', 'disease', 'drug', 'protein_coding_coords', 'targets')
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'protein_coding_coords',
+              'targets')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -399,14 +400,24 @@ def test_disease_view_landing_is_the_served_disease():
     )
 
 
-#: the columns of the served associations_otf_* tables as aotf.sql builds them (read off system.columns), but
-#: for target isMeasurement, UInt8 there; the Enums are checked by their first value
+#: the columns of the served associations_otf_* tables as aotf.sql built them (read off system.columns), but
+#: for target isMeasurement, UInt8 there
 AOTF_SERVED = {
     'rowId': 'String',
     'A': 'LowCardinality(String)',
     'B': 'LowCardinality(String)',
-    'datatypeId': "Enum8('affected_pathway' = 1, ",
-    'datasourceId': "Enum8('clinical_precedence' = 1, ",
+    'datatypeId': (
+        "Enum8('affected_pathway' = 1, 'animal_model' = 2, 'clinical' = 3, 'genetic_association' = 4, "
+        "'genetic_literature' = 5, 'known_drug' = 6, 'literature' = 7, 'ot_partner' = 8, 'ot_validation_lab' = 9, "
+        "'rna_expression' = 10, 'somatic_mutation' = 11)"
+    ),
+    'datasourceId': (
+        "Enum8('clinical_precedence' = 1, 'gwas_credible_sets' = 2, 'gene_burden' = 3, 'eva' = 4, "
+        "'genomics_england' = 5, 'gene2phenotype' = 6, 'uniprot_literature' = 7, 'uniprot_variants' = 8, "
+        "'orphanet' = 9, 'clingen' = 10, 'cancer_gene_census' = 11, 'intogen' = 12, 'eva_somatic' = 13, "
+        "'cancer_biomarkers' = 14, 'crispr_screen' = 15, 'crispr' = 16, 'reactome' = 17, 'europepmc' = 18, "
+        "'expression_atlas' = 19, 'impc' = 20, 'encore' = 21, 'ot_crispr' = 22, 'ot_crispr_validation' = 23)"
+    ),
     'rowScore': 'Float64',
     'searchA': 'Nullable(String)',
     'searchB': 'Nullable(String)',
@@ -431,8 +442,7 @@ def test_aotf_views_land_the_served_columns(model, extra):
     order += ['noveltyDirect', 'noveltyIndirect', 'indirect']
     landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
     assert list(landed) == order
-    for name, expected in served.items():
-        assert landed[name].startswith(expected) if expected.startswith('Enum8') else landed[name] == expected, name
+    assert landed == served
 
 
 # declared tables

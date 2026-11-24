@@ -121,6 +121,16 @@ def test_register_model_describes_the_disease_output():
     assert build_register.platform_table('disease') == tuple(_platform('disease') or [])
 
 
+def test_retired_datasets_keep_their_rows(register):
+    """A retired dataset (`aotf`: pts serves its tables) has no entry, model or generated table; its rows stay."""
+    assert {'aotf'} == build_register.RETIRED
+    assert 'association_otf' not in discover_models()
+    for dataset in build_register.RETIRED:
+        assert dataset not in CONFIG
+        assert build_register.platform_table(dataset) is None
+        assert [r['category'] for r in register if r['dataset'] == dataset]
+
+
 def _changed(row: dict[str, str]) -> bool:
     """Whether the ClickHouse type (or the struct field order) differs between `before` and `after`."""
     before, after = row['before'], row['after']
@@ -167,10 +177,12 @@ def test_register_covers_every_disagreement(drift, snapshot, register):
 
 
 def test_after_matches_the_generator(register):
-    """`after` is the generated Platform type; empty where the generated table lacks the column."""
+    """`after` is the generated Platform type; empty where the generated table lacks the column. A retired
+    dataset's rows keep the `after` of its last generated table."""
     no_table = {'api_follow_up', 'derived_type'}
-    tables = {d: _platform(d) for d in {r['dataset'] for r in register if r['category'] not in no_table}}
-    for row in register:
+    rows = [r for r in register if r['dataset'] not in build_register.RETIRED]
+    tables = {d: _platform(d) for d in {r['dataset'] for r in rows if r['category'] not in no_table}}
+    for row in rows:
         key = (row['dataset'], row['field'], row['category'])
         if row['category'] in {'serving_sql', 'api_follow_up', 'derived_type'}:
             continue

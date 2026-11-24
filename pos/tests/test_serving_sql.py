@@ -267,7 +267,7 @@ DECLARED = (
 )  # fmt: skip
 BEFORE = ROOT / 'tests' / 'fixtures' / 'serving_scripts_before'
 #: What the scripts left that nothing reads: a view the dictionary's EXPRESSION replaces, a landing table never dropped;
-#: `disease_log`, left for aotf.sql, which now reads `disease`.
+#: `disease_log`, left for an aotf.sql that read it.
 NOT_REBUILT = {'biosample_names_source', 'disease_log', 'otar_projects_log'}
 #: Declared datasets a product no longer loads: `otar_projects` was built empty on Platform, its model is PPP-only.
 NOT_LOADED = {'platform': {'association_time_series', 'otar_projects'}, 'ppp': set()}
@@ -539,52 +539,65 @@ def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
             assert not client.command('EXISTS TABLE pharmacogenomics')
 
 
-AOTF = ROOT / DATASETS['aotf']['postload_script']
 #: Fixture disease ids, and the fixture associations naming one: every other row.
 DISEASE_ID = "concat('D', toString(rowNumberInAllBlocks()))"
 NAMES_A_DISEASE = (
     f"if(rowNumberInAllBlocks() % 2 = 0, concat('D', toString(rowNumberInAllBlocks() % {FIXTURE_ROWS})), diseaseId)"
 )
 MEASUREMENT = "if(rowNumberInAllBlocks() % 3 = 0, arrayPushBack(therapeuticAreas, 'EFO_0001444'), therapeuticAreas)"
+#: The aotf declarations, which replace the frozen aotf.sql.
+AOTF = ('aotf_disease', 'aotf_target')
+#: The landing columns aotf.sql read (the removed `association_otf` view), by the disease-side column each became.
+AOTF_LANDING = {
+    'rowId': 'rowId', 'diseaseId': 'A', 'targetId': 'B', 'datasourceId': 'datasourceId', 'datatypeId': 'datatypeId',
+    'rowScore': 'rowScore', 'diseaseData': 'searchA', 'targetData': 'searchB', 'noveltyDirect': 'noveltyDirect',
+    'noveltyIndirect': 'noveltyIndirect',
+}  # fmt: skip
+#: The served column the declarations retype: (before, after).
+AOTF_RETYPED = {('associations_otf_target', 'isMeasurement'): ('UInt8', 'Bool')}
 
 
-def test_aotf_reads_the_served_disease_table():
-    """From the same association and disease rows, aotf.sql over the declared `disease` builds the
-    `associations_otf_*` tables the frozen script built over `disease_log`; the target side forces a hash join."""
-    statements = split_statements(AOTF.read_text())
-    (target,) = [s for s in statements if 'CREATE TABLE IF NOT EXISTS associations_otf_target' in s]
-    assert re.search(r'LEFT OUTER JOIN disease ON associations_otf_log\.diseaseId = disease\.id\b', target)
-    assert re.search(r"SETTINGS\s+join_algorithm\s*=\s*'hash'\s*$", target.strip()), target
+def test_aotf_loads_from_its_declarations():
+    """Both aotf entries load in the declared explode; the scripted `aotf` load is gone."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(AOTF) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in AOTF)
+    assert 'aotf' not in DATASETS
+    assert not [t['name'] for t in STEP if t.get('dataset') == 'aotf']
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_aotf_declarations_build_what_aotf_sql_built(product):
+    """The aotf declarations build the `associations_otf_*` tables the frozen aotf.sql built over the served
+    `disease`: tables, engines, sort keys and columns, but for target `isMeasurement`, UInt8 there and Bool here.
+    pts computes their rows (tests/test_association_otf_polars.py), so only the counts are compared."""
     served = {'associations_otf_disease', 'associations_otf_target'}
-    entry, aotf = DATASETS['disease'], DATASETS['aotf']
+    disease = DATASETS['disease']
+    landed = dict(landing_columns(DATASETS['aotf_disease'], product) or [])
+    landing = [(old, landed[new]) for old, new in AOTF_LANDING.items()]
     with _database() as before, _database() as after:
-        for _, sql in ddl_for(entry, 'platform'):
-            after.command(sql)
+        for _, sql in ddl_for(disease, product):
+            before.command(sql)
         overrides = {'id': DISEASE_ID, 'therapeuticAreas': MEASUREMENT}
-        _fill(after, entry['table'], landing_columns(entry, 'platform'), 1, overrides)
-        read = ('id', 'ancestors', 'therapeuticAreas')
-        script_landing = landing_columns({'model': SCRIPT_MODEL['disease']}, 'platform') or []
-        before.command(create_table(entry['table'], [c for c in script_landing if c[0] in read]))
-        before.command(
-            f'INSERT INTO disease_log SELECT {", ".join(read)} FROM `{after.database}`.disease_log'  # noqa: S608 fixed names
-        )
-        for client in (before, after):
-            for _, sql in ddl_for(aotf, 'platform'):
-                client.command(sql)
-            _fill(client, aotf['table'], landing_columns(aotf, 'platform'), 2, {'diseaseId': NAMES_A_DISEASE})
+        _fill(before, disease['table'], landing_columns(disease, product), 1, overrides)
+        _build_declared(before, 'disease', product)
+        before.command(create_table('associations_otf_log', landing))
+        _fill(before, 'associations_otf_log', landing, 2, {'diseaseId': NAMES_A_DISEASE})
         _run(before, (BEFORE / 'aotf.sql').read_text())
-        _build_declared(after, 'disease', 'platform')
-        _run(after, AOTF.read_text())
-        counts = after.query(
-            'SELECT countIf(isMeasurement), countIf(indirect != []), countIf(indirect = []), '
-            "countIf(B NOT LIKE 'D%') FROM associations_otf_target"
+        joined = before.query(
+            'SELECT countIf(isMeasurement), countIf(indirect != []) FROM associations_otf_target'
         ).result_rows[0]
+        for dataset in AOTF:
+            _land(after, dataset, product)
+            _build_declared(after, dataset, product)
         old, new = _shape(before), _shape(after)
-    assert set(old['tables']) == served
-    assert set(new['tables']) == served | {'disease', 'disease_mergetree'}
-    new = _without(new, {'disease', 'disease_mergetree', 'disease_names', 'dictionary disease_names'})
-    for part in ('tables', 'columns', 'rows'):
-        assert new[part] == old[part], part
-    measurement, matched, empty, unmatched = counts
-    assert measurement > 0 and matched > 0, counts
-    assert empty >= unmatched > 0, counts
+    assert all(joined), f'the join matched no disease: {joined}'
+    old = _without(old, {'disease', 'disease_mergetree', 'disease_names', 'dictionary disease_names'})
+    assert set(old['tables']) == set(new['tables']) == served
+    assert new['tables'] == old['tables']
+    for key, (was, now) in AOTF_RETYPED.items():
+        assert old['columns'][key][0] == was, key
+        old['columns'][key] = (now, old['columns'][key][1])
+    assert new['columns'] == old['columns']
+    counts = {name: len(rows) for name, rows in new['rows'].items()}
+    assert counts == {name: len(rows) for name, rows in old['rows'].items()} == dict.fromkeys(served, FIXTURE_ROWS)
