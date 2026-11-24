@@ -253,6 +253,7 @@ CONSUMER_TEST = {
     'evidence.gwas_credible_sets': 'evidence/test_gwas_credible_sets.py',
     'vep_view': 'test_vep_view.py',
     'search': 'test_search_entrypoint.py',
+    'target_view': 'test_target_view.py',
 }
 """The tests of every task that reads `CREDIBLE_SET_DATASETS`, which build their inputs as the producers write them."""
 
