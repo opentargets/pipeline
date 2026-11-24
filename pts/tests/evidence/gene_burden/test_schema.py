@@ -40,7 +40,7 @@ def test_columns(tmp_path: Path) -> None:
         'resourceScore': 2.5e-9,
         'ancestry': None,
         'ancestryId': None,
-        'literature': None,
+        'literature': ['42818077'],
         'projectId': 'SCHEMA',
         'cohortId': 'SCHEMA2',
         'releaseVersion': '2026-07-15',
