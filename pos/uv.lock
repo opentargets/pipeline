@@ -1012,7 +1012,7 @@ wheels = [
 
 [[package]]
 name = "pos"
-version = "26.12.0rc18"
+version = "26.12.0.dev10"
 source = { editable = "." }
 dependencies = [
     { name = "clickhouse-connect" },
