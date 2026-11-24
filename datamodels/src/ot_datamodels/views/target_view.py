@@ -1,17 +1,18 @@
-"""Target view: the `target_view` view (pts `target_view`).
+"""Target view: the `target_view` view (pts `target_view`), served as `targets`.
 
 Every target row with its homologues, tractability, safety liabilities, chemical probes and transcripts
-nested back in. Each nested list is null for a target with no row in its source.
+nested back in, then the ids of its credible sets and pharmacogenomics records. Each nested list is null
+for a target with no row in its source.
 """
 
 from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, StructModel, from_output, row_of
+from ot_datamodels import Bioregistry, ClickHouseType, StructModel, from_output, row_of
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from ot_datamodels.outputs.homology import Homology
-from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_TRANSCRIPT_ID
+from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_TRANSCRIPT_ID, MD5_HEX
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
@@ -94,6 +95,10 @@ TranscriptStrand = from_output(Transcript, 'strand')
 _UniprotId = Annotated[str, Bioregistry('uniprot')]
 # a list element takes no description, so not `from_output`; tests/test_views.py checks it equals transcriptId
 _TranscriptIdElement = Annotated[str, Bioregistry('ensembl'), Field(pattern=ENSEMBL_TRANSCRIPT_ID)]
+# list elements, so not `from_output`; tests/test_views.py checks them against credible_set.id and
+# pharmacogenomics.pharmacogenomicsId
+_CredibleSetId = Annotated[str, Field(pattern=MD5_HEX)]
+_PharmacogenomicsId = Annotated[int, ClickHouseType('UInt64'), Field(ge=0)]
 
 
 class TranscriptRow(StructModel):
@@ -159,6 +164,8 @@ class TargetView(Target):
         },
         'canonicalExons': ['100636608', '100636806'],
         'alternativeGenes': None,
+        'credibleSetIds': ['0002c80bb07a1c4ab11e5b6d2c9e0d6c'],
+        'pharmacogenomicsIds': [1],
     }
 
     homologues: list[Homologue] | None = Field(description='Homologues of the target, by ascending priority')
@@ -172,3 +179,9 @@ class TargetView(Target):
         description='Start and end of each exon of the canonical transcript, as strings, by start then end'
     )
     alternativeGenes: list[str] | None = Field(description='Always null; kept for the shape of the target dataset')
+    credibleSetIds: list[_CredibleSetId] = Field(
+        description='Credible sets of the studies whose geneId is the target, distinct and sorted'
+    )
+    pharmacogenomicsIds: list[_PharmacogenomicsId] = Field(
+        description='pharmacogenomicsId of the pharmacogenomics records naming the target, ascending'
+    )
