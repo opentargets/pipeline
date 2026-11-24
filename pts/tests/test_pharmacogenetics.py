@@ -12,9 +12,11 @@ from loguru import logger
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 
 from pts.schemas.dataset.conform import conformed_schema
+from pts.schemas.dataset.validate import validate_dataset
 from pts.schemas.pharmacogenetics import PHARMACOGENOMICS
 from pts.transformers import pharmacogenetics as pgx
 from pts.transformers.pharmacogenetics import (
+    add_pharmacogenomics_id,
     add_variant_id,
     annotate_phenotype,
     enrich_with_drugs,
@@ -312,6 +314,7 @@ def test_enrich_matches_spark_baseline() -> None:
 
 
 PUBLISHED_COLUMNS = [
+    'pharmacogenomicsId',
     'datasourceId',
     'datasourceVersion',
     'datatypeId',
@@ -461,6 +464,36 @@ def test_shared_and_duplicate_alt_genotypes_give_one_row_each(tmp_path: Path) ->
     assert sorted(out.select('studyId', 'variantId').rows()) == [('s1', '1_100_C_T'), ('s2', '1_100_C_T')]
 
 
+def test_homozygous_alternate_genotype_rows_pass_writes(tmp_path: Path) -> None:
+    annotation = [{**CLINPGX_RECORD['variantAnnotation'][0], 'id': '1'}]
+    records = [{**CLINPGX_RECORD, 'genotypeId': '1_100_C_T,T', 'variantAnnotation': annotation}]
+    source = _write_inputs(
+        tmp_path / 'in', records, [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}]
+    )
+    destination = _destination(tmp_path)
+    pharmacogenetics(source, destination, {}, None)
+    validate_dataset(Pharmacogenomics, destination['associations'])
+    out = _read_output(destination['associations'])
+    assert out.columns[0] == 'pharmacogenomicsId'
+    assert out['pharmacogenomicsId'].n_unique() == out.height
+
+
+def test_full_row_duplicates_pass_writes(tmp_path: Path) -> None:
+    annotation = [{**CLINPGX_RECORD['variantAnnotation'][0], 'id': '1'}]
+    record = {**CLINPGX_RECORD, 'variantAnnotation': annotation}
+    records = [record, {**record, 'drugs': [{'drugFromSource': 'RISPERIDONE'}]}]
+    source = _write_inputs(
+        tmp_path / 'in', records, [{'genotypeAnnotationText': 'parsed', 'phenotypeText': ['increased response']}]
+    )
+    destination = _destination(tmp_path)
+    pharmacogenetics(source, destination, {}, None)
+    validate_dataset(Pharmacogenomics, destination['associations'])
+    out = _read_output(destination['associations'])
+    assert out.height == 2
+    assert out.drop('pharmacogenomicsId').n_unique() == 1
+    assert out['pharmacogenomicsId'].n_unique() == 2
+
+
 def test_missing_column_in_a_non_empty_input_raises(tmp_path: Path) -> None:
     record = {k: v for k, v in CLINPGX_RECORD.items() if k != 'drugs'}
     source = _write_inputs(tmp_path / 'in', [record], [{'genotypeAnnotationText': 'parsed', 'phenotypeText': []}])
@@ -512,3 +545,61 @@ class TestStep:
         unparsed, messages = self._run(monkeypatch, tmp_path, [('parsed', None, None, 's1')])
         assert unparsed == []
         assert messages == []
+
+
+def _id_frame(rows: list[dict]) -> pl.DataFrame:
+    schema = {name: dtype for name, dtype in PHARMACOGENOMICS.items() if name != 'pharmacogenomicsId'}
+    return pl.DataFrame([{name: row.get(name) for name in schema} for row in rows], schema=schema)
+
+
+ID_ROWS = [
+    {'studyId': 's1', 'genotypeId': '1_100_C_T,T', 'literature': ['1', '2'], 'isDirectTarget': True},
+    {'studyId': 's1', 'genotypeId': '1_100_C_T,T', 'literature': ['1', '2'], 'isDirectTarget': True},
+    {'studyId': 's2', 'drugs': [{'drugFromSource': 'a', 'drugId': None}]},
+    {'studyId': 's3', 'variantAnnotation': [{'id': '1', 'effect': None}]},
+]
+
+
+class TestPharmacogenomicsId:
+    def test_is_first_unique_non_negative_and_repeatable(self) -> None:
+        df = _id_frame(ID_ROWS)
+        out = add_pharmacogenomics_id(df)
+        assert out.columns == ['pharmacogenomicsId', *df.columns]
+        assert out.schema['pharmacogenomicsId'] == pl.Int64
+        assert out['pharmacogenomicsId'].n_unique() == out.height
+        assert (out['pharmacogenomicsId'] >= 0).all()
+        assert out.equals(add_pharmacogenomics_id(df))
+        assert out.drop('pharmacogenomicsId').equals(df)
+
+    def test_row_order_does_not_change_ids(self) -> None:
+        df = _id_frame(ID_ROWS)
+        out = add_pharmacogenomics_id(df)
+        shuffled = add_pharmacogenomics_id(df.sample(fraction=1.0, shuffle=True, seed=3).reverse())
+        assert _rows(shuffled) == _rows(out)
+
+    def test_identical_rows_get_distinct_ids(self) -> None:
+        out = add_pharmacogenomics_id(_id_frame(ID_ROWS[:2]))
+        assert out.drop('pharmacogenomicsId').n_unique() == 1
+        assert out['pharmacogenomicsId'].n_unique() == 2
+
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        [
+            ({'genotype': None}, {'genotype': ''}),
+            ({'literature': []}, {'literature': None}),
+            ({'literature': ['1', '2']}, {'literature': ['2', '1']}),
+            ({'literature': [None]}, {'literature': []}),
+            ({'drugs': [{'drugFromSource': 'a', 'drugId': None}]}, {'drugs': [{'drugFromSource': 'a', 'drugId': ''}]}),
+            ({'drugs': [None]}, {'drugs': [{'drugFromSource': None, 'drugId': None}]}),
+            ({'isDirectTarget': None}, {'isDirectTarget': False}),
+            ({'genotype': 'a', 'genotypeId': 'b'}, {'genotype': 'ab', 'genotypeId': None}),
+        ],
+    )
+    def test_null_empty_and_order_variants_get_distinct_ids(self, a: dict, b: dict) -> None:
+        out = add_pharmacogenomics_id(_id_frame([a, b]))
+        assert out['pharmacogenomicsId'].n_unique() == 2
+
+    def test_empty_frame(self) -> None:
+        out = add_pharmacogenomics_id(_id_frame([]))
+        assert out.height == 0
+        assert out.schema['pharmacogenomicsId'] == pl.Int64

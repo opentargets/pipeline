@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 import polars as pl
+import polars_hash as plh
 from loguru import logger
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from otter.config.model import Config
@@ -28,6 +29,10 @@ from pts.transformers.utils.dataset import scan_dataset, write_dataset
 ROW_ID = '_operationalRowId'
 
 _TEXT = 'genotypeAnnotationText'
+
+_ID = 'pharmacogenomicsId'
+_ID_SEPARATOR = '\x1f'
+_ID_MASK = (1 << 63) - 1
 
 
 #: The ClinPGx annotation columns the step derives its output from.
@@ -188,6 +193,20 @@ def enrich_with_drugs(
     )
 
 
+def add_pharmacogenomics_id(df: pl.DataFrame) -> pl.DataFrame:
+    """Prepend `pharmacogenomicsId`: xxhash64, top bit cleared, of the row's content and its occurrence number.
+
+    The content is the JSON encoding of every column in `PHARMACOGENOMICS` order; the occurrence number
+    counts the rows with identical content, so full-row duplicates get distinct ids.
+    """
+    columns = [name for name in PHARMACOGENOMICS if name != _ID]
+    content = pl.struct(columns).struct.json_encode()
+    occurrence = pl.int_range(pl.len()).over(content).cast(pl.String)
+    digest = plh.concat_str([content, occurrence], separator=_ID_SEPARATOR).nchash.xxhash64(seed=0)
+    row_id = (digest & pl.lit(_ID_MASK, pl.UInt64)).cast(pl.Int64).alias(_ID)
+    return df.select(row_id, pl.all())
+
+
 @writes(associations=Pharmacogenomics)
 def pharmacogenetics(
     source: dict[str, str],
@@ -230,12 +249,12 @@ def pharmacogenetics(
         .rename({MAPPED_ID_COLUMN: 'phenotypeFromSourceId'})
         .collect()
     )
-    enriched = enrich_with_drugs(mapped, chembl_molecule, drug_mechanism_of_action)
+    enriched = enrich_with_drugs(mapped, chembl_molecule, drug_mechanism_of_action).select(
+        pl.col(name).cast(dtype) for name, dtype in PHARMACOGENOMICS.items() if name != _ID
+    )
 
     logger.info(f'save associations to {destination["associations"]}')
     write_dataset(
-        conform(
-            enriched.select(pl.col(name).cast(dtype) for name, dtype in PHARMACOGENOMICS.items()), Pharmacogenomics
-        ),
+        conform(add_pharmacogenomics_id(enriched), Pharmacogenomics),
         destination['associations'],
     )

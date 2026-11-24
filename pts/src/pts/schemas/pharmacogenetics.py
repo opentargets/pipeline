@@ -4,6 +4,7 @@ import polars as pl
 
 #: The published `output/pharmacogenomics` schema.
 PHARMACOGENOMICS = pl.Schema({
+    'pharmacogenomicsId': pl.Int64,
     'datasourceId': pl.String,
     'datasourceVersion': pl.String,
     'datatypeId': pl.String,
@@ -40,7 +41,7 @@ PHARMACOGENOMICS = pl.Schema({
     'drugs': pl.List(pl.Struct({'drugFromSource': pl.String, 'drugId': pl.String})),
 })
 
-_DERIVED = {'variantId', 'isDirectTarget', 'drugs'}
+_DERIVED = {'pharmacogenomicsId', 'variantId', 'isDirectTarget', 'drugs'}
 
 #: The ClinPGx annotation columns the step reads; any absent from the file is read as null.
 CLINPGX_SCHEMA = pl.Schema({
