@@ -63,11 +63,12 @@ class MungeSource(BaseModel):
 
 
 class MungeDestination(BaseModel):
-    """One parquet file per study under `munged/<ancestry>/`, and each panel's SNP count."""
+    """One parquet file per study under `munged/<ancestry>/`, each study's SNP count, and each panel's M."""
 
     model_config = ConfigDict(extra='forbid')
 
     munged: str
+    studies: str
     panels: str
 
 
@@ -83,14 +84,16 @@ class MungeSettings(BaseModel):
     of SNPs the LD scores stand for; LDSC's `M_5_50` convention."""
     billing_project: str | None = None
     """Project billed for reading the summary statistics, when their bucket is requester pays."""
+    min_snps: int = Field(default=200_000, gt=0)
+    """Fewest panel SNPs a munged study needs to be correlated; LDSC warns below 200,000."""
 
 
 class PairsSource(BaseModel):
-    """The representatives and the munged studies, with each panel's SNP count."""
+    """The munged studies, their index from the munge step, and each panel's M."""
 
     model_config = ConfigDict(extra='forbid')
 
-    representatives: str
+    studies: str
     munged: str
     panels: str
 
@@ -107,5 +110,6 @@ class PairsSettings(BaseModel):
     intercept: float | None = None
     """Fix the genetic covariance intercept; None estimates it."""
     min_overlap_snps: int = Field(default=50, gt=0)
-    pairs_per_chunk: int = Field(default=200, gt=0)
-    """Pairs in one Spark task."""
+    tile_studies: int = Field(default=20, gt=0)
+    """Studies on each side of a tile: a Spark task loads up to twice this many studies and
+    correlates every pair between them."""

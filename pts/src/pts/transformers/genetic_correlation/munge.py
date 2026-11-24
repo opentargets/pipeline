@@ -23,16 +23,17 @@ COPY_BYTES = 16 * 1024 * 1024
 VARIANT_KEY = ['chromosome', 'position', 'ref', 'alt']
 
 MUNGED_SCHEMA = pl.Schema({
-    'chromosome': pl.String,
-    'position': pl.Int64,
-    'ref': pl.String,
-    'alt': pl.String,
-    'beta': pl.Float64,
-    'standardError': pl.Float64,
+    'snp': pl.UInt32,
+    'z': pl.Float64,
     'sampleSize': pl.Float64,
     'ldScore': pl.Float64,
 })
-"""One munged study: its effects on the panel's SNPs, in genomic order."""
+"""One munged study: its z-scores on the panel's SNPs, aligned to the panel's alleles. `snp` is the
+SNP's row in the panel (`read_panel`), so sorting by it is genomic order and two studies of one
+ancestry join on it."""
+
+STUDIES_SCHEMA = pl.Schema({'studyId': pl.String, 'ldAncestry': pl.String, 'nSnps': pl.Int64, 'isUsable': pl.Boolean})
+"""Each munged study's number of panel SNPs, and whether it has enough to be correlated."""
 
 PANELS_SCHEMA = pl.Schema({'ldAncestry': pl.String, 'mSnps': pl.Int64})
 
@@ -79,7 +80,8 @@ def read_panel(path: str, scratch: Path) -> pl.DataFrame:
         scratch: where the parts of a remote panel are copied to be read.
 
     Returns:
-        `chromosome`, `position`, `ref`, `alt`, `ldScore` and, when the panel has one, `alleleFrequency`.
+        `snp`, the row in genomic order, then `chromosome`, `position`, `ref`, `alt`, `ldScore` and,
+        when the panel has one, `alleleFrequency`.
     """
     parts = [fetch(part, scratch / Path(part).name) for part in list_parts(path, '*.csv*')]
     scan = pl.scan_csv(parts, separator='\t', schema_overrides=_PANEL_COLUMNS)
@@ -94,7 +96,15 @@ def read_panel(path: str, scratch: Path) -> pl.DataFrame:
     ]
     if 'AF' in columns:
         selected.append(pl.col('AF').alias('alleleFrequency'))
-    return scan.select(selected).filter(pl.col('ldScore').is_not_null()).unique(VARIANT_KEY).collect()
+    return (
+        scan
+        .select(selected)
+        .filter(pl.col('ldScore').is_not_null())
+        .unique(VARIANT_KEY)
+        .sort(VARIANT_KEY)
+        .with_row_index('snp')
+        .collect()
+    )
 
 
 def panel_size(panel: pl.DataFrame, maf_threshold: float) -> int:
@@ -106,37 +116,49 @@ def panel_size(panel: pl.DataFrame, maf_threshold: float) -> int:
 
 
 def munge_study(sumstats: pl.LazyFrame, fallback_sample_size: float | None, panel: pl.DataFrame) -> pl.DataFrame:
-    """Join one study's summary statistics to the panel, in `MUNGED_SCHEMA`.
+    """Align one study's summary statistics to the panel, in `MUNGED_SCHEMA`.
 
-    Alleles come from `variantId` (`chr_pos_ref_alt`). A variant without a sample size of its own
-    takes the study's effective one. Variants with no effect, no error, or a duplicate key are dropped.
+    Alleles come from `variantId` (`chr_pos_ref_alt`). A variant whose alleles are the panel's
+    swapped is kept with its z-score negated; one that matches both ways keeps the direct match.
+    A variant without a sample size of its own takes the study's effective one. Variants with no
+    effect, no error, or a duplicate key are dropped.
     """
     alleles = pl.col('variantId').str.split('_')
-    key = pl.col('chromosome').cast(pl.String)
-    return (
+    study = (
         sumstats
         .select(
-            key,
+            pl.col('chromosome').cast(pl.String),
             pl.col('position').cast(pl.Int64),
             alleles.list.get(2, null_on_oob=True).alias('ref'),
             alleles.list.get(3, null_on_oob=True).alias('alt'),
-            pl.col('beta').cast(pl.Float64),
-            pl.col('standardError').cast(pl.Float64),
+            (pl.col('beta').cast(pl.Float64) / pl.col('standardError').cast(pl.Float64)).alias('z'),
             pl.coalesce(pl.col('sampleSize').cast(pl.Float64), pl.lit(fallback_sample_size, dtype=pl.Float64)).alias(
                 'sampleSize'
             ),
+            pl.col('standardError').cast(pl.Float64).alias('_se'),
         )
         .filter(
-            pl.col('beta').is_not_null(),
-            pl.col('standardError') > 0,
+            pl.col('z').is_finite(),
+            pl.col('_se') > 0,
             pl.col('sampleSize').is_not_null(),
             pl.col('ref').is_not_null(),
             pl.col('alt').is_not_null(),
         )
+        .drop('_se')
         .unique(VARIANT_KEY)
-        .join(panel.lazy().select(*VARIANT_KEY, 'ldScore'), on=VARIANT_KEY)
-        .sort('chromosome', 'position')
+    )
+    keys = panel.lazy().select('snp', *VARIANT_KEY, 'ldScore')
+    swapped = keys.rename({'ref': 'alt', 'alt': 'ref'})
+    return (
+        pl
+        .concat([
+            study.join(keys, on=VARIANT_KEY).with_columns(pl.lit(0).alias('_swapped')),
+            study.join(swapped, on=VARIANT_KEY).with_columns(-pl.col('z'), pl.lit(1).alias('_swapped')),
+        ])
+        .sort('snp', '_swapped')
+        .unique('snp', keep='first', maintain_order=True)
         .select(list(MUNGED_SCHEMA))
+        .cast(MUNGED_SCHEMA)
         .collect()
     )
 

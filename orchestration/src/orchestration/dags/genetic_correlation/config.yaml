@@ -98,6 +98,7 @@ steps:
           },
           "destination": {
             "munged": "{{output}}/output/munged",
+            "studies": "{{output}}/output/munged_studies",
             "panels": "{{output}}/output/panels"
           },
           "settings": {"billing_project": "{{billing_project}}"}
@@ -112,7 +113,7 @@ steps:
       args: |
         pyspark genetic_correlation_pairs '{
           "source": {
-            "representatives": "{{output}}/output/representatives",
+            "studies": "{{output}}/output/munged_studies",
             "munged": "{{output}}/output/munged",
             "panels": "{{output}}/output/panels"
           },

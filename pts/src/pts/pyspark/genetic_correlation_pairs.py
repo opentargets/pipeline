@@ -1,4 +1,4 @@
-"""Genetic correlation of every pair of representative studies, one Spark task per chunk of pairs."""
+"""Genetic correlation of every pair of representative studies, one Spark task per tile of pairs."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import polars as pl
 from loguru import logger
 
 from pts.pyspark.common.session import Session
-from pts.transformers.genetic_correlation.pairs import chunks, results, run_chunk, study_pairs
+from pts.transformers.genetic_correlation.pairs import Tile, results, run_tile, tiles
 from pts.transformers.genetic_correlation.settings import PairsSettings, PairsSource
 from pts.transformers.utils.dataset import check_destinations_absent, list_parts, write_dataset
 
@@ -20,12 +20,10 @@ _scratch = Path(tempfile.mkdtemp(prefix='genetic_correlation_'))
 """A Python worker's directory for the munged studies it fetches."""
 
 
-def _pairs_task(
-    chunk: list[tuple[str, str, str]], munged: str, m_snps: dict[str, int], options: PairsSettings
-) -> list[dict[str, Any]]:
-    """Correlate one chunk on an executor, with the seconds it took on its first row."""
+def _pairs_task(tile: Tile, munged: str, m_snps: dict[str, int], options: PairsSettings) -> list[dict[str, Any]]:
+    """Correlate one tile on an executor, with the seconds it took on its first row."""
     start = time.monotonic()
-    rows = run_chunk(chunk, munged, m_snps, options, _scratch)
+    rows = run_tile(tile, munged, m_snps, options, _scratch)
     rows[0]['_seconds'] = time.monotonic() - start
     return rows
 
@@ -36,7 +34,7 @@ def genetic_correlation_pairs(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Correlate every pair of representatives within an ancestry.
+    """Correlate every pair of usable munged studies within an ancestry.
 
     Args:
         source: the `PairsSource` paths.
@@ -47,12 +45,12 @@ def genetic_correlation_pairs(
     sources = PairsSource.model_validate(source)
     options = PairsSettings.model_validate(settings)
     check_destinations_absent([destination])
-    representatives = pl.read_parquet(list_parts(sources.representatives, '*.parquet'))
+    studies = pl.read_parquet(list_parts(sources.studies, '*.parquet')).filter(pl.col('isUsable'))
     panels = pl.read_parquet(list_parts(sources.panels, '*.parquet'))
     m_snps = dict(zip(panels['ldAncestry'], panels['mSnps'], strict=True))
-    pairs = study_pairs(representatives)
-    work = chunks(pairs, options.pairs_per_chunk)
-    logger.info(f'{pairs.height} pairs over {representatives["studyId"].n_unique()} studies, in {len(work)} tasks')
+    work = tiles(studies, options.tile_studies)
+    n_pairs = sum(len(tile.pairs()) for tile in work)
+    logger.info(f'{n_pairs} pairs over {studies.height} studies, in {len(work)} tiles')
 
     spark = Session(app_name='genetic_correlation_pairs', properties=properties).spark
     task = partial(_pairs_task, munged=sources.munged, m_snps=m_snps, options=options)

@@ -13,7 +13,7 @@ from loguru import logger
 from otter.storage.storage_context import storage_context
 
 from pts.pyspark.common.session import Session
-from pts.transformers.genetic_correlation.munge import PANELS_SCHEMA, munge_one, panel_size, read_panel
+from pts.transformers.genetic_correlation.munge import PANELS_SCHEMA, STUDIES_SCHEMA, munge_one, panel_size, read_panel
 from pts.transformers.genetic_correlation.settings import MungeDestination, MungeSettings, MungeSource
 from pts.transformers.utils.dataset import check_destinations_absent, list_parts, write_dataset
 
@@ -37,7 +37,12 @@ def _munge_task(
     panel = _panel(f'{sources.ldscore}/{options.ldscore_template.format(ancestry=study["ldAncestry"])}')
     with tempfile.TemporaryDirectory() as scratch, storage_context(billing_project=options.billing_project):
         n_snps = munge_one(study, panel, sources.sumstats, destinations.munged, Path(scratch))
-    return {'studyId': study['studyId'], 'nSnps': n_snps, 'seconds': time.monotonic() - start}
+    return {
+        'studyId': study['studyId'],
+        'ldAncestry': study['ldAncestry'],
+        'nSnps': n_snps,
+        'seconds': time.monotonic() - start,
+    }
 
 
 def genetic_correlation_munge(
@@ -46,7 +51,7 @@ def genetic_correlation_munge(
     settings: dict[str, Any],
     properties: dict[str, str],
 ) -> None:
-    """Munge every representative study, and write each panel's M.
+    """Munge every representative study, and write each study's SNP count and each panel's M.
 
     Args:
         source: the `MungeSource` paths.
@@ -57,7 +62,7 @@ def genetic_correlation_munge(
     sources = MungeSource.model_validate(source)
     destinations = MungeDestination.model_validate(destination)
     options = MungeSettings.model_validate(settings)
-    check_destinations_absent([destinations.munged, destinations.panels])
+    check_destinations_absent([destinations.munged, destinations.studies, destinations.panels])
     studies = (
         pl
         .read_parquet(list_parts(sources.representatives, '*.parquet'))
@@ -83,4 +88,14 @@ def genetic_correlation_munge(
         f'munged {len(done)} studies, {sum(row["nSnps"] for row in done)} SNPs, '
         f'{seconds / 3600:.2f} task hours, {seconds / max(len(done), 1):.1f} s per study'
     )
+    index = pl.DataFrame(
+        [{k: row[k] for k in ('studyId', 'ldAncestry', 'nSnps')} for row in done],
+        schema={k: STUDIES_SCHEMA[k] for k in ('studyId', 'ldAncestry', 'nSnps')},
+    ).with_columns((pl.col('nSnps') >= options.min_snps).alias('isUsable'))
+    excluded = index.filter(~pl.col('isUsable'))
+    if excluded.height:
+        logger.warning(
+            f'{excluded.height} studies have fewer than {options.min_snps} panel SNPs and are not correlated'
+        )
+    write_dataset(index.sort('ldAncestry', 'studyId'), destinations.studies)
     write_dataset(pl.DataFrame(panels, schema=PANELS_SCHEMA), destinations.panels)
