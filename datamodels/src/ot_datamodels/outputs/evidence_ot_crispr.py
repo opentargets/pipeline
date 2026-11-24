@@ -71,11 +71,20 @@ class EvidenceOtCrispr(DatasetModel):
     )
     cellType: str = Field(min_length=1, description='The studied cell type. Preferably the cell line ontology label')
     cellLineBackground: str | None = Field(min_length=1, description='Background of the derived cell lines')
-    log2FoldChangeValue: float = Field(description='Log 2 fold expression change in contrast experiment')
+    log2FoldChangeValue: float | None = Field(
+        description=(
+            'Log 2 fold expression change in contrast experiment; the phenotype score for PhIReWORK studies'
+        )
+    )
     resourceScore: float = Field(
         description=('Score provided by datasource indicating strength of target-disease association'),
     )
-    statisticalTestTail: str = Field(min_length=1, description='End of the distribution the target was picked from')
+    statisticalTestTail: str | None = Field(
+        min_length=1,
+        description=(
+            'End of the distribution the target was picked from; null for PhIReWORK studies, which are not directional'
+        ),
+    )
     datasourceId: Annotated[Literal['ot_crispr'], enum_of(Datasource)] = Field(
         description='Identifer of the evidence source'
     )
