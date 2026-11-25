@@ -27,7 +27,7 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    # tables declared in datasets.yaml; the serving scripts below run after them
+    # tables declared in datasets.yaml
     - name: explode load declared datasets
       requires:
         - sync_bucket etl output files
@@ -42,6 +42,8 @@ steps:
         - clinical_report
         - clinical_target
         - colocalisation
+        - credible_sets
+        - credible_sets_locus
         - disease
         - disease_hpo
         - drug
@@ -61,11 +63,14 @@ steps:
         - protein_coding_coords_by_variant
         - so
         - studies
+        - study_credible_sets
+        - target_credible_sets
         - target_essentiality
         - target_prioritisation
         - targets
         - targets_by_region
         - transcript
+        - variant_credible_sets
         - variants
         - w2v
       do:
@@ -74,13 +79,6 @@ steps:
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
-    - name: clickhouse_load clickhouse load credible_set_variant
-      requires:
-        - explode load declared datasets
-      dataset: credible_set_variant
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
         - explode load declared datasets
@@ -105,46 +103,6 @@ steps:
         - sync_bucket etl view files
         - clickhouse_create_database release database
       dataset: otar_projects
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load credible_sets
-      requires:
-        - clickhouse_load clickhouse load credible_set_variant
-      dataset: credible_sets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load variant_credible_sets
-      requires:
-        - clickhouse_load clickhouse load credible_sets
-        - explode load declared datasets
-      dataset: variant_credible_sets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load study_credible_sets
-      requires:
-        - clickhouse_load clickhouse load credible_sets
-        - explode load declared datasets
-      dataset: study_credible_sets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load target_credible_sets
-      requires:
-        - clickhouse_load clickhouse load credible_sets
-        - explode load declared datasets
-      dataset: target_credible_sets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse credible_sets_build_cleanup
-      requires:
-        - clickhouse_load clickhouse load variant_credible_sets
-        - clickhouse_load clickhouse load study_credible_sets
-        - clickhouse_load clickhouse load target_credible_sets
-      dataset: credible_sets_build_cleanup
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}

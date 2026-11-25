@@ -45,6 +45,7 @@ from pos.clickhouse_ddl import (
     type_at,
     uniqueness_sql,
 )
+from pos.clickhouse_tables import entry_tables
 from pos.services.clickhouse import connect
 from pos.sql import split_statements
 from pos.tasks.clickhouse_load import INSERT_SETTINGS, ClickhouseLoad, ClickhouseLoadError, member_drops, union_inserts
@@ -170,8 +171,8 @@ def test_serving_sql(product):
         names = client.query(
             'SELECT name FROM system.tables WHERE database = {d:String}', parameters={'d': client.database}
         )
-        left = {name for (name,) in names.result_rows} & {'studies_log', 'variants_log', 'credible_sets_log'}
-        assert not left, f'landing tables left after the load: {left}'
+        left = {name for (name,) in names.result_rows if name.endswith('_log')}
+        assert left == {'interaction_evidence_log'}, f'landing tables left after the load: {left}'
 
 
 #: Edit paths of `phase5_sql_edits.csv` (history) whose served value a later group removed: `targets_by_region`
@@ -296,9 +297,9 @@ NOT_LOADED = {'platform': {'association_time_series', 'otar_projects'}, 'ppp': s
 PRIMARY_KEY_IS_SORT_KEY = {'clinical_indication_disease', 'clinical_indication_drug', 'clinical_target', 'ml_w2v'}
 #: `allow_nullable_key` only where an `order_by` column is nullable:
 NULLABLE_KEY_DROPPED = {'evidence_by_disease_and_target'}
-# Every MergeTree table is optimised, `biosample_mergetree` too: the rows compared are the same.
-#: Scaffolding the script left unsorted (`ORDER BY tuple()`); credible_sets_build_cleanup drops it before release.
-RESORTED = {'biosample_mergetree', 'disease_mergetree'}
+#: Drops the `*_mergetree` copies the frozen scripts built for the credible-set read models: the "before" side of
+#: every parity test is the released state, after it.
+CLEANUP = 'credible_sets_build_cleanup'
 #: Fixture rows per landing table; generateRandom makes a few percent of a Nullable column NULL.
 FIXTURE_ROWS = 300
 #: The `IS NOT NULL` filters on columns the landing table has not Nullable.
@@ -321,7 +322,7 @@ SCRIPT_LANDINGS = {'disease': ['studies']}
 SCRIPT_MODEL = {'disease': 'disease'}
 #: Declared tables compared by structure and row count only: pts computes their content, checked in pts
 #: tests/test_drug_view.py and tests/test_disease_view.py and on real data by the release parity run.
-CONTENT_FROM_PTS = {'drug', 'disease', 'disease_mergetree', 'dictionary disease_names'}
+CONTENT_FROM_PTS = {'drug', 'disease', 'dictionary disease_names'}
 
 
 def _unique(name: str, dtype, seed: int) -> str:
@@ -457,6 +458,7 @@ def test_declared_tables_match_scripts(product):
                 before.command(f'DROP TABLE `{read}` SYNC')
             for read in SCRIPT_LANDINGS.get(dataset, []):
                 before.command(f'DROP TABLE `{DATASETS[read]["table"]}` SYNC')
+            _run(before, (BEFORE / f'{CLEANUP}.sql').read_text())
             _land(after, dataset, product)
             for table in declarations(entry, product)[0]:
                 if table.engine == 'rocksdb':
@@ -468,15 +470,7 @@ def test_declared_tables_match_scripts(product):
     # pts writes one entry per Synonyms field in field order, the order the script's tupleToNameValuePairs gives
     assert relations == [(list(Synonyms.model_fields),)]
     assert set(old['tables']) - NOT_REBUILT == set(new['tables'])
-    for name in RESORTED:
-        assert old['tables'][name][0] == new['tables'][name][0] == 'MergeTree', name
-        columns_of = [{k: v for k, v in shape['columns'].items() if k[0] == name} for shape in (old, new)]
-        assert columns_of[0] == columns_of[1], name
-        if name in CONTENT_FROM_PTS:
-            assert len(old['rows'][name]) == len(new['rows'][name]), name
-        else:
-            assert old['rows'][name] == new['rows'][name], name
-    old, new = _without(old, NOT_REBUILT | RESORTED), _without(new, RESORTED)
+    old = _without(old, NOT_REBUILT)
     assert new['tables'] == _accepted(old['tables'])
     assert new['columns'] == old['columns']
     assert new['dictionaries'] == old['dictionaries']
@@ -613,7 +607,7 @@ def test_aotf_declarations_build_what_aotf_sql_built(product):
             _build_declared(after, dataset, product)
         old, new = _shape(before), _shape(after)
     assert all(joined), f'the join matched no disease: {joined}'
-    old = _without(old, {'disease', 'disease_mergetree', 'disease_names', 'dictionary disease_names'})
+    old = _without(old, {'disease', 'disease_names', 'dictionary disease_names'})
     assert set(old['tables']) == set(new['tables']) == served
     assert new['tables'] == old['tables']
     for key, (was, now) in AOTF_RETYPED.items():
@@ -838,6 +832,17 @@ def test_small_compute_declarations_build_what_the_scripts_built(product):
         assert back[dataset] == old['rows'][dataset], dataset
 
 
+#: The landings the frozen credible-set scripts read, as they were declared before pts built the views.
+CREDIBLE_SET_LANDINGS = {
+    'credible_sets': {'table': 'credible_sets_log', 'model': 'credible_set'},
+    'credible_set_variant': {
+        'table': 'credible_set_variant_log',
+        'model': 'credible_set_variant',
+        'engine': 'MergeTree ORDER BY (credibleSetId, variantId)',
+    },
+}
+
+
 #: The target group's declarations, which replace the frozen targets.sql, transcript.sql and
 #: target_prioritisation.sql.
 TARGET_GROUP = ('target_prioritisation', 'targets', 'targets_by_region', 'transcript')
@@ -866,20 +871,10 @@ def test_target_group_loads_from_its_declarations():
         assert (BEFORE / f'{script}.sql').exists(), script
 
 
-@pytest.mark.parametrize(('dataset', 'landing'), [('credible_sets', 'credible_sets_log')])
-def test_genetics_scripts_drop_their_own_landing(dataset, landing):
-    """With targets.sql gone, each script drops the landing it reads, last; no other script reads it."""
-    script = DATASETS[dataset]['postload_script']
-    assert split_statements((ROOT / script).read_text())[-1] == f'DROP TABLE IF EXISTS {landing} SYNC'
-    scripts = {e[k] for e in DATASETS.values() for k in ('preload_script', 'postload_script') if k in e}
-    pattern = re.compile(rf'\b{landing}\b')
-    assert [s for s in sorted(scripts) if pattern.search((ROOT / s).read_text())] == [script]
-
-
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_target_group_declarations_build_what_the_scripts_built(product):
     """The declarations build the tables and the dictionary the frozen scripts built: tables, engines, keys,
-    columns and rows, but for `targets_by_region.target` (`Tuple(id String)`) and `targets_mergetree` sorted by id.
+    columns and rows, but for `targets_by_region.target` (`Tuple(id String)`).
     pts computes the content (tests/test_target_view.py, tests/test_target_prioritisation_view.py), so the
     declared landings take the scripts' served rows."""
     inputs = {'pharmacogenomics', 'target_essentiality'}
@@ -887,8 +882,8 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
         for dataset in sorted(inputs):
             _land(before, dataset, product)
             _build_declared(before, dataset, product)
-        for dataset in ('studies', 'credible_sets'):
-            _land(before, dataset, product)
+        _land(before, 'studies', product)
+        _land_keyed(before, CREDIBLE_SET_LANDINGS['credible_sets'], product, {})
         targets = [c for c in landing_columns(DATASETS['targets'], product) or [] if c[0] not in TARGET_ID_LISTS]
         before.command(create_table('targets_log', targets))
         _fill(before, 'targets_log', targets, 1)
@@ -900,7 +895,7 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
             for _, sql in ddl_for(landing, product):
                 before.command(sql)
             _fill(before, table, landing_columns(landing, product) or [], 2, overrides)
-        for script in TARGET_SCRIPTS:
+        for script in (*TARGET_SCRIPTS, CLEANUP):
             _run(before, (BEFORE / f'{script}.sql').read_text())
         # the LEFT JOIN default: a target absent from target_essentiality got '0', which pts no longer writes
         absent = before.query(
@@ -919,9 +914,7 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
         old, new = _shape(before), _shape(after)
     assert absent[0][0] == absent[0][1] > 0, absent
     old = _without(old, inputs)
-    assert set(old['tables']) == set(new['tables']) == {*TARGET_GROUP, 'targets_mergetree'}
-    assert old['tables'].pop('targets_mergetree')[2:] == ('', '')
-    assert new['tables'].pop('targets_mergetree')[2:] == ('(id)', '(id)')
+    assert set(old['tables']) == set(new['tables']) == set(TARGET_GROUP)
     assert new['tables'] == old['tables']
     assert old['columns'].pop(('targets_by_region', 'target'))[0].startswith('Tuple(id String, alternativeGenes ')
     assert new['columns'].pop(('targets_by_region', 'target')) == ('Tuple(id String)', 4)
@@ -932,7 +925,7 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
     old['rows'].pop('targets_by_region')
     assert new['rows'] == old['rows']
     assert {n: len(r) for n, r in new['rows'].items()} == {
-        'targets': FIXTURE_ROWS, 'targets_mergetree': FIXTURE_ROWS, 'dictionary target_symbols': FIXTURE_ROWS,
+        'targets': FIXTURE_ROWS, 'dictionary target_symbols': FIXTURE_ROWS,
         'transcript': 40, 'target_prioritisation': FIXTURE_ROWS,
     }  # fmt: skip
 
@@ -961,7 +954,7 @@ GENETICS_B_OVERRIDES = {
 
 def test_genetics_b_loads_from_its_declarations():
     """studies and variants load in the declared explode; no task loads them otherwise or waits on their loads;
-    their scripts are frozen, and credible_sets.sql no longer builds the id lists they joined on."""
+    their scripts are frozen, and credible_sets has no script left to build the id lists they joined on."""
     (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
     assert set(GENETICS_B) <= set(explode['foreach'])
     assert all(is_declared(DATASETS[d]) for d in GENETICS_B)
@@ -972,7 +965,7 @@ def test_genetics_b_loads_from_its_declarations():
         assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / f'{script}.sql').exists(), script
     for script in GENETICS_B_SCRIPTS:
         assert (BEFORE / f'{script}.sql').exists(), script
-    assert 'credible_sets_by_' not in (ROOT / DATASETS['credible_sets']['postload_script']).read_text()
+    assert 'postload_script' not in DATASETS['credible_sets']
 
 
 def _land_keyed(client, entry: dict, product: str, overrides: dict[str, str]) -> None:
@@ -984,19 +977,21 @@ def _land_keyed(client, entry: dict, product: str, overrides: dict[str, str]) ->
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_genetics_b_declarations_build_what_the_scripts_built(product):
     """The declarations build the tables the frozen scripts built: engines, keys, columns and rows, but for
-    `studies` without `credible_sets_by_study.studyId` and the `*_mergetree` copies sorted by their key. pts computes
+    `studies` without `credible_sets_by_study.studyId`. pts computes
     the id lists (tests/test_study_view.py, tests/test_variant_view.py), so the declared landings take the scripts'
     served rows."""
     inputs = {'credible_sets_log', 'credible_set_variant_log', 'pharmacogenomics'}
-    script_models = {'studies': 'study', 'variants': 'variant'}
+    script_landings = {
+        **CREDIBLE_SET_LANDINGS,
+        'studies': {'table': 'studies_log', 'model': 'study'},
+        'variants': {'table': 'variants_log', 'model': 'variant'},
+    }
     with _database() as before, _database() as after:
         for dataset in ('pharmacogenomics', 'credible_sets', 'credible_set_variant', *GENETICS_B):
-            entry = DATASETS[dataset]
-            if dataset in script_models:
-                entry = {'table': entry['table'], 'model': script_models[dataset]}
+            entry = script_landings[dataset] if dataset in script_landings else DATASETS[dataset]
             _land_keyed(before, entry, product, GENETICS_B_OVERRIDES[dataset])
         _build_declared(before, 'pharmacogenomics', product)
-        for script in GENETICS_B_SCRIPTS:
+        for script in (*GENETICS_B_SCRIPTS, CLEANUP):
             _run(before, (BEFORE / f'{script}.sql').read_text())
         fixture = before.query(
             f"SELECT countIf(empty(credibleSetIds) AND `{DOTTED}` = ''), countIf(notEmpty(credibleSetIds)) FROM studies"  # noqa: S608 fixed names
@@ -1017,23 +1012,17 @@ def test_genetics_b_declarations_build_what_the_scripts_built(product):
     assert fixture == [(150, 150)], fixture
     assert all(0 < n < FIXTURE_ROWS for n in lists[0]), lists
     old = _without(old, inputs)
-    mergetrees = {'studies_mergetree': 'studyId', 'variants_mergetree': 'variantId'}
-    assert set(old['tables']) == set(new['tables']) == {*GENETICS_B, *mergetrees}
-    for table, key in mergetrees.items():
-        assert old['tables'].pop(table)[::2] == ('MergeTree', ''), table
-        assert new['tables'].pop(table)[::2] == ('MergeTree', f'({key})'), table
+    assert set(old['tables']) == set(new['tables']) == set(GENETICS_B)
     assert new['tables'] == old['tables']
-    for table in ('studies', 'studies_mergetree'):
-        assert old['columns'].pop((table, DOTTED)) == ('String', 31), table
-        assert old['columns'][table, 'credibleSetIds'] == ('Array(String)', 32), table
-        old['columns'][table, 'credibleSetIds'] = ('Array(String)', 31)
+    assert old['columns'].pop(('studies', DOTTED)) == ('String', 31)
+    assert old['columns']['studies', 'credibleSetIds'] == ('Array(String)', 32)
+    old['columns']['studies', 'credibleSetIds'] = ('Array(String)', 31)
     assert new['columns'] == old['columns']
     assert new['columns']['variants', 'pharmacogenomicsIds'] == ('Array(UInt64)', 15)
-    for table in ('studies', 'studies_mergetree'):
-        served_rows = sorted('\t'.join(r.split('\t')[:30] + r.split('\t')[31:]) for r in old['rows'].pop(table))
-        assert new['rows'].pop(table) == served_rows, table
+    served_rows = sorted('\t'.join(r.split('\t')[:30] + r.split('\t')[31:]) for r in old['rows'].pop('studies'))
+    assert new['rows'].pop('studies') == served_rows
     assert new['rows'] == old['rows']
-    assert {n: len(r) for n, r in new['rows'].items()} == {'variants': FIXTURE_ROWS, 'variants_mergetree': FIXTURE_ROWS}
+    assert {n: len(r) for n, r in new['rows'].items()} == {'variants': FIXTURE_ROWS}
 
 
 #: PR 8a's declarations, which replace the frozen colocalisation.sql and l2g_predictions.sql.
@@ -1080,9 +1069,8 @@ def test_genetics_a_loads_from_its_declarations():
 
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_genetics_a_declarations_build_what_the_scripts_built(product):
-    """The declarations build the tables the frozen scripts built: tables, engines, keys, columns and rows, but for
-    `l2g_predictions_mergetree` sorted by credibleSetId. pts computes the content (tests/test_genetics_views.py), so
-    the declared landings take the scripts' served rows."""
+    """The declarations build the tables the frozen scripts built: tables, engines, keys, columns and rows. pts
+    computes the content (tests/test_genetics_views.py), so the declared landings take the scripts' served rows."""
     with _database() as before, _database() as after:
         for dataset in GENETICS_A:
             landing = {'table': DATASETS[dataset]['table'], 'model': GENETICS_A_LANDING[dataset]}
@@ -1092,8 +1080,8 @@ def test_genetics_a_declarations_build_what_the_scripts_built(product):
         before.command(REVERSED_GWAS)
         landed = before.command('SELECT count() FROM colocalisation_log')
         distinct = before.command(BOTH_SIDES)
-        for dataset in GENETICS_A:
-            _run(before, (BEFORE / f'{dataset}.sql').read_text())
+        for script in (*GENETICS_A, CLEANUP):
+            _run(before, (BEFORE / f'{script}.sql').read_text())
         served = before.command('SELECT sum(length(colocalisation)) FROM colocalisation')
         for dataset in GENETICS_A:
             entry = DATASETS[dataset]
@@ -1105,13 +1093,131 @@ def test_genetics_a_declarations_build_what_the_scripts_built(product):
         old, new = _shape(before), _shape(after)
     # groupArrayDistinct over both sides: the reversed GWAS rows repeat tuples, each served once
     assert served == distinct < 2 * landed, (served, distinct, landed)
-    assert set(old['tables']) == set(new['tables']) == {*GENETICS_A, 'l2g_predictions_mergetree'}
-    assert old['tables'].pop('l2g_predictions_mergetree')[2:] == ('', '')
-    assert new['tables'].pop('l2g_predictions_mergetree')[2:] == ('(credibleSetId)', '(credibleSetId)')
+    assert set(old['tables']) == set(new['tables']) == set(GENETICS_A)
     assert new['tables'] == old['tables']
     assert new['columns'] == old['columns']
     assert new['dictionaries'] == old['dictionaries'] == {}
     assert new['rows'] == old['rows']
     assert {n: len(r) for n, r in new['rows'].items()} == {
-        'colocalisation': 40, 'l2g_predictions': 40, 'l2g_predictions_mergetree': 40,
+        'colocalisation': 40, 'l2g_predictions': 40,
     }  # fmt: skip
+
+
+#: PR 8c's declarations, which replace the frozen credible_sets.sql and the three read-model scripts, and the
+#: script each served table came from.
+GENETICS_C = {
+    'credible_sets': 'credible_sets',
+    'credible_sets_locus': 'credible_sets',
+    'study_credible_sets': 'study_credible_sets',
+    'target_credible_sets': 'target_credible_sets',
+    'variant_credible_sets': 'variant_credible_sets',
+}
+#: The served inputs the frozen read-model scripts read through their `*_mergetree` copies.
+READ_MODEL_INPUTS = ('biosample', 'disease', 'l2g_predictions', 'studies', 'targets', 'variants')
+#: Fixture keys, so the joins match: the 300 credible sets are in 100 studies; the first 150 have two variants
+#: each, their lead among them, the rest none (the scripts drop them); half the leads are variants; studies name
+#: 50 genes (a third none), 40 biosamples (a quarter none) and a disease twice plus an unknown id; diseases have
+#: a therapeutic area that is a disease and one that is not.
+GENETICS_C_OVERRIDES = {
+    'credible_sets': {
+        'id': "concat('C', toString(rowNumberInAllBlocks()))",
+        'studyId': "concat('S', toString(rowNumberInAllBlocks() % 100))",
+        'leadVariantId': "concat('1_', toString(rowNumberInAllBlocks()), '_A_G')",
+    },
+    'credible_set_variant': {
+        'credibleSetId': "concat('C', toString(rowNumberInAllBlocks() % 150))",
+        'variantId': "concat('1_', toString(rowNumberInAllBlocks()), '_A_G')",
+    },
+    'studies': {
+        'studyId': "concat('S', toString(rowNumberInAllBlocks()))",
+        'geneId': "if(rowNumberInAllBlocks() % 3 = 0, NULL, concat('T', toString(rowNumberInAllBlocks() % 50)))",
+        'biosampleFromSourceId': (
+            "if(rowNumberInAllBlocks() % 4 = 0, NULL, concat('B', toString(rowNumberInAllBlocks() % 40)))"
+        ),
+        'diseaseIds': (
+            "[concat('D', toString(rowNumberInAllBlocks() % 30)), concat('D', toString(rowNumberInAllBlocks() % 30)), "
+            "'unknown']"
+        ),
+    },
+    'disease': {
+        'id': "concat('D', toString(rowNumberInAllBlocks()))",
+        'therapeuticAreas': "[concat('D', toString(rowNumberInAllBlocks() % 5)), 'not a disease']",
+    },
+    'targets': {
+        'id': "concat('T', toString(rowNumberInAllBlocks()))",
+        'credibleSetIds': (
+            "[concat('C', toString(rowNumberInAllBlocks() % 150)), concat('C', toString(rowNumberInAllBlocks() % 7))]"
+        ),
+    },
+    'variants': {'variantId': "concat('1_', toString(rowNumberInAllBlocks() * 2), '_A_G')"},
+    'l2g_predictions': {'credibleSetId': "concat('C', toString(rowNumberInAllBlocks()))"},
+    'biosample': {'biosampleId': "concat('B', toString(rowNumberInAllBlocks()))"},
+}
+
+
+def test_genetics_c_loads_from_its_declarations():
+    """The credible sets, their locus and the three read models load in the declared explode, as every ClickHouse
+    entry does; nothing waits on another load; no `*_mergetree` copy, `credible_set_variant` landing or cleanup is
+    left; the scripts are frozen and `config/clickhouse/scripts/` is empty."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(GENETICS_C) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in GENETICS_C)
+    assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
+    assert not [t['name'] for t in STEP if t.get('dataset') in GENETICS_C]
+    assert {'credible_set_variant', CLEANUP}.isdisjoint(DATASETS)
+    assert not [n for n, e in DATASETS.items() if {'preload_script', 'postload_script', 'derived'} & set(e)]
+    tables = {t.name for e in DATASETS.values() for t in entry_tables(e)}
+    assert not {t for t in tables if t.endswith('_mergetree')}
+    loads = [t for t in STEP if t['name'].startswith('clickhouse_load') or 'foreach' in t]
+    allowed = {*explode['requires'], explode['name']}
+    assert all(set(t.get('requires', [])) <= allowed for t in loads)
+    assert not list((ROOT / 'config' / 'clickhouse').glob('**/*.sql'))
+    for script in (*set(GENETICS_C.values()), CLEANUP):
+        assert (BEFORE / f'{script}.sql').exists(), script
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_genetics_c_declarations_build_what_the_scripts_built(product):
+    """The declarations build the tables the frozen scripts built: tables, engines, keys, columns and rows. pts
+    computes the content (tests/test_credible_set_view.py), so the declared landings take the scripts' served rows,
+    and the "before" side ends with the frozen cleanup, as released."""
+    with _database() as before, _database() as after:
+        for dataset in READ_MODEL_INPUTS:
+            _land_keyed(before, DATASETS[dataset], product, GENETICS_C_OVERRIDES[dataset])
+            _build_declared(before, dataset, product)
+            before.command(
+                f'CREATE TABLE `{dataset}_mergetree` ENGINE = MergeTree ORDER BY tuple() AS SELECT * FROM `{dataset}`'  # noqa: S608 fixed names
+            )
+        for dataset, entry in CREDIBLE_SET_LANDINGS.items():
+            _land_keyed(before, entry, product, GENETICS_C_OVERRIDES[dataset])
+        for script in (*dict.fromkeys(GENETICS_C.values()), CLEANUP):
+            _run(before, (BEFORE / f'{script}.sql').read_text())
+        fixture = before.query(
+            "SELECT countIf(leadReferenceAllele = ''), countIf(leadReferenceAllele != ''), "
+            'countIf(topL2GGeneId IS NULL), countIf(topL2GGeneId IS NOT NULL), countIf(length(diseases) > 1), '
+            'countIf(biosampleName IS NULL), countIf(notEmpty(diseaseTherapeuticAreas)) FROM variant_credible_sets'
+        ).result_rows
+        target = before.query(
+            "SELECT countIf(biosampleName = ''), countIf(biosampleName != '') FROM target_credible_sets"
+        ).result_rows
+        for dataset in GENETICS_C:
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            after.command(f'INSERT INTO `{entry["table"]}` SELECT * FROM `{before.database}`.`{dataset}`')  # noqa: S608 fixed names
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+    assert all(n > 0 for n in fixture[0]), fixture
+    assert all(n > 0 for n in target[0]), target
+    inputs = {*READ_MODEL_INPUTS, *old['dictionaries'], *(f'dictionary {d}' for d in old['dictionaries'])}
+    old = _without(old, inputs)
+    assert set(old['tables']) == set(new['tables']) == set(GENETICS_C)
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert new['dictionaries'] == {}
+    assert new['rows'] == old['rows']
+    counts = {n: len(r) for n, r in new['rows'].items()}
+    assert counts['credible_sets'] == counts['credible_sets_locus'] == 150, counts
+    assert counts['variant_credible_sets'] == 300, counts
+    assert 0 < counts['study_credible_sets'] < 150, counts
+    assert counts['target_credible_sets'] > 0, counts

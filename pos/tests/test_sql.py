@@ -6,8 +6,9 @@ import pytest
 
 from pos.sql import split_statements
 
-CLICKHOUSE = Path(__file__).parents[1] / 'config' / 'clickhouse'
-SCRIPTS = sorted(CLICKHOUSE.glob('**/*.sql'))
+# the frozen serving scripts: config/clickhouse holds none since the credible-set read models became declarations
+FROZEN = Path(__file__).parent / 'fixtures' / 'serving_scripts_before'
+SCRIPTS = sorted(FROZEN.glob('*.sql'))
 
 
 def test_split_statements():
@@ -25,7 +26,7 @@ def test_split_quotes_and_escapes():
     assert split_statements(sql) == ["SELECT 'it''s;'", "SELECT 'a\\';b'", 'SELECT "x;y"', 'SELECT 2']
 
 
-@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: str(p.relative_to(CLICKHOUSE)))
+@pytest.mark.parametrize('script', SCRIPTS, ids=lambda p: p.name)
 def test_split_real_scripts(script):
     sql = script.read_text()
     statements = split_statements(sql)
@@ -36,8 +37,9 @@ def test_split_real_scripts(script):
 @pytest.mark.parametrize(
     ('script', 'count'),
     [
-        ('scripts/credible_sets.sql', 8),  # leading comments belong to the first statement
+        ('credible_sets.sql', 8),  # leading comments belong to the first statement
     ],
 )
 def test_split_real_script_counts(script, count):
-    assert len(split_statements((CLICKHOUSE / script).read_text())) == count
+    assert SCRIPTS
+    assert len(split_statements((FROZEN / script).read_text())) == count
