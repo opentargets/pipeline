@@ -11,8 +11,8 @@ from orchestration.operators import gce_disks
 from orchestration.operators.gce_disks import (
     CreateDiskOperator,
     CreateSnapshotOperator,
-    DeleteDiskOperator,
-    DeleteSnapshotOperator,
+    delete_disk,
+    delete_snapshot,
 )
 from orchestration.utils.labels import Labels, TemplatedLabels
 
@@ -76,12 +76,12 @@ def test_create_disk_without_snapshot_has_no_source(disks) -> None:
 
 def test_delete_disk_treats_not_found_as_success(disks) -> None:
     disks.delete.side_effect = NotFound('x')
-    DeleteDiskOperator(task_id='t', disk_name=DISK).execute({})
+    delete_disk(gce_disks.GCP_PROJECT_PLATFORM, gce_disks.GCP_ZONE, DISK, MagicMock())
 
 
 def test_delete_snapshot_treats_not_found_as_success(snapshots) -> None:
     snapshots.delete.side_effect = NotFound('x')
-    DeleteSnapshotOperator(task_id='t', snapshot_name=SNAP).execute({})
+    delete_snapshot(gce_disks.GCP_PROJECT_PLATFORM, SNAP, MagicMock())
 
 
 def test_create_snapshot_sets_source_location_and_labels(snapshots) -> None:
@@ -207,11 +207,6 @@ def test_create_disk_that_exists_records_nothing(disks) -> None:
     ti.xcom_push.assert_not_called()
 
 
-def test_delete_disk_without_a_name_deletes_nothing(disks) -> None:
-    DeleteDiskOperator(task_id='t', disk_name='').execute({})
-    disks.delete.assert_not_called()
-
-
 def test_disk_labels_are_cleaned(disks) -> None:
     disks.get.side_effect = NotFound('x')
     CreateDiskOperator(
@@ -224,7 +219,7 @@ def test_disk_labels_are_cleaned(disks) -> None:
 def test_templated_labels_render_from_the_context() -> None:
     labels = TemplatedLabels({'tool': 'pos'}, templated={'product': '{{ product }}'})
     assert labels['product'] == '{{ product }}'
-    op = DeleteDiskOperator(task_id='t', disk_name='')
+    op = CreateDiskOperator(task_id='t', disk_name=DISK, size_gb=1, labels=Labels())
     rendered = op.render_template(labels, cast(Any, {'product': 'ppp'}))
     assert rendered['product'] == 'ppp'
     assert rendered['tool'] == 'pos'

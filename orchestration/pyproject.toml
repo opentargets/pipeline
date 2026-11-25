@@ -24,9 +24,6 @@ dependencies = [
 dev = ["graphviz>=0.21", "ruff==0.16.10", "ty==0.0.85"]
 test = ["pytest>=9.1.1"]
 
-[project.scripts]
-orchestration = "orchestration:main"
-
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"

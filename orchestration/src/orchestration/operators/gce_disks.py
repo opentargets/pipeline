@@ -115,35 +115,6 @@ def delete_disk(project_id: str, zone: str, name: str, log: Any) -> None:
         log.info('disk %s not found, nothing to delete', name)
 
 
-class DeleteDiskOperator(_ComputeOperator):
-    """Delete a persistent disk. A missing disk, or an empty name, is success."""
-
-    template_fields: Sequence[str] = ('disk_name',)
-
-    def __init__(self, *args: Any, disk_name: str, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.disk_name = disk_name
-
-    def execute(self, context: Any) -> None:
-        if not self.disk_name:
-            self.log.info('no disk name, nothing to delete')
-            return
-        delete_disk(self.project_id, self.zone, self.disk_name, self.log)
-
-
-class DeleteSnapshotOperator(_ComputeOperator):
-    """Delete a snapshot. A missing snapshot is success."""
-
-    template_fields: Sequence[str] = ('snapshot_name',)
-
-    def __init__(self, *args: Any, snapshot_name: str, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.snapshot_name = snapshot_name
-
-    def execute(self, context: Any) -> None:
-        delete_snapshot(self.project_id, self.snapshot_name, self.log)
-
-
 class CreateSnapshotOperator(_ComputeOperator):
     """Snapshot a disk; delete the partial snapshot if creation fails."""
 

@@ -9,7 +9,6 @@ from orchestration.models.step import UnifiedPipelineStep
 from orchestration.operators.dataproc import PTSJobBuilder
 
 ASSET_PATH = Path(__file__).parent.parent / 'assets'
-PTS_CLUSTER_NAME = 'pts'
 
 
 def pts_step_from_config(
