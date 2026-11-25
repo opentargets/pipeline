@@ -449,7 +449,7 @@ steps:
       - pts_target_safety_event
       - pts_chemical_probes
       - pts_transcript
-      - pts_credible_set
+      - pts_credible_set_annotation
   pts_target_prioritisation_view:
     depends_on:
       - pts_target_prioritisation

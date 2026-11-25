@@ -94,3 +94,34 @@ def test_ontoma_ported_steps_have_no_pyspark_task(step: str) -> None:
     assert PTS[step], step
     assert all('pyspark' not in task for task in PTS[step]), step
     assert not any(task.get('name', '').startswith('pyspark') for task in PTS[step]), step
+
+
+def _paths(node: object) -> set[str]:
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, dict):
+        return set().union(*(_paths(v) for v in node.values()))
+    if isinstance(node, list):
+        return set().union(*(_paths(v) for v in node))
+    return set()
+
+
+def _writers() -> dict[str, set[str]]:
+    """Each `output/` dataset to the DAG steps whose tasks write it."""
+    found: dict[str, set[str]] = {}
+    for step, tasks in PTS.items():
+        for task in tasks:
+            for spec in [task, *task.get('do', [])]:
+                for path in _paths(spec.get('destination')):
+                    found.setdefault(path, set()).add(f'pts_{step}')
+    return found
+
+
+@pytest.mark.parametrize('name', ['pts_target_view', 'pts_target_prioritisation_view'])
+def test_every_output_a_view_step_reads_is_written_by_an_ancestor(name: str) -> None:
+    writers = _writers()
+    tasks = PTS[name.removeprefix('pts_')]
+    reads = {p for task in tasks for p in _paths(task.get('source')) if p.startswith('output/')}
+    assert reads, name
+    missing = {p: writers.get(p) for p in sorted(reads) if not writers.get(p, set()) & ancestors(name)}
+    assert not missing, f'{name} reads outputs no ancestor writes: {missing}'
