@@ -1,14 +1,24 @@
 """One representative study per disease and LD ancestry.
 
 Most pairs of GWAS studies are two cohorts of the same disease, so genetic correlation is computed
-between diseases, each stood for by its best powered study: the highest effective sample size,
-among studies that are GWAS with summary statistics, pass QC, are of a kind LDSC applies to, have
-one dominant LD ancestry with a score panel, and whose own heritability was estimated with
-detectable signal.
+between diseases, each stood for by one study. Eligible are GWAS with summary statistics that pass
+QC, are of a kind LDSC applies to, draw nearly all their samples from one LD ancestry with a score
+panel, have a genome-wide significant variant, and whose own heritability is estimated with the
+power stratified LDSC needs. Of those, the study with the most genome-wide significant credible
+sets is chosen, then the one with the highest heritability z-score.
+
+The effective sample size only screens out small studies: without case and control counts it is
+the total sample size, which overstates the power of a biobank case-control study many times over.
+
+Optionally, studies the release excluded only for failing the PZ or mean beta checks are a
+fallback, chosen only for a disease and ancestry with no eligible release study. The release has
+no credible sets of excluded studies, so their count is unknown, null, and they are chosen by
+heritability z-score.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import polars as pl
@@ -26,10 +36,18 @@ OUTPUT_SCHEMA = pl.Schema({
     'nSamples': pl.Int32,
     'nCases': pl.Int32,
     'nControls': pl.Int32,
+    'ancestryShare': pl.Float64,
+    'nSignificantVariants': pl.Int64,
+    'nSignificantCredibleSets': pl.Int64,
     'h2': pl.Float64,
     'h2StandardError': pl.Float64,
+    'h2ZScore': pl.Float64,
     'lambdaGc': pl.Float64,
+    'excludedFromRelease': pl.Boolean,
 })
+
+SIGNIFICANT_VARIANTS_CHECK = 'n_variants_sig'
+"""The `sumstatQCValues` check counting the genome-wide significant variants of the summary statistics."""
 
 
 def effective_sample_size() -> pl.Expr:
@@ -48,13 +66,28 @@ def effective_sample_size() -> pl.Expr:
     )
 
 
+def significant_variants() -> pl.Expr:
+    """The study's `n_variants_sig` QC value, null when it was not computed."""
+    check = pl.element().struct.field('QCCheckName') == SIGNIFICANT_VARIANTS_CHECK
+    return (
+        pl
+        .col('sumstatQCValues')
+        .list.eval(pl.element().filter(check).struct.field('QCCheckValue'))
+        .list.first()
+        .cast(pl.Int64)
+        .alias('nSignificantVariants')
+    )
+
+
 def ld_ancestry(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Each study's dominant LD population among those with a panel: `studyId` and `ldAncestry`.
+    """Each study's dominant LD population among those with a panel: `studyId`, `ldAncestry`, `ancestryShare`.
 
     Populations are weighted by `relativeSampleSize`; a tie goes to `nfe`, then alphabetically.
+    `ancestryShare` is the population's share of the weight of every population, with a panel or not.
     A study with no population among `LD_ANCESTRIES` has no row.
     """
     entry = pl.col('ldPopulationStructure')
+    total = pl.col('weight').sum().over('studyId')
     return (
         studies
         .select('studyId', 'ldPopulationStructure')
@@ -62,34 +95,50 @@ def ld_ancestry(studies: pl.LazyFrame) -> pl.LazyFrame:
         .select(
             'studyId',
             entry.struct.field('ldPopulation').str.strip_chars().str.to_lowercase().alias('population'),
-            entry.struct.field('relativeSampleSize').alias('weight'),
+            entry.struct.field('relativeSampleSize').cast(pl.Float64).alias('weight'),
         )
-        .filter(pl.col('population').is_in(LD_ANCESTRIES), pl.col('weight').is_not_null())
+        .filter(pl.col('population').is_not_null(), pl.col('weight').is_not_null())
         .group_by('studyId', 'population')
         .agg(pl.col('weight').sum())
+        .with_columns(pl.when(total > 0).then(pl.col('weight') / total).alias('ancestryShare'))
+        .filter(pl.col('population').is_in(LD_ANCESTRIES))
         .sort('studyId', 'weight', pl.col('population') == 'nfe', 'population', descending=[False, True, True, False])
         .unique('studyId', keep='first', maintain_order=True)
-        .select('studyId', pl.col('population').alias('ldAncestry'))
+        .select('studyId', pl.col('population').alias('ldAncestry'), 'ancestryShare')
     )
 
 
-def eligible_studies(studies: pl.LazyFrame, options: RepresentativesSettings) -> pl.LazyFrame:
-    """The studies a representative may be chosen from, with their ancestry and effective sample size."""
+def eligible_studies(
+    studies: pl.LazyFrame, options: RepresentativesSettings, *, excluded: bool = False
+) -> pl.LazyFrame:
+    """The studies a representative may be chosen from, with their ancestry and effective sample size.
+
+    Args:
+        studies: a study index.
+        options: the eligibility thresholds.
+        excluded: `studies` are those the release excluded, which may fail the
+            `excluded_tolerated_quality_controls` checks, and are marked `excludedFromRelease`.
+    """
+    disqualifying = [
+        flag
+        for flag in options.disqualifying_quality_controls
+        if not (excluded and flag in options.excluded_tolerated_quality_controls)
+    ]
     flags = pl.col('analysisFlags').list.eval(pl.element().str.strip_chars().str.to_lowercase())
     compatible = pl.col('analysisFlags').is_null() | (
         flags.list.set_difference(options.allowed_analysis_flags).list.len() == 0
     )
-    disqualified = (
-        pl.col('qualityControls').fill_null([]).list.set_intersection(options.disqualifying_quality_controls).list.len()
-        > 0
-    )
+    disqualified = pl.col('qualityControls').fill_null([]).list.set_intersection(disqualifying).list.len() > 0
     return (
         studies
         .filter(pl.col('studyType') == 'gwas', pl.col('hasSumstats'), ~disqualified, compatible)
-        .with_columns(effective_sample_size())
-        .filter(pl.col('effectiveSampleSize') >= options.min_effective_sample_size)
+        .with_columns(effective_sample_size(), significant_variants())
+        .filter(
+            pl.col('effectiveSampleSize') >= options.min_effective_sample_size,
+            pl.col('nSignificantVariants').fill_null(0) >= options.min_significant_variants,
+        )
         .join(ld_ancestry(studies), on='studyId')
-        .filter(pl.col('ldAncestry').is_in(options.ancestries))
+        .filter(pl.col('ldAncestry').is_in(options.ancestries), pl.col('ancestryShare') >= options.min_ancestry_share)
         .select(
             'studyId',
             'ldAncestry',
@@ -97,8 +146,27 @@ def eligible_studies(studies: pl.LazyFrame, options: RepresentativesSettings) ->
             pl.col('nSamples').cast(pl.Int32),
             pl.col('nCases').cast(pl.Int32),
             pl.col('nControls').cast(pl.Int32),
+            'ancestryShare',
+            'nSignificantVariants',
+            pl.lit(excluded).alias('excludedFromRelease'),
             pl.col(options.disease_column).alias('diseaseIds'),
         )
+    )
+
+
+def significant_loci(credible_sets: pl.LazyFrame, max_p_value: float) -> pl.LazyFrame:
+    """Each study's number of credible sets whose lead variant has a p-value of at most `max_p_value`.
+
+    The p-value is compared in log10 space with a relative tolerance, so a lead at exactly
+    `max_p_value`, written as a mantissa and exponent, counts.
+    """
+    log_p = pl.col('pValueMantissa').cast(pl.Float64).log10() + pl.col('pValueExponent').cast(pl.Float64)
+    threshold = math.log10(max_p_value)
+    return (
+        credible_sets
+        .filter(log_p <= threshold + 1e-9 * abs(threshold))
+        .group_by('studyId')
+        .agg(pl.len().cast(pl.Int64).alias('nSignificantCredibleSets'))
     )
 
 
@@ -123,7 +191,7 @@ def successful_heritability(heritability: pl.LazyFrame) -> pl.LazyFrame:
 def heritable_studies(
     studies: pl.LazyFrame, heritability: pl.LazyFrame, options: RepresentativesSettings
 ) -> pl.LazyFrame:
-    """The eligible studies whose heritability estimate passes the thresholds, with `h2ZSquared`."""
+    """The eligible studies whose heritability estimate passes the thresholds, with `h2ZScore`."""
     error = pl.when(pl.col('h2StandardError') > 0).then(pl.col('h2StandardError'))
     lambda_ok = pl.col('lambdaGc').is_null() | pl.col('lambdaGc').is_between(
         options.min_lambda_gc, options.max_lambda_gc
@@ -131,18 +199,22 @@ def heritable_studies(
     return (
         studies
         .join(heritability, on='studyId')
-        .with_columns(((pl.col('h2') / error) ** 2).alias('h2ZSquared'))
+        .with_columns((pl.col('h2') / error).alias('h2ZScore'))
         .filter(
             pl.col('h2') > options.min_h2,
             pl.col('h2') < options.max_h2,
-            pl.col('h2ZSquared') >= options.min_h2_z_squared,
+            pl.col('h2ZScore') >= options.min_h2_z,
             lambda_ok,
         )
     )
 
 
 def choose_representatives(candidates: pl.LazyFrame) -> pl.LazyFrame:
-    """The best powered study per disease and ancestry: highest effective sample size, then `h2ZSquared`."""
+    """The best study per disease and ancestry.
+
+    A release study before an excluded one, then the most significant credible sets, then the
+    highest `h2ZScore`, then the first `studyId`.
+    """
     return (
         candidates
         .select(pl.col('diseaseIds').alias('diseaseId'), pl.exclude('diseaseIds'))
@@ -151,10 +223,12 @@ def choose_representatives(candidates: pl.LazyFrame) -> pl.LazyFrame:
         .sort(
             'diseaseId',
             'ldAncestry',
-            'effectiveSampleSize',
-            'h2ZSquared',
+            'excludedFromRelease',
+            'nSignificantCredibleSets',
+            'h2ZScore',
             'studyId',
-            descending=[False, False, True, True, False],
+            descending=[False, False, False, True, True, False],
+            nulls_last=True,
         )
         .unique(['diseaseId', 'ldAncestry'], keep='first', maintain_order=True)
         .select(list(OUTPUT_SCHEMA))
@@ -174,15 +248,31 @@ def representatives(
         destination: the representatives dataset, one row per disease and ancestry.
         settings: the `RepresentativesSettings`.
         config: unused.
+
+    Raises:
+        ValueError: if `include_excluded_studies` is set without an `excluded_study` source.
     """
     sources = RepresentativesSource.model_validate(source)
     options = RepresentativesSettings.model_validate(settings)
     studies = eligible_studies(scan_dataset(sources.study), options)
+    if options.include_excluded_studies:
+        if sources.excluded_study is None:
+            msg = 'include_excluded_studies needs the excluded_study source'
+            raise ValueError(msg)
+        excluded = eligible_studies(scan_dataset(sources.excluded_study), options, excluded=True)
+        studies = pl.concat([studies, excluded.join(studies.select('studyId'), on='studyId', how='anti')])
     heritability = successful_heritability(scan_dataset(sources.heritability))
-    chosen = choose_representatives(heritable_studies(studies, heritability, options)).collect()
+    loci = significant_loci(scan_dataset(sources.credible_set), options.max_lead_p_value)
+    candidates = (
+        heritable_studies(studies, heritability, options)
+        .join(loci, on='studyId', how='left')
+        .with_columns(pl.col('nSignificantCredibleSets').fill_null(pl.when(~pl.col('excludedFromRelease')).then(0)))
+    )
+    chosen = choose_representatives(candidates).collect()
     logger.info(
-        '{} representative studies over {} disease and ancestry cells',
+        '{} representative studies over {} disease and ancestry cells, {} of them excluded from the release',
         chosen['studyId'].n_unique(),
         chosen.height,
+        chosen['excludedFromRelease'].sum(),
     )
     write_dataset(chosen.cast(OUTPUT_SCHEMA), destination)

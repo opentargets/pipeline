@@ -13,13 +13,17 @@ LD_ANCESTRIES = ('afr', 'amr', 'eas', 'fin', 'nfe')
 
 
 class RepresentativesSource(BaseModel):
-    """The study index and the heritability estimates to choose representatives from."""
+    """The study index, heritability estimates and credible sets to choose representatives from."""
 
     model_config = ConfigDict(extra='forbid')
 
     study: str
     heritability: str
     """LDSC heritability estimates, one row per run, with `runStatus`, `h2`, `h2_se` and `lambda_gc`."""
+    credible_set: str
+    """The release's credible sets; a study's genome-wide significant ones rank it."""
+    excluded_study: str | None = None
+    """The studies the release excluded, read only with `include_excluded_studies`."""
 
 
 class RepresentativesSettings(BaseModel):
@@ -29,24 +33,45 @@ class RepresentativesSettings(BaseModel):
 
     ancestries: list[str] = Field(default=['nfe'], min_length=1)
     """LD ancestries to keep studies of; each needs a score panel."""
+    min_ancestry_share: float = Field(default=0.9, ge=0, le=1)
+    """Lowest share of a study's samples, by `relativeSampleSize`, from its LD ancestry: the LD of a
+    mixed-ancestry meta-analysis matches no single panel."""
     disease_column: Literal['diseaseIds', 'traitFromSourceMappedIds'] = 'diseaseIds'
     """The study column whose identifiers define a disease."""
     min_effective_sample_size: float = Field(default=10_000, gt=0)
     min_h2: float = 0.0
     max_h2: float = 1.0
-    min_h2_z_squared: float = Field(default=4.0, ge=0)
-    """Lowest `(h2 / h2_se)^2`: the study needs detectable polygenic signal."""
+    min_h2_z: float = Field(default=7.0, ge=0)
+    """Lowest `h2 / h2_se`, the power threshold of stratified LDSC (Finucane et al. 2015)."""
     min_lambda_gc: float = 0.8
     max_lambda_gc: float = 2.5
+    min_significant_variants: int = Field(default=1, ge=0)
+    """Lowest `n_variants_sig` of the study's summary statistics QC: genome-wide significant variants."""
+    max_lead_p_value: float = Field(default=5e-8, gt=0, le=1)
+    """A credible set counts as a significant locus when its lead variant's p-value is at most this."""
     allowed_analysis_flags: list[str] = ['exwas', 'wgsgwas', 'metabolite']
     """A study's `analysisFlags`, lower-cased, must all be among these."""
     disqualifying_quality_controls: list[str] = [
         QualityFlag.SUMSTATS_NOT_AVAILABLE,
+        QualityFlag.UNRESOLVED_TARGET,
+        QualityFlag.UNRESOLVED_DISEASE,
+        QualityFlag.UNKNOWN_STUDY_TYPE,
+        QualityFlag.DUPLICATED_STUDY,
+        QualityFlag.UNKNOWN_BIOSAMPLE,
+        QualityFlag.FAILED_MEAN_BETA_CHECK,
+        QualityFlag.FAILED_PZ_CHECK,
+        QualityFlag.FAILED_GC_LAMBDA_CHECK,
+        QualityFlag.NO_OT_CURATION,
+        QualityFlag.CASE_CASE_STUDY_DESIGN,
+        QualityFlag.DEPRECATED_PROJECT,
+    ]
+    """The study step's invalid reasons, and missing summary statistics."""
+    include_excluded_studies: bool = False
+    """Fall back on studies the release excluded only for `excluded_tolerated_quality_controls`; one
+    is chosen only for a disease and ancestry with no eligible release study."""
+    excluded_tolerated_quality_controls: list[str] = [
         QualityFlag.FAILED_PZ_CHECK,
         QualityFlag.FAILED_MEAN_BETA_CHECK,
-        QualityFlag.FAILED_GC_LAMBDA_CHECK,
-        QualityFlag.CASE_CASE_STUDY_DESIGN,
-        QualityFlag.DUPLICATED_STUDY,
     ]
 
 

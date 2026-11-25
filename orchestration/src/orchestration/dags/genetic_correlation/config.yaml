@@ -54,8 +54,8 @@ infrastructure:
         - '{{output}}/bin/install_dependencies_on_cluster.sh'
 
 steps:
-  # the study index and heritability estimates, from requester-pays buckets, and the LD scores,
-  # copied into input/ of the run
+  # the study index, credible sets and excluded studies of the release and the heritability
+  # estimates, from requester-pays buckets, and the LD scores, copied into input/ of the run
   stage:
     kind: vm
     definition:
@@ -64,6 +64,8 @@ steps:
       command: |
         sh -c 'set -eu; \
           gcloud storage cp -r --billing-project={{billing_project}} {{input.platform}}/output/study {{output}}/input/; \
+          gcloud storage cp -r --billing-project={{billing_project}} {{input.platform}}/output/credible_set {{output}}/input/; \
+          gcloud storage cp -r --billing-project={{billing_project}} {{input.platform}}/excluded/study {{output}}/input/excluded/; \
           gcloud storage cp -r --billing-project={{billing_project}} {{input.heritability}} {{output}}/input/; \
           gcloud storage cp -r {{input.ldscore}} {{output}}/input/ldscore'
 
@@ -77,11 +79,15 @@ steps:
         transformer genetic_correlation.representatives '{
           "source": {
             "study": "{{output}}/input/study",
-            "heritability": "{{output}}/input/heritability_estimates"
+            "heritability": "{{output}}/input/heritability_estimates",
+            "credible_set": "{{output}}/input/credible_set",
+            "excluded_study": "{{output}}/input/excluded/study"
           },
           "destination": "{{output}}/output/representatives",
           "settings": {"ancestries": ["nfe"]}
         }'
+      # "include_excluded_studies": true in settings also considers the studies the release
+      # excludes only for failing the PZ or mean beta check, ranked after the released ones
 
   munge:
     depends_on: [representatives]

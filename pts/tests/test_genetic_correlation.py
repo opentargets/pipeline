@@ -30,6 +30,7 @@ def _study(
     flags: list[str] | None = None,
     study_type: str = 'gwas',
     sumstats: bool = True,
+    significant: float = 100.0,
 ) -> dict:
     return {
         'studyId': study_id,
@@ -45,6 +46,10 @@ def _study(
         'qualityControls': quality,
         'analysisFlags': flags,
         'hasSumstats': sumstats,
+        'sumstatQCValues': [
+            {'QCCheckName': 'gc_lambda', 'QCCheckValue': 1.0},
+            {'QCCheckName': 'n_variants_sig', 'QCCheckValue': significant},
+        ],
     }
 
 
@@ -57,14 +62,22 @@ def _h2(
 STUDIES = [
     _study('BIG', ['D1']),
     _study('SMALL', ['D1'], cases=5_000, controls=5_000),
-    _study('QC', ['D1'], cases=50_000, controls=50_000, quality=[QualityFlag.FAILED_PZ_CHECK.value]),
-    _study('FLAG', ['D1'], cases=50_000, controls=50_000, flags=['pQTL']),
-    _study('EAS', ['D1'], cases=50_000, controls=50_000, populations=[('eas', 0.9), ('nfe', 0.1)]),
-    _study('NOH2', ['D1'], cases=50_000, controls=50_000),
-    _study('WEAKH2', ['D1'], cases=50_000, controls=50_000),
+    _study('QC', ['D1'], quality=[QualityFlag.FAILED_PZ_CHECK.value]),
+    _study('FLAG', ['D1'], flags=['pQTL']),
+    _study('EAS', ['D1'], populations=[('eas', 0.95), ('nfe', 0.05)]),
+    _study('MIXED', ['D1'], populations=[('nfe', 0.85), ('sas', 0.15)]),
+    _study('NOSIG', ['D1'], significant=0.0),
+    _study('NOH2', ['D1']),
+    _study('WEAKH2', ['D1']),
     _study('QUANT', ['D2', 'D3'], cases=None, controls=None, samples=30_000),
+    _study('LOWZ', ['D2'], cases=None, controls=None, samples=100_000),
     _study('TINY', ['D2'], cases=None, controls=None, samples=5_000),
     _study('QTL', ['D3'], study_type='eqtl'),
+]
+EXCLUDED_STUDIES = [
+    _study('PZ', ['D1', 'D4'], quality=[QualityFlag.FAILED_PZ_CHECK.value]),
+    _study('PZGC', ['D4'], quality=[QualityFlag.FAILED_PZ_CHECK.value, QualityFlag.FAILED_GC_LAMBDA_CHECK.value]),
+    _study('BETA', ['D5'], quality=[QualityFlag.FAILED_MEAN_BETA_CHECK.value]),
 ]
 HERITABILITY = [
     _h2('BIG'),
@@ -72,58 +85,113 @@ HERITABILITY = [
     _h2('QC'),
     _h2('FLAG'),
     _h2('EAS'),
+    _h2('MIXED'),
+    _h2('NOSIG'),
     _h2('NOH2', status='error'),
-    _h2('WEAKH2', h2=0.02, se=0.02),
+    _h2('WEAKH2', h2=0.1),
     _h2('QUANT', lambda_gc=None),
+    _h2('LOWZ', se=0.025),
     _h2('TINY'),
     _h2('QTL'),
+    _h2('PZ'),
+    _h2('PZGC', se=0.01),
+    _h2('BETA'),
+]
+# lead p-values as mantissa and exponent: SMALL's two significant loci outrank BIG's one, whose
+# 1e-6 leads do not count; every ineligible study has more
+CREDIBLE_SETS = [
+    ('BIG', 1.0, -10),
+    ('BIG', 1.0, -6),
+    ('BIG', 1.0, -6),
+    ('SMALL', 5.0, -8),
+    ('SMALL', 1.0, -400),
+    *[(study, 1.0, -20) for study in ('QC', 'FLAG', 'EAS', 'MIXED', 'NOSIG', 'WEAKH2', 'PZ', 'PZGC') for _ in range(3)],
 ]
 
 
 @pytest.fixture
 def inputs(tmp_path: Path) -> dict[str, str]:
-    study = tmp_path / 'study.parquet'
-    pl.DataFrame(STUDIES).write_parquet(study)
-    heritability = tmp_path / 'heritability.parquet'
-    pl.DataFrame(HERITABILITY).write_parquet(heritability)
-    return {'study': str(study), 'heritability': str(heritability)}
+    paths = {name: str(tmp_path / f'{name}.parquet') for name in ('study', 'excluded_study', 'heritability')}
+    paths['credible_set'] = str(tmp_path / 'credible_set.parquet')
+    studies = pl.DataFrame(STUDIES + EXCLUDED_STUDIES)
+    excluded = pl.col('studyId').is_in([study['studyId'] for study in EXCLUDED_STUDIES])
+    studies.filter(~excluded).write_parquet(paths['study'])
+    studies.filter(excluded).write_parquet(paths['excluded_study'])
+    pl.DataFrame(HERITABILITY).write_parquet(paths['heritability'])
+    pl.DataFrame(CREDIBLE_SETS, schema=['studyId', 'pValueMantissa', 'pValueExponent'], orient='row').write_parquet(
+        paths['credible_set']
+    )
+    return paths
 
 
-def test_ld_ancestry_takes_the_dominant_population_and_breaks_ties_towards_nfe() -> None:
+def test_ld_ancestry_takes_the_dominant_population_and_its_share() -> None:
     frame = pl.DataFrame({
-        'studyId': ['a', 'b', 'c', 'd'],
+        'studyId': ['a', 'b', 'c', 'd', 'e'],
         'ldPopulationStructure': [
             [{'ldPopulation': 'EAS', 'relativeSampleSize': 0.6}, {'ldPopulation': 'nfe', 'relativeSampleSize': 0.4}],
             [{'ldPopulation': 'afr', 'relativeSampleSize': 0.5}, {'ldPopulation': 'nfe', 'relativeSampleSize': 0.5}],
             [{'ldPopulation': 'afr', 'relativeSampleSize': 0.5}, {'ldPopulation': 'amr', 'relativeSampleSize': 0.5}],
+            [{'ldPopulation': 'sas', 'relativeSampleSize': 0.25}, {'ldPopulation': 'nfe', 'relativeSampleSize': 0.75}],
             [{'ldPopulation': 'sas', 'relativeSampleSize': 1.0}],
         ],
     })
     result = ld_ancestry(frame.lazy()).collect().sort('studyId')
-    assert result.to_dict(as_series=False) == {'studyId': ['a', 'b', 'c'], 'ldAncestry': ['eas', 'nfe', 'afr']}
+    assert result.select('studyId', 'ldAncestry').rows() == [('a', 'eas'), ('b', 'nfe'), ('c', 'afr'), ('d', 'nfe')]
+    assert result['ancestryShare'].to_list() == pytest.approx([0.6, 0.5, 0.5, 0.75])
 
 
-def test_representatives_choose_the_best_powered_eligible_study(inputs: dict[str, str], tmp_path: Path) -> None:
+def test_representatives_choose_the_study_with_the_most_significant_loci(
+    inputs: dict[str, str], tmp_path: Path
+) -> None:
     destination = tmp_path / 'representatives'
     representatives(inputs, str(destination), {}, Mock())
     result = scan_dataset(str(destination)).collect().sort('diseaseId')
     assert result.schema == OUTPUT_SCHEMA
-    assert result.select('diseaseId', 'ldAncestry', 'studyId').to_dict(as_series=False) == {
-        'diseaseId': ['D1', 'D2', 'D3'],
-        'ldAncestry': ['nfe', 'nfe', 'nfe'],
-        'studyId': ['BIG', 'QUANT', 'QUANT'],
-    }
-    big = result.row(0, named=True)
-    assert big['effectiveSampleSize'] == 40_000
-    assert big['h2'] == 0.2
-    assert big['lambdaGc'] == 1.1
+    # D2's studies have no significant loci, so the higher heritability z-score wins over the larger sample;
+    # the excluded studies are not read by default
+    assert result.select('diseaseId', 'ldAncestry', 'studyId').rows() == [
+        ('D1', 'nfe', 'SMALL'),
+        ('D2', 'nfe', 'QUANT'),
+        ('D3', 'nfe', 'QUANT'),
+    ]
+    small = result.row(0, named=True)
+    assert small['effectiveSampleSize'] == 10_000
+    assert small['ancestryShare'] == 1.0
+    assert small['nSignificantVariants'] == 100
+    assert small['nSignificantCredibleSets'] == 2
+    assert small['h2ZScore'] == pytest.approx(10)
+    assert small['lambdaGc'] == 1.1
+    assert not small['excludedFromRelease']
 
 
 def test_representatives_can_include_another_ancestry(inputs: dict[str, str], tmp_path: Path) -> None:
     destination = tmp_path / 'representatives'
     representatives(inputs, str(destination), {'ancestries': ['nfe', 'eas']}, Mock())
     result = scan_dataset(str(destination)).collect().filter(pl.col('diseaseId') == 'D1').sort('ldAncestry')
-    assert result['studyId'].to_list() == ['EAS', 'BIG']
+    assert result['studyId'].to_list() == ['EAS', 'SMALL']
+
+
+def test_representatives_fall_back_on_studies_excluded_only_for_tolerated_checks(
+    inputs: dict[str, str], tmp_path: Path
+) -> None:
+    destination = tmp_path / 'representatives'
+    representatives(inputs, str(destination), {'include_excluded_studies': True}, Mock())
+    result = scan_dataset(str(destination)).collect().sort('diseaseId')
+    # PZ has more loci than SMALL but is only a fallback; PZGC also failed the GC lambda check;
+    # BETA has no credible sets, so an unknown count rather than none
+    assert result.select('diseaseId', 'studyId', 'excludedFromRelease', 'nSignificantCredibleSets').rows() == [
+        ('D1', 'SMALL', False, 2),
+        ('D2', 'QUANT', False, 0),
+        ('D3', 'QUANT', False, 0),
+        ('D4', 'PZ', True, 3),
+        ('D5', 'BETA', True, None),
+    ]
+
+
+def test_representatives_fall_back_only_with_the_excluded_studies(inputs: dict[str, str], tmp_path: Path) -> None:
+    del inputs['excluded_study']
+    with pytest.raises(ValueError, match='excluded_study'):
+        representatives(inputs, str(tmp_path / 'representatives'), {'include_excluded_studies': True}, Mock())
 
 
 def _sumstats(rng: np.random.Generator, positions: np.ndarray, *, sample_size: float | None) -> pl.DataFrame:
