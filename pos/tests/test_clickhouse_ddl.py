@@ -18,6 +18,8 @@ from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
+from ot_datamodels.views.credible_set_locus import CredibleSetLocus
+from ot_datamodels.views.credible_set_view import CredibleSetView
 from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug import DrugMechanismOfActionByDrug
@@ -26,11 +28,14 @@ from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.study_credible_set import StudyCredibleSet
 from ot_datamodels.views.study_view import StudyView
 from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_credible_set import TargetCredibleSet
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
+from ot_datamodels.views.variant_credible_set import VariantCredibleSet
 from ot_datamodels.views.variant_view import VariantView
 from ot_datamodels.vocabularies import (
     ChemblActionType,
@@ -39,6 +44,7 @@ from ot_datamodels.vocabularies import (
     Chromosome,
     Datasource,
     Datatype,
+    FineMappingMethod,
     HpoAspect,
     HpoEvidenceCode,
     HpoResource,
@@ -383,10 +389,12 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'colocalisation', 'disease', 'disease_hpo',
-              'drug', 'drug_warnings', 'interaction', 'l2g_predictions', 'mechanism_of_action', 'mouse_phenotypes',
-              'pharmacovigilance', 'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies',
-              'target_prioritisation', 'targets', 'targets_by_region', 'transcript', 'variants')  # fmt: skip
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'colocalisation', 'credible_sets',
+              'credible_sets_locus', 'disease', 'disease_hpo', 'drug', 'drug_warnings', 'interaction',
+              'l2g_predictions', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
+              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies', 'study_credible_sets',
+              'target_credible_sets', 'target_prioritisation', 'targets', 'targets_by_region', 'transcript',
+              'variant_credible_sets', 'variants')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -643,6 +651,64 @@ GENETICS_A_SERVED = {
 @pytest.mark.parametrize('model', list(GENETICS_A_SERVED), ids=lambda m: m.dataset_name)
 def test_genetics_a_views_land_the_served_columns(model):
     assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model)) == GENETICS_A_SERVED[model]
+
+
+_CHR, _ST, _FMM = _enum8(Chromosome), _enum8(StudyType), _enum8(FineMappingMethod)
+_LEAD_STATS = 'pValueMantissa Nullable(Float32), pValueExponent Nullable(Int32), beta Nullable(Float64)'
+_TOP_L2G = (
+    'topL2GGeneId Nullable(String), topL2GApprovedSymbol LowCardinality(Nullable(String)), '
+    'topL2GScore Nullable(Float64)'
+)
+_DISEASES = 'Array(Tuple(id LowCardinality(String), name LowCardinality(String)))'
+#: the served credible_sets, credible_sets_locus and read models as credible_sets.sql and the three read-model
+#: scripts built them (design "Served DDL", read off system.columns): isTransQtl UInt8 (has()); groupArray stripped
+#: LowCardinality from locus qualityControls and any() from variant_credible_sets.condition; the LEFT JOIN
+#: defaults keep target_credible_sets.biosampleName non-null and variant_credible_sets.biosampleName nullable.
+GENETICS_C_SERVED = {
+    CredibleSetView: (
+        f'credibleSetId String, studyId String, studyType {_ST}, chromosome {_CHR}, leadVariantId String, '
+        'leadPosition UInt32, leadPValueMantissa Nullable(Float32), leadPValueExponent Nullable(Int32), '
+        'leadBeta Nullable(Float64), leadStandardError Nullable(Float64), '
+        'leadEffectAlleleFrequency Nullable(Float32), leadSampleSize Nullable(UInt32), locusStart UInt32, '
+        f'locusEnd UInt32, locusSize UInt32, fineMappingMethod {_FMM}, logBayesFactor Nullable(Float64), '
+        'confidence UInt8, purityMeanR2 Nullable(Float64), purityMinR2 Nullable(Float64), '
+        'qualityControls Array(LowCardinality(String)), isTransQtl UInt8'
+    ),
+    CredibleSetLocus: (
+        'credibleSetId String, locus Array(Tuple(variantId String, posteriorProbability Float32, '
+        'logBayesFactor Nullable(Float32), pValueMantissa Nullable(Float32), pValueExponent Nullable(Int32), '
+        'effectAlleleFrequency Nullable(Float32), sampleSize Nullable(UInt32), reportedBeta Nullable(Float64), '
+        'reportedStandardError Nullable(Float64), r2Overall Nullable(Float32), conditionalBeta Nullable(Float32), '
+        'conditionalStandardError Nullable(Float32), rescaledAbsBeta Nullable(Float32), '
+        'rescaledStandardError Nullable(Float32), rescaledDirection Nullable(Int8), qualityControls Array(String)))'
+    ),
+    StudyCredibleSet: (
+        f'studyId String, credibleSetId String, leadVariantId String, leadChromosome {_CHR}, leadPosition UInt32, '
+        f'leadReferenceAllele String, leadAlternateAllele String, {_LEAD_STATS}, fineMappingMethod {_FMM}, '
+        f'confidence UInt8, locusSize UInt32, {_TOP_L2G}'
+    ),
+    TargetCredibleSet: (
+        f'targetId String, credibleSetId String, {_LEAD_STATS}, fineMappingMethod {_FMM}, confidence UInt8, '
+        f'isTransQtl UInt8, leadVariantId String, leadChromosome {_CHR}, leadPosition UInt32, '
+        f'leadReferenceAllele String, leadAlternateAllele String, studyId String, studyType {_ST}, '
+        'condition LowCardinality(Nullable(String)), biosampleId Nullable(String), '
+        'biosampleName LowCardinality(String), locusSize UInt32'
+    ),
+    VariantCredibleSet: (
+        f'studyType {_ST}, variantId String, credibleSetId String, posteriorProbability Float32, locusSize UInt32, '
+        f'{_LEAD_STATS}, fineMappingMethod {_FMM}, confidence UInt8, isTransQtl UInt8, leadVariantId String, '
+        f'leadChromosome {_CHR}, leadPosition UInt32, leadReferenceAllele String, leadAlternateAllele String, '
+        'studyId String, condition Nullable(String), studyTargetId Nullable(String), '
+        'studyTargetApprovedSymbol LowCardinality(Nullable(String)), biosampleId Nullable(String), '
+        'biosampleName LowCardinality(Nullable(String)), traitFromSource LowCardinality(String), '
+        f'diseases {_DISEASES}, diseaseTherapeuticAreas {_DISEASES}, {_TOP_L2G}'
+    ),
+}
+
+
+@pytest.mark.parametrize('model', list(GENETICS_C_SERVED), ids=lambda m: m.dataset_name)
+def test_genetics_c_views_land_the_served_columns(model):
+    assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model)) == GENETICS_C_SERVED[model]
 
 
 # declared tables

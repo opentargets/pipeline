@@ -116,6 +116,7 @@ def _platform(dataset: str):
 #: Each `REGISTER_MODEL` dataset and the view its entry now loads.
 VIEW_LOADED = {
     'colocalisation': 'colocalisation_by_credible_set',
+    'credible_sets': 'credible_set_view',
     'disease': 'disease_view',
     'disease_hpo': 'disease_phenotype_by_disease',
     'drug_warnings': 'drug_warning_by_drug',
@@ -142,9 +143,10 @@ def test_register_model_describes_the_output(dataset):
 
 
 def test_retired_datasets_keep_their_rows(register):
-    """A retired dataset (`aotf`, `protein_coding_coords`: pts serves their tables) has no entry, model or generated
-    table; its rows stay."""
-    assert {'aotf', 'protein_coding_coords'} == build_register.RETIRED
+    """A retired dataset (`aotf`, `protein_coding_coords`: pts serves their tables; `credible_set_variant`: pts
+    builds the locus and read models from it, pos no longer loads it) has no entry or generated table; its rows
+    stay."""
+    assert {'aotf', 'credible_set_variant', 'protein_coding_coords'} == build_register.RETIRED
     assert not {'association_otf', 'coding_variant'} & set(discover_models())
     for dataset in build_register.RETIRED:
         assert dataset not in CONFIG
