@@ -15,6 +15,7 @@ from ot_datamodels.outputs.association_by_datasource_indirect import Association
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
+from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
 from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
@@ -29,6 +30,7 @@ from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
+from ot_datamodels.outputs.target_prioritisation import TargetPrioritisation
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
@@ -47,7 +49,10 @@ from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
+from ot_datamodels.views.transcript_view import TranscriptView
 
 VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf_disease': AssociationOtfDisease,
@@ -63,7 +68,10 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'interaction_view': InteractionView,
     'mouse_phenotype_by_target': MousePhenotypeByTarget,
     'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
+    'target_by_region': TargetByRegion,
+    'target_prioritisation_view': TargetPrioritisationView,
     'target_view': TargetView,
+    'transcript_view': TranscriptView,
 }
 
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
@@ -71,6 +79,9 @@ PTS_SCHEMAS = {
     'association_timeseries': ASSOCIATION_TIMESERIES,
     'target_view': TARGET_VIEW,
 }
+
+#: columns appended after the frozen pre-piece-3 baseline's
+ADDED: dict[str, list[str]] = {'target_view': ['credibleSetIds', 'pharmacogenomicsIds']}
 
 #: columns whose dtype differs from the frozen pre-piece-3 baseline: Enums the baseline holds as strings, and
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
@@ -102,7 +113,10 @@ PRIMARY_KEYS = {
     'interaction_view': ('targetA',),
     'mouse_phenotype_by_target': ('targetFromSourceId',),
     'pharmacovigilance_by_drug': ('chembl_id',),
+    'target_by_region': (),
+    'target_prioritisation_view': ('targetId',),
     'target_view': ('id',),
+    'transcript_view': ('targetId',),
 }
 
 ASSOCIATION_INPUTS = [
@@ -272,6 +286,31 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         ('target_view', f'canonicalTranscript/{c}'): (Transcript, c, None)
         for c in ('chromosome', 'start', 'end', 'strand')
     },
+    ('target_view', 'credibleSetIds[]'): (CredibleSet, 'id', None),
+    ('target_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
+    **{('target_by_region', c): (Target, f'genomicLocation/{c}', None) for c in ('chromosome', 'start', 'end')},
+    ('target_by_region', 'target/id'): (Target, 'id', None),
+    ('transcript_view', 'targetId'): (Transcript, 'targetId', None),
+    **{
+        ('transcript_view', f'transcripts[]/{c}'): (Transcript, c, None)
+        for c in (
+            'transcriptId',
+            'proteinId',
+            'uniprotSwissprotIds',
+            'uniprotTremblIds',
+            'uniprotIsoformIds',
+            'alphafoldIds',
+            'dbXrefs',
+            'isEnsemblCanonical',
+            'chromosome',
+            'start',
+            'end',
+            'strand',
+            'transcriptionStartSite',
+            'exons',
+        )
+    },
+    ('target_prioritisation_view', 'targetId'): (TargetPrioritisation, 'targetId', None),
 }
 
 
@@ -292,8 +331,9 @@ def _as_pts_writes(
 def test_view_matches_the_pre_piece_3_pts_schema(name: str) -> None:
     schema, pts = to_polars_schema(VIEWS[name]), PTS_SCHEMAS[name]
 
-    assert list(schema) == list(pts)
-    assert {c for c in schema if schema[c] != pts[c]} == CHANGED[name]
+    added = ADDED.get(name, [])
+    assert list(schema) == [*pts, *added]
+    assert {c for c in pts if schema[c] != pts[c]} == CHANGED[name]
     assert all(_as_pts_writes(schema[c], c) == pts[c] for c in CHANGED[name])
 
 
@@ -472,6 +512,19 @@ DECLARED: dict[str, set[str]] = {
         'canonicalExons[]',
         'alternativeGenes',
         'alternativeGenes[]',
+        'credibleSetIds',
+        'pharmacogenomicsIds',
+    },
+    'target_by_region': {'target'},
+    'target_prioritisation_view': {'items', 'items[]', 'items[]/key', 'items[]/value'},
+    'transcript_view': {
+        'transcripts',
+        'transcripts[]',
+        'transcripts[]/biotype',
+        'transcripts[]/flags',
+        'transcripts[]/flags[]',
+        'transcripts[]/flags[]/label',
+        'transcripts[]/flags[]/value',
     },
 }
 
@@ -769,3 +822,75 @@ def test_pharmacovigilance_declared_values_are_their_output_s_without_low_cardin
     source = _nodes(Pharmacovigilance)[output_path]
     assert source.clickhouse == 'LowCardinality(String)'
     assert _nodes(PharmacovigilanceByDrug)[f'adverse_events[]/{path}'] == dataclasses.replace(source, clickhouse=None)
+
+
+def test_target_view_ends_with_the_served_id_lists() -> None:
+    nodes = _nodes(TargetView)
+    assert [f.name for f in dataset_spec(TargetView).fields][-2:] == ['credibleSetIds', 'pharmacogenomicsIds']
+    for column in ('credibleSetIds', 'pharmacogenomicsIds'):
+        assert not nodes[column].nullable, column
+        assert not nodes[f'{column}[]'].nullable, column
+    assert nodes['pharmacogenomicsIds[]'].clickhouse == 'UInt64'
+
+
+def test_target_by_region_is_the_location_and_the_id() -> None:
+    """`target` is `Tuple(id String)` (David, 2026-11-24): the API reads only its id."""
+    nodes = _nodes(TargetByRegion)
+    assert [f.name for f in dataset_spec(TargetByRegion).fields] == ['chromosome', 'start', 'end', 'target']
+    assert [f.name for f in nodes['target'].fields] == ['id']
+    assert not nodes['target'].nullable
+    assert nodes['chromosome'].dtype == pl.Enum(list(get_args(v.Chromosome)))
+    assert discover_models()['target_by_region'] is TargetByRegion
+
+
+#: the served `transcripts` tuple, in the CAST's field order (the landing's)
+TRANSCRIPT_FIELDS = [f.name for f in dataset_spec(Transcript).fields if f.name != 'targetId']
+
+
+def test_transcript_view_is_the_served_transcript() -> None:
+    nodes = _nodes(TranscriptView)
+    assert [f.name for f in dataset_spec(TranscriptView).fields] == ['targetId', 'transcripts']
+    assert [f.name for f in nodes['transcripts[]'].fields] == TRANSCRIPT_FIELDS
+    assert nodes['transcripts'].constraints.min_length == 1
+    biotype = nodes['transcripts[]/biotype']
+    assert (biotype.dtype, biotype.clickhouse, biotype.nullable) == (pl.String(), None, False)
+    for field, vocabulary in (('label', v.TranscriptFlagLabel), ('value', v.TranscriptFlagValue)):
+        node = nodes[f'transcripts[]/flags[]/{field}']
+        assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, True), field
+        assert node.constraints.allowed == get_args(vocabulary), field
+    assert discover_models()['transcript_view'] is TranscriptView
+
+
+#: the target_prioritisation columns in the order the served items list them
+PRIORITISATION_ORDER = [
+    'geneticConstraint',
+    'hasHighQualityChemicalProbes',
+    'hasLigand',
+    'hasPocket',
+    'hasSafetyEvent',
+    'hasSmallMoleculeBinder',
+    'isCancerDriverGene',
+    'isInMembrane',
+    'isSecreted',
+    'maxClinicalStage',
+    'mouseKOScore',
+    'mouseOrthologMaxIdentityPercentage',
+    'paralogMaxIdentityPercentage',
+    'tissueDistribution',
+    'tissueSpecificity',
+    'celltypeSpecificity',
+    'celltypeDistribution',
+]
+
+
+def test_target_prioritisation_view_items_are_strings() -> None:
+    nodes = _nodes(TargetPrioritisationView)
+    assert [f.name for f in dataset_spec(TargetPrioritisationView).fields] == ['targetId', 'items']
+    assert [f.name for f in nodes['items[]'].fields] == ['key', 'value']
+    key, value = nodes['items[]/key'], nodes['items[]/value']
+    assert (key.dtype, key.clickhouse, value.dtype, value.clickhouse) == (pl.String(), None, pl.String(), None)
+    assert key.constraints.allowed == (*PRIORITISATION_ORDER, 'geneEssentiality')
+    columns = {f.name for f in dataset_spec(TargetPrioritisation).fields} - {'targetId'}
+    assert set(PRIORITISATION_ORDER) == columns
+    assert nodes['items'].constraints.min_length is None
+    assert discover_models()['target_prioritisation_view'] is TargetPrioritisationView

@@ -59,6 +59,10 @@ steps:
         - protein_coding_coords_by_variant
         - so
         - target_essentiality
+        - target_prioritisation
+        - targets
+        - targets_by_region
+        - transcript
         - w2v
       do:
         - name: clickhouse_load clickhouse load ${each}
@@ -71,7 +75,6 @@ steps:
         - explode load declared datasets
       foreach:
         - colocalisation
-        - transcript
       do:
         - name: clickhouse_load clickhouse load ${each}
           dataset: ${each}
@@ -119,13 +122,6 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
-    - name: clickhouse_load clickhouse target_prioritisation
-      requires:
-        - explode load declared datasets
-      dataset: target_prioritisation
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load credible_sets
       requires:
         - clickhouse_load clickhouse load credible_set_variant
@@ -148,20 +144,11 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
-    - name: clickhouse_load clickhouse load targets
-      requires:
-        - explode load declared datasets
-        - clickhouse_load clickhouse load studies
-      dataset: targets
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load variant_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
         - explode load declared datasets
         - clickhouse_load clickhouse load studies
-        - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load l2g_predictions
       dataset: variant_credible_sets
@@ -171,7 +158,7 @@ steps:
     - name: clickhouse_load clickhouse load study_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
-        - clickhouse_load clickhouse load targets
+        - explode load declared datasets
         - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load l2g_predictions
       dataset: study_credible_sets
@@ -181,7 +168,6 @@ steps:
     - name: clickhouse_load clickhouse load target_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
-        - clickhouse_load clickhouse load targets
         - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load studies
         - explode load declared datasets

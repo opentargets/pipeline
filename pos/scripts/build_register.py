@@ -101,6 +101,8 @@ REGISTER_MODEL = {
     'mechanism_of_action': 'drug_mechanism_of_action',
     'mouse_phenotypes': 'mouse_phenotype',
     'pharmacovigilance': 'pharmacovigilance',
+    'target_prioritisation': 'target_prioritisation',
+    'transcript': 'transcript',
 }
 #: Datasets whose entry and model are gone; their rows stay as last built.
 RETIRED = {'aotf', 'protein_coding_coords'}

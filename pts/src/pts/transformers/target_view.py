@@ -1,9 +1,9 @@
 """Target view dataset generation.
 
 The target dataset with its homologues, tractability, safety liabilities, chemical probes and
-transcripts nested back in, in the shape target had before they were split out of it. A
-compatibility view for consumers of that shape (Platform, API, croissant), not an input to other
-steps. `tep` is not reproduced and `alternativeGenes` is always null.
+transcripts nested back in, in the shape target had before they were split out of it, then the ids of
+its credible sets and pharmacogenomics records: the served `targets`. `tep` is not reproduced and
+`alternativeGenes` is always null. Also writes the served `targets_by_region` and `transcript`.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
+from ot_datamodels.views.target_by_region import TargetByRegion
 from ot_datamodels.views.target_view import TargetView
+from ot_datamodels.views.transcript_view import TranscriptView, TranscriptViewRow
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform, without_enums
@@ -21,8 +23,15 @@ from pts.task_outputs import writes
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 SOURCES = ['target', 'homology', 'target_tractability', 'target_safety_event', 'chemical_probes', 'transcript']
+#: the columns read from the sources the id lists come from
+ID_SOURCES = {
+    'study': ['studyId', 'geneId'],
+    'credible_set': ['id', 'studyId'],
+    'pharmacogenomics': ['pharmacogenomicsId', 'targetFromSourceId'],
+}
 
 VIEW_SCHEMA = to_polars_schema(TargetView)
+TRANSCRIPT_FIELDS = list(TranscriptViewRow.model_fields)
 
 
 def homologues(homology: pl.DataFrame) -> pl.DataFrame:
@@ -137,6 +146,28 @@ def transcripts(transcript: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def credible_set_ids(study: pl.DataFrame, credible_set: pl.DataFrame) -> pl.DataFrame:
+    """The credible sets of the studies of each gene, distinct and sorted, by `geneId`."""
+    return (
+        study
+        .filter(pl.col('geneId').is_not_null())
+        .join(credible_set.filter(pl.col('id') != ''), on='studyId', how='inner')
+        .unique(['geneId', 'id'])
+        .group_by('geneId')
+        .agg(credibleSetIds=pl.col('id').sort())
+    )
+
+
+def pharmacogenomics_ids(pharmacogenomics: pl.DataFrame) -> pl.DataFrame:
+    """The ids of the pharmacogenomics rows naming each target, ascending, by `targetFromSourceId`."""
+    return (
+        pharmacogenomics
+        .filter(pl.col('targetFromSourceId').is_not_null())
+        .group_by('targetFromSourceId')
+        .agg(pharmacogenomicsIds=pl.col('pharmacogenomicsId').sort())
+    )
+
+
 def build_target_view(
     target: pl.DataFrame,
     homology: pl.DataFrame,
@@ -144,10 +175,14 @@ def build_target_view(
     target_safety_event: pl.DataFrame,
     probes: pl.DataFrame,
     transcript: pl.DataFrame,
+    study: pl.DataFrame,
+    credible_set: pl.DataFrame,
+    pharmacogenomics: pl.DataFrame,
 ) -> pl.DataFrame:
     """Every target row, in target's order, with the view columns after its own, conformed to `TargetView`.
 
-    Lists are sorted, apart from `homologues`, by priority first, and `canonicalExons`.
+    Lists are sorted, apart from `homologues`, by priority first, and `canonicalExons`. `credibleSetIds` and
+    `pharmacogenomicsIds` are `[]` for a target with none.
     """
     view = target
     for aggregate in [
@@ -158,28 +193,69 @@ def build_target_view(
         transcripts(transcript),
     ]:
         view = view.join(aggregate.rename({'targetId': 'id'}), on='id', how='left', maintain_order='left')
-    view = view.with_columns(alternativeGenes=pl.lit(None, dtype=VIEW_SCHEMA['alternativeGenes']))
+    for ids in [
+        credible_set_ids(study, credible_set).rename({'geneId': 'id'}),
+        pharmacogenomics_ids(pharmacogenomics).rename({'targetFromSourceId': 'id'}),
+    ]:
+        view = view.join(ids, on='id', how='left', maintain_order='left')
+    view = view.with_columns(
+        alternativeGenes=pl.lit(None, dtype=VIEW_SCHEMA['alternativeGenes']),
+        credibleSetIds=pl.col('credibleSetIds').fill_null(pl.lit([], dtype=VIEW_SCHEMA['credibleSetIds'])),
+        pharmacogenomicsIds=pl
+        .col('pharmacogenomicsIds')
+        .cast(VIEW_SCHEMA['pharmacogenomicsIds'])
+        .fill_null(pl.lit([], dtype=VIEW_SCHEMA['pharmacogenomicsIds'])),
+    )
     return conform(view.select(VIEW_SCHEMA.names()), TargetView)
 
 
-@writes(TargetView)
+def build_target_by_region(view: pl.DataFrame) -> pl.DataFrame:
+    """One row per view row: its genomic location and id, by location then id, conformed to `TargetByRegion`."""
+    location = pl.col('genomicLocation')
+    frame = view.rechunk().select(
+        chromosome=location.struct.field('chromosome'),
+        start=location.struct.field('start'),
+        end=location.struct.field('end'),
+        target=pl.struct('id'),
+    )
+    frame = frame.sort('chromosome', 'start', 'end', pl.col('target').struct.field('id'), maintain_order=True)
+    return conform(frame, TargetByRegion)
+
+
+def build_transcript_view(transcript: pl.DataFrame) -> pl.DataFrame:
+    """The transcripts of each target, rows by `targetId`, conformed to `TranscriptView`.
+
+    Each in the transcript's column order, by `transcriptId`.
+    """
+    rows = transcript.rechunk().sort('targetId', 'transcriptId', maintain_order=True)
+    frame = rows.group_by('targetId', maintain_order=True).agg(transcripts=pl.struct(TRANSCRIPT_FIELDS))
+    return conform(frame, TranscriptView)
+
+
+@writes(view=TargetView, by_region=TargetByRegion, transcript=TranscriptView)
 def target_view(
     source: dict[str, str],
-    destination: str,
+    destination: dict[str, str],
     settings: dict[str, Any] | None,
     config: Config | None,
 ) -> None:
-    """Build the target view and write it.
+    """Build the target view, the targets by region and the transcript view, and write them.
 
     Args:
         source: `target`, `homology`, `target_tractability`, `target_safety_event`,
-            `chemical_probes` and `transcript` locations.
-        destination: the target view directory.
+            `chemical_probes`, `transcript`, `study`, `credible_set` and `pharmacogenomics` locations.
+        destination: `view`, `by_region` and `transcript` directories.
         settings: unused.
         config: unused.
     """
     logger.info('load target view inputs')
-    frames = pl.collect_all([scan_dataset(source[name]) for name in SOURCES])
-    result = build_target_view(*(without_enums(frame) for frame in frames))
-    logger.info(f'{result.height} targets in the target view')
-    write_dataset(result, destination)
+    scans = [scan_dataset(source[name]) for name in SOURCES]
+    scans += [scan_dataset(source[name]).select(columns) for name, columns in ID_SOURCES.items()]
+    frames = [without_enums(frame) for frame in pl.collect_all(scans)]
+    view = build_target_view(*frames)
+    logger.info(f'{view.height} targets in the target view')
+    write_dataset(view, str(destination['view']))
+    write_dataset(build_target_by_region(view), str(destination['by_region']))
+    transcript = build_transcript_view(frames[SOURCES.index('transcript')])
+    logger.info(f'{transcript.height} targets in the transcript view')
+    write_dataset(transcript, str(destination['transcript']))

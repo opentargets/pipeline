@@ -1,7 +1,6 @@
 -- Built from credible_sets_log (one row per credible set) and credible_set_variant_log
 -- (one row per variant in each credible set), so the credible_set_variant load must run first.
--- credible_set_variant_log is dropped at the end of this script. credible_sets_log is kept
--- for targets.sql, which drops it.
+-- Both landing tables are dropped at the end of this script.
 -- NB: the load task splits statements on semicolons outside quotes and comments.
 
 -- One row per credible set, with the lead variant statistics from credible_set_variant
@@ -143,3 +142,5 @@ CREATE TABLE IF NOT EXISTS credible_sets_by_variant ENGINE = EmbeddedRocksDB () 
 );
 
 DROP TABLE IF EXISTS credible_set_variant_log SYNC;
+
+DROP TABLE IF EXISTS credible_sets_log SYNC;

@@ -180,7 +180,10 @@ def test_run_folder_of_the_discovered_models() -> None:
         'interaction_view',
         'mouse_phenotype_by_target',
         'pharmacovigilance_by_drug',
+        'target_by_region',
+        'target_prioritisation_view',
         'target_view',
+        'transcript_view',
     }
     assert run_folder(models['target_view']) == 'view'
     assert run_folder(models['target']) == 'output'

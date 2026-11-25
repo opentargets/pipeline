@@ -157,6 +157,9 @@ def test_serving_sql(product):
             served = client.query(query, parameters={'d': client.database, 't': entry['table'], 'c': column})
             assert len(served.result_rows) == 1, f'{entry}: no column {column}'
             found = type_at([(column, parse_type(served.result_rows[0][0]))], entry['path'])
+            if (entry['table'], entry['path']) in SLIMMED_PATHS:
+                assert found is None, f'{entry}: still served'
+                continue
             assert found is not None, f'{entry}: no {entry["path"]}'
             assert canonical(found) == canonical(parse_type(entry['served'])), str(entry)
         for entry in DERIVED:
@@ -164,6 +167,16 @@ def test_serving_sql(product):
             assert len(served.result_rows) == 1, f'phase5_derived_changes.csv: {entry}: no column'
             found = parse_type(served.result_rows[0][0])
             assert canonical(found) == canonical(parse_type(entry['served'])), f'phase5_derived_changes.csv: {entry}'
+        names = client.query(
+            'SELECT name FROM system.tables WHERE database = {d:String}', parameters={'d': client.database}
+        )
+        left = {name for (name,) in names.result_rows} & {'studies_log', 'credible_sets_log'}
+        assert not left, f'landing tables left after the load: {left}'
+
+
+#: Edit paths of `phase5_sql_edits.csv` (history) whose served value a later group removed: `targets_by_region`
+#: serves only the target's id (David, 2026-11-24).
+SLIMMED_PATHS = {('targets_by_region', 'target/homologues[]/isHighConfidence')}
 
 
 def _as_strings(dtype):
@@ -217,9 +230,11 @@ ENUM_MODELS = {
     'variant': 'variants',
     'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
+    'target_by_region': 'targets_by_region',
     'target_view': 'targets',
     'drug_mechanism_of_action_by_drug': 'mechanism_of_action',
     'disease_phenotype_by_disease': 'disease_hpo',
+    'transcript_view': 'transcript',
 }
 
 
@@ -820,3 +835,102 @@ def test_small_compute_declarations_build_what_the_scripts_built(product):
         assert len(old['rows'][dataset]) > 1, dataset
         assert len(new['rows'][dataset]) == len(old['rows'][dataset]), dataset
         assert back[dataset] == old['rows'][dataset], dataset
+
+
+#: The target group's declarations, which replace the frozen targets.sql, transcript.sql and
+#: target_prioritisation.sql.
+TARGET_GROUP = ('target_prioritisation', 'targets', 'targets_by_region', 'transcript')
+TARGET_SCRIPTS = ('targets', 'transcript', 'target_prioritisation')
+#: The `targets` landing columns pts now computes: targets.sql joined them on.
+TARGET_ID_LISTS = {'credibleSetIds', 'pharmacogenomicsIds'}
+#: Fixture transcripts: 300 rows over 40 targets, so groupArray collects several.
+TRANSCRIPT_OF = {'targetId': "concat('T', toString(rowNumberInAllBlocks() % 40))"}
+#: The script's targets_by_region rows as the declaration serves them: the tuple holds only the id
+#: (David, 2026-11-24).
+REGION_IDS = 'SELECT chromosome, start, end, tuple(target.id) FROM {table}'
+
+
+def test_target_group_loads_from_its_declarations():
+    """The four entries load in the declared explode; no task loads them otherwise or waits on a `load targets`
+    task; their scripts are frozen."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(TARGET_GROUP) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in TARGET_GROUP)
+    assert not [t['name'] for t in STEP if t.get('dataset') in TARGET_GROUP]
+    others = [t for t in STEP if 'foreach' in t and t['name'] != explode['name']]
+    assert not [t['name'] for t in others if set(TARGET_GROUP) & set(t['foreach'])]
+    assert not [t['name'] for t in STEP if 'clickhouse_load clickhouse load targets' in t.get('requires', [])]
+    for script in TARGET_SCRIPTS:
+        assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / f'{script}.sql').exists(), script
+        assert (BEFORE / f'{script}.sql').exists(), script
+
+
+@pytest.mark.parametrize(('dataset', 'landing'), [('studies', 'studies_log'), ('credible_sets', 'credible_sets_log')])
+def test_genetics_scripts_drop_their_own_landing(dataset, landing):
+    """With targets.sql gone, each script drops the landing it reads, last; no other script reads it."""
+    script = DATASETS[dataset]['postload_script']
+    assert split_statements((ROOT / script).read_text())[-1] == f'DROP TABLE IF EXISTS {landing} SYNC'
+    scripts = {e[k] for e in DATASETS.values() for k in ('preload_script', 'postload_script') if k in e}
+    pattern = re.compile(rf'\b{landing}\b')
+    assert [s for s in sorted(scripts) if pattern.search((ROOT / s).read_text())] == [script]
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_target_group_declarations_build_what_the_scripts_built(product):
+    """The declarations build the tables and the dictionary the frozen scripts built: tables, engines, keys,
+    columns and rows, but for `targets_by_region.target` (`Tuple(id String)`) and `targets_mergetree` sorted by id.
+    pts computes the content (tests/test_target_view.py, tests/test_target_prioritisation_view.py), so the
+    declared landings take the scripts' served rows."""
+    inputs = {'pharmacogenomics', 'target_essentiality'}
+    with _database() as before, _database() as after:
+        for dataset in sorted(inputs):
+            _land(before, dataset, product)
+            _build_declared(before, dataset, product)
+        for dataset in ('studies', 'credible_sets'):
+            _land(before, dataset, product)
+        targets = [c for c in landing_columns(DATASETS['targets'], product) or [] if c[0] not in TARGET_ID_LISTS]
+        before.command(create_table('targets_log', targets))
+        _fill(before, 'targets_log', targets, 1)
+        for table, model, overrides in (
+            ('transcript_log', 'transcript', TRANSCRIPT_OF),
+            ('target_prioritisation_log', 'target_prioritisation', {}),
+        ):
+            landing = {'table': table, 'model': model}
+            for _, sql in ddl_for(landing, product):
+                before.command(sql)
+            _fill(before, table, landing_columns(landing, product) or [], 2, overrides)
+        for script in TARGET_SCRIPTS:
+            _run(before, (BEFORE / f'{script}.sql').read_text())
+        # the LEFT JOIN default: a target absent from target_essentiality got '0', which pts no longer writes
+        absent = before.query(
+            "SELECT countIf(has(items, ('geneEssentiality', '0'))), countIf(notEmpty(items)) "
+            'FROM target_prioritisation WHERE targetId NOT IN (SELECT targetId FROM target_essentiality)'
+        ).result_rows
+        region = before.raw_query(f'{REGION_IDS.format(table="targets_by_region")} FORMAT TSV').decode()
+        served = {'targets_by_region': REGION_IDS.format(table=f'`{before.database}`.targets_by_region')}
+        for dataset in TARGET_GROUP:
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            rows = served.get(dataset, f'SELECT * FROM `{before.database}`.`{dataset}`')  # noqa: S608 fixed names
+            after.command(f'INSERT INTO `{entry["table"]}` {rows}')
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+    assert absent[0][0] == absent[0][1] > 0, absent
+    old = _without(old, inputs)
+    assert set(old['tables']) == set(new['tables']) == {*TARGET_GROUP, 'targets_mergetree'}
+    assert old['tables'].pop('targets_mergetree')[2:] == ('', '')
+    assert new['tables'].pop('targets_mergetree')[2:] == ('(id)', '(id)')
+    assert new['tables'] == old['tables']
+    assert old['columns'].pop(('targets_by_region', 'target'))[0].startswith('Tuple(id String, alternativeGenes ')
+    assert new['columns'].pop(('targets_by_region', 'target')) == ('Tuple(id String)', 4)
+    assert new['columns'] == old['columns']
+    assert set(new['dictionaries']) == {'target_symbols'}
+    assert new['dictionaries'] == old['dictionaries']
+    assert new['rows'].pop('targets_by_region') == sorted(region.splitlines())
+    old['rows'].pop('targets_by_region')
+    assert new['rows'] == old['rows']
+    assert {n: len(r) for n, r in new['rows'].items()} == {
+        'targets': FIXTURE_ROWS, 'targets_mergetree': FIXTURE_ROWS, 'dictionary target_symbols': FIXTURE_ROWS,
+        'transcript': 40, 'target_prioritisation': FIXTURE_ROWS,
+    }  # fmt: skip
