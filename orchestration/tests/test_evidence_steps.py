@@ -117,7 +117,9 @@ def _writers() -> dict[str, set[str]]:
     return found
 
 
-@pytest.mark.parametrize('name', ['pts_target_view', 'pts_target_prioritisation_view'])
+@pytest.mark.parametrize(
+    'name', ['pts_target_view', 'pts_target_prioritisation_view', 'pts_study_view', 'pts_variant_view']
+)
 def test_every_output_a_view_step_reads_is_written_by_an_ancestor(name: str) -> None:
     writers = _writers()
     tasks = PTS[name.removeprefix('pts_')]
