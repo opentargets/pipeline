@@ -414,6 +414,40 @@ steps:
       - pts_association
       - pts_clinical_target
 
+  # Depends on every step nothing else depends on, so it runs last; add new terminal steps here.
+  pts_dataset_metrics:
+    depends_on:
+      - pts_association_otf
+      - pts_association_timeseries_view
+      - pts_chembl_bioactivity
+      - pts_clinical_indication
+      - pts_coding_variant
+      - pts_colocalisation_view
+      - pts_disease_phenotype_by_disease
+      - pts_disease_view
+      - pts_drug_mechanism_of_action_by_drug
+      - pts_drug_view
+      - pts_drug_warning_by_drug
+      - pts_interaction_view
+      - pts_l2g_prediction_view
+      - pts_literature_entity_lut
+      - pts_literature_vector
+      - pts_mouse_phenotype_by_target
+      - pts_pharmacovigilance_by_drug
+      - pts_release_metrics
+      - pts_search
+      - pts_search_ebi
+      - pts_search_facet
+      - pts_so
+      - pts_study_view
+      - pts_target_prioritisation_view
+      - pts_target_view
+      - pts_variant_view
+      - pts_vep_view
+    depends_on_ppp:
+      - pts_biosample_enrichment
+      - pts_otar
+
   pts_otar:
     ppp_only: true
     depends_on:
