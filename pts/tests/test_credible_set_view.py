@@ -376,3 +376,16 @@ def test_the_step_refuses_an_existing_destination(tmp_path: Path):
 
     with pytest.raises(ValueError, match='already exists'):
         credible_set_view(source, destination, {}, None)
+
+
+def test_credible_set_enums_in_another_category_order_are_served_in_the_models():
+    """2612-3's credible_set stores studyType with other Enum categories; the views take the models' Enums."""
+    inputs = _inputs()
+    reordered = pl.Enum(['gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'])
+    inputs['credible_set'] = inputs['credible_set'].with_columns(pl.col('studyType').cast(pl.String).cast(reordered))
+
+    views = _views(inputs)
+
+    for key, frame in views.items():
+        assert frame.schema == to_polars_schema(VIEWS[key]), key
+    assert views['view']['studyType'].cast(pl.String).to_list() == ['gwas', 'eqtl', 'eqtl', 'gwas', 'eqtl']

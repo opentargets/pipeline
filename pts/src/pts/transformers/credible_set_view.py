@@ -25,7 +25,7 @@ from ot_datamodels.views.target_credible_set import TargetCredibleSet
 from ot_datamodels.views.variant_credible_set import VariantCredibleSet
 from otter.config.model import Config
 
-from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.utils.buckets import bucket_of, for_each_bucket, read_bucket, write_buckets
 from pts.transformers.utils.dataset import check_destinations_absent, list_parts, scan_dataset
@@ -139,7 +139,8 @@ def set_frame(
     Unmatched values as the scripts' LEFT JOINs left them: alleles and `traitFromSource` `''`, diseases `[]`, the
     rest null.
     """
-    sets = credible_set.select(
+    # an output written with other Enum categories (2612-3's) is conformed to the views' Enums from strings
+    sets = without_enums(credible_set).select(
         credibleSetId='id',
         studyId='studyId',
         studyType='studyType',
