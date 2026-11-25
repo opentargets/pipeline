@@ -522,6 +522,10 @@ steps:
     depends_on:
       - pts_l2g
 
+  pts_l2g_prediction_view:
+    depends_on:
+      - pts_l2g
+
   pts_l2g:
     machine_type: n2d-standard-64
     depends_on:
@@ -567,6 +571,9 @@ steps:
   pts_colocalisation:
     depends_on:
       - pts_credible_set_annotation
+  pts_colocalisation_view:
+    depends_on:
+      - pts_colocalisation
   gentropy_l2g_feature_matrix:
     depends_on:
       - pts_colocalisation
