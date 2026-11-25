@@ -1786,6 +1786,25 @@ steps:
       source: output/pharmacovigilance
       destination:
         view: view/pharmacovigilance_by_drug
+
+  study_view:
+    - name: transform study_view
+      transformer: study_view
+      source:
+        study: output/study
+        credible_set: output/credible_set
+      destination:
+        view: view/study_view
+
+  variant_view:
+    - name: transform variant_view
+      transformer: variant_view
+      source:
+        variant: output/variant
+        credible_set_variant: output/credible_set_variant
+        pharmacogenomics: output/pharmacogenomics
+      destination:
+        view: view/variant_view
   ##################################################################################################
 
   #: RELEASE_METRICS STEP :#########################################################################
