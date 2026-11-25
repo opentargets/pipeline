@@ -12,9 +12,9 @@ from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
 from pts.schemas.evidence import evidence_schema
+from pts.transformers.parquet_helpers import discover_dataset_paths, to_parquet_glob
 from pts.transformers.release_metrics import (
     _build_run_id,
-    _discover_dataset_paths,
     _emit_association_metrics,
     _emit_evidence_failed_metrics,
     _emit_evidence_metrics,
@@ -23,7 +23,6 @@ from pts.transformers.release_metrics import (
     _quality_control_flag_total_metrics,
     _read_associations_minimal,
     _read_evidence_with_canonical_schema_from_paths,
-    _to_parquet_glob,
 )
 
 
@@ -239,7 +238,7 @@ def test_to_parquet_glob_skips_success_marker(tmp_path) -> None:
     pl.DataFrame({'id': [1, 2]}).write_parquet(dataset / 'part-00000.parquet')
     (dataset / '_SUCCESS').write_text('{"committer": "manifest"}')
 
-    assert pl.read_parquet(_to_parquet_glob(f'{dataset}/')).height == 2
+    assert pl.read_parquet(to_parquet_glob(f'{dataset}/')).height == 2
 
 
 def test_discover_dataset_paths_recovers_missing_directory_markers(monkeypatch) -> None:
@@ -258,11 +257,11 @@ def test_discover_dataset_paths_recovers_missing_directory_markers(monkeypatch) 
         return []
 
     monkeypatch.setattr(
-        'pts.transformers.release_metrics._expand_storage_glob',
+        'pts.transformers.parquet_helpers._expand_storage_glob',
         fake_expand_storage_glob,
     )
 
-    discovered = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)
+    discovered = discover_dataset_paths(release_uri, ['/output/*/'], config=config)
 
     assert set(discovered) == {'/output/disease', '/output/go', '/output/target'}
 
@@ -282,12 +281,12 @@ def test_discover_dataset_paths_scope_trailing_slash_equivalent(monkeypatch) -> 
         return []
 
     monkeypatch.setattr(
-        'pts.transformers.release_metrics._expand_storage_glob',
+        'pts.transformers.parquet_helpers._expand_storage_glob',
         fake_expand_storage_glob,
     )
 
-    discovered_without_slash = _discover_dataset_paths(release_uri, ['/output/*'], config=config)
-    discovered_with_slash = _discover_dataset_paths(release_uri, ['/output/*/'], config=config)
+    discovered_without_slash = discover_dataset_paths(release_uri, ['/output/*'], config=config)
+    discovered_with_slash = discover_dataset_paths(release_uri, ['/output/*/'], config=config)
 
     assert discovered_without_slash == discovered_with_slash
     assert set(discovered_without_slash) == {'/output/disease', '/output/target'}
