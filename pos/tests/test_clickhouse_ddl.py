@@ -17,11 +17,13 @@ from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
+from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
 from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug import DrugMechanismOfActionByDrug
 from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
+from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
 from ot_datamodels.views.study_view import StudyView
@@ -43,6 +45,7 @@ from ot_datamodels.vocabularies import (
     HpoSex,
     InteractionSource,
     MechanismCuration,
+    StudyType,
 )
 
 from pos import clickhouse_ddl
@@ -380,9 +383,9 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'disease_hpo', 'drug',
-              'drug_warnings', 'interaction', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
-              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies',
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'colocalisation', 'disease', 'disease_hpo',
+              'drug', 'drug_warnings', 'interaction', 'l2g_predictions', 'mechanism_of_action', 'mouse_phenotypes',
+              'pharmacovigilance', 'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies',
               'target_prioritisation', 'targets', 'targets_by_region', 'transcript', 'variants')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
@@ -618,6 +621,28 @@ def test_genetics_b_views_land_the_output_then_the_id_lists(view, output, lists)
     landed = [(n, render(t, quote_fields=False)) for n, t in columns(view)]
     base = [(n, render(t, quote_fields=False)) for n, t in columns(output)]
     assert landed == [*base, *lists]
+
+
+#: the served colocalisation and l2g_predictions as colocalisation.sql and l2g_predictions.sql built them (design
+#: "Served DDL", read off system.columns): groupArray stripped LowCardinality from colocalisationMethod and
+#: features.name, which stay String; rightStudyType and chromosome stay Enum8
+GENETICS_A_SERVED = {
+    ColocalisationByCredibleSet: (
+        'credibleSetId String, colocalisation Array(Tuple(credibleSetId String, otherCredibleSetId String, '
+        f'rightStudyType {_enum8(StudyType)}, chromosome {_enum8(Chromosome)}, colocalisationMethod String, '
+        'numberColocalisingVariants UInt32, h3 Float64, h4 Float64, clpp Float64, '
+        'betaRatioSignAverage Nullable(Float64)))'
+    ),
+    L2gPredictionByCredibleSet: (
+        'credibleSetId String, l2g_predictions Array(Tuple(credibleSetId String, geneId String, score Float64, '
+        'features Array(Tuple(name String, value Float64, shapValue Float64)), shapBaseValue Float64))'
+    ),
+}
+
+
+@pytest.mark.parametrize('model', list(GENETICS_A_SERVED), ids=lambda m: m.dataset_name)
+def test_genetics_a_views_land_the_served_columns(model):
+    assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model)) == GENETICS_A_SERVED[model]
 
 
 # declared tables
