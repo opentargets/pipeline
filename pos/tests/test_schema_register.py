@@ -115,10 +115,12 @@ def _platform(dataset: str):
 
 #: Each `REGISTER_MODEL` dataset and the view its entry now loads.
 VIEW_LOADED = {
+    'colocalisation': 'colocalisation_by_credible_set',
     'disease': 'disease_view',
     'disease_hpo': 'disease_phenotype_by_disease',
     'drug_warnings': 'drug_warning_by_drug',
     'interaction': 'interaction_view',
+    'l2g_predictions': 'l2g_prediction_by_credible_set',
     'mechanism_of_action': 'drug_mechanism_of_action_by_drug',
     'mouse_phenotypes': 'mouse_phenotype_by_target',
     'pharmacovigilance': 'pharmacovigilance_by_drug',

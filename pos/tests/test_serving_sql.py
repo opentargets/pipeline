@@ -227,6 +227,7 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 #: disease_phenotype_by_disease: Nullable, in a list of structs in a list of structs), and the dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
+    'colocalisation_by_credible_set': 'colocalisation',
     'variant': 'variants',
     'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
@@ -933,4 +934,85 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
     assert {n: len(r) for n, r in new['rows'].items()} == {
         'targets': FIXTURE_ROWS, 'targets_mergetree': FIXTURE_ROWS, 'dictionary target_symbols': FIXTURE_ROWS,
         'transcript': 40, 'target_prioritisation': FIXTURE_ROWS,
+    }  # fmt: skip
+
+
+#: PR 8a's declarations, which replace the frozen colocalisation.sql and l2g_predictions.sql.
+GENETICS_A = ('colocalisation', 'l2g_predictions')
+#: The output landings the frozen scripts read.
+GENETICS_A_LANDING = {'colocalisation': 'colocalisation', 'l2g_predictions': 'l2g_prediction'}
+#: Fixture rows over 40 credible sets, so the scripts group several; half the colocalisations GWAS ones.
+GENETICS_A_OF = {
+    'colocalisation': {
+        'leftLocusId': "concat('C', toString(rowNumberInAllBlocks() % 40))",
+        'rightLocusId': "concat('C', toString((rowNumberInAllBlocks() * 7 + 1) % 40))",
+        'rightStudyType': "if(rowNumberInAllBlocks() % 2 = 0, 'gwas', 'eqtl')",
+    },
+    'l2g_predictions': {'credibleSetId': "concat('C', toString(rowNumberInAllBlocks() % 40))"},
+}
+#: Every GWAS colocalisation also listed the other way round: its swapped side repeats a tuple.
+REVERSED_GWAS = (
+    'INSERT INTO colocalisation_log SELECT rightLocusId, leftLocusId, * EXCEPT (leftLocusId, rightLocusId) '
+    "FROM colocalisation_log WHERE rightStudyType = 'gwas'"
+)
+#: The distinct tuples of both sides of every colocalisation, as pts builds them.
+BOTH_SIDES = (
+    'SELECT count() FROM (SELECT DISTINCT * FROM ('
+    'SELECT leftLocusId, rightLocusId, rightStudyType, * EXCEPT (leftLocusId, rightLocusId, rightStudyType) '
+    'FROM colocalisation_log UNION ALL '
+    "SELECT rightLocusId, leftLocusId, CAST('gwas', toTypeName(rightStudyType)), "
+    '* EXCEPT (leftLocusId, rightLocusId, rightStudyType) FROM colocalisation_log))'
+)
+
+
+def test_genetics_a_loads_from_its_declarations():
+    """Both entries load in the declared explode; nothing else loads them or waits on a `load l2g_predictions`
+    task; the other-datasets explode is gone; their scripts are frozen."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(GENETICS_A) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in GENETICS_A)
+    assert not [t['name'] for t in STEP if t.get('dataset') in GENETICS_A]
+    assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
+    assert not [t['name'] for t in STEP if 'clickhouse_load clickhouse load l2g_predictions' in t.get('requires', [])]
+    for script in GENETICS_A:
+        assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / f'{script}.sql').exists(), script
+        assert (BEFORE / f'{script}.sql').exists(), script
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_genetics_a_declarations_build_what_the_scripts_built(product):
+    """The declarations build the tables the frozen scripts built: tables, engines, keys, columns and rows, but for
+    `l2g_predictions_mergetree` sorted by credibleSetId. pts computes the content (tests/test_genetics_views.py), so
+    the declared landings take the scripts' served rows."""
+    with _database() as before, _database() as after:
+        for dataset in GENETICS_A:
+            landing = {'table': DATASETS[dataset]['table'], 'model': GENETICS_A_LANDING[dataset]}
+            for _, sql in ddl_for(landing, product):
+                before.command(sql)
+            _fill(before, landing['table'], landing_columns(landing, product) or [], 2, GENETICS_A_OF[dataset])
+        before.command(REVERSED_GWAS)
+        landed = before.command('SELECT count() FROM colocalisation_log')
+        distinct = before.command(BOTH_SIDES)
+        for dataset in GENETICS_A:
+            _run(before, (BEFORE / f'{dataset}.sql').read_text())
+        served = before.command('SELECT sum(length(colocalisation)) FROM colocalisation')
+        for dataset in GENETICS_A:
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            rows = f'SELECT * FROM `{before.database}`.`{dataset}`'  # noqa: S608 fixed names
+            after.command(f'INSERT INTO `{entry["table"]}` {rows}')
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+    # groupArrayDistinct over both sides: the reversed GWAS rows repeat tuples, each served once
+    assert served == distinct < 2 * landed, (served, distinct, landed)
+    assert set(old['tables']) == set(new['tables']) == {*GENETICS_A, 'l2g_predictions_mergetree'}
+    assert old['tables'].pop('l2g_predictions_mergetree')[2:] == ('', '')
+    assert new['tables'].pop('l2g_predictions_mergetree')[2:] == ('(credibleSetId)', '(credibleSetId)')
+    assert new['tables'] == old['tables']
+    assert new['columns'] == old['columns']
+    assert new['dictionaries'] == old['dictionaries'] == {}
+    assert new['rows'] == old['rows']
+    assert {n: len(r) for n, r in new['rows'].items()} == {
+        'colocalisation': 40, 'l2g_predictions': 40, 'l2g_predictions_mergetree': 40,
     }  # fmt: skip

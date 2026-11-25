@@ -79,9 +79,10 @@ clickhouse:
         source_columns: {id: biosampleId, name: biosampleName}
   colocalisation:
     table: colocalisation_log
-    input_dir: output/colocalisation
-    model: colocalisation
-    postload_script: config/clickhouse/scripts/colocalisation.sql
+    input_dir: view/colocalisation_by_credible_set
+    model: colocalisation_by_credible_set
+    tables:
+      - {name: colocalisation, engine: rocksdb}
   # credible_set_variant has no postload script: credible_sets builds its tables from both _log tables.
   credible_set_variant:
     table: credible_set_variant_log
@@ -171,9 +172,12 @@ clickhouse:
       - {name: hpo, engine: rocksdb}
   l2g_predictions:
     table: l2g_predictions_log
-    input_dir: output/l2g_prediction
-    model: l2g_prediction
-    postload_script: config/clickhouse/scripts/l2g_predictions.sql
+    input_dir: view/l2g_prediction_by_credible_set
+    model: l2g_prediction_by_credible_set
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: l2g_predictions_mergetree, engine: mergetree, order_by: [credibleSetId]}
+      - {name: l2g_predictions, engine: rocksdb}
   literature_entity_lut:
     table: literature_entity_lut_log
     input_dir: output/literature_entity_lut
