@@ -8,15 +8,10 @@ from loguru import logger
 from otter.storage.synchronous.handle import StorageHandle
 from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
-from otter.util.errors import OtterError
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 from pis.validators.solr import counts
-
-
-class SolrError(OtterError):
-    """Base class for SOLR fetch errors."""
 
 
 class SolrSpec(Spec):
