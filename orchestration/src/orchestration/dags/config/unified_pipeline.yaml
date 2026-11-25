@@ -490,6 +490,12 @@ steps:
   pts_pharmacovigilance_by_drug:
     depends_on:
       - pts_pharmacovigilance
+  pts_study_view:
+    depends_on:
+      - pts_credible_set_annotation
+  pts_variant_view:
+    depends_on:
+      - pts_credible_set_annotation
 
   pts_search:
     depends_on:

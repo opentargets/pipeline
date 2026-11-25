@@ -36,8 +36,7 @@ def test_split_real_scripts(script):
 @pytest.mark.parametrize(
     ('script', 'count'),
     [
-        ('scripts/studies.sql', 5),
-        ('scripts/credible_sets.sql', 10),  # leading comments belong to the first statement
+        ('scripts/credible_sets.sql', 8),  # leading comments belong to the first statement
     ],
 )
 def test_split_real_script_counts(script, count):

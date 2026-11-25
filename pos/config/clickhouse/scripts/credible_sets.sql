@@ -118,29 +118,6 @@ SELECT throwIf(count() != uniqExact(credibleSetId), 'duplicate credibleSetId in 
 CREATE TABLE IF NOT EXISTS credible_sets_locus ENGINE = EmbeddedRocksDB () PRIMARY KEY credibleSetId AS
 SELECT * FROM credible_sets_locus_mergetree;
 
--- credibleSetIds for each study, joined onto studies by studies.sql (which drops this table).
-CREATE TABLE IF NOT EXISTS credible_sets_by_study ENGINE = EmbeddedRocksDB () PRIMARY KEY studyId AS (
-    SELECT
-        studyId,
-        groupArray (id) AS credibleSetIds
-    FROM
-        credible_sets_log
-    GROUP BY
-        studyId
-);
-
--- credibleSetIds for each variant, joined onto variants by variants.sql (which drops this table).
--- (credibleSetId, variantId) is unique in credible_set_variant, so groupArray has no duplicates.
-CREATE TABLE IF NOT EXISTS credible_sets_by_variant ENGINE = EmbeddedRocksDB () PRIMARY KEY variantId AS (
-    SELECT
-        variantId,
-        groupArray (credibleSetId) AS credibleSetIds
-    FROM
-        credible_set_variant_log
-    GROUP BY
-        variantId
-);
-
 DROP TABLE IF EXISTS credible_set_variant_log SYNC;
 
 DROP TABLE IF EXISTS credible_sets_log SYNC;

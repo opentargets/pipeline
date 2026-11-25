@@ -244,9 +244,12 @@ clickhouse:
       - {name: ml_w2v, engine: mergetree, order_by: [word], columns: [category, word, norm, vector]}
   studies:
     table: studies_log
-    input_dir: output/study
-    model: study
-    postload_script: config/clickhouse/scripts/studies.sql
+    input_dir: view/study_view
+    model: study_view
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: studies_mergetree, engine: mergetree, order_by: [studyId]}
+      - {name: studies, engine: rocksdb}
   so:
     table: sequence_ontology_log
     input_dir: output/so
@@ -291,9 +294,12 @@ clickhouse:
       - {name: transcript, engine: rocksdb}
   variants:
     table: variants_log
-    input_dir: output/variant
-    model: variant
-    postload_script: config/clickhouse/scripts/variants.sql
+    input_dir: view/variant_view
+    model: variant_view
+    tables:
+      # read by the credible-set read models: EmbeddedRocksDB scans as one stream
+      - {name: variants_mergetree, engine: mergetree, order_by: [variantId]}
+      - {name: variants, engine: rocksdb}
   # Built by its preload script from loaded tables.
   variant_credible_sets:
     table: variant_credible_sets

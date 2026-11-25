@@ -49,10 +49,12 @@ from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.study_view import StudyView
 from ot_datamodels.views.target_by_region import TargetByRegion
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
+from ot_datamodels.views.variant_view import VariantView
 
 VIEWS: dict[str, type[DatasetModel]] = {
     'association_otf_disease': AssociationOtfDisease,
@@ -68,10 +70,12 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'interaction_view': InteractionView,
     'mouse_phenotype_by_target': MousePhenotypeByTarget,
     'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
+    'study_view': StudyView,
     'target_by_region': TargetByRegion,
     'target_prioritisation_view': TargetPrioritisationView,
     'target_view': TargetView,
     'transcript_view': TranscriptView,
+    'variant_view': VariantView,
 }
 
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
@@ -113,10 +117,12 @@ PRIMARY_KEYS = {
     'interaction_view': ('targetA',),
     'mouse_phenotype_by_target': ('targetFromSourceId',),
     'pharmacovigilance_by_drug': ('chembl_id',),
+    'study_view': ('studyId',),
     'target_by_region': (),
     'target_prioritisation_view': ('targetId',),
     'target_view': ('id',),
     'transcript_view': ('targetId',),
+    'variant_view': ('variantId',),
 }
 
 ASSOCIATION_INPUTS = [
@@ -311,6 +317,11 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         )
     },
     ('target_prioritisation_view', 'targetId'): (TargetPrioritisation, 'targetId', None),
+    **{('study_view', f.name): (Study, f.name, None) for f in dataset_spec(Study).fields},
+    ('study_view', 'credibleSetIds[]'): (CredibleSet, 'id', None),
+    **{('variant_view', f.name): (Variant, f.name, None) for f in dataset_spec(Variant).fields},
+    ('variant_view', 'credibleSetIds[]'): (CredibleSet, 'id', None),
+    ('variant_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
 }
 
 
@@ -515,6 +526,7 @@ DECLARED: dict[str, set[str]] = {
         'credibleSetIds',
         'pharmacogenomicsIds',
     },
+    'study_view': {'credibleSetIds'},
     'target_by_region': {'target'},
     'target_prioritisation_view': {'items', 'items[]', 'items[]/key', 'items[]/value'},
     'transcript_view': {
@@ -526,6 +538,7 @@ DECLARED: dict[str, set[str]] = {
         'transcripts[]/flags[]/label',
         'transcripts[]/flags[]/value',
     },
+    'variant_view': {'credibleSetIds', 'pharmacogenomicsIds'},
 }
 
 
@@ -894,3 +907,21 @@ def test_target_prioritisation_view_items_are_strings() -> None:
     assert set(PRIORITISATION_ORDER) == columns
     assert nodes['items'].constraints.min_length is None
     assert discover_models()['target_prioritisation_view'] is TargetPrioritisationView
+
+
+@pytest.mark.parametrize(
+    ('view', 'output', 'lists'),
+    [(StudyView, Study, ['credibleSetIds']), (VariantView, Variant, ['credibleSetIds', 'pharmacogenomicsIds'])],
+    ids=['study', 'variant'],
+)
+def test_genetics_views_are_their_output_then_the_id_lists(view, output, lists) -> None:
+    """`studies` without the script's `credible_sets_by_study.studyId` (David, 2026-11-25); `variants` as served."""
+    assert issubclass(view, output)
+    assert dataset_spec(view).fields[: len(dataset_spec(output).fields)] == dataset_spec(output).fields
+    assert [f.name for f in dataset_spec(view).fields] == [*(f.name for f in dataset_spec(output).fields), *lists]
+    nodes = _nodes(view)
+    for column in lists:
+        assert not nodes[column].nullable, column
+        assert not nodes[f'{column}[]'].nullable, column
+    assert nodes['credibleSetIds[]'].constraints.pattern == _nodes(CredibleSet)['id'].constraints.pattern
+    assert discover_models()[view.dataset_name] is view
