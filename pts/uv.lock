@@ -1689,7 +1689,7 @@ wheels = [
 
 [[package]]
 name = "ot-datamodels"
-version = "26.12.0rc17"
+version = "26.12.0rc18"
 source = { editable = "../datamodels" }
 dependencies = [
     { name = "polars" },
@@ -2089,7 +2089,7 @@ wheels = [
 
 [[package]]
 name = "pts"
-version = "26.12.0rc103"
+version = "26.12.0rc104"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
