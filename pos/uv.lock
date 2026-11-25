@@ -877,7 +877,7 @@ wheels = [
 
 [[package]]
 name = "ot-datamodels"
-version = "26.12.0rc16"
+version = "26.12.0rc17"
 source = { editable = "../datamodels" }
 dependencies = [
     { name = "polars" },
@@ -1002,7 +1002,7 @@ wheels = [
 
 [[package]]
 name = "pos"
-version = "26.12.0rc27"
+version = "26.12.0rc28"
 source = { editable = "." }
 dependencies = [
     { name = "clickhouse-connect" },
