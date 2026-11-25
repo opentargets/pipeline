@@ -210,13 +210,16 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 
 
 #: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs;
-#: interaction_view: in a list of structs), and the dataset each loads into.
+#: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug: a top-level list, and in a list of structs;
+#: disease_phenotype_by_disease: Nullable, in a list of structs in a list of structs), and the dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
     'variant': 'variants',
     'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
     'target_view': 'targets',
+    'drug_mechanism_of_action_by_drug': 'mechanism_of_action',
+    'disease_phenotype_by_disease': 'disease_hpo',
 }
 
 
@@ -718,3 +721,102 @@ def test_protein_coding_coords_declarations_build_what_the_script_built(product)
     assert new['columns'] == old['columns']
     assert {n: len(r) for n, r in new['rows'].items()} == {PCC[0]: 30, PCC[1]: 40}
     assert new['rows'] == old['rows']
+
+
+#: The small compute declarations, which replace the frozen scripts of the same names: dataset -> (the output model
+#: the script's landing had, the served items column).
+SMALL_COMPUTE = {
+    'disease_hpo': ('disease_phenotype', 'phenotypes'),
+    'drug_warnings': ('drug_warning', 'drugWarnings'),
+    'mechanism_of_action': ('drug_mechanism_of_action', 'rows'),
+    'mouse_phenotypes': ('mouse_phenotype', 'mouse_phenotypes'),
+    'pharmacovigilance': ('pharmacovigilance', 'adverse_events'),
+}
+#: Fixture chemblIds: a tenth empty, a tenth one id twice, the rest two of 20 ids.
+CHEMBL_IDS = (
+    'multiIf(rowNumberInAllBlocks() % 10 = 0, CAST([] AS Array(String)), rowNumberInAllBlocks() % 10 = 1, '
+    "['CR', 'CR'], [concat('C', toString(rowNumberInAllBlocks() % 20)), "
+    "concat('C', toString((rowNumberInAllBlocks() + 3) % 20))])"
+)
+#: arrayJoin items from CHEMBL_IDS: empty lists give none, the others two each.
+CHEMBL_ITEMS = FIXTURE_ROWS * 9 // 10 * 2
+#: Fixture keys, repeated so that groupArray collects several rows per key.
+SMALL_COMPUTE_KEYS = {
+    'disease_hpo': {'disease': "concat('D', toString(rowNumberInAllBlocks() % 40))"},
+    'drug_warnings': {'chemblIds': CHEMBL_IDS},
+    'mechanism_of_action': {'chemblIds': CHEMBL_IDS},
+    'mouse_phenotypes': {'targetFromSourceId': "concat('T', toString(rowNumberInAllBlocks() % 30))"},
+    'pharmacovigilance': {'chembl_id': "concat('C', toString(rowNumberInAllBlocks() % 30))"},
+}
+
+
+def test_small_compute_loads_from_declarations():
+    """The five load in the declared explode; their scripts and scripted loads are gone."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(SMALL_COMPUTE) <= set(explode['foreach'])
+    others = [t for t in STEP if t is not explode]
+    assert not [t['name'] for t in others if set(SMALL_COMPUTE) & {t.get('dataset'), *t.get('foreach', [])}]
+    for dataset in SMALL_COMPUTE:
+        entry = DATASETS[dataset]
+        assert is_declared(entry), dataset
+        assert 'postload_script' not in entry, dataset
+        assert entry['input_dir'] == f'view/{entry["model"]}', dataset
+        assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / f'{dataset}.sql').exists(), dataset
+
+
+def _types(client, table: str) -> list[tuple[str, str]]:
+    return client.query(
+        'SELECT name, type FROM system.columns WHERE database = {d:String} AND table = {t:String} ORDER BY position',
+        parameters={'d': client.database, 't': table},
+    ).result_rows
+
+
+def _cast_select(source: str, types: list[tuple[str, str]]) -> str:
+    """`SELECT` every column of `source`, each CAST to its type in `types`: named tuples map by name."""
+    casts = ', '.join(f'CAST(`{name}` AS {kind}) AS `{name}`' for name, kind in types)
+    return f'SELECT {casts} FROM {source}'  # noqa: S608 system names
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_small_compute_declarations_build_what_the_scripts_built(product):
+    """The declarations build the tables the frozen scripts built from the output landings: names, engines,
+    `engine_full`, keys and column positions; only each items column is retyped, to the output's types and order
+    (David, 2026-11-24, decision 4; the types are pinned in test_clickhouse_ddl.py). pts groups the rows
+    (tests/test_small_compute_views.py), so the declared landings take the script's served rows, which come back the
+    script's once cast back to its types. arrayJoin dropped the empty chemblIds and repeated the repeated id."""
+    with _database() as before, _database() as after:
+        for dataset, (model, _) in SMALL_COMPUTE.items():
+            landing = {'table': DATASETS[dataset]['table'], 'model': model}
+            for _, sql in ddl_for(landing, product):
+                before.command(sql)
+            _fill(before, landing['table'], landing_columns(landing, product), 3, SMALL_COMPUTE_KEYS[dataset])
+            _run(before, (BEFORE / f'{dataset}.sql').read_text())
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            served = f'`{before.database}`.`{dataset}`'
+            after.command(f'INSERT INTO `{entry["table"]}` {_cast_select(served, _types(after, entry["table"]))}')
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+        back = {
+            dataset: sorted(
+                after.raw_query(f'{_cast_select(f"`{dataset}`", _types(before, dataset))} FORMAT TSV')
+                .decode()
+                .splitlines()
+            )
+            for dataset in SMALL_COMPUTE
+        }
+        items = before.query(
+            "SELECT sum(length(drugWarnings)), sumIf(length(drugWarnings), chemblId = 'CR') FROM drug_warnings"
+        ).result_rows
+    assert items == [(CHEMBL_ITEMS, FIXTURE_ROWS // 10 * 2)]
+    assert set(old['tables']) == set(new['tables']) == set(SMALL_COMPUTE)
+    assert new['tables'] == old['tables']
+    assert new['columns'].keys() == old['columns'].keys()
+    retyped = {k for k, (kind, position) in new['columns'].items() if (kind, position) != old['columns'][k]}
+    assert retyped == {(table, column) for table, (_, column) in SMALL_COMPUTE.items()}
+    assert all(new['columns'][k][1] == old['columns'][k][1] for k in retyped)
+    for dataset in SMALL_COMPUTE:
+        assert len(old['rows'][dataset]) > 1, dataset
+        assert len(new['rows'][dataset]) == len(old['rows'][dataset]), dataset
+        assert back[dataset] == old['rows'][dataset], dataset

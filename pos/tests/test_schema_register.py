@@ -113,11 +113,24 @@ def _platform(dataset: str):
     return landing_columns(entry, 'platform')
 
 
-@pytest.mark.parametrize('dataset', ['disease', 'interaction'])
+#: Each `REGISTER_MODEL` dataset and the view its entry now loads.
+VIEW_LOADED = {
+    'disease': 'disease_view',
+    'disease_hpo': 'disease_phenotype_by_disease',
+    'drug_warnings': 'drug_warning_by_drug',
+    'interaction': 'interaction_view',
+    'mechanism_of_action': 'drug_mechanism_of_action_by_drug',
+    'mouse_phenotypes': 'mouse_phenotype_by_target',
+    'pharmacovigilance': 'pharmacovigilance_by_drug',
+}
+
+
+@pytest.mark.parametrize('dataset', sorted(VIEW_LOADED))
 def test_register_model_describes_the_output(dataset):
-    """The `disease` and `interaction` rows describe the output landing, not the view the entry now loads."""
-    assert CONFIG[dataset]['model'] == f'{dataset}_view'
-    output = dataset_spec(discover_models()[dataset])
+    """The rows of a dataset now loading a view describe the output landing, not the view."""
+    assert set(build_register.REGISTER_MODEL) == set(VIEW_LOADED)
+    assert CONFIG[dataset]['model'] == VIEW_LOADED[dataset]
+    output = dataset_spec(discover_models()[build_register.REGISTER_MODEL[dataset]])
     assert [n for n, _ in _platform(dataset) or []] == [f.name for f in output.fields]
     assert build_register.platform_table(dataset) == tuple(_platform(dataset) or [])
 

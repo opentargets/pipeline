@@ -14,10 +14,27 @@ from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
+from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
+from ot_datamodels.views.drug_mechanism_of_action_by_drug import DrugMechanismOfActionByDrug
+from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
+from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
+from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
 from ot_datamodels.views.target_view import TargetView
-from ot_datamodels.vocabularies import Datasource, Datatype, InteractionSource
+from ot_datamodels.vocabularies import (
+    ChemblActionType,
+    ChemblTargetType,
+    ChemblWarningType,
+    Datasource,
+    Datatype,
+    HpoAspect,
+    HpoEvidenceCode,
+    HpoResource,
+    HpoSex,
+    InteractionSource,
+    MechanismCuration,
+)
 
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
@@ -354,7 +371,8 @@ def test_every_entry_round_trips():
         assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
         checked += 1
     assert checked > 20
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'drug', 'interaction',
+    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'disease_hpo', 'drug',
+              'drug_warnings', 'interaction', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
               'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'targets')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
@@ -490,6 +508,56 @@ def test_coding_variant_views_land_the_served_columns(model, key):
     landed = {n: render(t, quote_fields=False) for n, t in columns(model)}
     assert landed == {key: 'String', 'proteinCodingCoords': PROTEIN_CODING_COORDS}
     assert list(landed) == [key, 'proteinCodingCoords']
+
+
+#: The small compute tables as their declarations serve them: the top-level columns as before, each item the output
+#: row (or the fields served) in output order and types (David, 2026-11-24, decision 4). Against the scripts'
+#: tables (system.columns): disease_hpo evidence keeps `qualifier`, aspect/evidenceType/resource are Enum8 (were
+#: Nullable(String)/String), sex Nullable(Enum8) (Nullable(String)), bioCuration String (Nullable); mouse phenotypes
+#: in output order (alphabetical), targetInModelEnsemblId String (Nullable); drug warnings with chemblIds first,
+#: country String and id UInt32 (Nullable), warningType Enum8 (String); mechanism rows (mechanismOfAction, actionType,
+#: references, targetName, targets, curation) (references last), actionType Enum8 and targetName String (Nullable),
+#: curation Enum8 (String), references (source, ids, urls) ((ids, source, urls)); adverse events (name, count, logLR,
+#: critval, meddraCode) ((count, critval, name, logLR, meddraCode)).
+SMALL_COMPUTE_SERVED = {
+    DiseasePhenotypeByDisease: (
+        'disease String, phenotypes Array(Tuple(disease String, phenotype String, evidence Array(Tuple('
+        f'aspect {_enum8(HpoAspect)}, bioCuration String, diseaseFromSourceId String, diseaseFromSource String, '
+        f'diseaseName String, evidenceType {_enum8(HpoEvidenceCode)}, frequency Nullable(String), '
+        'modifiers Array(String), onset Array(String), qualifier Nullable(String), qualifierNot Bool, '
+        f'references Array(String), sex Nullable({_enum8(HpoSex)}), resource {_enum8(HpoResource)}))))'
+    ),
+    MousePhenotypeByTarget: (
+        'targetFromSourceId String, mouse_phenotypes Array(Tuple(targetInModel String, targetInModelMgiId String, '
+        'targetInModelEnsemblId String, targetFromSourceId String, modelPhenotypeId String, '
+        'modelPhenotypeLabel String, biologicalModels Array(Tuple(allelicComposition String, '
+        'geneticBackground String, id Nullable(String), literature Array(String))), '
+        'modelPhenotypeClasses Array(Tuple(id String, label String))))'
+    ),
+    DrugWarningByDrug: (
+        'chemblId String, drugWarnings Array(Tuple(chemblIds Array(String), toxicityClass Nullable(String), '
+        'country String, description Nullable(String), id UInt32, '
+        'references Array(Tuple(id String, source String, url String)), '
+        f'warningType {_enum8(ChemblWarningType)}, year Nullable(UInt16), efoTerm Nullable(String), '
+        'efoId Nullable(String), efoIdForWarningClass Nullable(String)))'
+    ),
+    DrugMechanismOfActionByDrug: (
+        f'chemblId String, rows Array(Tuple(mechanismOfAction String, actionType {_enum8(ChemblActionType)}, '
+        'references Array(Tuple(source String, ids Array(String), urls Array(String))), targetName String, '
+        f'targets Array(String), curation {_enum8(MechanismCuration)})), '
+        f'uniqueTargetTypes Array({_enum8(ChemblTargetType)}), uniqueActionTypes Array({_enum8(ChemblActionType)})'
+    ),
+    PharmacovigilanceByDrug: (
+        'chembl_id String, adverse_events Array(Tuple(name String, count UInt32, logLR Float64, critval Float64, '
+        'meddraCode String)), criticalValue Float64'
+    ),
+}
+
+
+@pytest.mark.parametrize('model', list(SMALL_COMPUTE_SERVED), ids=lambda m: m.dataset_name)
+def test_small_compute_views_land_the_served_columns(model):
+    landed = ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model))
+    assert landed == SMALL_COMPUTE_SERVED[model]
 
 
 # declared tables

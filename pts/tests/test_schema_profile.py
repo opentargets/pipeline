@@ -172,9 +172,14 @@ def test_run_folder_of_the_discovered_models() -> None:
         'association_timeseries',
         'coding_variant_by_target',
         'coding_variant_by_variant',
+        'disease_phenotype_by_disease',
         'disease_view',
+        'drug_mechanism_of_action_by_drug',
         'drug_view',
+        'drug_warning_by_drug',
         'interaction_view',
+        'mouse_phenotype_by_target',
+        'pharmacovigilance_by_drug',
         'target_view',
     }
     assert run_folder(models['target_view']) == 'view'

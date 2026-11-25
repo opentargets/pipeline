@@ -1734,6 +1734,43 @@ steps:
         view: view/interaction_view
   ##################################################################################################
 
+  #: SERVED VIEW STEPS :############################################################################
+  disease_phenotype_by_disease:
+    - name: transform disease_phenotype_by_disease
+      transformer: disease_phenotype_by_disease
+      source: output/disease_phenotype
+      destination:
+        view: view/disease_phenotype_by_disease
+
+  mouse_phenotype_by_target:
+    - name: transform mouse_phenotype_by_target
+      transformer: mouse_phenotype_by_target
+      source: output/mouse_phenotype
+      destination:
+        view: view/mouse_phenotype_by_target
+
+  drug_warning_by_drug:
+    - name: transform drug_warning_by_drug
+      transformer: drug_warning_by_drug
+      source: output/drug_warning
+      destination:
+        view: view/drug_warning_by_drug
+
+  drug_mechanism_of_action_by_drug:
+    - name: transform drug_mechanism_of_action_by_drug
+      transformer: drug_mechanism_of_action_by_drug
+      source: output/drug_mechanism_of_action
+      destination:
+        view: view/drug_mechanism_of_action_by_drug
+
+  pharmacovigilance_by_drug:
+    - name: transform pharmacovigilance_by_drug
+      transformer: pharmacovigilance_by_drug
+      source: output/pharmacovigilance
+      destination:
+        view: view/pharmacovigilance_by_drug
+  ##################################################################################################
+
   #: RELEASE_METRICS STEP :#########################################################################
   release_metrics:
     - name: transform release_metrics

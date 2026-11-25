@@ -16,12 +16,17 @@ from ot_datamodels.outputs.association_overall_direct import AssociationOverallD
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from ot_datamodels.outputs.disease import Disease
+from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
+from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from ot_datamodels.outputs.drug_molecule import DrugMolecule
+from ot_datamodels.outputs.drug_warning import DrugWarning
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.interaction import Interaction
 from ot_datamodels.outputs.interaction_evidence import InteractionEvidence
+from ot_datamodels.outputs.mouse_phenotype import MousePhenotype
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
+from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
@@ -34,9 +39,14 @@ from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
+from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
+from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
 from ot_datamodels.views.drug_view import DrugView
+from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
+from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
+from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
 from ot_datamodels.views.target_view import TargetView
 
 VIEWS: dict[str, type[DatasetModel]] = {
@@ -45,9 +55,14 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_timeseries': AssociationTimeseries,
     'coding_variant_by_target': CodingVariantByTarget,
     'coding_variant_by_variant': CodingVariantByVariant,
+    'disease_phenotype_by_disease': DiseasePhenotypeByDisease,
     'disease_view': DiseaseView,
+    'drug_mechanism_of_action_by_drug': DrugMechanismOfActionByDrug,
     'drug_view': DrugView,
+    'drug_warning_by_drug': DrugWarningByDrug,
     'interaction_view': InteractionView,
+    'mouse_phenotype_by_target': MousePhenotypeByTarget,
+    'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
     'target_view': TargetView,
 }
 
@@ -79,9 +94,14 @@ PRIMARY_KEYS = {
     'association_timeseries': (),
     'coding_variant_by_target': ('targetId',),
     'coding_variant_by_variant': ('variantId',),
+    'disease_phenotype_by_disease': ('disease',),
     'disease_view': ('id',),
+    'drug_mechanism_of_action_by_drug': ('chemblId',),
     'drug_view': ('id',),
+    'drug_warning_by_drug': ('chemblId',),
     'interaction_view': ('targetA',),
+    'mouse_phenotype_by_target': ('targetFromSourceId',),
+    'pharmacovigilance_by_drug': ('chembl_id',),
     'target_view': ('id',),
 }
 
@@ -176,6 +196,33 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
             'pubmedId',
         )
     },
+    ('disease_phenotype_by_disease', 'disease'): (DiseasePhenotype, 'disease', None),
+    **{
+        ('disease_phenotype_by_disease', f'phenotypes[]/{c}'): (DiseasePhenotype, c, None)
+        for c in ('disease', 'phenotype', 'evidence')
+    },
+    ('mouse_phenotype_by_target', 'targetFromSourceId'): (MousePhenotype, 'targetFromSourceId', None),
+    **{
+        ('mouse_phenotype_by_target', f'mouse_phenotypes[]/{f.name}'): (MousePhenotype, f.name, None)
+        for f in dataset_spec(MousePhenotype).fields
+    },
+    ('drug_warning_by_drug', 'chemblId'): (DrugWarning, 'chemblIds[]', None),
+    **{
+        ('drug_warning_by_drug', f'drugWarnings[]/{f.name}'): (DrugWarning, f.name, None)
+        for f in dataset_spec(DrugWarning).fields
+    },
+    ('drug_mechanism_of_action_by_drug', 'chemblId'): (DrugMechanismOfAction, 'chemblIds[]', None),
+    **{
+        ('drug_mechanism_of_action_by_drug', f'rows[]/{c}'): (DrugMechanismOfAction, c, None)
+        for c in MECHANISM_FIELDS
+    },
+    ('drug_mechanism_of_action_by_drug', 'uniqueTargetTypes[]'): (DrugMechanismOfAction, 'targetType', None),
+    ('drug_mechanism_of_action_by_drug', 'uniqueActionTypes[]'): (DrugMechanismOfAction, 'actionType', None),
+    ('pharmacovigilance_by_drug', 'chembl_id'): (Pharmacovigilance, 'chembl_id', None),
+    ('pharmacovigilance_by_drug', 'adverse_events[]/count'): (Pharmacovigilance, 'count', None),
+    ('pharmacovigilance_by_drug', 'adverse_events[]/logLR'): (Pharmacovigilance, 'llr', None),
+    ('pharmacovigilance_by_drug', 'adverse_events[]/critval'): (Pharmacovigilance, 'critval', None),
+    ('pharmacovigilance_by_drug', 'criticalValue'): (Pharmacovigilance, 'critval', None),
     **{('target_view', f.name): (Target, f.name, None) for f in dataset_spec(Target).fields},
     **{
         ('target_view', f'homologues[]/{c}'): (Homology, c, None)
@@ -375,6 +422,16 @@ DECLARED: dict[str, set[str]] = {
         'indirectStudyIds',
     },
     'drug_view': {'pharmacogenomicsIds'},
+    'disease_phenotype_by_disease': {'phenotypes', 'phenotypes[]'},
+    'drug_mechanism_of_action_by_drug': {'rows', 'rows[]', 'uniqueTargetTypes', 'uniqueActionTypes'},
+    'drug_warning_by_drug': {'drugWarnings', 'drugWarnings[]'},
+    'mouse_phenotype_by_target': {'mouse_phenotypes', 'mouse_phenotypes[]'},
+    'pharmacovigilance_by_drug': {
+        'adverse_events',
+        'adverse_events[]',
+        'adverse_events[]/name',
+        'adverse_events[]/meddraCode',
+    },
     'interaction_view': {
         'interactions',
         'interactions[]',
@@ -649,3 +706,66 @@ def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[Dat
     assert set(node.constraints.allowed or ()) == set(get_args(v.CodingVariantDatasource))
     for path in ('datasources[]/datasourceNiceName', 'referenceAminoAcid', 'alternateAminoAcid'):
         assert nodes[f'proteinCodingCoords[]/{path}'].clickhouse is None, path
+
+
+#: the small compute views: (view, key, items column, items' output, output fields served in order)
+SMALL_COMPUTE = [
+    (DiseasePhenotypeByDisease, 'disease', 'phenotypes', DiseasePhenotype, ['disease', 'phenotype', 'evidence']),
+    (MousePhenotypeByTarget, 'targetFromSourceId', 'mouse_phenotypes', MousePhenotype, None),
+    (DrugWarningByDrug, 'chemblId', 'drugWarnings', DrugWarning, None),
+    (DrugMechanismOfActionByDrug, 'chemblId', 'rows', DrugMechanismOfAction, MECHANISM_FIELDS),
+]
+
+
+@pytest.mark.parametrize(
+    ('model', 'key', 'items', 'output', 'fields'), SMALL_COMPUTE, ids=[m[0].dataset_name for m in SMALL_COMPUTE]
+)
+def test_small_compute_items_are_output_rows(model, key, items, output, fields) -> None:
+    """Each item is the output row (or the fields served), in output order and output types (David, 2026-11-24)."""
+    nodes, source = _nodes(model), dataset_spec(output)
+    order = [f.name for f in source.fields] if fields is None else fields
+
+    assert [f.name for f in dataset_spec(model).fields][:2] == [key, items]
+    assert [f.name for f in nodes[f'{items}[]'].fields] == order
+    assert [f.name for f in source.fields if f.name in order] == order
+    assert nodes[items].constraints.min_length == 1
+    assert discover_models()[model.dataset_name] is model
+
+
+def test_disease_phenotype_evidence_keeps_qualifier_and_the_enums() -> None:
+    evidence = _nodes(DiseasePhenotypeByDisease)['phenotypes[]/evidence[]']
+    assert 'qualifier' in [f.name for f in evidence.fields]
+    for name in ('aspect', 'evidenceType', 'sex', 'resource'):
+        assert isinstance(_nodes(DiseasePhenotypeByDisease)[f'phenotypes[]/evidence[]/{name}'].dtype, pl.Enum), name
+
+
+def test_mechanism_unique_types_are_the_vocabulary_enums() -> None:
+    nodes = _nodes(DrugMechanismOfActionByDrug)
+    assert [f.name for f in dataset_spec(DrugMechanismOfActionByDrug).fields] == [
+        'chemblId',
+        'rows',
+        'uniqueTargetTypes',
+        'uniqueActionTypes',
+    ]
+    assert nodes['uniqueTargetTypes[]'].dtype == pl.Enum(list(get_args(v.ChemblTargetType)))
+    assert nodes['uniqueActionTypes[]'].dtype == pl.Enum(list(get_args(v.ChemblActionType)))
+    assert [f.name for f in nodes['rows[]/references[]'].fields] == ['source', 'ids', 'urls']
+
+
+def test_pharmacovigilance_by_drug_is_the_served_shape() -> None:
+    nodes = _nodes(PharmacovigilanceByDrug)
+    assert [f.name for f in dataset_spec(PharmacovigilanceByDrug).fields] == [
+        'chembl_id',
+        'adverse_events',
+        'criticalValue',
+    ]
+    assert [f.name for f in nodes['adverse_events[]'].fields] == ['name', 'count', 'logLR', 'critval', 'meddraCode']
+    assert nodes['adverse_events'].constraints.min_length == 1
+
+
+@pytest.mark.parametrize(('path', 'output_path'), [('name', 'event'), ('meddraCode', 'meddraCode')])
+def test_pharmacovigilance_declared_values_are_their_output_s_without_low_cardinality(path, output_path) -> None:
+    """groupArray stripped LowCardinality, and the served type keeps none (decision 4 changes no LowCardinality)."""
+    source = _nodes(Pharmacovigilance)[output_path]
+    assert source.clickhouse == 'LowCardinality(String)'
+    assert _nodes(PharmacovigilanceByDrug)[f'adverse_events[]/{path}'] == dataclasses.replace(source, clickhouse=None)

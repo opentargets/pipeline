@@ -105,9 +105,10 @@ clickhouse:
       - {name: disease_names, source: disease, key: id, attributes: [name]}
   disease_hpo:
     table: disease_hpo_log
-    input_dir: output/disease_phenotype
-    model: disease_phenotype
-    postload_script: config/clickhouse/scripts/disease_hpo.sql
+    input_dir: view/disease_phenotype_by_disease
+    model: disease_phenotype_by_disease
+    tables:
+      - {name: disease_hpo, engine: rocksdb}
   drug:
     table: drug_log
     input_dir: view/drug_view
@@ -116,9 +117,10 @@ clickhouse:
       - {name: drug, engine: rocksdb}
   drug_warnings:
     table: drug_warnings_log
-    input_dir: output/drug_warning
-    model: drug_warning
-    postload_script: config/clickhouse/scripts/drug_warnings.sql
+    input_dir: view/drug_warning_by_drug
+    model: drug_warning_by_drug
+    tables:
+      - {name: drug_warnings, engine: rocksdb}
   enhancer_to_gene:
     table: enhancer_to_gene_log
     input_dir: output/enhancer_to_gene
@@ -183,14 +185,16 @@ clickhouse:
         columns: [pmid, pmcid, keywordId, relevance, date, year, month]
   mechanism_of_action:
     table: mechanism_of_action_log
-    input_dir: output/drug_mechanism_of_action
-    model: drug_mechanism_of_action
-    postload_script: config/clickhouse/scripts/mechanism_of_action.sql
+    input_dir: view/drug_mechanism_of_action_by_drug
+    model: drug_mechanism_of_action_by_drug
+    tables:
+      - {name: mechanism_of_action, engine: rocksdb}
   mouse_phenotypes:
     table: mouse_phenotypes_log
-    input_dir: output/mouse_phenotype
-    model: mouse_phenotype
-    postload_script: config/clickhouse/scripts/mouse_phenotypes.sql
+    input_dir: view/mouse_phenotype_by_target
+    model: mouse_phenotype_by_target
+    tables:
+      - {name: mouse_phenotypes, engine: rocksdb}
   association_time_series:
     table: association_time_series_log
     input_dir: view/association_timeseries
@@ -203,9 +207,10 @@ clickhouse:
                   yearlyEvidenceCount, isDirect]
   pharmacovigilance:
     table: pharmacovigilance_log
-    input_dir: output/pharmacovigilance
-    model: pharmacovigilance
-    postload_script: config/clickhouse/scripts/pharmacovigilance.sql
+    input_dir: view/pharmacovigilance_by_drug
+    model: pharmacovigilance_by_drug
+    tables:
+      - {name: pharmacovigilance, engine: rocksdb}
   otar_projects:
     table: otar_projects_log
     input_dir: output/otar

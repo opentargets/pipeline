@@ -42,14 +42,19 @@ steps:
         - clinical_report
         - clinical_target
         - disease
+        - disease_hpo
         - drug
+        - drug_warnings
         - enhancer_to_gene
         - evidence
         - go
         - hpo
         - interaction
         - literature_entity_lut
+        - mechanism_of_action
+        - mouse_phenotypes
         - pharmacogenomics
+        - pharmacovigilance
         - protein_coding_coords_by_target
         - protein_coding_coords_by_variant
         - so
@@ -66,11 +71,6 @@ steps:
         - explode load declared datasets
       foreach:
         - colocalisation
-        - disease_hpo
-        - drug_warnings
-        - mechanism_of_action
-        - mouse_phenotypes
-        - pharmacovigilance
         - transcript
       do:
         - name: clickhouse_load clickhouse load ${each}
