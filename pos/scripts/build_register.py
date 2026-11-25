@@ -94,10 +94,12 @@ MODELS = discover_models()
 CONFIG = yaml.safe_load((POS / 'config' / 'datasets.yaml').read_text())['clickhouse']
 #: The model a dataset's rows describe, where its entry now loads another (a view).
 REGISTER_MODEL = {
+    'colocalisation': 'colocalisation',
     'disease': 'disease',
     'disease_hpo': 'disease_phenotype',
     'drug_warnings': 'drug_warning',
     'interaction': 'interaction',
+    'l2g_predictions': 'l2g_prediction',
     'mechanism_of_action': 'drug_mechanism_of_action',
     'mouse_phenotypes': 'mouse_phenotype',
     'pharmacovigilance': 'pharmacovigilance',

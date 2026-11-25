@@ -105,6 +105,9 @@ and `target_symbols`), `targets_by_region`, `transcript` and `target_prioritisat
 `test_genetics_b_declarations_build_what_the_scripts_built` does it for `studies` and `variants` (with
 `studies_mergetree`, `variants_mergetree`; frozen `studies.sql`, `variants.sql` and the `credible_sets_by_*` blocks
 of `credible_sets.sql`): `studies` has no `credible_sets_by_study.studyId`, and the two copies are sorted by key.
+`test_genetics_a_declarations_build_what_the_scripts_built` does it for `colocalisation` and `l2g_predictions` (with
+`l2g_predictions_mergetree`, read by the credible-set read models until the cleanup) on shapes, pts computing their
+rows (frozen `colocalisation.sql`, `l2g_predictions.sql`): `l2g_predictions_mergetree` is sorted by `credibleSetId`.
 
 Print the generated DDL:
 
@@ -252,10 +255,10 @@ add the row to `docs/phase5_register.csv` by hand (dataset, field, category, out
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
 record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
-`drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`, the five small compute and three target scripts, `studies.sql`, `variants.sql`) moved into declarations. A
+`drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`, the five small compute and three target scripts, `studies.sql`, `variants.sql`, `colocalisation.sql`, `l2g_predictions.sql`) moved into declarations. A
 `RETIRED` dataset (`aotf`, `protein_coding_coords`, whose entries and models are gone) keeps its rows as last built, unchecked against
-the generator; the rows of an entry that now loads a view (`disease`, `interaction`, `disease_hpo`, `drug_warnings`,
-`mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`, `studies`, `target_prioritisation`, `transcript`,
+the generator; the rows of an entry that now loads a view (`colocalisation`, `disease`, `interaction`, `disease_hpo`, `drug_warnings`,
+`l2g_predictions`, `mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`, `studies`, `target_prioritisation`, `transcript`,
 `variants`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
 

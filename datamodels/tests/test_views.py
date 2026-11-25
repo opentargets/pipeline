@@ -15,6 +15,7 @@ from ot_datamodels.outputs.association_by_datasource_indirect import Association
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
+from ot_datamodels.outputs.colocalisation import Colocalisation
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
@@ -25,6 +26,7 @@ from ot_datamodels.outputs.evidence_eva import EvidenceEva
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.interaction import Interaction
 from ot_datamodels.outputs.interaction_evidence import InteractionEvidence
+from ot_datamodels.outputs.l2g_prediction import L2gPrediction
 from ot_datamodels.outputs.mouse_phenotype import MousePhenotype
 from ot_datamodels.outputs.pharmacogenomics import Pharmacogenomics
 from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
@@ -41,12 +43,14 @@ from ot_datamodels.views.association_otf_target import AssociationOtfTarget
 from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
+from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
 from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
+from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
 from ot_datamodels.views.study_view import StudyView
@@ -62,12 +66,14 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'association_timeseries': AssociationTimeseries,
     'coding_variant_by_target': CodingVariantByTarget,
     'coding_variant_by_variant': CodingVariantByVariant,
+    'colocalisation_by_credible_set': ColocalisationByCredibleSet,
     'disease_phenotype_by_disease': DiseasePhenotypeByDisease,
     'disease_view': DiseaseView,
     'drug_mechanism_of_action_by_drug': DrugMechanismOfActionByDrug,
     'drug_view': DrugView,
     'drug_warning_by_drug': DrugWarningByDrug,
     'interaction_view': InteractionView,
+    'l2g_prediction_by_credible_set': L2gPredictionByCredibleSet,
     'mouse_phenotype_by_target': MousePhenotypeByTarget,
     'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
     'study_view': StudyView,
@@ -109,12 +115,14 @@ PRIMARY_KEYS = {
     'association_timeseries': (),
     'coding_variant_by_target': ('targetId',),
     'coding_variant_by_variant': ('variantId',),
+    'colocalisation_by_credible_set': ('credibleSetId',),
     'disease_phenotype_by_disease': ('disease',),
     'disease_view': ('id',),
     'drug_mechanism_of_action_by_drug': ('chemblId',),
     'drug_view': ('id',),
     'drug_warning_by_drug': ('chemblId',),
     'interaction_view': ('targetA',),
+    'l2g_prediction_by_credible_set': ('credibleSetId',),
     'mouse_phenotype_by_target': ('targetFromSourceId',),
     'pharmacovigilance_by_drug': ('chembl_id',),
     'study_view': ('studyId',),
@@ -238,6 +246,34 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     },
     ('drug_mechanism_of_action_by_drug', 'uniqueTargetTypes[]'): (DrugMechanismOfAction, 'targetType', None),
     ('drug_mechanism_of_action_by_drug', 'uniqueActionTypes[]'): (DrugMechanismOfAction, 'actionType', None),
+    ('colocalisation_by_credible_set', 'credibleSetId'): (Colocalisation, 'leftLocusId', None),
+    ('colocalisation_by_credible_set', 'colocalisation[]/credibleSetId'): (Colocalisation, 'leftLocusId', None),
+    ('colocalisation_by_credible_set', 'colocalisation[]/otherCredibleSetId'): (Colocalisation, 'rightLocusId', None),
+    **{
+        ('colocalisation_by_credible_set', f'colocalisation[]/{c}'): (Colocalisation, c, None)
+        for c in (
+            'rightStudyType',
+            'chromosome',
+            'numberColocalisingVariants',
+            'h3',
+            'h4',
+            'clpp',
+            'betaRatioSignAverage',
+        )
+    },
+    ('l2g_prediction_by_credible_set', 'credibleSetId'): (L2gPrediction, 'credibleSetId', None),
+    **{
+        ('l2g_prediction_by_credible_set', f'l2g_predictions[]/{c}'): (L2gPrediction, c, None)
+        for c in ('credibleSetId', 'geneId', 'score', 'shapBaseValue')
+    },
+    **{
+        ('l2g_prediction_by_credible_set', f'l2g_predictions[]/features[]/{c}'): (
+            L2gPrediction,
+            f'features[]/{c}',
+            None,
+        )
+        for c in ('value', 'shapValue')
+    },
     ('pharmacovigilance_by_drug', 'chembl_id'): (Pharmacovigilance, 'chembl_id', None),
     ('pharmacovigilance_by_drug', 'adverse_events[]/count'): (Pharmacovigilance, 'count', None),
     ('pharmacovigilance_by_drug', 'adverse_events[]/logLR'): (Pharmacovigilance, 'llr', None),
@@ -471,6 +507,18 @@ DECLARED: dict[str, set[str]] = {
         'synonyms[]/terms[]',
         'studyIds',
         'indirectStudyIds',
+    },
+    'colocalisation_by_credible_set': {
+        'colocalisation',
+        'colocalisation[]',
+        'colocalisation[]/colocalisationMethod',
+    },
+    'l2g_prediction_by_credible_set': {
+        'l2g_predictions',
+        'l2g_predictions[]',
+        'l2g_predictions[]/features',
+        'l2g_predictions[]/features[]',
+        'l2g_predictions[]/features[]/name',
     },
     'drug_view': {'pharmacogenomicsIds'},
     'disease_phenotype_by_disease': {'phenotypes', 'phenotypes[]'},
@@ -925,3 +973,42 @@ def test_genetics_views_are_their_output_then_the_id_lists(view, output, lists) 
         assert not nodes[f'{column}[]'].nullable, column
     assert nodes['credibleSetIds[]'].constraints.pattern == _nodes(CredibleSet)['id'].constraints.pattern
     assert discover_models()[view.dataset_name] is view
+
+
+def test_colocalisation_by_credible_set_is_the_served_shape() -> None:
+    nodes = _nodes(ColocalisationByCredibleSet)
+    assert [f.name for f in dataset_spec(ColocalisationByCredibleSet).fields] == ['credibleSetId', 'colocalisation']
+    assert [f.name for f in nodes['colocalisation[]'].fields] == [
+        'credibleSetId',
+        'otherCredibleSetId',
+        *[f.name for f in dataset_spec(Colocalisation).fields][2:],
+    ]
+    assert nodes['colocalisation'].constraints.min_length == 1
+    assert nodes['colocalisation[]/rightStudyType'].dtype == pl.Enum(list(get_args(v.StudyType)))
+    assert nodes['colocalisation[]/chromosome'].dtype == pl.Enum(list(get_args(v.Chromosome)))
+    assert discover_models()['colocalisation_by_credible_set'] is ColocalisationByCredibleSet
+
+
+def test_colocalisation_method_is_served_as_a_string() -> None:
+    """groupArray stripped LowCardinality and the API decodes a String: never an Enum8."""
+    source = _nodes(Colocalisation)['colocalisationMethod']
+    node = _nodes(ColocalisationByCredibleSet)['colocalisation[]/colocalisationMethod']
+    assert source.dtype == pl.Enum(list(get_args(v.ColocalisationMethod)))
+    assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, False)
+    assert node.constraints.allowed == get_args(v.ColocalisationMethod)
+
+
+def test_l2g_prediction_by_credible_set_is_the_served_shape() -> None:
+    nodes = _nodes(L2gPredictionByCredibleSet)
+    assert [f.name for f in dataset_spec(L2gPredictionByCredibleSet).fields] == ['credibleSetId', 'l2g_predictions']
+    assert [f.name for f in nodes['l2g_predictions[]'].fields] == [f.name for f in dataset_spec(L2gPrediction).fields]
+    assert [f.name for f in nodes['l2g_predictions[]/features[]'].fields] == ['name', 'value', 'shapValue']
+    assert nodes['l2g_predictions'].constraints.min_length == 1
+    assert discover_models()['l2g_prediction_by_credible_set'] is L2gPredictionByCredibleSet
+
+
+def test_l2g_feature_name_is_the_output_s_without_low_cardinality() -> None:
+    source = _nodes(L2gPrediction)['features[]/name']
+    assert source.clickhouse == 'LowCardinality(String)'
+    node = _nodes(L2gPredictionByCredibleSet)['l2g_predictions[]/features[]/name']
+    assert node == dataclasses.replace(source, clickhouse=None)

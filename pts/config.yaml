@@ -1807,6 +1807,25 @@ steps:
         view: view/variant_view
   ##################################################################################################
 
+  #: GENETICS VIEW STEPS :##########################################################################
+  colocalisation_view:
+    - name: transform colocalisation_view
+      transformer: colocalisation_view
+      source: output/colocalisation
+      destination:
+        view: view/colocalisation_by_credible_set
+      settings:
+        bucket_count: 64
+        concurrency: 8
+
+  l2g_prediction_view:
+    - name: transform l2g_prediction_view
+      transformer: l2g_prediction_view
+      source: output/l2g_prediction
+      destination:
+        view: view/l2g_prediction_by_credible_set
+  ##################################################################################################
+
   #: RELEASE_METRICS STEP :#########################################################################
   release_metrics:
     - name: transform release_metrics
