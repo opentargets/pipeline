@@ -27,7 +27,7 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    # tables declared in datasets.yaml; the explode below runs the serving scripts after them
+    # tables declared in datasets.yaml; the serving scripts below run after them
     - name: explode load declared datasets
       requires:
         - sync_bucket etl output files
@@ -41,6 +41,7 @@ steps:
         - clinical_indication
         - clinical_report
         - clinical_target
+        - colocalisation
         - disease
         - disease_hpo
         - drug
@@ -50,6 +51,7 @@ steps:
         - go
         - hpo
         - interaction
+        - l2g_predictions
         - literature_entity_lut
         - mechanism_of_action
         - mouse_phenotypes
@@ -72,17 +74,6 @@ steps:
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
-    - name: explode load all datasets
-      requires:
-        - explode load declared datasets
-      foreach:
-        - colocalisation
-      do:
-        - name: clickhouse_load clickhouse load ${each}
-          dataset: ${each}
-          clickhouse_database: ${database_namespace}
-          data_dir_parent: ${local_data}
-          product: ${product}
     - name: clickhouse_load clickhouse load credible_set_variant
       requires:
         - explode load declared datasets
@@ -94,13 +85,6 @@ steps:
       requires:
         - explode load declared datasets
       dataset: interaction_evidence
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load l2g_predictions
-      requires:
-        - explode load declared datasets
-      dataset: l2g_predictions
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
@@ -135,7 +119,6 @@ steps:
       requires:
         - clickhouse_load clickhouse load credible_sets
         - explode load declared datasets
-        - clickhouse_load clickhouse load l2g_predictions
       dataset: variant_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
@@ -144,7 +127,6 @@ steps:
       requires:
         - clickhouse_load clickhouse load credible_sets
         - explode load declared datasets
-        - clickhouse_load clickhouse load l2g_predictions
       dataset: study_credible_sets
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
