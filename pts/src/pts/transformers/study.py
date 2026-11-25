@@ -1,16 +1,17 @@
 """Study validation and annotation."""
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
 from ot_datamodels.outputs.study import Study
+from ot_datamodels.vocabularies import StudyType
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pts.schemas.dataset.conform import conform
-from pts.schemas.study import STUDY_TYPES, study_schema
+from pts.schemas.study import study_schema, superseded_studies_schema
 from pts.task_outputs import writes
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
@@ -38,6 +39,7 @@ class QualityFlag(StrEnum):
     CASE_CONTROL_SUM_NEQ_SAMPLE_SIZE = 'Study has non empty or zero nCases, nControls & nSamples with non matching sum'
     ONE_ONLY_CASE_OR_CONTROL = 'Study has only cases or only controls'
     MEASUREMENT_STUDY_DESIGN = 'Study has non empty or zero nSamples with empty nCases and nControls'
+    SUPERSEDED_STUDY = 'Study superseded by another study'
 
 
 class StudySource(BaseModel):
@@ -50,6 +52,7 @@ class StudySource(BaseModel):
     disease: str
     biosample: str
     heritability: str
+    superseded_studies: str | None = None
 
 
 class StudyDestination(BaseModel):
@@ -85,88 +88,29 @@ def sort_study_collections(studies: pl.LazyFrame) -> pl.LazyFrame:
     )
 
 
-def deconvolute_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Merge repeated study IDs and propagate their QC and most granular traits.
+def record_key(columns: list[str]) -> pl.Expr:
+    """The canonical content of a study record: `columns` in name order, encoded as JSON.
 
-    For conflicting unaggregated fields, prefer the first configured source.
-    Equally granular traits prefer the last configured source. Within each source,
-    canonical record content breaks ties independently of file and row order.
-    Callers without source ranks treat all records as belonging to one source.
+    Ranking records by it makes a choice between them independent of file and row order.
     """
-    logger.info('Deconvoluting study records')
-    columns = [name for name in studies.collect_schema().names() if name != '_source_rank']
-    if '_source_rank' not in studies.collect_schema():
-        studies = studies.with_columns(pl.lit(0).alias('_source_rank'))
-    studies = (
-        studies
-        .pipe(sort_study_collections)
-        .with_columns(pl.struct(sorted(columns)).struct.json_encode().alias('_record_key'))
-        .sort(['studyId', '_source_rank', '_record_key'])
-        .drop('_record_key')
-    )
-    has_summary = pl.col('hasSumstats').fill_null(False).any().over('studyId')
-    trait_count = pl.col('traitFromSourceMappedIds').list.len()
-    qc = pl.col('qualityControls').fill_null([])
-    prepared = studies.with_columns(
-        pl
-        .when(~pl.col('hasSumstats'))
-        .then(qc.list.eval(pl.element().filter(pl.element() != QualityFlag.NO_OT_CURATION.value)))
-        .otherwise(qc)
-        .alias('qualityControls'),
-        # Only records with mapped traits compete for the most granular (fewest) traits.
-        # Gentropy compares size(), where a null list is -1, so a record without mapped
-        # traits always won and the study lost its traits; that is intentionally fixed here.
-        pl.when(trait_count > 0).then(trait_count).min().over('studyId').alias('_minimum_traits'),
-        has_summary.alias('_has_summary'),
-    ).with_columns(
-        pl
-        .when(pl.col('_has_summary'))
-        .then(
-            pl.col('qualityControls').list.eval(
-                pl.element().filter(pl.element() != QualityFlag.SUMSTATS_NOT_AVAILABLE.value)
-            )
-        )
-        .otherwise(pl.col('qualityControls'))
-        .alias('qualityControls')
-    )
-    # When no record has mapped traits, every record is a candidate, as in Gentropy.
-    granular = (
-        pl.when(pl.col('_minimum_traits').is_null()).then(True).otherwise(trait_count == pl.col('_minimum_traits'))
-    )
-    aggregated = {
-        'qualityControls': pl
-        .col('qualityControls')
-        .filter(pl.col('qualityControls').list.len() > 0)
-        .explode()
-        .unique()
-        .sort(),
-        'sumstatQCValues': pl.col('sumstatQCValues').drop_nulls().first(),
-        'analysisFlags': pl.col('analysisFlags').filter(pl.col('analysisFlags').list.len() > 0).explode(),
-        'hasSumstats': pl
-        .when(pl.col('_has_summary').first())
-        .then(True)
-        .when((~pl.col('hasSumstats')).any())
-        .then(False)
-        .otherwise(None),
-        'traitFromSourceMappedIds': pl.col('traitFromSourceMappedIds').filter(granular).drop_nulls().last(),
-        'traitFromSource': pl.col('traitFromSource').filter(granular).drop_nulls().last(),
-        'studyType': pl.col('studyType').drop_nulls().unique().sort().str.join(','),
-    }
-    return (
-        prepared
-        .group_by('studyId', maintain_order=True)
-        .agg([
-            aggregated.get(column, pl.col(column).first()).alias(column) for column in columns if column != 'studyId'
-        ])
-        .select(columns)
-        .pipe(sort_study_collections)
-    )
+    return pl.struct(sorted(columns)).struct.json_encode()
+
+
+def validate_duplicated_studies(studies: pl.LazyFrame) -> pl.LazyFrame:
+    """Keep one record of each study ID that several records hold, and flag the others.
+
+    The kept record is the first by `record_key`, after list columns are put in canonical order.
+    """
+    logger.info('Validating study ID uniqueness')
+    studies = studies.pipe(sort_study_collections)
+    later = record_key(studies.collect_schema().names()).rank('ordinal').over('studyId') > 1
+    return flag_rows(studies, later, QualityFlag.DUPLICATED_STUDY)
 
 
 def validate_study_type(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag study types that are not one of `STUDY_TYPES`, the gentropy study types."""
+    """Flag study types that are not one of `StudyType`, the gentropy study types."""
     logger.info('Validating study types')
-    supported = pl.col('studyType').is_in(STUDY_TYPES)
+    supported = pl.col('studyType').is_in(get_args(StudyType))
     return flag_rows(studies, ~supported.fill_null(False), QualityFlag.UNKNOWN_STUDY_TYPE)
 
 
@@ -235,10 +179,12 @@ def validate_biosample(studies: pl.LazyFrame, biosample: pl.LazyFrame) -> pl.Laz
 
 
 def validate_analysis_flags(studies: pl.LazyFrame) -> pl.LazyFrame:
-    """Flag studies curated as case-case designs."""
+    """Flag studies curated as case-case designs; a missing list of analysis flags becomes empty."""
     logger.info('Validating study analysis flags')
     return flag_rows(
-        studies, pl.col('analysisFlags').list.contains('Case-case study'), QualityFlag.CASE_CASE_STUDY_DESIGN
+        studies.with_columns(pl.col('analysisFlags').fill_null([])),
+        pl.col('analysisFlags').list.contains('Case-case study'),
+        QualityFlag.CASE_CASE_STUDY_DESIGN,
     )
 
 
@@ -310,6 +256,50 @@ def collect_heritability(studies: pl.LazyFrame, heritability: pl.LazyFrame) -> p
     )
 
 
+def read_superseded_studies(path: str) -> dict[str, str]:
+    """Read the curation file of superseded studies into a map from each study to the study superseding it.
+
+    Raises:
+        ValueError: when a row lacks either study, or a study is listed more than once.
+    """
+    rows = scan_dataset(path, format='tsv', schema=superseded_studies_schema, has_header=True).collect()
+    if rows.select(pl.any_horizontal(pl.all().is_null() | (pl.all().str.strip_chars() == '')).any()).item():
+        msg = f'superseded studies in {path} must name both studies on every row'
+        raise ValueError(msg)
+    if repeated := rows.filter(pl.col('studyId').is_duplicated())['studyId'].unique().sort().to_list():
+        msg = f'superseded studies in {path} list these studies more than once: {repeated}'
+        raise ValueError(msg)
+    return dict(rows.iter_rows())
+
+
+def validate_superseded_studies(
+    studies: pl.DataFrame,
+    superseded_studies: dict[str, str],
+    invalid_qc_reasons: list[QualityFlag],
+) -> pl.DataFrame:
+    """Flag each superseded study whose replacement is present and valid.
+
+    A superseded study absent from `studies` is skipped. One whose replacement is absent or carries
+    an invalidating flag is kept, and a warning names it.
+    """
+    logger.info('Validating superseded studies')
+    invalidating = {reason.value for reason in invalid_qc_reasons} - {QualityFlag.SUPERSEDED_STUDY.value}
+    flags = dict(zip(studies['studyId'], studies['qualityControls'].fill_null([]).to_list(), strict=True))
+    superseded, kept = [], []
+    for study_id, replacement in superseded_studies.items():
+        if study_id not in flags:
+            continue
+        if replacement not in flags:
+            kept.append(f'{study_id} -> {replacement} (absent)')
+        elif failing := sorted(QualityFlag(flag).name for flag in invalidating.intersection(flags[replacement])):
+            kept.append(f'{study_id} -> {replacement} ({", ".join(failing)})')
+        else:
+            superseded.append(study_id)
+    if kept:
+        logger.warning('Keeping {} studies without a valid replacement: {}', len(kept), '; '.join(kept))
+    return flag_rows(studies, pl.col('studyId').is_in(superseded), QualityFlag.SUPERSEDED_STUDY)
+
+
 @writes(output=Study)
 def study(
     source: dict[str, str | list[str]],
@@ -321,7 +311,8 @@ def study(
 
     Args:
         source: Study input paths under `study`, plus `target`, `disease`, and
-            `biosample` lookup paths and the `heritability` path.
+            `biosample` lookup paths, the `heritability` path and, optionally, the
+            curation file of `superseded_studies`.
         destination: Dataset paths under `output` and `excluded`.
         settings: QC reason names under `invalid_qc_reasons` and project IDs
             under `deprecated_project_ids`.
@@ -334,16 +325,11 @@ def study(
     biosample = scan_dataset(sources.biosample)
     disease = build_disease_lut(sources.disease).lazy().rename({'diseaseFromSourceMappedId': 'efo'})
     heritability = scan_dataset(sources.heritability)
+    superseded = read_superseded_studies(sources.superseded_studies) if sources.superseded_studies else {}
     validated = (
         pl
-        .concat(
-            [
-                scan_dataset(path).with_columns(pl.lit(rank).alias('_source_rank'))
-                for rank, path in enumerate(sources.study)
-            ],
-            how='diagonal_relaxed',
-        )
-        .pipe(deconvolute_studies)
+        .concat([scan_dataset(path) for path in sources.study], how='diagonal_relaxed')
+        .pipe(validate_duplicated_studies)
         .pipe(validate_study_type)
         .pipe(validate_project_id, options.deprecated_project_ids)
         .pipe(validate_target, target)
@@ -358,6 +344,7 @@ def study(
         # which also restores its struct field order.
         .match_to_schema(study_schema)
         .collect()
+        .pipe(validate_superseded_studies, superseded, options.invalid_qc_reasons)
     )
     # Validate once, then write both outputs from the same frame.
     result = valid_rows(validated.lazy(), options.invalid_qc_reasons)

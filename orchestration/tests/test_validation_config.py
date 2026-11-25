@@ -18,6 +18,8 @@ PPP_ONLY = [
     'molqtl/bigbrain/sqtl',
 ]
 BOTH = ['molqtl/eqtl_catalogue', 'molqtl/ukb_ppp_eur', 'molqtl/finngen_multiome']
+# The sources sharing study IDs, deconvoluted before validation.
+GWAS_CATALOG = ['gcca', 'gcss_pics', 'gcss_susie']
 
 
 @pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
@@ -25,13 +27,30 @@ def test_study_inputs_follow_the_run(monkeypatch, ppp):
     """PPP adds its molQTL sources to the platform ones; both read released targets."""
     monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
     config = UnifiedPipelineConfig()
-    [task] = config.pts.config['steps']['study']
-    sources = task['source']['study']
+    deconvolution, validation = config.pts.config['steps']['study']
+    assert deconvolution['source']['study'] == [f'input/gwas/{name}/study' for name in GWAS_CATALOG]
+    sources = validation['source']['study']
+    assert sources[0] == deconvolution['destination']
     for name in PPP_ONLY:
         assert (f'input/{name}/study' in sources) is ppp
     for name in BOTH:
         assert f'input/{name}/study' in sources
-    assert task['source']['target'] == 'output/target'
+    assert validation['source']['target'] == 'output/target'
+
+
+@pytest.mark.parametrize('ppp', [False, True], ids=['platform', 'ppp'])
+def test_only_ppp_supersedes_gwas_catalog_studies_with_pgc(monkeypatch, ppp):
+    """PGC is a PPP source, so only in the PPP run do PGC studies supersede GWAS Catalog ones."""
+    monkeypatch.setattr(UnifiedPipelineConfig, 'is_ppp', property(lambda self: ppp))
+    config = UnifiedPipelineConfig()
+    _, validation = config.pts.config['steps']['study']
+    superseded = validation['source'].get('superseded_studies')
+    assert (superseded is not None) is ppp
+    assert ('SUPERSEDED_STUDY' in validation['settings']['invalid_qc_reasons']) is ppp
+    # Every run stages the curation file with the GWAS inputs; only PPP reads it.
+    assert 'input/ot_curation/genetics/superseded_studies.tsv' in _destinations(config.pis.config['steps']['gwas'])
+    if ppp:
+        assert superseded == 'input/ot_curation/genetics/superseded_studies.tsv'
 
 
 def _credible_set_step(ppp: bool, monkeypatch) -> list[dict[str, Any]]:

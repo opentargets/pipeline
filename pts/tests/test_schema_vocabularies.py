@@ -9,13 +9,14 @@ constant, the model's list must include every one of them.
 
 from collections.abc import Iterable
 from enum import Enum
+from typing import get_args
 
 import pytest
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
+from ot_datamodels.vocabularies import StudyType
 
 from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS
-from pts.schemas.study import STUDY_TYPES
 from pts.transformers.clinical_mira.moa.schemas import ActionType
 from pts.transformers.clinical_mira.schemas import ClinicalProvider, ClinicalReportType, ClinicalStageCategory
 from pts.transformers.clinical_report import ClinicalReportFlags
@@ -39,9 +40,9 @@ VOCABULARIES: list[tuple[str, str, type[Enum] | tuple[str, ...]]] = [
     ('clinical_report', 'type', ClinicalReportType),
     ('clinical_report', 'provider', ClinicalProvider),
     ('clinical_report', 'qualityControls[]', ClinicalReportFlags),
-    ('colocalisation', 'rightStudyType', STUDY_TYPES),
-    ('credible_set', 'studyType', STUDY_TYPES),
-    ('study', 'studyType', STUDY_TYPES),
+    ('colocalisation', 'rightStudyType', get_args(StudyType)),
+    ('credible_set', 'studyType', get_args(StudyType)),
+    ('study', 'studyType', get_args(StudyType)),
     ('colocalisation', 'chromosome', CHROMOSOMES),
     ('credible_set', 'chromosome', CHROMOSOMES),
     ('variant', 'chromosome', CHROMOSOMES),

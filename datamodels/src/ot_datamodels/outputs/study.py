@@ -197,6 +197,7 @@ class Study(DatasetModel):
             'Study has non empty or zero nCases, nControls & nSamples with non matching sum',
             'Study has only cases or only controls',
             'Study has non empty or zero nSamples with empty nCases and nControls',
+            'Study superseded by another study',
         ]
     ] = Field(description='Control metrics refining study validation')
     analysisFlags: list[Annotated[str, Field(min_length=1)]] = Field(

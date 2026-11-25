@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import polars as pl
 import pytest
+from loguru import logger
 from ot_datamodels.outputs.study import Study
 from otter.config.model import Config
 from polars.testing import assert_frame_equal
@@ -16,16 +17,19 @@ from pts.transformers.study import (
     QualityFlag,
     StudySource,
     collect_heritability,
-    deconvolute_studies,
+    read_superseded_studies,
     study,
     validate_analysis_flags,
     validate_biosample,
     validate_ccs,
     validate_disease,
+    validate_duplicated_studies,
     validate_project_id,
     validate_study_type,
+    validate_superseded_studies,
     validate_target,
 )
+from tests.study_fixtures import source_schema, studies_frame
 
 
 def disease_lookup(tmp_path, rows):
@@ -66,31 +70,6 @@ def test_validate_disease_keeps_every_disease_sharing_an_obsolete_id(tmp_path):
     assert validate_disease(studies, lookup).collect()['diseaseIds'].to_list() == [['EFO_001', 'EFO_002']]
 
 
-# Columns the validators derive; no study input carries them.
-DERIVED_COLUMNS = {'diseaseIds', 'backgroundDiseaseIds', 'biosampleId'}
-source_schema = pl.Schema({name: dtype for name, dtype in study_schema.items() if name not in DERIVED_COLUMNS})
-
-
-def studies_frame(rows, schema=source_schema):
-    """Build typed studies, by default as the sources provide them, with absent optional fields filled with nulls."""
-    rows = [
-        {
-            name: [str(item) if isinstance(item, QualityFlag) else item for item in value]
-            if isinstance(value, list)
-            else value
-            for name, value in row.items()
-        }
-        for row in rows
-    ]
-    fields = {name for row in rows for name in row}
-    return (
-        pl
-        .DataFrame(rows, schema={name: dtype for name, dtype in schema.items() if name in fields})
-        .lazy()
-        .match_to_schema(schema, missing_columns='insert')
-    )
-
-
 @pytest.mark.parametrize(
     ('study_type', 'flagged'),
     [
@@ -112,6 +91,32 @@ def test_validate_study_type(study_type, flagged):
     assert result.collect()['qualityControls'].to_list() == [[QualityFlag.UNKNOWN_STUDY_TYPE] if flagged else []]
 
 
+@pytest.mark.parametrize('order', [[0, 1, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]])
+def test_validate_duplicated_studies_keeps_the_first_record_by_content(order):
+    """Of the records sharing a study ID, the first by content is kept and the rest flagged, in any row order."""
+    rows = [
+        {'studyId': 's', 'geneId': 'ENSG2'},
+        {'studyId': 's', 'geneId': 'ENSG1'},
+        {'studyId': 's', 'geneId': 'ENSG3'},
+        {'studyId': 'other', 'geneId': 'ENSG9'},
+    ]
+    result = validate_duplicated_studies(studies_frame([rows[i] for i in order])).collect()
+
+    assert sorted(result.select('studyId', 'geneId', 'qualityControls').rows()) == [
+        ('other', 'ENSG9', []),
+        ('s', 'ENSG1', []),
+        ('s', 'ENSG2', [QualityFlag.DUPLICATED_STUDY]),
+        ('s', 'ENSG3', [QualityFlag.DUPLICATED_STUDY]),
+    ]
+
+
+def test_validate_duplicated_studies_keeps_one_of_identical_records():
+    """Identical records are still reduced to one kept record."""
+    result = validate_duplicated_studies(studies_frame([{'studyId': 's'}, {'studyId': 's'}])).collect()
+
+    assert sorted(result['qualityControls'].to_list()) == [[], [QualityFlag.DUPLICATED_STUDY]]
+
+
 @pytest.mark.parametrize(
     ('project', 'deprecated', 'flagged'),
     [('old', ['old'], True), ('new', ['old'], False), (None, ['old'], False), ('old', [], False)],
@@ -124,6 +129,98 @@ def test_validate_project_id(project, deprecated, flagged):
     assert set(result['qualityControls'][0]) == (
         {'existing', QualityFlag.DEPRECATED_PROJECT} if flagged else {'existing'}
     )
+
+
+def supersede(rows, superseded_studies):
+    """Run the supersession check over `rows`, returning each study's flags and the warnings it logged."""
+    warnings = []
+    handler = logger.add(lambda message: warnings.append(message.record['message']), level='WARNING')
+    try:
+        result = validate_superseded_studies(
+            studies_frame(rows).collect(),
+            superseded_studies,
+            [QualityFlag.UNRESOLVED_DISEASE, QualityFlag.SUPERSEDED_STUDY],
+        )
+    finally:
+        logger.remove(handler)
+    return dict(zip(result['studyId'], result['qualityControls'].to_list(), strict=True)), warnings
+
+
+@pytest.mark.parametrize(
+    ('replacement', 'superseded'),
+    [
+        ({'studyId': 'pgc'}, True),
+        ({'studyId': 'pgc', 'qualityControls': [QualityFlag.CASE_CONTROL_STUDY_DESIGN]}, True),
+        ({'studyId': 'pgc', 'qualityControls': [QualityFlag.UNRESOLVED_DISEASE]}, False),
+        ({'studyId': 'other'}, False),
+    ],
+    ids=['valid', 'valid-with-a-non-invalidating-flag', 'invalid', 'absent'],
+)
+def test_validate_superseded_studies_supersedes_a_study_only_when_its_replacement_is_valid(replacement, superseded):
+    """A study is superseded only when its replacement is present and carries no invalidating flag."""
+    flags, warnings = supersede([{'studyId': 'gcst'}, replacement], {'gcst': 'pgc'})
+
+    assert (QualityFlag.SUPERSEDED_STUDY in flags['gcst']) is superseded
+    assert QualityFlag.SUPERSEDED_STUDY not in flags[replacement['studyId']]
+    assert bool(warnings) is not superseded
+
+
+def test_validate_superseded_studies_names_kept_studies_and_the_flags_of_their_replacements():
+    """One warning names every kept study, its replacement and why that replacement does not count."""
+    _, warnings = supersede(
+        [
+            {'studyId': 'missing'},
+            {'studyId': 'failed'},
+            {'studyId': 'pgc_failed', 'qualityControls': [QualityFlag.UNRESOLVED_DISEASE]},
+        ],
+        {'missing': 'pgc_missing', 'failed': 'pgc_failed'},
+    )
+
+    [warning] = warnings
+    assert 'missing -> pgc_missing (absent)' in warning
+    assert 'failed -> pgc_failed (UNRESOLVED_DISEASE)' in warning
+
+
+def test_validate_superseded_studies_ignores_studies_absent_from_the_run():
+    """A listed study the run does not hold is skipped without a warning, whatever its replacement."""
+    flags, warnings = supersede([{'studyId': 'pgc'}], {'gcst': 'pgc', 'other': 'pgc_missing'})
+
+    assert flags == {'pgc': []}
+    assert warnings == []
+
+
+def test_validate_superseded_studies_without_a_mapping_leaves_studies_unchanged():
+    """No mapping, no change."""
+    studies = studies_frame([{'studyId': 'gcst', 'qualityControls': ['existing']}]).collect()
+
+    assert_frame_equal(validate_superseded_studies(studies, {}, [QualityFlag.SUPERSEDED_STUDY]), studies)
+
+
+def superseded_studies_file(tmp_path, rows):
+    """Write the curation file of superseded studies: a header, then one tab-separated pair per row."""
+    path = tmp_path / 'superseded_studies.tsv'
+    path.write_text(
+        ''.join(f'{study_id}\t{superseded_by}\n' for study_id, superseded_by in [('studyId', 'supersededBy'), *rows])
+    )
+    return str(path)
+
+
+def test_read_superseded_studies_maps_each_study_to_the_one_superseding_it(tmp_path):
+    """Each row maps a superseded study to the study that supersedes it."""
+    path = superseded_studies_file(tmp_path, [('GCST1', 'pgc_a'), ('GCST2', 'pgc_b')])
+
+    assert read_superseded_studies(path) == {'GCST1': 'pgc_a', 'GCST2': 'pgc_b'}
+
+
+@pytest.mark.parametrize(
+    'rows',
+    [[('GCST1', '')], [('', 'pgc_a')], [('GCST1', 'pgc_a'), ('GCST1', 'pgc_b')]],
+    ids=['missing-replacement', 'missing-study', 'repeated-study'],
+)
+def test_read_superseded_studies_rejects_incomplete_or_repeated_rows(tmp_path, rows):
+    """Every row names both studies, and a study is superseded by one study only."""
+    with pytest.raises(ValueError, match='superseded studies'):
+        read_superseded_studies(superseded_studies_file(tmp_path, rows))
 
 
 @pytest.mark.parametrize(
@@ -180,6 +277,13 @@ def test_validate_analysis_flags(flags, flagged):
     )
 
 
+def test_validate_analysis_flags_turns_missing_flags_into_an_empty_list():
+    """A source without analysis flags publishes an empty list, as deconvoluted studies do."""
+    result = validate_analysis_flags(studies_frame([{'analysisFlags': None}, {'analysisFlags': ['one']}])).collect()
+
+    assert result['analysisFlags'].to_list() == [[], ['one']]
+
+
 @pytest.mark.parametrize(
     ('cases', 'controls', 'samples', 'flag'),
     [
@@ -233,82 +337,6 @@ def test_validate_disease_flags_only_gwas_without_resolved_diseases(study_type, 
     assert result['qualityControls'].to_list() == [[QualityFlag.UNRESOLVED_DISEASE] if flagged else []]
 
 
-def test_deconvolute_studies_merges_flags_sumstats_and_granular_disease():
-    """Duplicate sources propagate QC and select the most granular disease assignment."""
-    studies = studies_frame([
-        {
-            'studyId': 's',
-            'studyType': 'gwas',
-            'hasSumstats': False,
-            'qualityControls': [QualityFlag.NO_OT_CURATION, QualityFlag.SUMSTATS_NOT_AVAILABLE, 'top'],
-            'traitFromSourceMappedIds': ['a', 'b'],
-            'traitFromSource': 'broad',
-            'analysisFlags': ['one'],
-        },
-        {
-            'studyId': 's',
-            'studyType': 'gwas',
-            'hasSumstats': True,
-            'qualityControls': [QualityFlag.NO_OT_CURATION, 'summary'],
-            'traitFromSourceMappedIds': ['a'],
-            'traitFromSource': 'specific',
-            'analysisFlags': ['two'],
-            'sumstatQCValues': [{'QCCheckName': 'test', 'QCCheckValue': 1.0}],
-        },
-    ])
-    result = deconvolute_studies(studies)
-    assert isinstance(result, pl.LazyFrame)
-    row = result.collect().row(0, named=True)
-    assert set(row['qualityControls']) == {QualityFlag.NO_OT_CURATION, 'top', 'summary'}
-    assert row['hasSumstats'] is True
-    assert row['traitFromSourceMappedIds'] == ['a']
-    assert row['traitFromSource'] == 'specific'
-    assert sorted(row['analysisFlags']) == ['one', 'two']
-    assert row['sumstatQCValues'] == [{'QCCheckName': 'test', 'QCCheckValue': 1.0}]
-
-
-@pytest.mark.parametrize(
-    ('sumstats', 'expected'), [([None, None], None), ([False, None], False), ([True, False], True)]
-)
-def test_deconvolute_studies_propagates_tristate_sumstats(sumstats, expected):
-    """Summary statistics availability prefers true, then false, then null."""
-    result = deconvolute_studies(
-        studies_frame([{'studyId': 's', 'studyType': 'gwas', 'hasSumstats': value} for value in sumstats])
-    ).collect()
-    assert result.height == 1
-    assert result['hasSumstats'].to_list() == [expected]
-    assert result['qualityControls'].to_list() == [[]]
-    assert result['analysisFlags'].to_list() == [[]]
-
-
-def test_deconvolute_studies_without_sumstats_removes_curation_flag():
-    """Top-hit studies retain unavailable-sumstats flags but drop absent curation."""
-    result = deconvolute_studies(
-        studies_frame([
-            {
-                'studyId': 's',
-                'studyType': 'gwas',
-                'hasSumstats': False,
-                'qualityControls': [QualityFlag.NO_OT_CURATION, QualityFlag.SUMSTATS_NOT_AVAILABLE],
-            }
-        ])
-    ).collect()
-    assert result['qualityControls'].to_list() == [[QualityFlag.SUMSTATS_NOT_AVAILABLE]]
-
-
-def test_deconvolute_studies_combines_ambiguous_types_and_keeps_distinct_studies():
-    """Different study types remain visible to validation and separate IDs survive."""
-    result = deconvolute_studies(
-        studies_frame([
-            {'studyId': 's', 'studyType': 'gwas'},
-            {'studyId': 's', 'studyType': 'eqtl'},
-            {'studyId': 'other', 'studyType': 'gwas'},
-        ])
-    ).collect()
-    assert result.height == 2
-    assert set(result.filter(pl.col('studyId') == 's')['studyType'][0].split(',')) == {'gwas', 'eqtl'}
-
-
 def test_quality_flags_are_sorted_and_not_duplicated_when_validation_is_repeated():
     """An already applied flag is preserved once and triggered flags sort the QC list."""
     studies = studies_frame([
@@ -316,32 +344,6 @@ def test_quality_flags_are_sorted_and_not_duplicated_when_validation_is_repeated
     ])
     result = studies.pipe(validate_study_type).pipe(validate_study_type).collect()
     assert result['qualityControls'].to_list() == [sorted(['a', 'z', str(QualityFlag.UNKNOWN_STUDY_TYPE)])]
-
-
-@pytest.mark.parametrize('unmapped', [None, []], ids=['null', 'empty'])
-def test_deconvolute_studies_prefers_records_with_mapped_traits(unmapped):
-    """A record without mapped traits must not win granularity over a populated one."""
-    result = deconvolute_studies(
-        studies_frame([
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['a', 'b'], 'traitFromSource': 'broad'},
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['a'], 'traitFromSource': 'specific'},
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': unmapped, 'traitFromSource': 'unmapped'},
-        ])
-    ).collect()
-    assert result['traitFromSourceMappedIds'].to_list() == [['a']]
-    assert result['traitFromSource'].to_list() == ['specific']
-
-
-def test_deconvolute_studies_without_any_mapped_traits_keeps_every_candidate():
-    """With no mapped traits anywhere, every record stays a candidate, as before."""
-    result = deconvolute_studies(
-        studies_frame([
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': None, 'traitFromSource': 'first'},
-            {'studyId': 's', 'studyType': 'gwas', 'traitFromSourceMappedIds': None, 'traitFromSource': 'last'},
-        ])
-    ).collect()
-    assert result['traitFromSourceMappedIds'].to_list() == [None]
-    assert result['traitFromSource'].to_list() == ['last']
 
 
 def heritability_frame(rows):
@@ -434,6 +436,11 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
         'study': studies_frame([
             {'studyId': 'valid', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['old'], 'nSamples': 100},
             {'studyId': 'invalid', 'studyType': 'unsupported', 'nSamples': 100},
+            {'studyId': 'superseded', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['old'], 'nSamples': 100},
+            {'studyId': 'repeated', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['old'], 'nSamples': 100},
+        ]).collect(),
+        'other_study': studies_frame([
+            {'studyId': 'repeated', 'studyType': 'gwas', 'traitFromSourceMappedIds': ['old'], 'nSamples': 100},
         ]).collect(),
         'target': pl.DataFrame({'id': ['gene']}),
         'biosample': pl.DataFrame({'biosampleId': ['tissue']}),
@@ -445,14 +452,15 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
         path = tmp_path / f'{name}.parquet'
         frame.write_parquet(path)
         paths[name] = str(path)
-    paths['study'] = [paths['study']]
+    paths['study'] = [paths['study'], paths.pop('other_study')]
+    paths['superseded_studies'] = superseded_studies_file(tmp_path, [('superseded', 'valid')])
     output_path = tmp_path / 'output'
     excluded_path = tmp_path / 'excluded'
 
     study(
         source=paths,
         destination={'output': str(output_path), 'excluded': str(excluded_path)},
-        settings={'invalid_qc_reasons': ['UNKNOWN_STUDY_TYPE']},
+        settings={'invalid_qc_reasons': ['UNKNOWN_STUDY_TYPE', 'DUPLICATED_STUDY', 'SUPERSEDED_STUDY']},
         config=Mock(spec=Config),
     )
 
@@ -461,60 +469,19 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
     assert len(output_files) == len(excluded_files) == 1
     valid = pl.read_parquet(output_files[0])
     invalid = pl.read_parquet(excluded_files[0])
-    assert valid['studyId'].to_list() == ['valid']
-    assert invalid['studyId'].to_list() == ['invalid']
+    assert sorted(valid['studyId']) == ['repeated', 'valid']
+    assert sorted(invalid['studyId']) == ['invalid', 'repeated', 'superseded']
     assert invalid.schema == study_schema
     assert valid.schema == conformed_schema(study_schema, Study)
-    assert valid['diseaseIds'].to_list() == [['disease']]
-    assert valid['sumstatQCValues'][0][0]['QCCheckValue'] == 0.5
-    assert str(QualityFlag.UNKNOWN_STUDY_TYPE) in invalid['qualityControls'][0]
-
-
-@pytest.mark.parametrize('seed', [1, 7, 42])
-def test_deconvolution_is_independent_of_row_order(seed):
-    """Explicit source ranks and canonical content break otherwise conflicting ties."""
-    rows = (
-        studies_frame([
-            {
-                'studyId': 's',
-                'projectId': 'z',
-                'traitFromSource': 'z',
-                'traitFromSourceMappedIds': ['b'],
-                'studyType': 'gwas',
-                'qualityControls': ['z', 'a'],
-                'analysisFlags': ['z', 'a', 'a'],
-            },
-            {
-                'studyId': 's',
-                'projectId': 'a',
-                'traitFromSource': 'a',
-                'traitFromSourceMappedIds': ['a'],
-                'studyType': 'no_licence',
-                'qualityControls': ['a', 'z'],
-                'analysisFlags': ['a'],
-            },
-            {
-                'studyId': 's',
-                'projectId': 'preferred',
-                'traitFromSource': 'last source',
-                'traitFromSourceMappedIds': ['c'],
-                'studyType': 'gwas',
-            },
-        ])
-        .with_columns(pl.Series('_source_rank', [0, 0, 1]))
-        .collect()
-    )
-    expected = deconvolute_studies(rows.lazy()).collect()
-    actual = deconvolute_studies(rows.sample(fraction=1, shuffle=True, seed=seed).lazy()).collect()
-    assert_frame_equal(actual, expected)
-    row = actual.row(0, named=True)
-    assert row['projectId'] == 'z'
-    assert row['traitFromSource'] == 'last source'
-    assert row['traitFromSourceMappedIds'] == ['c']
-    assert row['studyType'] == 'gwas,no_licence'
-    assert row['qualityControls'] == ['a', 'z']
-    assert row['analysisFlags'] == ['a', 'a', 'a', 'z']
-    assert '_source_rank' not in actual.columns
+    accepted = valid.filter(pl.col('studyId') == 'valid')
+    assert accepted['diseaseIds'].to_list() == [['disease']]
+    assert accepted['sumstatQCValues'][0][0]['QCCheckValue'] == 0.5
+    flags = {(row['studyId'], flag) for row in invalid.iter_rows(named=True) for flag in row['qualityControls']}
+    assert {
+        ('invalid', QualityFlag.UNKNOWN_STUDY_TYPE),
+        ('superseded', QualityFlag.SUPERSEDED_STUDY),
+        ('repeated', QualityFlag.DUPLICATED_STUDY),
+    } <= flags
 
 
 def test_collection_ordering_preserves_nulls_and_sample_multiplicity():

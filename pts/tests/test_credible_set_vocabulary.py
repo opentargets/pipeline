@@ -1,7 +1,10 @@
 """The vocabularies of the credible set stages match gentropy and the PRDs."""
 
+from typing import get_args
+
+from ot_datamodels.vocabularies import StudyType
+
 from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS, SUSIE_METHODS
-from pts.schemas.study import STUDY_TYPES
 from pts.transformers.credible_set.region import KnownGenomicRegion
 from pts.transformers.utils.ensembl.queries import CANONICAL_CHROMOSOMES
 
@@ -23,4 +26,5 @@ def test_mhc_matches_gentropy() -> None:
 
 def test_study_types_match_gentropy() -> None:
     """gentropy's `StudyType`; the order is ClickHouse's Enum's, not gentropy's."""
-    assert set(STUDY_TYPES) == {'gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'}
+    study_types = {'gwas', 'eqtl', 'pqtl', 'sqtl', 'tuqtl', 'sceqtl', 'scpqtl', 'scsqtl', 'sctuqtl'}
+    assert set(get_args(StudyType)) == study_types

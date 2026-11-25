@@ -12,16 +12,15 @@ under their contract and runs the checks in order:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.vocabularies import FineMappingMethod
+from ot_datamodels.vocabularies import FineMappingMethod, StudyType
 from otter.config.model import Config
 from pydantic import BaseModel, ConfigDict, Field
 
 from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS, credible_set_required, credible_set_schema
-from pts.schemas.study import STUDY_TYPES
 from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.credible_set.identifier import CREDIBLE_SET_ID_PATTERN, variant_chromosome, variant_position
 from pts.transformers.credible_set.region import KnownGenomicRegion
@@ -161,7 +160,7 @@ def _flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     A set without a `studyType` takes its study's from the index, with no flag; a set that has one
     keeps it, so a mismatch stays visible.
 
-    - INVALID_STUDY_TYPE: the source `studyType` is not one of `STUDY_TYPES`; a missing type is not.
+    - INVALID_STUDY_TYPE: the source `studyType` is not one of `StudyType`; a missing type is not.
     - STUDY_TYPE_MISMATCH: the study is in the index, and the source `studyType` differs from the
       study's.
     - TOP_HIT_AND_SUMMARY_STATS: the set is a curated top hit, and the study is not flagged
@@ -200,7 +199,7 @@ def _flag_study(frame: pl.LazyFrame, study: pl.LazyFrame) -> pl.LazyFrame:
     return (
         frame
         .join(lookup, on='studyId', how='left')
-        .pipe(flag_rows, ~pl.col('studyType').is_in(STUDY_TYPES), CredibleSetFlag.INVALID_STUDY_TYPE)
+        .pipe(flag_rows, ~pl.col('studyType').is_in(get_args(StudyType)), CredibleSetFlag.INVALID_STUDY_TYPE)
         .pipe(flag_rows, mismatch, CredibleSetFlag.STUDY_TYPE_MISMATCH)
         .pipe(flag_rows, top_hit & ~no_sumstats, CredibleSetFlag.TOP_HIT_AND_SUMMARY_STATS)
         .pipe(flag_rows, ~found, CredibleSetFlag.MISSING_STUDY)
