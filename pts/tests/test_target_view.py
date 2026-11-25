@@ -542,10 +542,13 @@ def test_target_by_region_is_one_row_per_target(tmp_path: Path):
 def test_transcript_view_groups_the_transcripts_by_target(tmp_path: Path):
     """One row per targetId; each transcript row without targetId, in the transcript's column order, by
     transcriptId; flags as strings."""
-    transcript = _run_all(tmp_path, typed=True)['transcript']
+    # targetId is the view's key, never null in the transcript output
+    transcripts = [t for t in ROWS['transcript'] if t['targetId'] is not None]
+    transcript = _run_all(tmp_path, ROWS | {'transcript': transcripts}, typed=True)['transcript']
     assert transcript.schema == to_polars_schema(TranscriptView)
     rows = {r['targetId']: r['transcripts'] for r in transcript.to_dicts()}
-    assert set(rows) == {t['targetId'] for t in ROWS['transcript']}
+    assert set(rows) == {t['targetId'] for t in transcripts}
+    assert None not in rows
     assert [t['transcriptId'] for t in rows['ENSG1']] == [None, 'ENST11', 'ENST12', 'ENST13']
     assert [t['transcriptId'] for t in rows['ENSG5']] == ['ENST51', 'ENST52']
     first = rows['ENSG1'][1]
