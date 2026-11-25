@@ -65,6 +65,14 @@ point to a removed fan-out.
   under-reports its span. `manifest.json` keeps the real step times and survives the VM;
   its steps are keyed `<runner>_<step>` (`pis_variant`, `pts_variant`).
 - **The exception text is in a log entry's `error_detail`** key, not `event`.
+- **`manifest.json` can miss steps that ran.** On `ds/ppp-2612-1`, four steps that
+  succeeded in Airflow (`pis_disease`, `pts_evidence_orphanet`,
+  `pts_evidence_uniprot_literature`, `pts_evidence_uniprot_variants`) had no manifest
+  entry. Before reporting step counts or times from the manifest, check its step list
+  against the `run_` tasks, and say where a time comes from Airflow instead.
+- **A failed `run_` can hide a step that succeeded**: when the exit-status log entry is
+  lost, the sensor times out (`full-run.md`, failure modes). The manifest, the container
+  log and the output settle what happened.
 
 ## Step logs
 

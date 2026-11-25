@@ -106,11 +106,26 @@ curl -s -H "Authorization: Bearer $T" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_entries"])'
 ```
 
+A step on a VM shows its `run_` task as `deferred`, not `running`, for as long as the
+VM works: the sensor waits in the triggerer. Count `running` and `deferred` together, or
+a busy run looks idle.
+
 Most steps run on their own GCE VM, named `up-<step, _ as ->-<run hash>` (e.g.
 `up-pis-variant-…`), which Compute Engine deletes after 8 hours regardless. Which pts
 steps run on Dataproc instead is in `orchestration/AGENTS.md`; gentropy steps always
 do. No step sets `execution_timeout`: a step running well past its time in the previous
 run is stuck, not slow; read its logs (`verification.md`).
+
+On every check, also list the step VMs and flag any whose step's `run_` has already
+ended: its cleanup didn't run (`partial-reruns.md`, "A blocked step's VM cleanup has
+already run"):
+
+```sh
+gcloud compute instances list --project open-targets-eu-dev --filter='name~^up-' \
+  --format='value(name,creationTimestamp)'
+```
+
+A watcher that runs for hours must reopen the tunnel itself (`vm-and-config.md`).
 
 **Every incident gets its own issue comment** (`reporting.md`), posted when found and
 updated when resolved. An incident is anything that needs action: a failed task, a
@@ -131,6 +146,9 @@ Failure modes seen on real runs:
 | a step succeeds but used the old config | cleared before the DAG re-parsed the pulled config (`vm-and-config.md`) |
 | a step fails reaching an external service (OpenAI, GitHub, Hugging Face, an upstream data host) | public services rate-limit or fail at fan-out scale; retry, or check whether the upstream URL moved |
 | one failed step shows as several failures | `delete_vm_*` and downstream tasks fail or go `upstream_failed` alongside it |
+| a step fails with `TaskValidationError: ... breaks its model` | the output has values its model doesn't allow, e.g. a null in a required field. On a run cut from an older base, compare the model with `main`, which may already allow them. Otherwise the data is new (e.g. PPP-only studies). A retry fails the same way |
+| a pts Dataproc cluster is created in an ERROR state | the pts init action failed. Read `dataproc-initialization-script-0_output` in the cluster's staging bucket. Seen: `Distribution not found at: .../datamodels`, from an init action that checked out only `pts` (opentargets/pipeline#432) |
+| a VM step stays `deferred` long after its container exited | the VM's `startup-script exit status` log entry never reached Cloud Logging (journal: `Cannot connect to cloud logging, skipping flush`). The sensor waits until its deferral times out (8 h), then fails a step that succeeded. Check the container's exit code, the manifest and the output; marking `run_` `success` by hand is the run owner's call |
 
 **Done when** the DagRun has ended and every incident comment has an outcome.
 
