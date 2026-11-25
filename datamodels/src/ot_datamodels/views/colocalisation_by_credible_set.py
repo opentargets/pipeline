@@ -2,8 +2,9 @@
 
 Written by pts `colocalisation_view`. One row per credible set with every colocalisation it takes part in, from
 both sides: an output row as is (`leftLocusId` as `credibleSetId`) and swapped (`rightLocusId` as `credibleSetId`,
-`rightStudyType` `gwas`, the left set's type). Repeated tuples are served once; tuples by `otherCredibleSetId`,
-`rightStudyType`, `colocalisationMethod`, then the other fields.
+`rightStudyType` `gwas`, the left set's type). Repeated tuples are served once, sorted by their fields in order
+(`otherCredibleSetId`, `rightStudyType` and `chromosome` in vocabulary order, `colocalisationMethod`, then the
+statistics, nulls last).
 """
 
 from typing import ClassVar
