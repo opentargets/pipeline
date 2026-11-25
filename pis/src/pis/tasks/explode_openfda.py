@@ -31,7 +31,7 @@ class ExplodeOpenfdaSpec(Spec):
     jq_filter: str
     prefix: str
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, _context: Any) -> None:
         # allows keys to be missing from the global scratchpad
         self.scratchpad_ignore_missing = True
 
