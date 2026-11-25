@@ -256,6 +256,7 @@ CONSUMER_TEST = {
     'target_view': 'test_target_view.py',
     'study_view': 'test_study_view.py',
     'variant_view': 'test_variant_view.py',
+    'credible_set_view': 'test_credible_set_view.py',
 }
 """The tests of every task that reads `CREDIBLE_SET_DATASETS`, which build their inputs as the producers write them."""
 

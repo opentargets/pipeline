@@ -1824,6 +1824,28 @@ steps:
       source: output/l2g_prediction
       destination:
         view: view/l2g_prediction_by_credible_set
+
+  credible_set_view:
+    - name: transform credible_set_view
+      transformer: credible_set_view
+      source:
+        credible_set: output/credible_set
+        credible_set_variant: output/credible_set_variant
+        variant: output/variant
+        study: output/study
+        l2g_prediction: output/l2g_prediction
+        target: output/target
+        disease: output/disease
+        biosample: output/biosample
+      destination:
+        view: view/credible_set_view
+        locus: view/credible_set_locus
+        study: view/study_credible_set
+        target: view/target_credible_set
+        variant: view/variant_credible_set
+      settings:
+        bucket_count: 16
+        concurrency: 4
   ##################################################################################################
 
   #: RELEASE_METRICS STEP :#########################################################################
