@@ -58,11 +58,13 @@ steps:
         - protein_coding_coords_by_target
         - protein_coding_coords_by_variant
         - so
+        - studies
         - target_essentiality
         - target_prioritisation
         - targets
         - targets_by_region
         - transcript
+        - variants
         - w2v
       do:
         - name: clickhouse_load clickhouse load ${each}
@@ -129,27 +131,10 @@ steps:
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
-    - name: clickhouse_load clickhouse load variants
-      requires:
-        - explode load declared datasets
-        - clickhouse_load clickhouse load credible_sets
-      dataset: variants
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load studies
-      requires:
-        - clickhouse_load clickhouse load credible_sets
-      dataset: studies
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
     - name: clickhouse_load clickhouse load variant_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
         - explode load declared datasets
-        - clickhouse_load clickhouse load studies
-        - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load l2g_predictions
       dataset: variant_credible_sets
       clickhouse_database: ${database_namespace}
@@ -159,7 +144,6 @@ steps:
       requires:
         - clickhouse_load clickhouse load credible_sets
         - explode load declared datasets
-        - clickhouse_load clickhouse load variants
         - clickhouse_load clickhouse load l2g_predictions
       dataset: study_credible_sets
       clickhouse_database: ${database_namespace}
@@ -168,8 +152,6 @@ steps:
     - name: clickhouse_load clickhouse load target_credible_sets
       requires:
         - clickhouse_load clickhouse load credible_sets
-        - clickhouse_load clickhouse load variants
-        - clickhouse_load clickhouse load studies
         - explode load declared datasets
       dataset: target_credible_sets
       clickhouse_database: ${database_namespace}

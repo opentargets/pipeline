@@ -9,7 +9,9 @@ import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
+from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
+from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.spec import dataset_spec
 from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
 from ot_datamodels.views.association_otf_target import AssociationOtfTarget
@@ -22,10 +24,12 @@ from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
 from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.study_view import StudyView
 from ot_datamodels.views.target_by_region import TargetByRegion
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
+from ot_datamodels.views.variant_view import VariantView
 from ot_datamodels.vocabularies import (
     ChemblActionType,
     ChemblTargetType,
@@ -378,8 +382,8 @@ def test_every_entry_round_trips():
     assert checked > 20
     served = ('aotf_disease', 'aotf_target', 'association_time_series', 'disease', 'disease_hpo', 'drug',
               'drug_warnings', 'interaction', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
-              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'target_prioritisation',
-              'targets', 'targets_by_region', 'transcript')  # fmt: skip
+              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies',
+              'target_prioritisation', 'targets', 'targets_by_region', 'transcript', 'variants')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
     for product in ('platform', 'ppp'):
@@ -598,6 +602,22 @@ def test_target_view_lands_target_then_the_id_lists():
     assert landed[-2:] == [('credibleSetIds', 'Array(String)'), ('pharmacogenomicsIds', 'Array(UInt64)')]
     assert [n for n, _ in landed[: len(dataset_spec(Target).fields)]] == [f.name for f in dataset_spec(Target).fields]
     assert len(landed) == 31
+
+
+@pytest.mark.parametrize(
+    ('view', 'output', 'lists'),
+    [
+        (StudyView, Study, [('credibleSetIds', 'Array(String)')]),
+        (VariantView, Variant, [('credibleSetIds', 'Array(String)'), ('pharmacogenomicsIds', 'Array(UInt64)')]),
+    ],
+    ids=['studies', 'variants'],
+)
+def test_genetics_b_views_land_the_output_then_the_id_lists(view, output, lists):
+    """`studies` and `variants`: the output's landing columns, then the lists studies.sql and variants.sql joined
+    on; `studies` without `credible_sets_by_study.studyId` (David, 2026-11-25)."""
+    landed = [(n, render(t, quote_fields=False)) for n, t in columns(view)]
+    base = [(n, render(t, quote_fields=False)) for n, t in columns(output)]
+    assert landed == [*base, *lists]
 
 
 # declared tables

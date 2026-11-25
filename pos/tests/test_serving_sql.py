@@ -170,7 +170,7 @@ def test_serving_sql(product):
         names = client.query(
             'SELECT name FROM system.tables WHERE database = {d:String}', parameters={'d': client.database}
         )
-        left = {name for (name,) in names.result_rows} & {'studies_log', 'credible_sets_log'}
+        left = {name for (name,) in names.result_rows} & {'studies_log', 'variants_log', 'credible_sets_log'}
         assert not left, f'landing tables left after the load: {left}'
 
 
@@ -227,7 +227,7 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 #: disease_phenotype_by_disease: Nullable, in a list of structs in a list of structs), and the dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
-    'variant': 'variants',
+    'variant_view': 'variants',
     'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
     'target_by_region': 'targets_by_region',
@@ -865,7 +865,7 @@ def test_target_group_loads_from_its_declarations():
         assert (BEFORE / f'{script}.sql').exists(), script
 
 
-@pytest.mark.parametrize(('dataset', 'landing'), [('studies', 'studies_log'), ('credible_sets', 'credible_sets_log')])
+@pytest.mark.parametrize(('dataset', 'landing'), [('credible_sets', 'credible_sets_log')])
 def test_genetics_scripts_drop_their_own_landing(dataset, landing):
     """With targets.sql gone, each script drops the landing it reads, last; no other script reads it."""
     script = DATASETS[dataset]['postload_script']
@@ -934,3 +934,102 @@ def test_target_group_declarations_build_what_the_scripts_built(product):
         'targets': FIXTURE_ROWS, 'targets_mergetree': FIXTURE_ROWS, 'dictionary target_symbols': FIXTURE_ROWS,
         'transcript': 40, 'target_prioritisation': FIXTURE_ROWS,
     }  # fmt: skip
+
+
+#: The genetics 8b declarations, which replace the frozen studies.sql, variants.sql and the credible_sets.sql
+#: blocks they joined on.
+GENETICS_B = ('studies', 'variants')
+GENETICS_B_SCRIPTS = ('credible_sets_by_study_and_variant', 'studies', 'variants')
+#: The join artefact studies.sql served, dropped (David, 2026-11-25).
+DOTTED = 'credible_sets_by_study.studyId'
+#: Fixture keys, so the joins match: 150 of the 300 studies have two credible sets, 120 of the 300 variants are in
+#: credible sets, 90 are named by pharmacogenomics rows, a third of which name no variant.
+GENETICS_B_OVERRIDES = {
+    'studies': {'studyId': "concat('S', toString(rowNumberInAllBlocks()))"},
+    'credible_sets': {'studyId': "concat('S', toString(rowNumberInAllBlocks() % 150))"},
+    'variants': {'variantId': "concat('V', toString(rowNumberInAllBlocks()))"},
+    'credible_set_variant': {
+        'credibleSetId': "concat('C', toString(rowNumberInAllBlocks()))",
+        'variantId': "concat('V', toString(rowNumberInAllBlocks() % 120))",
+    },
+    'pharmacogenomics': {
+        'variantId': "if(rowNumberInAllBlocks() % 3 = 0, NULL, concat('V', toString(rowNumberInAllBlocks() % 90)))"
+    },
+}
+
+
+def test_genetics_b_loads_from_its_declarations():
+    """studies and variants load in the declared explode; no task loads them otherwise or waits on their loads;
+    their scripts are frozen, and credible_sets.sql no longer builds the id lists they joined on."""
+    (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
+    assert set(GENETICS_B) <= set(explode['foreach'])
+    assert all(is_declared(DATASETS[d]) for d in GENETICS_B)
+    assert not [t['name'] for t in STEP if t.get('dataset') in GENETICS_B]
+    loads = {f'clickhouse_load clickhouse load {d}' for d in GENETICS_B}
+    assert not [t['name'] for t in STEP if loads & set(t.get('requires', []))]
+    for script in ('studies', 'variants'):
+        assert not (ROOT / 'config' / 'clickhouse' / 'scripts' / f'{script}.sql').exists(), script
+    for script in GENETICS_B_SCRIPTS:
+        assert (BEFORE / f'{script}.sql').exists(), script
+    assert 'credible_sets_by_' not in (ROOT / DATASETS['credible_sets']['postload_script']).read_text()
+
+
+def _land_keyed(client, entry: dict, product: str, overrides: dict[str, str]) -> None:
+    for _, sql in ddl_for(entry, product):
+        client.command(sql)
+    _fill(client, entry['table'], landing_columns(entry, product) or [], 1, overrides)
+
+
+@pytest.mark.parametrize('product', ['platform', 'ppp'])
+def test_genetics_b_declarations_build_what_the_scripts_built(product):
+    """The declarations build the tables the frozen scripts built: engines, keys, columns and rows, but for
+    `studies` without `credible_sets_by_study.studyId` and the `*_mergetree` copies sorted by their key. pts computes
+    the id lists (tests/test_study_view.py, tests/test_variant_view.py), so the declared landings take the scripts'
+    served rows."""
+    inputs = {'credible_sets_log', 'credible_set_variant_log', 'pharmacogenomics'}
+    script_models = {'studies': 'study', 'variants': 'variant'}
+    with _database() as before, _database() as after:
+        for dataset in ('pharmacogenomics', 'credible_sets', 'credible_set_variant', *GENETICS_B):
+            entry = DATASETS[dataset]
+            if dataset in script_models:
+                entry = {'table': entry['table'], 'model': script_models[dataset]}
+            _land_keyed(before, entry, product, GENETICS_B_OVERRIDES[dataset])
+        _build_declared(before, 'pharmacogenomics', product)
+        for script in GENETICS_B_SCRIPTS:
+            _run(before, (BEFORE / f'{script}.sql').read_text())
+        fixture = before.query(
+            f"SELECT countIf(empty(credibleSetIds) AND `{DOTTED}` = ''), countIf(notEmpty(credibleSetIds)) FROM studies"  # noqa: S608 fixed names
+        ).result_rows
+        lists = before.query(
+            'SELECT countIf(empty(credibleSetIds)), countIf(empty(pharmacogenomicsIds)), '
+            'countIf(notEmpty(credibleSetIds) AND notEmpty(pharmacogenomicsIds)) FROM variants'
+        ).result_rows
+        served = {'studies': f'SELECT * EXCEPT (`{DOTTED}`) FROM `{before.database}`.studies'}  # noqa: S608 fixed names
+        for dataset in GENETICS_B:
+            entry = DATASETS[dataset]
+            for _, sql in ddl_for(entry, product):
+                after.command(sql)
+            rows = served.get(dataset, f'SELECT * FROM `{before.database}`.`{dataset}`')  # noqa: S608 fixed names
+            after.command(f'INSERT INTO `{entry["table"]}` {rows}')
+            _build_declared(after, dataset, product)
+        old, new = _shape(before), _shape(after)
+    assert fixture == [(150, 150)], fixture
+    assert all(0 < n < FIXTURE_ROWS for n in lists[0]), lists
+    old = _without(old, inputs)
+    mergetrees = {'studies_mergetree': 'studyId', 'variants_mergetree': 'variantId'}
+    assert set(old['tables']) == set(new['tables']) == {*GENETICS_B, *mergetrees}
+    for table, key in mergetrees.items():
+        assert old['tables'].pop(table)[::2] == ('MergeTree', ''), table
+        assert new['tables'].pop(table)[::2] == ('MergeTree', f'({key})'), table
+    assert new['tables'] == old['tables']
+    for table in ('studies', 'studies_mergetree'):
+        assert old['columns'].pop((table, DOTTED)) == ('String', 31), table
+        assert old['columns'][table, 'credibleSetIds'] == ('Array(String)', 32), table
+        old['columns'][table, 'credibleSetIds'] = ('Array(String)', 31)
+    assert new['columns'] == old['columns']
+    assert new['columns']['variants', 'pharmacogenomicsIds'] == ('Array(UInt64)', 15)
+    for table in ('studies', 'studies_mergetree'):
+        served_rows = sorted('\t'.join(r.split('\t')[:30] + r.split('\t')[31:]) for r in old['rows'].pop(table))
+        assert new['rows'].pop(table) == served_rows, table
+    assert new['rows'] == old['rows']
+    assert {n: len(r) for n, r in new['rows'].items()} == {'variants': FIXTURE_ROWS, 'variants_mergetree': FIXTURE_ROWS}
