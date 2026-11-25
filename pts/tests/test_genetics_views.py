@@ -184,6 +184,40 @@ def test_many_chunks_build_the_coloc_view():
     ].list.len().sum()
 
 
+def test_string_typed_input_is_served_in_vocabulary_order(tmp_path: Path):
+    """Spark writes `rightStudyType` and `chromosome` as strings: the step serves these hand-written tuples, the
+    study types and chromosomes in vocabulary order (tuqtl before eqtl before gwas, 9 before 10), not lexically."""
+    a, b, c, d = _id(1), _id(2), _id(3), _id(4)
+    base = {'colocalisationMethod': 'COLOC_PIP_ECAVIAR', 'numberColocalisingVariants': 3}
+    stats = {'h3': 0.1, 'h4': 0.8, 'clpp': 0.5, 'betaRatioSignAverage': None}
+    rows = pl.DataFrame(
+        [
+            {'leftLocusId': a, 'rightLocusId': b, 'rightStudyType': 'gwas', 'chromosome': '2', **base, **stats},
+            {'leftLocusId': a, 'rightLocusId': b, 'rightStudyType': 'eqtl', 'chromosome': '2', **base, **stats},
+            {'leftLocusId': a, 'rightLocusId': b, 'rightStudyType': 'tuqtl', 'chromosome': '2', **base, **stats},
+            {'leftLocusId': b, 'rightLocusId': a, 'rightStudyType': 'gwas', 'chromosome': '2', **base, **stats},
+            {'leftLocusId': c, 'rightLocusId': d, 'rightStudyType': 'pqtl', 'chromosome': '10', **base, **stats},
+            {'leftLocusId': c, 'rightLocusId': d, 'rightStudyType': 'pqtl', 'chromosome': '9', **base, **stats},
+        ],
+        schema_overrides={'betaRatioSignAverage': pl.Float64},
+    )
+    assert {rows.schema[c] for c in ('rightStudyType', 'chromosome', 'colocalisationMethod')} == {pl.String}
+    _write_parts(rows, tmp_path / 'output', 2)
+    destination = {'view': str(tmp_path / 'view')}
+    config = Config(step='colocalisation_view', steps=['colocalisation_view'], work_path=tmp_path / 'work')
+
+    colocalisation_view(str(tmp_path / 'output'), destination, {'bucket_count': 3, 'concurrency': 2}, config)
+
+    served = _by_key(pl.read_parquet(destination['view']))
+    view = {k: [(t['otherCredibleSetId'], t['rightStudyType'], t['chromosome']) for t in v] for k, v in served.items()}
+    assert view == {
+        a: [(b, 'tuqtl', '2'), (b, 'eqtl', '2'), (b, 'gwas', '2')],
+        b: [(a, 'gwas', '2')],
+        c: [(d, 'pqtl', '9'), (d, 'pqtl', '10')],
+        d: [(c, 'gwas', '9'), (c, 'gwas', '10')],
+    }
+
+
 # buckets
 
 
