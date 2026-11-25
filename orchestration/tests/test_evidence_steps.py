@@ -126,6 +126,7 @@ def _writers() -> dict[str, set[str]]:
         'pts_variant_view',
         'pts_colocalisation_view',
         'pts_l2g_prediction_view',
+        'pts_credible_set_view',
     ],
 )
 def test_every_output_a_view_step_reads_is_written_by_an_ancestor(name: str) -> None:
