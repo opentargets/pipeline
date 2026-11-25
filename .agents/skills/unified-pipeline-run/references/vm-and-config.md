@@ -23,8 +23,15 @@ SSH tunnel to `localhost:8081` and opens the Airflow UI (`airflow`/`airflow`). N
 - **The VM never pulls by itself.** Boot runs `git fetch` and `git checkout <branch>`,
   which does not fast-forward a branch already checked out. After pushing config
   changes, pull on the VM.
-- **The tunnel drops** on VM stop/restart and on any container recreate. Re-open it
-  with `make tunnel`.
+- **The tunnel drops** on VM stop/restart and on any container recreate, and on its own
+  over a long run: several times during `ds/ppp-2612-1`. Re-open it with `make tunnel`
+  (kill the old `ssh -fNL 8081:localhost:8080` first). A watcher polling the API must
+  reopen it itself rather than exit, or the end of the run goes unnoticed.
+- **gcloud credentials can expire during a run** (seen overnight). After that, gcloud
+  fails with `Reauthentication failed. cannot prompt during non-interactive execution`,
+  and the tunnel can't be reopened. Logging in again is interactive: the person runs
+  `! gcloud auth login` (and `! gcloud auth application-default login` if API or bucket
+  calls still fail).
 - **Stop keeps state, destroy loses it.** `gcloud compute instances stop` keeps the
   disk, so the Airflow database and run history survive. `make clean-vm` runs
   `terraform destroy`: the Airflow DB and task logs are gone, and the next VM gets a

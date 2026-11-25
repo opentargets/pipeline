@@ -68,7 +68,8 @@ POST /api/v2/dags/unified_pipeline/clearTaskInstances
   inclusion drags in everything transitively (an evidence step pulls in
   `pts_association` and everything behind it).
 - **`upstream_failed` is a finished state.** Tasks stuck behind a failure need clearing
-  too.
+  too, and so does every blocked VM step's `delete_vm_`, which has already run and is
+  `success` (see "A blocked step's VM cleanup has already run").
 
 ## Traps, in the order they bite
 
@@ -82,6 +83,26 @@ Clear from `run_<step>` downward (for Dataproc steps, from the cluster task), le
 `diff_` and `upload_config_` in `success`. The dry run shows it: no `success` states in
 the list. To re-run the differ anyway, delete `etc/config/<step>.yaml` before **every**
 attempt; each attempt re-uploads it.
+
+### A blocked step's VM cleanup has already run
+
+`delete_vm_<step>` has `trigger_rule=NONE_SKIPPED`
+(`orchestration/src/orchestration/dags/unified_pipeline.py`), which fires when `run_`
+goes `upstream_failed`. So the moment a failure blocks a VM step, its cleanup runs, finds
+no VM, and ends `success`. A clear of only the `failed` and `upstream_failed` tasks
+leaves it there, so when the step finally runs, nothing deletes its VM. On `ds/ppp-2612-1`
+this left five step VMs running for up to two hours
+([opentargets/issues#4706](https://github.com/opentargets/issues/issues/4706#issuecomment-7141278493)).
+
+**When clearing blocked steps, also clear each blocked VM step's `delete_vm_` that is
+already `success`.** The dry run then lists them as `success`, and that's intended.
+
+After the fact, a cleanup that ran too early is one where `run_<step>` is `success` with
+`try_number` ≥ 1 and `delete_vm_<step>` ended before `run_<step>` ended. **Do not compare
+with `run_`'s `start_date`:** an `upstream_failed` marker sets `run_`'s start and end to
+the moment of failure (try 0), a few seconds before the early `delete_vm_` ended, so that
+comparison passes and misses them. Before re-arming one, check that its VM still exists:
+some were already gone.
 
 ### Polars transformer steps refuse to overwrite
 
@@ -147,6 +168,7 @@ Re-running one polars transformer step after an image bump:
 3. delete output/<dataset>/            # write_dataset refuses to overwrite
 4. delete etc/config/<step>.yaml       # force the differ
 5. clear the step's tasks with include_downstream: false, dry run first
+   (with every blocked VM step's delete_vm_ if the step had failed)
 6. confirm diff_ branched to upload_config_, not end_
 7. check the output, not the task status
 ```
