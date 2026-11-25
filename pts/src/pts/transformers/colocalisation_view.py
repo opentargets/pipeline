@@ -2,8 +2,9 @@
 
 Every output row twice: as is (`leftLocusId` as `credibleSetId`) and swapped (`rightLocusId` as `credibleSetId`,
 `rightStudyType` `gwas`). Repeated tuples are kept once, then each credible set gets its tuples sorted by every
-field. The input is split into `bucket_count` hash buckets of `credibleSetId` on local disk first, and the buckets
-are built `concurrency` at a time, one output part each.
+field in tuple order, `rightStudyType` and `chromosome` in vocabulary order whether the input stores them as Enums
+or (as Spark writes them) strings. The input is split into `bucket_count` hash buckets of `credibleSetId` on local
+disk first, and the buckets are built `concurrency` at a time, one output part each.
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
 from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
+from ot_datamodels.vocabularies import Chromosome, StudyType
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -40,11 +42,17 @@ FIELDS = [
 ]
 #: The fields copied as they are on both sides.
 SHARED = FIELDS[3:]
+STUDY_TYPE = pl.Enum(get_args(StudyType))
+CHROMOSOME = pl.Enum(get_args(Chromosome))
 
 
 def both_sides(rows: pl.DataFrame) -> pl.DataFrame:
     """Each colocalisation output row seen from its left set, then from its right set."""
-    rows = rows.with_columns(pl.col('colocalisationMethod').cast(pl.String))
+    rows = rows.with_columns(
+        pl.col('rightStudyType').cast(pl.String).cast(STUDY_TYPE),
+        pl.col('chromosome').cast(pl.String).cast(CHROMOSOME),
+        pl.col('colocalisationMethod').cast(pl.String),
+    )
     left = rows.select(
         pl.col('leftLocusId').alias('credibleSetId'),
         pl.col('rightLocusId').alias('otherCredibleSetId'),
@@ -54,7 +62,7 @@ def both_sides(rows: pl.DataFrame) -> pl.DataFrame:
     right = rows.select(
         pl.col('rightLocusId').alias('credibleSetId'),
         pl.col('leftLocusId').alias('otherCredibleSetId'),
-        pl.lit('gwas', dtype=rows.schema['rightStudyType']).alias('rightStudyType'),
+        pl.lit('gwas', dtype=STUDY_TYPE).alias('rightStudyType'),
         *SHARED,
     )
     return pl.concat([left, right])
