@@ -239,6 +239,9 @@ def bucket_views(rows: pl.DataFrame, sets: pl.DataFrame, pairs: pl.DataFrame) ->
         .join(size, on='credibleSetId', how='inner', maintain_order='left')
         .sort('credibleSetId')
     )
+    repeated = full.height - full['credibleSetId'].n_unique()
+    if repeated:
+        raise ValueError(f'duplicate credibleSetId in credible_set_view: {repeated} repeated lead rows')
     if full.height != sets.height:
         raise ValueError(f'{sets.height - full.height} credible sets have no credible_set_variant row for their lead')
     read_model = full.rename(READ_MODEL_NAMES)

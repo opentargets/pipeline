@@ -389,3 +389,29 @@ def test_credible_set_enums_in_another_category_order_are_served_in_the_models()
     for key, frame in views.items():
         assert frame.schema == to_polars_schema(VIEWS[key]), key
     assert views['view']['studyType'].cast(pl.String).to_list() == ['gwas', 'eqtl', 'eqtl', 'gwas', 'eqtl']
+
+
+def test_a_repeated_lead_row_raises():
+    """credible_sets.sql threw `duplicate credibleSetId` when a set's lead row was repeated."""
+    inputs = _inputs()
+    rows = inputs['credible_set_variant']
+    inputs['credible_set_variant'] = pl.concat([rows, rows.filter(pl.col('variantId') == '1_100_A_G')])
+
+    with pytest.raises(ValueError, match='duplicate credibleSetId in credible_set_view: 1 repeated lead rows'):
+        _views(inputs)
+
+
+def test_a_bucket_with_sets_and_no_credible_set_variant_rows_raises(tmp_path: Path):
+    """A set whose rows are all missing lands in a bucket no csv part reached: the step raises, not drops it."""
+    inputs = _inputs()
+    inputs['credible_set_variant'] = inputs['credible_set_variant'].filter(pl.col('credibleSetId') != S3)
+    source = {name: _write(frame, tmp_path / 'run' / name, 1) for name, frame in inputs.items()}
+    destination = {key: str(tmp_path / 'view' / key) for key in VIEWS}
+    config = Config(step='credible_set_view', steps=['credible_set_view'], work_path=tmp_path / 'work')
+    bucket_count = 64
+    buckets = pl.Series([S1, S2, S3, S4, S5]).hash(seed=0) % bucket_count
+    # S3's bucket holds no other set, so no csv part reaches it
+    assert buckets.to_list().count(buckets[2]) == 1
+
+    with pytest.raises(ValueError, match='1 credible sets have no credible_set_variant rows'):
+        credible_set_view(source, destination, {'bucket_count': bucket_count, 'concurrency': 2}, config)
