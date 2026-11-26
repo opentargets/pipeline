@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -1002,7 +1002,7 @@ wheels = [
 
 [[package]]
 name = "pos"
-version = "26.12.0rc30"
+version = "26.12.0.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "clickhouse-connect" },
