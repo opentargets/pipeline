@@ -46,22 +46,21 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
-  `config/clickhouse/` holds the server config (`config.d/`, `users.d/`); no serving SQL is left
-  (every table is declared); `config/opensearch/` the index settings.
+  `config/clickhouse/` holds the server config (`config.d/`, `users.d/`) and nothing else;
+  `config/opensearch/` the index settings.
 
 ## ClickHouse landing tables
 
 Every ClickHouse landing table has an `ot_datamodels` model (`discover_models()`: the outputs
 and the `view/` models in `ot_datamodels.views`) and gets `model: <dataset_name>` in
-`config/datasets.yaml`, not a `preload_script`: `clickhouse_load` builds its landing table
+`config/datasets.yaml`: `clickhouse_load` builds its landing table
 from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the default `Log`.
 `evidence` has `models: 'evidence_*'`: each member for the run's product loads into
 `evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
 columns), and the member tables are dropped. A member with no parquet fails the load unless
 it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
-load. No entry has a `preload_script`, `postload_script` or `derived` any more (the loader still supports them
-until the script machinery is removed); a config test checks each entry has exactly one of `model`, `models`,
-`preload_script`.
+load. Each entry has exactly one of `model`, `models`: an entry with neither, or both, fails the load at spec
+time and `entry_problems` (`test_clickhouse_entries_have_one_of_model_and_models`).
 
 Storage is declared in `config/datasets.yaml`: an entry's `tables` and `dictionaries` list what
 its load builds from the landing table (`ClickHouseTable`, `ClickHouseDictionary` in
@@ -73,49 +72,15 @@ the one its members share), a `model` entry builds only for the model's products
 `OPTIMIZE FINAL`. `clickhouse_load` checks each RocksDB key is unique in the landing table,
 builds the tables and dictionaries from it, then drops it. `entry_problems` checks the
 declarations against the landing columns (`test_yaml_declarations_are_valid`).
-Declared datasets load in `explode load declared datasets`; a `postload_script` (under
-`scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones included,
+Declared datasets load in `explode load declared datasets`. Every undeclared load, top-level ones included,
 requires the declared explode, directly or through another task; a declared
 dataset outside it must be product-gated or wait for it too
 (`test_undeclared_loads_wait_for_the_declared_ones`). `colocalisation` loads alone after the
 explode: its RocksDB bulk insert is the largest ClickHouse memory peak of the step.
 A declared model loads only for its products, so a PPP-only one (`otar_projects`,
 `association_time_series`) is a top-level task with `products: [ppp]`
-(`test_a_declared_model_loads_only_for_its_products`). No script may read a declared
-landing table (`test_no_script_reads_a_declared_landing_table`).
-`test_declared_tables_match_scripts` builds each declared dataset from the same fixture rows
-with the script it replaced (frozen in `tests/fixtures/serving_scripts_before/`) and
-compares tables, columns, sort keys, dictionaries and rows. Engine settings may differ
-only as listed there: the primary key is the sort key, `allow_nullable_key` only on a
-nullable `order_by`, every MergeTree table optimised, and no `otar_projects` on Platform.
-`test_aotf_declarations_build_what_aotf_sql_built` does the same for `aotf_disease` and
-`aotf_target` (frozen `aotf.sql`) on shapes only, pts computing their rows: target
-`isMeasurement` is `Bool`, `UInt8` before. `test_interaction_declaration_builds_what_interaction_sql_built`
-does it for `interaction` (frozen `interaction.sql`); `interaction_evidence_log` stays an undeclared
-landing table, read by the API.
-`test_protein_coding_coords_declarations_build_what_the_script_built` does it for the two
-`protein_coding_coords_*` entries (frozen `protein_coding_coords.sql`): their landings take the
-script's served rows, and tables, columns and rows must come back equal.
-`test_small_compute_declarations_build_what_the_scripts_built` does it for `disease_hpo`, `drug_warnings`,
-`mechanism_of_action`, `mouse_phenotypes` and `pharmacovigilance` (frozen scripts of the same names), but these
-serve their items in the output's order and types (Enum8, non-null, `qualifier` kept), not the scripts' narrower
-ones: only the items column of each table may differ, and its rows must come back equal once cast back to the
-script's types. `test_small_compute_views_land_the_served_columns` pins the served types.
-`test_target_group_declarations_build_what_the_scripts_built` does it for `targets` (with `target_symbols`),
-`targets_by_region`, `transcript` and `target_prioritisation` (frozen `targets.sql`, `transcript.sql`,
-`target_prioritisation.sql`): `targets_by_region.target` is `Tuple(id String)`.
-`test_genetics_b_declarations_build_what_the_scripts_built` does it for `studies` and `variants` (frozen
-`studies.sql`, `variants.sql` and the `credible_sets_by_*` blocks of `credible_sets.sql`): `studies` has no
-`credible_sets_by_study.studyId`.
-`test_genetics_a_declarations_build_what_the_scripts_built` does it for `colocalisation` and `l2g_predictions` on
-shapes, pts computing their rows (frozen `colocalisation.sql`, `l2g_predictions.sql`).
-`test_genetics_c_declarations_build_what_the_scripts_built` does it for `credible_sets`, `credible_sets_locus` and
-the read models `study_credible_sets`, `target_credible_sets`, `variant_credible_sets` (MergeTree, sorted as
-served) on shapes, pts `credible_set_view` computing their rows (frozen `credible_sets.sql` and the three
-read-model scripts, which read `*_mergetree` copies of their inputs). In every parity test the "before" side ends
-with the frozen `credible_sets_build_cleanup.sql`, which dropped those copies before release; no load builds a
-`*_mergetree` copy or a `credible_set_variant` landing now, and only `interaction_evidence_log` is left of the
-landing tables.
+(`test_a_declared_model_loads_only_for_its_products`). `interaction_evidence_log` is the only
+undeclared landing table: the API reads it (`test_declared_datasets_load_in_the_declared_explode`).
 
 Print the generated DDL:
 
@@ -230,45 +195,17 @@ destinations, for test runs that must not touch the public release:
 dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
 in the same PR.
 
-`tests/test_serving_sql.py` runs the `backend_clickhouse` DDL and serving SQL, in `requires:`
-order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
+`tests/test_serving_sql.py` runs the `backend_clickhouse` landing DDL, member inserts and
+declared-table SQL, in `requires:` order, against empty tables on a live ClickHouse (`POS_TEST_CLICKHOUSE`, default
 `localhost:8123`; CI starts one and sets `POS_REQUIRE_CLICKHOUSE=1`; without a server it
 skips). Locally: `docker run -d --rm --name pos-test-clickhouse -p 8123:8123 -e
 CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:26.8.2.7`. It also loads polars-written
-Enum parquet (top level, list, struct) into generated `Enum8` landing tables. A serving-script edit a
-generated type forces goes in `docs/phase5_sql_edits.csv` (`path` in the served `table`), which `scripts/build_register.py`
-turns into a `serving_sql` register row. A landing-only type change a serving script casts back
-to the landing type goes in `docs/phase5_cast_back.csv` (`path` in the served `table`); the test
-checks the served type there.
+Enum parquet (top level, list, struct) into generated `Enum8` landing tables.
 
-## Schema drift and the change register (phase 5)
+## Schema audit (phase 5)
 
-`scripts/schema_drift.py` lists every disagreement between the dataset models and the hand-written ClickHouse
-landing DDL (entries with a `preload_script`; generated entries are skipped, so since piece 3 it is empty). `docs/phase5_register.csv` is the change register: one row per `(dataset, field,
-category)` with the `before` and `after` ClickHouse types, data evidence, the serving script that reads the
-column and whether the API needs a follow-up. `scripts/build_register.py` generated it from
-`docs/phase5_drift_before.csv` (the drift before the piece 1 model changes), `docs/phase5_landing_before.csv` (the
-hand-written landing DDL at the end of piece 1, and of the four view tables until piece 3), the generator and the
-2612-3 evidence; it reads no landing DDL. A table the snapshot lists as `no_model` that has a model now (the views)
-gets the drift of its model against its frozen columns. The
-builder's docstring says where the evidence is. The register's companion note in the vault
-(`POS-Phase5-API-Change-Register`) lists the pending decisions and the hints for DDL generation (piece 2).
-
-`tests/test_schema_register.py` requires a register row for every snapshot row and for every disagreement
-`drift()` finds now, and checks each `after` against the Platform table `pos.clickhouse_ddl` generates (empty
-where that table lacks the column). It also requires a row showing every type change (Enum values included) and
-column order change from `docs/phase5_landing_before.csv` to the generated Platform tables (`type_unrecorded` and
-`column_order` rows). If it fails with "new schema drift", a later model or DDL change opened a disagreement:
-add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
-serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
-to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
-record: `scripts/build_register.py` no longer reproduces it, because every serving script it read moved into
-declarations. A `RETIRED` dataset (`aotf`, `protein_coding_coords`, whose entries and models are gone;
-`credible_set_variant`, whose entry is gone) keeps its rows as last built, unchecked against
-the generator; the rows of an entry that now loads a view (`colocalisation`, `credible_sets`, `disease`, `interaction`, `disease_hpo`, `drug_warnings`,
-`l2g_predictions`, `mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`, `studies`, `target_prioritisation`, `transcript`,
-`variants`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
-schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).
+The phase-5 audit (`scripts/schema_drift.py`, the change register and `scripts/build_register.py`) is in git
+history. `docs/api_follow_ups.csv` (`dataset, field, follow_up`) lists the API changes still open.
 
 ## Croissant
 

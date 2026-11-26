@@ -1,7 +1,7 @@
 ---
 # input_dir is relative to the synced release data; croissant is written by ot_croissant.
-# A clickhouse entry with `model:` (or `models:`, a glob) gets its landing table from the ot_datamodels model
-# (`pos-ddl <dataset>` prints it); `engine:` defaults to Log. Derived entries run their `preload_script`.
+# Every clickhouse entry has exactly one of `model:` and `models:` (a glob); its landing table comes from the
+# ot_datamodels model (`pos-ddl <dataset>` prints it); `engine:` defaults to Log.
 # `tables:` and `dictionaries:` declare what a load builds from the landing table, which it then drops
 # (pos.clickhouse_tables).
 opensearch:
@@ -156,7 +156,7 @@ clickhouse:
     model: interaction_view
     tables:
       - {name: interaction, engine: rocksdb}
-  # interaction_evidence has no postload script: the API reads interaction_evidence_log.
+  # interaction_evidence declares no tables: the API reads interaction_evidence_log.
   interaction_evidence:
     table: interaction_evidence_log
     input_dir: output/interaction_evidence
