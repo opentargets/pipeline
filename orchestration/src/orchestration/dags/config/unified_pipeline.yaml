@@ -526,6 +526,10 @@ steps:
     depends_on:
       - pts_l2g
 
+  pts_credible_set_view:
+    depends_on:
+      - pts_l2g
+
   pts_l2g:
     machine_type: n2d-standard-64
     depends_on:

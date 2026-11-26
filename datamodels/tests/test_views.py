@@ -17,6 +17,7 @@ from ot_datamodels.outputs.association_overall_indirect import AssociationOveral
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from ot_datamodels.outputs.colocalisation import Colocalisation
 from ot_datamodels.outputs.credible_set import CredibleSet
+from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.disease_phenotype import DiseasePhenotype
 from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
@@ -44,6 +45,8 @@ from ot_datamodels.views.association_timeseries import AssociationTimeseries
 from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
 from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
 from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
+from ot_datamodels.views.credible_set_locus import LOCUS_FIELDS, CredibleSetLocus
+from ot_datamodels.views.credible_set_view import CredibleSetView
 from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
 from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
@@ -53,11 +56,14 @@ from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
 from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
 from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.study_credible_set import StudyCredibleSet
 from ot_datamodels.views.study_view import StudyView
 from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_credible_set import TargetCredibleSet
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
+from ot_datamodels.views.variant_credible_set import VariantCredibleSet
 from ot_datamodels.views.variant_view import VariantView
 
 VIEWS: dict[str, type[DatasetModel]] = {
@@ -67,6 +73,8 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'coding_variant_by_target': CodingVariantByTarget,
     'coding_variant_by_variant': CodingVariantByVariant,
     'colocalisation_by_credible_set': ColocalisationByCredibleSet,
+    'credible_set_locus': CredibleSetLocus,
+    'credible_set_view': CredibleSetView,
     'disease_phenotype_by_disease': DiseasePhenotypeByDisease,
     'disease_view': DiseaseView,
     'drug_mechanism_of_action_by_drug': DrugMechanismOfActionByDrug,
@@ -76,11 +84,14 @@ VIEWS: dict[str, type[DatasetModel]] = {
     'l2g_prediction_by_credible_set': L2gPredictionByCredibleSet,
     'mouse_phenotype_by_target': MousePhenotypeByTarget,
     'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
+    'study_credible_set': StudyCredibleSet,
     'study_view': StudyView,
     'target_by_region': TargetByRegion,
+    'target_credible_set': TargetCredibleSet,
     'target_prioritisation_view': TargetPrioritisationView,
     'target_view': TargetView,
     'transcript_view': TranscriptView,
+    'variant_credible_set': VariantCredibleSet,
     'variant_view': VariantView,
 }
 
@@ -116,6 +127,8 @@ PRIMARY_KEYS = {
     'coding_variant_by_target': ('targetId',),
     'coding_variant_by_variant': ('variantId',),
     'colocalisation_by_credible_set': ('credibleSetId',),
+    'credible_set_locus': ('credibleSetId',),
+    'credible_set_view': ('credibleSetId',),
     'disease_phenotype_by_disease': ('disease',),
     'disease_view': ('id',),
     'drug_mechanism_of_action_by_drug': ('chemblId',),
@@ -125,11 +138,14 @@ PRIMARY_KEYS = {
     'l2g_prediction_by_credible_set': ('credibleSetId',),
     'mouse_phenotype_by_target': ('targetFromSourceId',),
     'pharmacovigilance_by_drug': ('chembl_id',),
+    'study_credible_set': (),
     'study_view': ('studyId',),
     'target_by_region': (),
+    'target_credible_set': (),
     'target_prioritisation_view': ('targetId',),
     'target_view': ('id',),
     'transcript_view': ('targetId',),
+    'variant_credible_set': (),
     'variant_view': ('variantId',),
 }
 
@@ -146,6 +162,79 @@ EVIDENCE = sorted(
 
 def _nodes(model: type[DatasetModel]) -> dict[str, Node]:
     return dict(walk(dataset_spec(model)))
+
+
+#: the credible-set views' copies of credible_set columns: (view, column)
+CREDIBLE_SET_COLUMNS = [
+    *(
+        ('credible_set_view', c)
+        for c in (
+            'studyId',
+            'studyType',
+            'chromosome',
+            'leadVariantId',
+            'locusStart',
+            'locusEnd',
+            'fineMappingMethod',
+            'logBayesFactor',
+            'confidence',
+            'purityMeanR2',
+            'purityMinR2',
+            'qualityControls',
+        )
+    ),
+    *(('study_credible_set', c) for c in ('studyId', 'leadVariantId', 'fineMappingMethod', 'confidence')),
+    *(('target_credible_set', c) for c in ('fineMappingMethod', 'confidence', 'leadVariantId', 'studyId', 'studyType')),
+    *(
+        ('variant_credible_set', c)
+        for c in ('studyType', 'fineMappingMethod', 'confidence', 'leadVariantId', 'studyId')
+    ),
+]
+#: (view, column, credible_set column) copied under another name
+CREDIBLE_SET_RENAMED = [
+    ('credible_set_view', 'credibleSetId', 'id'),
+    *(
+        (view, c, p)
+        for view in ('study_credible_set', 'target_credible_set', 'variant_credible_set')
+        for c, p in (('credibleSetId', 'id'), ('leadChromosome', 'chromosome'))
+    ),
+]
+#: (view, column, credible_set_variant column): the lead variant's statistics
+LEAD_COLUMNS = [
+    *(
+        ('credible_set_view', c, p)
+        for c, p in (
+            ('leadPValueMantissa', 'pValueMantissa'),
+            ('leadPValueExponent', 'pValueExponent'),
+            ('leadBeta', 'reportedBeta'),
+            ('leadStandardError', 'reportedStandardError'),
+            ('leadEffectAlleleFrequency', 'effectAlleleFrequency'),
+            ('leadSampleSize', 'sampleSize'),
+        )
+    ),
+    *(
+        (view, c, p)
+        for view in ('study_credible_set', 'target_credible_set', 'variant_credible_set')
+        for c, p in (
+            ('pValueMantissa', 'pValueMantissa'),
+            ('pValueExponent', 'pValueExponent'),
+            ('beta', 'reportedBeta'),
+        )
+    ),
+]
+#: (view, column) the read models copy from credible_set_view, which computes them
+COMPUTED_COLUMNS = [
+    ('study_credible_set', 'leadPosition'),
+    ('study_credible_set', 'locusSize'),
+    *(
+        (view, c)
+        for view in ('target_credible_set', 'variant_credible_set')
+        for c in ('isTransQtl', 'leadPosition', 'locusSize')
+    ),
+]
+TOP_L2G_VIEWS = ('study_credible_set', 'variant_credible_set')
+#: the declared struct of the diseases and therapeutic areas of variant_credible_set
+DISEASE_NAMES = {f'{c}{s}' for c in ('diseases', 'diseaseTherapeuticAreas') for s in ('', '[]', '[]/id', '[]/name')}
 
 
 #: every derived value of a view: (view, path) -> (output, path, nullability the view sets, or None)
@@ -358,6 +447,21 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     **{('variant_view', f.name): (Variant, f.name, None) for f in dataset_spec(Variant).fields},
     ('variant_view', 'credibleSetIds[]'): (CredibleSet, 'id', None),
     ('variant_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
+    **{(view, c): (CredibleSet, c, None) for view, c in CREDIBLE_SET_COLUMNS},
+    **{(view, c): (CredibleSet, p, None) for view, c, p in CREDIBLE_SET_RENAMED},
+    **{(view, c): (CredibleSetVariant, p, None) for view, c, p in LEAD_COLUMNS},
+    **{(view, c): (CredibleSetView, c, None) for view, c in COMPUTED_COLUMNS},
+    ('credible_set_locus', 'credibleSetId'): (CredibleSetVariant, 'credibleSetId', None),
+    **{('credible_set_locus', f'locus[]/{c}'): (CredibleSetVariant, c, None) for c in LOCUS_FIELDS[:-1]},
+    **{(view, 'topL2GGeneId'): (L2gPrediction, 'geneId', True) for view in TOP_L2G_VIEWS},
+    **{(view, 'topL2GScore'): (L2gPrediction, 'score', True) for view in TOP_L2G_VIEWS},
+    ('target_credible_set', 'targetId'): (Target, 'id', None),
+    ('target_credible_set', 'condition'): (Study, 'condition', None),
+    ('target_credible_set', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
+    ('variant_credible_set', 'variantId'): (CredibleSetVariant, 'variantId', None),
+    ('variant_credible_set', 'posteriorProbability'): (CredibleSetVariant, 'posteriorProbability', None),
+    ('variant_credible_set', 'studyTargetId'): (Study, 'geneId', None),
+    ('variant_credible_set', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
 }
 
 
@@ -468,6 +572,21 @@ MARKERS = {
     ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
     ('coding_variant_by_target', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
     ('coding_variant_by_variant', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
+    ('study_credible_set', 'topL2GApprovedSymbol'): 'LowCardinality(String)',
+    ('target_credible_set', 'biosampleName'): 'LowCardinality(String)',
+    **{
+        ('variant_credible_set', p): 'LowCardinality(String)'
+        for p in (
+            'studyTargetApprovedSymbol',
+            'biosampleName',
+            'traitFromSource',
+            'diseases[]/id',
+            'diseases[]/name',
+            'diseaseTherapeuticAreas[]/id',
+            'diseaseTherapeuticAreas[]/name',
+            'topL2GApprovedSymbol',
+        )
+    },
 }
 
 #: the values of a protein coding coordinate a view declares
@@ -587,6 +706,20 @@ DECLARED: dict[str, set[str]] = {
         'transcripts[]/flags[]/value',
     },
     'variant_view': {'credibleSetIds', 'pharmacogenomicsIds'},
+    'credible_set_view': {'leadPosition', 'locusSize', 'isTransQtl'},
+    'credible_set_locus': {'locus', 'locus[]', 'locus[]/qualityControls', 'locus[]/qualityControls[]'},
+    'study_credible_set': {'leadReferenceAllele', 'leadAlternateAllele', 'topL2GApprovedSymbol'},
+    'target_credible_set': {'leadReferenceAllele', 'leadAlternateAllele', 'biosampleName'},
+    'variant_credible_set': {
+        'leadReferenceAllele',
+        'leadAlternateAllele',
+        'condition',
+        'studyTargetApprovedSymbol',
+        'biosampleName',
+        'traitFromSource',
+        'topL2GApprovedSymbol',
+        *DISEASE_NAMES,
+    },
 }
 
 
@@ -1012,3 +1145,73 @@ def test_l2g_feature_name_is_the_output_s_without_low_cardinality() -> None:
     assert source.clickhouse == 'LowCardinality(String)'
     node = _nodes(L2gPredictionByCredibleSet)['l2g_predictions[]/features[]/name']
     assert node == dataclasses.replace(source, clickhouse=None)
+
+
+#: the served columns of the credible-set views, in served order (design "Served DDL"; the API decodes the read
+#: models by position)
+CREDIBLE_SET_SERVED: dict[type[DatasetModel], list[str]] = {
+    CredibleSetView: [
+        'credibleSetId', 'studyId', 'studyType', 'chromosome', 'leadVariantId', 'leadPosition', 'leadPValueMantissa',
+        'leadPValueExponent', 'leadBeta', 'leadStandardError', 'leadEffectAlleleFrequency', 'leadSampleSize',
+        'locusStart', 'locusEnd', 'locusSize', 'fineMappingMethod', 'logBayesFactor', 'confidence', 'purityMeanR2',
+        'purityMinR2', 'qualityControls', 'isTransQtl',
+    ],
+    CredibleSetLocus: ['credibleSetId', 'locus'],
+    StudyCredibleSet: [
+        'studyId', 'credibleSetId', 'leadVariantId', 'leadChromosome', 'leadPosition', 'leadReferenceAllele',
+        'leadAlternateAllele', 'pValueMantissa', 'pValueExponent', 'beta', 'fineMappingMethod', 'confidence',
+        'locusSize', 'topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore',
+    ],
+    TargetCredibleSet: [
+        'targetId', 'credibleSetId', 'pValueMantissa', 'pValueExponent', 'beta', 'fineMappingMethod', 'confidence',
+        'isTransQtl', 'leadVariantId', 'leadChromosome', 'leadPosition', 'leadReferenceAllele', 'leadAlternateAllele',
+        'studyId', 'studyType', 'condition', 'biosampleId', 'biosampleName', 'locusSize',
+    ],
+    VariantCredibleSet: [
+        'studyType', 'variantId', 'credibleSetId', 'posteriorProbability', 'locusSize', 'pValueMantissa',
+        'pValueExponent', 'beta', 'fineMappingMethod', 'confidence', 'isTransQtl', 'leadVariantId', 'leadChromosome',
+        'leadPosition', 'leadReferenceAllele', 'leadAlternateAllele', 'studyId', 'condition', 'studyTargetId',
+        'studyTargetApprovedSymbol', 'biosampleId', 'biosampleName', 'traitFromSource', 'diseases',
+        'diseaseTherapeuticAreas', 'topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore',
+    ],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize('model', list(CREDIBLE_SET_SERVED), ids=lambda m: m.dataset_name)
+def test_credible_set_views_are_the_served_columns(model: type[DatasetModel]) -> None:
+    assert [f.name for f in dataset_spec(model).fields] == CREDIBLE_SET_SERVED[model]
+    assert discover_models()[model.dataset_name] is model
+
+
+def test_credible_set_view_computed_types() -> None:
+    """`isTransQtl` is served UInt8 (has()), `leadPosition` and `locusSize` UInt32."""
+    nodes = _nodes(CredibleSetView)
+    assert [nodes[c].dtype for c in ('leadPosition', 'locusSize', 'isTransQtl')] == [pl.UInt32, pl.UInt32, pl.UInt8]
+    assert (nodes['isTransQtl'].constraints.ge, nodes['isTransQtl'].constraints.le) == (0, 1)
+    assert nodes['locusSize'].constraints.ge == 1
+
+
+def test_locus_rows_are_credible_set_variants_qualitycontrols_without_low_cardinality() -> None:
+    nodes = _nodes(CredibleSetLocus)
+    assert [f.name for f in nodes['locus[]'].fields] == LOCUS_FIELDS
+    assert nodes['locus'].constraints.min_length == 1
+    source = _nodes(CredibleSetVariant)['qualityControls[]']
+    assert source.clickhouse == 'LowCardinality(String)'
+    element = nodes['locus[]/qualityControls[]']
+    assert (element.dtype, element.clickhouse) == (pl.String(), None)
+
+
+def test_read_model_defaults_and_low_cardinality() -> None:
+    """The scripts' LEFT JOIN defaults: alleles and the target page's biosample name '' (non-null); the variant
+    page's biosample name, the symbols and the top L2G null; `any()` stripped LowCardinality from the variant page's
+    condition."""
+    study, target, variant = _nodes(StudyCredibleSet), _nodes(TargetCredibleSet), _nodes(VariantCredibleSet)
+    for nodes in (study, target, variant):
+        for allele in ('leadReferenceAllele', 'leadAlternateAllele'):
+            assert (nodes[allele].nullable, nodes[allele].constraints.pattern) == (False, None), allele
+    assert (target['biosampleName'].nullable, target['biosampleName'].constraints.min_length) == (False, None)
+    assert variant['biosampleName'].nullable
+    assert (target['condition'].clickhouse, variant['condition'].clickhouse) == ('LowCardinality(String)', None)
+    assert not variant['traitFromSource'].nullable
+    for nodes in (study, variant):
+        assert all(nodes[c].nullable for c in ('topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore'))

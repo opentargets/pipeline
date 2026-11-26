@@ -12,7 +12,7 @@ from loguru import logger
 from ot_datamodels.base import DatasetModel, PrimaryKey
 
 from pos import clickhouse_ddl
-from pos.clickhouse_ddl import ddl_for, uniqueness_sql
+from pos.clickhouse_ddl import uniqueness_sql
 from pos.clickhouse_tables import ClickHouseTable
 from pos.tasks import clickhouse_load
 from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, ClickhouseLoadSpec
@@ -313,13 +313,6 @@ def test_model_entry_uses_its_engine(tmp_path, monkeypatch):
     _run(task)
     create = 'CREATE TABLE IF NOT EXISTS `toy_log` (`id` String) ENGINE = MergeTree ORDER BY (id)'
     assert events[0] == ('command', create)
-
-
-def test_credible_set_variant_uses_its_engine():
-    entry = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']['credible_set_variant']
-    ((table, sql),) = ddl_for(entry, 'platform')
-    assert table == 'credible_set_variant_log'
-    assert sql.endswith('ENGINE = MergeTree ORDER BY (credibleSetId, variantId)')
 
 
 def test_evidence_loads_each_member_into_its_own_table(tmp_path, monkeypatch, info):

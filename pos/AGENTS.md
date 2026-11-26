@@ -46,8 +46,8 @@ datasets) from it. A task with `products: [...]` runs only for those products.
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
 - `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
-  `config/clickhouse/` holds the serving SQL (`scripts/`) and the server config (`config.d/`,
-  `users.d/`); `config/opensearch/` the index settings.
+  `config/clickhouse/` holds the server config (`config.d/`, `users.d/`); no serving SQL is left
+  (every table is declared); `config/opensearch/` the index settings.
 
 ## ClickHouse landing tables
 
@@ -59,8 +59,9 @@ from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the defa
 `evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
 columns), and the member tables are dropped. A member with no parquet fails the load unless
 it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
-load. Only `derived` entries (built from loaded tables) have a `preload_script`, under `scripts/`; a config
-test checks each entry has exactly one of `model`, `models`, `preload_script`.
+load. No entry has a `preload_script`, `postload_script` or `derived` any more (the loader still supports them
+until the script machinery is removed); a config test checks each entry has exactly one of `model`, `models`,
+`preload_script`.
 
 Storage is declared in `config/datasets.yaml`: an entry's `tables` and `dictionaries` list what
 its load builds from the landing table (`ClickHouseTable`, `ClickHouseDictionary` in
@@ -98,16 +99,21 @@ script's served rows, and tables, columns and rows must come back equal.
 serve their items in the output's order and types (Enum8, non-null, `qualifier` kept), not the scripts' narrower
 ones: only the items column of each table may differ, and its rows must come back equal once cast back to the
 script's types. `test_small_compute_views_land_the_served_columns` pins the served types.
-`test_target_group_declarations_build_what_the_scripts_built` does it for `targets` (with `targets_mergetree`
-and `target_symbols`), `targets_by_region`, `transcript` and `target_prioritisation` (frozen `targets.sql`,
-`transcript.sql`, `target_prioritisation.sql`): `targets_by_region.target` is `Tuple(id String)`, and
-`targets_mergetree` is sorted by `id`. `credible_sets.sql` drops its own landing tables.
-`test_genetics_b_declarations_build_what_the_scripts_built` does it for `studies` and `variants` (with
-`studies_mergetree`, `variants_mergetree`; frozen `studies.sql`, `variants.sql` and the `credible_sets_by_*` blocks
-of `credible_sets.sql`): `studies` has no `credible_sets_by_study.studyId`, and the two copies are sorted by key.
-`test_genetics_a_declarations_build_what_the_scripts_built` does it for `colocalisation` and `l2g_predictions` (with
-`l2g_predictions_mergetree`, read by the credible-set read models until the cleanup) on shapes, pts computing their
-rows (frozen `colocalisation.sql`, `l2g_predictions.sql`): `l2g_predictions_mergetree` is sorted by `credibleSetId`.
+`test_target_group_declarations_build_what_the_scripts_built` does it for `targets` (with `target_symbols`),
+`targets_by_region`, `transcript` and `target_prioritisation` (frozen `targets.sql`, `transcript.sql`,
+`target_prioritisation.sql`): `targets_by_region.target` is `Tuple(id String)`.
+`test_genetics_b_declarations_build_what_the_scripts_built` does it for `studies` and `variants` (frozen
+`studies.sql`, `variants.sql` and the `credible_sets_by_*` blocks of `credible_sets.sql`): `studies` has no
+`credible_sets_by_study.studyId`.
+`test_genetics_a_declarations_build_what_the_scripts_built` does it for `colocalisation` and `l2g_predictions` on
+shapes, pts computing their rows (frozen `colocalisation.sql`, `l2g_predictions.sql`).
+`test_genetics_c_declarations_build_what_the_scripts_built` does it for `credible_sets`, `credible_sets_locus` and
+the read models `study_credible_sets`, `target_credible_sets`, `variant_credible_sets` (MergeTree, sorted as
+served) on shapes, pts `credible_set_view` computing their rows (frozen `credible_sets.sql` and the three
+read-model scripts, which read `*_mergetree` copies of their inputs). In every parity test the "before" side ends
+with the frozen `credible_sets_build_cleanup.sql`, which dropped those copies before release; no load builds a
+`*_mergetree` copy or a `credible_set_variant` landing now, and only `interaction_evidence_log` is left of the
+landing tables.
 
 Print the generated DDL:
 
@@ -254,10 +260,10 @@ column order change from `docs/phase5_landing_before.csv` to the generated Platf
 add the row to `docs/phase5_register.csv` by hand (dataset, field, category, outcome, before, after, evidence,
 serving read, API follow-up; copy `before` and `serving read` from `schema_drift.py`, `after` from the generator) and set the follow-up
 to `open` if the ClickHouse type changes and a serving script reads the column. The register is a historical
-record: `scripts/build_register.py` no longer reproduces it, because serving scripts it reads (`evidence.sql`,
-`drug.sql`, `pharmacogenomics.sql`, `disease.sql`, `interaction.sql`, the five small compute and three target scripts, `studies.sql`, `variants.sql`, `colocalisation.sql`, `l2g_predictions.sql`) moved into declarations. A
-`RETIRED` dataset (`aotf`, `protein_coding_coords`, whose entries and models are gone) keeps its rows as last built, unchecked against
-the generator; the rows of an entry that now loads a view (`colocalisation`, `disease`, `interaction`, `disease_hpo`, `drug_warnings`,
+record: `scripts/build_register.py` no longer reproduces it, because every serving script it read moved into
+declarations. A `RETIRED` dataset (`aotf`, `protein_coding_coords`, whose entries and models are gone;
+`credible_set_variant`, whose entry is gone) keeps its rows as last built, unchecked against
+the generator; the rows of an entry that now loads a view (`colocalisation`, `credible_sets`, `disease`, `interaction`, `disease_hpo`, `drug_warnings`,
 `l2g_predictions`, `mechanism_of_action`, `mouse_phenotypes`, `pharmacovigilance`, `studies`, `target_prioritisation`, `transcript`,
 `variants`) describe its output (`REGISTER_MODEL`). Edit rows by hand (API changes that are no
 schema diff go in `docs/phase5_api_follow_ups.csv`: `dataset, field, follow_up`, one `api_follow_up` row each).

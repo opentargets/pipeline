@@ -173,6 +173,8 @@ def test_run_folder_of_the_discovered_models() -> None:
         'coding_variant_by_target',
         'coding_variant_by_variant',
         'colocalisation_by_credible_set',
+        'credible_set_locus',
+        'credible_set_view',
         'disease_phenotype_by_disease',
         'disease_view',
         'drug_mechanism_of_action_by_drug',
@@ -182,11 +184,14 @@ def test_run_folder_of_the_discovered_models() -> None:
         'l2g_prediction_by_credible_set',
         'mouse_phenotype_by_target',
         'pharmacovigilance_by_drug',
+        'study_credible_set',
         'study_view',
         'target_by_region',
+        'target_credible_set',
         'target_prioritisation_view',
         'target_view',
         'transcript_view',
+        'variant_credible_set',
         'variant_view',
     }
     assert run_folder(models['target_view']) == 'view'
