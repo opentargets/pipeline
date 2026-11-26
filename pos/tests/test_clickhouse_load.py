@@ -1,4 +1,4 @@
-"""clickhouse_load connects to the running server and runs each script statement by statement."""
+"""clickhouse_load creates each landing table from its model, loads it and builds its declared tables."""
 
 from pathlib import Path
 from typing import Annotated
@@ -20,114 +20,45 @@ from pos.tasks.clickhouse_load import ClickhouseLoad, ClickhouseLoadError, Click
 ROOT = Path(__file__).parents[1]
 
 
+TOY = 'clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n    model: toy\n'
+TOY_CREATE = 'CREATE TABLE IF NOT EXISTS `t_log` (`id` String) ENGINE = Log'
+
+
+def _toy_spec(tmp_path, monkeypatch, datasets: str) -> ClickhouseLoadSpec:
+    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'toy': Toy})
+    config = tmp_path / 'datasets.yaml'
+    config.write_text(datasets)
+    return ClickhouseLoadSpec(
+        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(config),
+        product='platform',
+    )
+
+
 def test_clickhouse_load_fails_on_no_parquet(tmp_path, monkeypatch):
-    datasets = tmp_path / 'datasets.yaml'
-    datasets.write_text('clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n    preload_script: pre.sql\n')
     (tmp_path / 'release_data' / 'output' / 't').mkdir(parents=True)
     client = MagicMock()
     monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
-    spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
-        product='platform',
-    )
-    task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
+    task = ClickhouseLoad(_toy_spec(tmp_path, monkeypatch, TOY), MagicMock(config=MagicMock(work_path=tmp_path)))
     with pytest.raises(ClickhouseLoadError, match=r'dataset t in .*release_data/output/t'):
         ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-    client.query.assert_not_called()
+    client.command.assert_not_called()
 
 
-def test_clickhouse_load_optional_runs_scripts_on_no_parquet(tmp_path, monkeypatch):
-    pre = tmp_path / 'pre.sql'
-    pre.write_text('CREATE TABLE t_log (x String) ENGINE = Log;\n')
-    datasets = tmp_path / 'datasets.yaml'
-    datasets.write_text(
-        f'clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n    optional: true\n    preload_script: {pre}\n'
-    )
-    client = MagicMock()
-    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
-    spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
-        product='platform',
-    )
-    task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
-    ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-    assert [c.args[0] for c in client.query.call_args_list] == ['CREATE TABLE t_log (x String) ENGINE = Log']
-
-
-def test_clickhouse_load_runs_split_statements(tmp_path, monkeypatch):
-    pre = tmp_path / 'pre.sql'
-    pre.write_text("-- a; comment\nCREATE TABLE t_log (x String DEFAULT ';') engine = Log;\n")
-    post = tmp_path / 'post.sql'
-    post.write_text('CREATE TABLE t AS SELECT * FROM t_log;\nDROP TABLE t_log SYNC;\n')
-    datasets = tmp_path / 'datasets.yaml'
-    datasets.write_text(
-        f'clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n'
-        f'    preload_script: {pre}\n    postload_script: {post}\n'
-    )
-    data = tmp_path / 'release_data' / 'output' / 't'
-    data.mkdir(parents=True)
-    (data / 'part-0.parquet').write_bytes(b'')
-
+def test_clickhouse_load_optional_creates_an_empty_table_on_no_parquet(tmp_path, monkeypatch):
     client = MagicMock()
     connected = {}
     monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: connected.update(kw) or client)
-    inserted = []
-    monkeypatch.setattr(
-        clickhouse_load,
-        'insert_file',
-        lambda c, table, path, fmt, settings: inserted.append((table, path, settings)),
-    )
-
-    spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
-        product='platform',
-    )
+    spec = _toy_spec(tmp_path, monkeypatch, TOY + '    optional: true\n')
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
     ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-
     assert connected['host'] == 'localhost'
     assert connected['database'] == 'ot'
-    assert [c.args[0] for c in client.query.call_args_list] == [
-        "-- a; comment\nCREATE TABLE t_log (x String DEFAULT ';') engine = Log",
-        'CREATE TABLE t AS SELECT * FROM t_log',
-        'DROP TABLE t_log SYNC',
-    ]
-    assert inserted == [('t_log', str(data / 'part-0.parquet'), {'async_insert': 0})]
-
-
-def test_clickhouse_load_derived_runs_scripts_without_input(tmp_path, monkeypatch):
-    pre = tmp_path / 'pre.sql'
-    pre.write_text('CREATE TABLE d ENGINE = Log AS SELECT 1;\n')
-    post = tmp_path / 'post.sql'
-    post.write_text('OPTIMIZE TABLE d;\n')
-    datasets = tmp_path / 'datasets.yaml'
-    datasets.write_text(
-        f'clickhouse:\n  d:\n    table: d\n    derived: true\n    preload_script: {pre}\n    postload_script: {post}\n'
-    )
-    client = MagicMock()
-    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
-    inserted = []
-    monkeypatch.setattr(clickhouse_load, 'insert_file', lambda *a, **kw: inserted.append(a))
-    spec = ClickhouseLoadSpec(
-        name='clickhouse_load d', dataset='d', data_dir_parent='release_data', dataset_config_path=str(datasets),
-        product='platform',
-    )
-    task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
-    ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-
-    assert [c.args[0] for c in client.query.call_args_list] == [
-        'CREATE TABLE d ENGINE = Log AS SELECT 1',
-        'OPTIMIZE TABLE d',
-    ]
-    assert inserted == []
+    assert [c.args[0] for c in client.command.call_args_list] == [TOY_CREATE, 'SELECT count() FROM `t_log`']
 
 
 def _two_file_task(tmp_path, monkeypatch, failures):
     """A load of two files whose inserts raise the given errors in turn, then succeed."""
-    datasets = tmp_path / 'datasets.yaml'
-    datasets.write_text('clickhouse:\n  t:\n    table: t_log\n    input_dir: output/t\n    preload_script: pre.sql\n')
-    (tmp_path / 'pre.sql').write_text('CREATE TABLE IF NOT EXISTS t_log (x String) ENGINE = Log;\n')
-    monkeypatch.chdir(tmp_path)
+    spec = _toy_spec(tmp_path, monkeypatch, TOY)
     data = tmp_path / 'release_data' / 'output' / 't'
     data.mkdir(parents=True)
     for name in ('part-0.parquet', 'part-1.parquet'):
@@ -146,10 +77,6 @@ def _two_file_task(tmp_path, monkeypatch, failures):
 
     monkeypatch.setattr(clickhouse_load, 'insert_file', insert)
     client.command.side_effect = lambda sql: events.append(('command', sql))
-    spec = ClickhouseLoadSpec(
-        name='clickhouse_load t', dataset='t', data_dir_parent='release_data', dataset_config_path=str(datasets),
-        product='platform',
-    )
     return ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path))), events
 
 
@@ -166,11 +93,11 @@ def test_clickhouse_load_fails_when_the_reload_fails_too(tmp_path, monkeypatch):
     task, events = _two_file_task(tmp_path, monkeypatch, [DatabaseError('code: 159'), DatabaseError('code: 159')])
     with pytest.raises(ClickhouseLoadError) as raised:
         ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-    assert [e for e in events if e[0] == 'command'] == [('command', 'TRUNCATE TABLE `t_log`')]
+    assert [e for e in events if e[0] == 'command'] == [('command', TOY_CREATE), ('command', 'TRUNCATE TABLE `t_log`')]
     message = str(raised.value)
     assert 'loading t into t_log failed on ' in message
     assert 'release_data/output/t/part-1.parquet' in message
-    assert 'its table' not in message
+    assert message.endswith(f'; its table: {TOY_CREATE}')
     assert isinstance(raised.value.__cause__, DatabaseError)
 
 
@@ -477,22 +404,6 @@ def test_models_matching_nothing_fail_before_connecting(tmp_path, monkeypatch):
     assert events == []
 
 
-def test_scripts_log_every_statement(tmp_path, monkeypatch, info):
-    pre = tmp_path / 'pre.sql'
-    pre.write_text('CREATE TABLE d ENGINE = Log AS SELECT 1;\n')
-    post = tmp_path / 'post.sql'
-    post.write_text('CREATE TABLE e ENGINE = Log AS SELECT * FROM d;\nDROP TABLE d;\n')
-    datasets = (
-        f'clickhouse:\n  d:\n    table: d\n    derived: true\n    preload_script: {pre}\n    postload_script: {post}\n'
-    )
-    task, events = _generated_task(tmp_path, monkeypatch, datasets, {})
-    _run(task)
-    statements = ['CREATE TABLE d ENGINE = Log AS SELECT 1', 'CREATE TABLE e ENGINE = Log AS SELECT * FROM d',
-                  'DROP TABLE d']  # fmt: skip
-    assert [e[1] for e in events] == statements
-    assert [line for line in info if line in statements] == statements
-
-
 # declared tables, on a live ClickHouse
 
 class Declared(DatasetModel):
@@ -595,15 +506,22 @@ def test_duplicate_rocksdb_key_fails_the_load(tmp_path, live, clickhouse_server)
         _run(_declared_task(tmp_path, live, clickhouse_server, duplicated))
 
 
-def test_declarations_with_a_postload_script_fail_at_spec_time(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ('source', 'problem'),
+    [
+        ('', 'has neither model nor models'),
+        ("    model: declared\n    models: 'declared*'\n", 'has both model and models'),
+    ],
+)
+def test_an_entry_needs_one_of_model_and_models_at_spec_time(tmp_path, monkeypatch, source, problem):
     monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'declared': Declared})
     config = tmp_path / 'datasets.yaml'
-    config.write_text(DECLARED + '    postload_script: post.sql\n')
+    config.write_text(DECLARED.replace('    model: declared\n', source))
     spec = ClickhouseLoadSpec(
         name='clickhouse_load declared', dataset='declared', data_dir_parent='release_data',
         dataset_config_path=str(config), product='platform',
     )  # fmt: skip
-    with pytest.raises(ClickhouseLoadError, match='declared: declares ClickHouse tables and has a postload_script'):
+    with pytest.raises(ClickhouseLoadError, match=f'^declared: {problem}$'):
         ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
 
 

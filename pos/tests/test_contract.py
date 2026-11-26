@@ -50,8 +50,6 @@ def _inputs(*prefixes: str) -> list[tuple[str, str]]:
     pairs = []
     for section in ('opensearch', 'clickhouse'):
         for name, entry in DATASETS[section].items():
-            if entry.get('derived'):
-                continue
             path = entry['input_dir']
             if path in PTS_PREFIXES:
                 path = f'{path}/{entry["models"]}'
@@ -92,9 +90,6 @@ def test_search_indices_read_export():
 def test_every_input_is_accounted_for():
     for section in ('opensearch', 'clickhouse'):
         for name, entry in DATASETS[section].items():
-            if entry.get('derived'):
-                assert 'input_dir' not in entry, f'{section}/{name}: derived with an input_dir'
-                continue
             path = entry['input_dir']
             assert path.split('/')[0] in PTS_PREFIXES or path.startswith(POS_WRITTEN), f'{section}/{name}: {path}'
 

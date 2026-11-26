@@ -27,7 +27,6 @@ ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
 _ENUM8_MAX = 127
 _TOKEN = re.compile(r"\s*(?:`([^`]*)`|('(?:[^'\\]|\\.)*')|(-?\d+(?:\.\d+)?)|([A-Za-z_]\w*)|(\S))")
-_CREATE = re.compile(r'create\s+table\s+(?:if\s+not\s+exists\s+)?[\w.`]+\s*\(', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -137,17 +136,6 @@ def parse_type(text: str) -> CHType:
     return parsed
 
 
-def parse_table(sql: str) -> dict[str, CHType]:
-    """The columns of the first `CREATE TABLE ... (...)` in `sql`, in order."""
-    sql = re.sub(r'--[^\n]*', '', sql)
-    match = _CREATE.search(sql)
-    if match is None:
-        raise ValueError('no CREATE TABLE found')
-    parser = _Parser(sql[match.end() - 1 :])
-    cols = parser.items(lambda: (parser.take('name'), parser.type()))
-    return dict(cols)
-
-
 def render(t: CHType, *, nullable_outermost: bool = False, quote_fields: bool = True) -> str:
     """The type as ClickHouse accepts it: `LowCardinality(Nullable(...))`, Tuple field names backtick-quoted.
 
@@ -172,23 +160,6 @@ def render(t: CHType, *, nullable_outermost: bool = False, quote_fields: bool = 
 
 def _name(name: str) -> str:
     return f'`{name}`'
-
-
-def canonical(t: CHType) -> CHType:
-    """`t` with every Enum an `Enum8`/`Enum16` with explicit values; an entry with none takes the last value + 1."""
-    element = canonical(t.element) if t.element is not None else None
-    fields = tuple((n, canonical(f)) for n, f in t.fields)
-    if t.name not in ENUMS:
-        return replace(t, element=element, fields=fields)
-    entries, value = [], 0
-    for entry in t.args:
-        label, _, given = entry.partition(' = ')
-        value = int(given) if given else value + 1
-        entries.append(f'{label} = {value}')
-    name = t.name
-    if name == 'Enum':
-        name = 'Enum8' if all(-128 <= int(e.rsplit(' = ', 1)[1]) <= _ENUM8_MAX for e in entries) else 'Enum16'
-    return replace(t, name=name, args=tuple(entries))
 
 
 # models
@@ -400,17 +371,26 @@ def members(pattern: str, product: str) -> list[type[DatasetModel]]:
     return [m for name, m in sorted(models.items()) if fnmatch(name, pattern) and product in m.products]
 
 
-def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]] | None:
-    """The generated columns of a `datasets.yaml` clickhouse entry; None if it has no model.
+def source_problem(entry: Mapping) -> str | None:
+    """Why an entry has no landing table: it needs exactly one of `model`, `models`; None if it has one."""
+    if 'model' in entry and 'models' in entry:
+        return 'has both model and models'
+    if 'model' not in entry and 'models' not in entry:
+        return 'has neither model nor models'
+    return None
+
+
+def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]]:
+    """The generated columns of a `datasets.yaml` clickhouse entry.
 
     A `models` entry is the union of its members for `product`; a `model` entry is that model, whatever its
     products (a product without the output loads an empty table).
     """
+    if (problem := source_problem(entry)) is not None:
+        raise ValueError(f'{entry.get("table")}: {problem}')
     if 'models' in entry:
         return union_columns(members(entry['models'], product))
-    if (model := entry_model(entry)) is not None:
-        return columns(model)
-    return None
+    return columns(discover_models()[entry['model']])
 
 
 def entry_model(entry: Mapping) -> type[DatasetModel] | None:
@@ -436,15 +416,14 @@ def entry_problems(entry: Mapping, product: str) -> list[str]:
     """The problems in the tables and dictionaries a `datasets.yaml` entry declares, checked against its members."""
     tables = entry_tables(entry)
     owner = entry['table']
+    if (problem := source_problem(entry)) is not None:
+        return [f'{owner}: {problem}']
     keys = _primary_keys(_entry_models(entry, product))
     shared = set(keys.values())
     keyed = any(t.engine == 'rocksdb' for t in tables)
-    problems = []
-    if tables and 'postload_script' in entry:
-        problems.append(f'{owner}: declares ClickHouse tables and has a postload_script')
-    problems +=[f'{owner}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
+    problems = [f'{owner}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
     key = next(iter(shared)) if len(shared) == 1 else ()
-    fields = [name for name, _ in landing_columns(entry, product) or []]
+    fields = [name for name, _ in landing_columns(entry, product)]
     problems += [p for t in tables for p in table_problems(t, owner, fields, key)]
     return problems + [p for d in entry_dictionaries(entry) for p in dictionary_problems(d, owner, tables, fields)]
 
@@ -473,7 +452,7 @@ def declared_sql(entry: Mapping, product: str) -> list[str]:
     tables, dictionaries = declarations(entry, product)
     if not tables:
         return []
-    cols = landing_columns(entry, product) or []
+    cols = landing_columns(entry, product)
     landing = entry['table']
     key = entry_key(entry, product) if any(t.engine == 'rocksdb' for t in tables) else None
     by_name = {t.name: t for t in tables}
@@ -492,8 +471,6 @@ def member_table(model: type[DatasetModel]) -> str:
 def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
     """(table, CREATE TABLE) pairs a load of the entry runs: its one table, or each member then the union."""
     cols = landing_columns(entry, product)
-    if cols is None:
-        return []
     union = (entry['table'], create_table(entry['table'], cols, entry.get('engine', 'Log')))
     if 'models' not in entry:
         return [union]
@@ -506,7 +483,7 @@ def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description='Print the generated ClickHouse landing DDL.')
     parser.add_argument('dataset', nargs='?', help='a clickhouse entry of the datasets config')
-    parser.add_argument('--all', action='store_true', help='every entry with a model')
+    parser.add_argument('--all', action='store_true', help='every entry')
     parser.add_argument('--product', default='platform', choices=('platform', 'ppp'))
     parser.add_argument('--config', default='config/datasets.yaml', help='the datasets config (default: %(default)s)')
     args = parser.parse_args()
@@ -517,19 +494,4 @@ def main() -> None:
         parser.error(f'no clickhouse entry {args.dataset}')
     names = list(entries) if args.all else [args.dataset]
     statements = [sql for name in names for _, sql in ddl_for(entries[name], args.product)]
-    if not statements:
-        parser.error(f'{args.dataset} has no model: its DDL is {entries[args.dataset].get("preload_script")}')
     sys.stdout.write(''.join(f'{sql};\n' for sql in statements))
-
-
-def type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
-    """The type at `a`, `a/b` or `a[]/b` (`a[]` is the element); a Tuple of `cols` for ''; None if absent."""
-    t: CHType | None = CHType('Tuple', fields=tuple(cols))
-    for part in path.split('/') if path else []:
-        name, lists = part, 0
-        while name.endswith('[]'):
-            name, lists = name[:-2], lists + 1
-        t = dict(t.fields).get(name) if t is not None else None
-        for _ in range(lists):
-            t = t.element if t is not None else None
-    return t
