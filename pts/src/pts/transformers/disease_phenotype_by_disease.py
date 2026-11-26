@@ -9,7 +9,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease, DiseasePhenotypeItem
+from ot_datamodels.views.disease_phenotype_by_disease_view import DiseasePhenotypeByDiseaseView, DiseasePhenotypeItem
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -29,7 +29,7 @@ def disease_phenotype_by_disease_frame(phenotypes: pl.DataFrame) -> pl.DataFrame
     )
 
 
-@writes(view=DiseasePhenotypeByDisease)
+@writes(view=DiseasePhenotypeByDiseaseView)
 def disease_phenotype_by_disease(
     source: str,
     destination: dict[str, str],
@@ -46,4 +46,4 @@ def disease_phenotype_by_disease(
     """
     result = disease_phenotype_by_disease_frame(scan_dataset(str(source)).collect())
     logger.info(f'{result.height} diseases in the disease phenotype view')
-    write_dataset(conform(result, DiseasePhenotypeByDisease), str(destination['view']))
+    write_dataset(conform(result, DiseasePhenotypeByDiseaseView), str(destination['view']))

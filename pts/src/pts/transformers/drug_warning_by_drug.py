@@ -10,7 +10,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug, DrugWarningItem
+from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView, DrugWarningItem
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -33,7 +33,7 @@ def drug_warning_by_drug_frame(warnings: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-@writes(view=DrugWarningByDrug)
+@writes(view=DrugWarningByDrugView)
 def drug_warning_by_drug(
     source: str,
     destination: dict[str, str],
@@ -52,4 +52,4 @@ def drug_warning_by_drug(
     dropped = warnings.filter(pl.col('chemblIds').list.len() == 0).height
     result = drug_warning_by_drug_frame(warnings)
     logger.info(f'{result.height} molecules in the drug warning view; {dropped} warnings name no molecule')
-    write_dataset(conform(result, DrugWarningByDrug), str(destination['view']))
+    write_dataset(conform(result, DrugWarningByDrugView), str(destination['view']))

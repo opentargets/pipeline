@@ -1,4 +1,4 @@
-"""Drug warnings by drug: the `drug_warning_by_drug` view (pts `drug_warning_by_drug`).
+"""Drug warnings by drug: the `drug_warning_by_drug_view` view (pts `drug_warning_by_drug`).
 
 One row per molecule named in a `drug_warning` row's `chemblIds`, as served in `drug_warnings`: the warnings naming
 it, ordered by `id`, each the output row. A warning naming no molecule is in no row.
@@ -15,10 +15,10 @@ from ot_datamodels.outputs.patterns import CHEMBL_ID
 DrugWarningItem = row_of(DrugWarning, list(DrugWarning.model_fields), name='DrugWarningItem')
 
 
-class DrugWarningByDrug(DatasetModel):
+class DrugWarningByDrugView(DatasetModel):
     """Drug warnings by drug."""
 
-    dataset_name: ClassVar[str] = 'drug_warning_by_drug'
+    dataset_name: ClassVar[str] = 'drug_warning_by_drug_view'
     dataset_title: ClassVar[str] = 'Drug warnings by drug'
     dataset_description: ClassVar[str] = 'Blackbox and withdrawn warnings of each drug molecule, as served by molecule'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)

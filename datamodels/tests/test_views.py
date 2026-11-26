@@ -39,65 +39,65 @@ from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.spec import Constraints, Node, dataset_spec, walk
-from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
-from ot_datamodels.views.association_otf_target import AssociationOtfTarget
-from ot_datamodels.views.association_timeseries import AssociationTimeseries
-from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
-from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
-from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
-from ot_datamodels.views.credible_set_locus import LOCUS_FIELDS, CredibleSetLocus
+from ot_datamodels.views.association_otf_disease_view import AssociationOtfDiseaseView
+from ot_datamodels.views.association_otf_target_view import AssociationOtfTargetView
+from ot_datamodels.views.association_timeseries_view import AssociationTimeseriesView
+from ot_datamodels.views.coding_variant_by_target_view import CodingVariantByTargetView
+from ot_datamodels.views.coding_variant_by_variant_view import CodingVariantByVariantView
+from ot_datamodels.views.colocalisation_by_credible_set_view import ColocalisationByCredibleSetView
+from ot_datamodels.views.credible_set_locus_view import LOCUS_FIELDS, CredibleSetLocusView
 from ot_datamodels.views.credible_set_view import CredibleSetView
-from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
+from ot_datamodels.views.disease_phenotype_by_disease_view import DiseasePhenotypeByDiseaseView
 from ot_datamodels.views.disease_view import DiseaseView
-from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
+from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import MECHANISM_FIELDS, DrugMechanismOfActionByDrugView
 from ot_datamodels.views.drug_view import DrugView
-from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
+from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView
 from ot_datamodels.views.interaction_view import InteractionView
-from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
-from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
-from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
-from ot_datamodels.views.study_credible_set import StudyCredibleSet
+from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
+from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView
+from ot_datamodels.views.pharmacovigilance_by_drug_view import PharmacovigilanceByDrugView
+from ot_datamodels.views.study_credible_set_view import StudyCredibleSetView
 from ot_datamodels.views.study_view import StudyView
-from ot_datamodels.views.target_by_region import TargetByRegion
-from ot_datamodels.views.target_credible_set import TargetCredibleSet
+from ot_datamodels.views.target_by_region_view import TargetByRegionView
+from ot_datamodels.views.target_credible_set_view import TargetCredibleSetView
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
-from ot_datamodels.views.variant_credible_set import VariantCredibleSet
+from ot_datamodels.views.variant_credible_set_view import VariantCredibleSetView
 from ot_datamodels.views.variant_view import VariantView
 
 VIEWS: dict[str, type[DatasetModel]] = {
-    'association_otf_disease': AssociationOtfDisease,
-    'association_otf_target': AssociationOtfTarget,
-    'association_timeseries': AssociationTimeseries,
-    'coding_variant_by_target': CodingVariantByTarget,
-    'coding_variant_by_variant': CodingVariantByVariant,
-    'colocalisation_by_credible_set': ColocalisationByCredibleSet,
-    'credible_set_locus': CredibleSetLocus,
+    'association_otf_disease_view': AssociationOtfDiseaseView,
+    'association_otf_target_view': AssociationOtfTargetView,
+    'association_timeseries_view': AssociationTimeseriesView,
+    'coding_variant_by_target_view': CodingVariantByTargetView,
+    'coding_variant_by_variant_view': CodingVariantByVariantView,
+    'colocalisation_by_credible_set_view': ColocalisationByCredibleSetView,
+    'credible_set_locus_view': CredibleSetLocusView,
     'credible_set_view': CredibleSetView,
-    'disease_phenotype_by_disease': DiseasePhenotypeByDisease,
+    'disease_phenotype_by_disease_view': DiseasePhenotypeByDiseaseView,
     'disease_view': DiseaseView,
-    'drug_mechanism_of_action_by_drug': DrugMechanismOfActionByDrug,
+    'drug_mechanism_of_action_by_drug_view': DrugMechanismOfActionByDrugView,
     'drug_view': DrugView,
-    'drug_warning_by_drug': DrugWarningByDrug,
+    'drug_warning_by_drug_view': DrugWarningByDrugView,
     'interaction_view': InteractionView,
-    'l2g_prediction_by_credible_set': L2gPredictionByCredibleSet,
-    'mouse_phenotype_by_target': MousePhenotypeByTarget,
-    'pharmacovigilance_by_drug': PharmacovigilanceByDrug,
-    'study_credible_set': StudyCredibleSet,
+    'l2g_prediction_by_credible_set_view': L2gPredictionByCredibleSetView,
+    'mouse_phenotype_by_target_view': MousePhenotypeByTargetView,
+    'pharmacovigilance_by_drug_view': PharmacovigilanceByDrugView,
+    'study_credible_set_view': StudyCredibleSetView,
     'study_view': StudyView,
-    'target_by_region': TargetByRegion,
-    'target_credible_set': TargetCredibleSet,
+    'target_by_region_view': TargetByRegionView,
+    'target_credible_set_view': TargetCredibleSetView,
     'target_prioritisation_view': TargetPrioritisationView,
     'target_view': TargetView,
     'transcript_view': TranscriptView,
-    'variant_credible_set': VariantCredibleSet,
+    'variant_credible_set_view': VariantCredibleSetView,
     'variant_view': VariantView,
 }
 
 #: the frozen pre-piece-3 pts schema of each view (`pts_view_schemas`)
 PTS_SCHEMAS = {
-    'association_timeseries': ASSOCIATION_TIMESERIES,
+    'association_timeseries_view': ASSOCIATION_TIMESERIES,
     'target_view': TARGET_VIEW,
 }
 
@@ -107,7 +107,7 @@ ADDED: dict[str, list[str]] = {'target_view': ['credibleSetIds', 'pharmacogenomi
 #: columns whose dtype differs from the frozen pre-piece-3 baseline: Enums the baseline holds as strings, and
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
-    'association_timeseries': {'aggregationType'},
+    'association_timeseries_view': {'aggregationType'},
     'target_view': {
         'genomicLocation',
         'go',
@@ -121,31 +121,31 @@ CHANGED: dict[str, set[str]] = {
 
 #: the primary key of each view
 PRIMARY_KEYS = {
-    'association_otf_disease': ('rowId',),
-    'association_otf_target': ('rowId',),
-    'association_timeseries': (),
-    'coding_variant_by_target': ('targetId',),
-    'coding_variant_by_variant': ('variantId',),
-    'colocalisation_by_credible_set': ('credibleSetId',),
-    'credible_set_locus': ('credibleSetId',),
+    'association_otf_disease_view': ('rowId',),
+    'association_otf_target_view': ('rowId',),
+    'association_timeseries_view': (),
+    'coding_variant_by_target_view': ('targetId',),
+    'coding_variant_by_variant_view': ('variantId',),
+    'colocalisation_by_credible_set_view': ('credibleSetId',),
+    'credible_set_locus_view': ('credibleSetId',),
     'credible_set_view': ('credibleSetId',),
-    'disease_phenotype_by_disease': ('disease',),
+    'disease_phenotype_by_disease_view': ('disease',),
     'disease_view': ('id',),
-    'drug_mechanism_of_action_by_drug': ('chemblId',),
+    'drug_mechanism_of_action_by_drug_view': ('chemblId',),
     'drug_view': ('id',),
-    'drug_warning_by_drug': ('chemblId',),
+    'drug_warning_by_drug_view': ('chemblId',),
     'interaction_view': ('targetA',),
-    'l2g_prediction_by_credible_set': ('credibleSetId',),
-    'mouse_phenotype_by_target': ('targetFromSourceId',),
-    'pharmacovigilance_by_drug': ('chembl_id',),
-    'study_credible_set': (),
+    'l2g_prediction_by_credible_set_view': ('credibleSetId',),
+    'mouse_phenotype_by_target_view': ('targetFromSourceId',),
+    'pharmacovigilance_by_drug_view': ('chembl_id',),
+    'study_credible_set_view': (),
     'study_view': ('studyId',),
-    'target_by_region': (),
-    'target_credible_set': (),
+    'target_by_region_view': (),
+    'target_credible_set_view': (),
     'target_prioritisation_view': ('targetId',),
     'target_view': ('id',),
     'transcript_view': ('targetId',),
-    'variant_credible_set': (),
+    'variant_credible_set_view': (),
     'variant_view': ('variantId',),
 }
 
@@ -183,10 +183,13 @@ CREDIBLE_SET_COLUMNS = [
             'qualityControls',
         )
     ),
-    *(('study_credible_set', c) for c in ('studyId', 'leadVariantId', 'fineMappingMethod', 'confidence')),
-    *(('target_credible_set', c) for c in ('fineMappingMethod', 'confidence', 'leadVariantId', 'studyId', 'studyType')),
+    *(('study_credible_set_view', c) for c in ('studyId', 'leadVariantId', 'fineMappingMethod', 'confidence')),
     *(
-        ('variant_credible_set', c)
+        ('target_credible_set_view', c)
+        for c in ('fineMappingMethod', 'confidence', 'leadVariantId', 'studyId', 'studyType')
+    ),
+    *(
+        ('variant_credible_set_view', c)
         for c in ('studyType', 'fineMappingMethod', 'confidence', 'leadVariantId', 'studyId')
     ),
 ]
@@ -195,7 +198,7 @@ CREDIBLE_SET_RENAMED = [
     ('credible_set_view', 'credibleSetId', 'id'),
     *(
         (view, c, p)
-        for view in ('study_credible_set', 'target_credible_set', 'variant_credible_set')
+        for view in ('study_credible_set_view', 'target_credible_set_view', 'variant_credible_set_view')
         for c, p in (('credibleSetId', 'id'), ('leadChromosome', 'chromosome'))
     ),
 ]
@@ -214,7 +217,7 @@ LEAD_COLUMNS = [
     ),
     *(
         (view, c, p)
-        for view in ('study_credible_set', 'target_credible_set', 'variant_credible_set')
+        for view in ('study_credible_set_view', 'target_credible_set_view', 'variant_credible_set_view')
         for c, p in (
             ('pValueMantissa', 'pValueMantissa'),
             ('pValueExponent', 'pValueExponent'),
@@ -224,45 +227,45 @@ LEAD_COLUMNS = [
 ]
 #: (view, column) the read models copy from credible_set_view, which computes them
 COMPUTED_COLUMNS = [
-    ('study_credible_set', 'leadPosition'),
-    ('study_credible_set', 'locusSize'),
+    ('study_credible_set_view', 'leadPosition'),
+    ('study_credible_set_view', 'locusSize'),
     *(
         (view, c)
-        for view in ('target_credible_set', 'variant_credible_set')
+        for view in ('target_credible_set_view', 'variant_credible_set_view')
         for c in ('isTransQtl', 'leadPosition', 'locusSize')
     ),
 ]
-TOP_L2G_VIEWS = ('study_credible_set', 'variant_credible_set')
-#: the declared struct of the diseases and therapeutic areas of variant_credible_set
+TOP_L2G_VIEWS = ('study_credible_set_view', 'variant_credible_set_view')
+#: the declared struct of the diseases and therapeutic areas of variant_credible_set_view
 DISEASE_NAMES = {f'{c}{s}' for c in ('diseases', 'diseaseTherapeuticAreas') for s in ('', '[]', '[]/id', '[]/name')}
 
 
 #: every derived value of a view: (view, path) -> (output, path, nullability the view sets, or None)
 DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
-    ('association_otf_disease', 'rowId'): (EvidenceEva, 'id', None),
-    ('association_otf_disease', 'A'): (EvidenceEva, 'diseaseId', None),
-    ('association_otf_disease', 'B'): (EvidenceEva, 'targetId', None),
-    ('association_otf_disease', 'rowScore'): (EvidenceEva, 'score', None),
-    ('association_otf_disease', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
-    ('association_otf_disease', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
-    ('association_otf_target', 'rowId'): (EvidenceEva, 'id', None),
-    ('association_otf_target', 'A'): (EvidenceEva, 'targetId', None),
-    ('association_otf_target', 'B'): (EvidenceEva, 'diseaseId', None),
-    ('association_otf_target', 'rowScore'): (EvidenceEva, 'score', None),
-    ('association_otf_target', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
-    ('association_otf_target', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
-    ('association_otf_target', 'indirect'): (Disease, 'ancestors', None),
-    ('association_timeseries', 'diseaseId'): (AssociationOverallDirect, 'diseaseId', None),
-    ('association_timeseries', 'targetId'): (AssociationOverallDirect, 'targetId', None),
+    ('association_otf_disease_view', 'rowId'): (EvidenceEva, 'id', None),
+    ('association_otf_disease_view', 'A'): (EvidenceEva, 'diseaseId', None),
+    ('association_otf_disease_view', 'B'): (EvidenceEva, 'targetId', None),
+    ('association_otf_disease_view', 'rowScore'): (EvidenceEva, 'score', None),
+    ('association_otf_disease_view', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
+    ('association_otf_disease_view', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    ('association_otf_target_view', 'rowId'): (EvidenceEva, 'id', None),
+    ('association_otf_target_view', 'A'): (EvidenceEva, 'targetId', None),
+    ('association_otf_target_view', 'B'): (EvidenceEva, 'diseaseId', None),
+    ('association_otf_target_view', 'rowScore'): (EvidenceEva, 'score', None),
+    ('association_otf_target_view', 'noveltyDirect'): (AssociationOverallDirect, 'currentNovelty', True),
+    ('association_otf_target_view', 'noveltyIndirect'): (AssociationOverallIndirect, 'currentNovelty', True),
+    ('association_otf_target_view', 'indirect'): (Disease, 'ancestors', None),
+    ('association_timeseries_view', 'diseaseId'): (AssociationOverallDirect, 'diseaseId', None),
+    ('association_timeseries_view', 'targetId'): (AssociationOverallDirect, 'targetId', None),
     **{
-        ('association_timeseries', c): (AssociationOverallDirect, f'timeseries[]/{c}', None)
+        ('association_timeseries_view', c): (AssociationOverallDirect, f'timeseries[]/{c}', None)
         for c in ('year', 'associationScore', 'novelty', 'yearlyEvidenceCount')
     },
-    ('coding_variant_by_variant', 'variantId'): (Variant, 'variantId', None),
-    ('coding_variant_by_target', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
+    ('coding_variant_by_variant_view', 'variantId'): (Variant, 'variantId', None),
+    ('coding_variant_by_target_view', 'targetId'): (Variant, 'transcriptConsequences[]/targetId', None),
     **{
         (view, f'proteinCodingCoords[]/{c}'): (Variant, p, n)
-        for view in ('coding_variant_by_variant', 'coding_variant_by_target')
+        for view in ('coding_variant_by_variant_view', 'coding_variant_by_target_view')
         for c, p, n in (
             ('targetId', 'transcriptConsequences[]/targetId', None),
             ('variantId', 'variantId', None),
@@ -313,33 +316,37 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
             'pubmedId',
         )
     },
-    ('disease_phenotype_by_disease', 'disease'): (DiseasePhenotype, 'disease', None),
+    ('disease_phenotype_by_disease_view', 'disease'): (DiseasePhenotype, 'disease', None),
     **{
-        ('disease_phenotype_by_disease', f'phenotypes[]/{c}'): (DiseasePhenotype, c, None)
+        ('disease_phenotype_by_disease_view', f'phenotypes[]/{c}'): (DiseasePhenotype, c, None)
         for c in ('disease', 'phenotype', 'evidence')
     },
-    ('mouse_phenotype_by_target', 'targetFromSourceId'): (MousePhenotype, 'targetFromSourceId', None),
+    ('mouse_phenotype_by_target_view', 'targetFromSourceId'): (MousePhenotype, 'targetFromSourceId', None),
     **{
-        ('mouse_phenotype_by_target', f'mouse_phenotypes[]/{f.name}'): (MousePhenotype, f.name, None)
+        ('mouse_phenotype_by_target_view', f'mouse_phenotypes[]/{f.name}'): (MousePhenotype, f.name, None)
         for f in dataset_spec(MousePhenotype).fields
     },
-    ('drug_warning_by_drug', 'chemblId'): (DrugWarning, 'chemblIds[]', None),
+    ('drug_warning_by_drug_view', 'chemblId'): (DrugWarning, 'chemblIds[]', None),
     **{
-        ('drug_warning_by_drug', f'drugWarnings[]/{f.name}'): (DrugWarning, f.name, None)
+        ('drug_warning_by_drug_view', f'drugWarnings[]/{f.name}'): (DrugWarning, f.name, None)
         for f in dataset_spec(DrugWarning).fields
     },
-    ('drug_mechanism_of_action_by_drug', 'chemblId'): (DrugMechanismOfAction, 'chemblIds[]', None),
+    ('drug_mechanism_of_action_by_drug_view', 'chemblId'): (DrugMechanismOfAction, 'chemblIds[]', None),
     **{
-        ('drug_mechanism_of_action_by_drug', f'rows[]/{c}'): (DrugMechanismOfAction, c, None)
+        ('drug_mechanism_of_action_by_drug_view', f'rows[]/{c}'): (DrugMechanismOfAction, c, None)
         for c in MECHANISM_FIELDS
     },
-    ('drug_mechanism_of_action_by_drug', 'uniqueTargetTypes[]'): (DrugMechanismOfAction, 'targetType', None),
-    ('drug_mechanism_of_action_by_drug', 'uniqueActionTypes[]'): (DrugMechanismOfAction, 'actionType', None),
-    ('colocalisation_by_credible_set', 'credibleSetId'): (Colocalisation, 'leftLocusId', None),
-    ('colocalisation_by_credible_set', 'colocalisation[]/credibleSetId'): (Colocalisation, 'leftLocusId', None),
-    ('colocalisation_by_credible_set', 'colocalisation[]/otherCredibleSetId'): (Colocalisation, 'rightLocusId', None),
+    ('drug_mechanism_of_action_by_drug_view', 'uniqueTargetTypes[]'): (DrugMechanismOfAction, 'targetType', None),
+    ('drug_mechanism_of_action_by_drug_view', 'uniqueActionTypes[]'): (DrugMechanismOfAction, 'actionType', None),
+    ('colocalisation_by_credible_set_view', 'credibleSetId'): (Colocalisation, 'leftLocusId', None),
+    ('colocalisation_by_credible_set_view', 'colocalisation[]/credibleSetId'): (Colocalisation, 'leftLocusId', None),
+    ('colocalisation_by_credible_set_view', 'colocalisation[]/otherCredibleSetId'): (
+        Colocalisation,
+        'rightLocusId',
+        None,
+    ),
     **{
-        ('colocalisation_by_credible_set', f'colocalisation[]/{c}'): (Colocalisation, c, None)
+        ('colocalisation_by_credible_set_view', f'colocalisation[]/{c}'): (Colocalisation, c, None)
         for c in (
             'rightStudyType',
             'chromosome',
@@ -350,24 +357,24 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
             'betaRatioSignAverage',
         )
     },
-    ('l2g_prediction_by_credible_set', 'credibleSetId'): (L2gPrediction, 'credibleSetId', None),
+    ('l2g_prediction_by_credible_set_view', 'credibleSetId'): (L2gPrediction, 'credibleSetId', None),
     **{
-        ('l2g_prediction_by_credible_set', f'l2g_predictions[]/{c}'): (L2gPrediction, c, None)
+        ('l2g_prediction_by_credible_set_view', f'l2g_predictions[]/{c}'): (L2gPrediction, c, None)
         for c in ('credibleSetId', 'geneId', 'score', 'shapBaseValue')
     },
     **{
-        ('l2g_prediction_by_credible_set', f'l2g_predictions[]/features[]/{c}'): (
+        ('l2g_prediction_by_credible_set_view', f'l2g_predictions[]/features[]/{c}'): (
             L2gPrediction,
             f'features[]/{c}',
             None,
         )
         for c in ('value', 'shapValue')
     },
-    ('pharmacovigilance_by_drug', 'chembl_id'): (Pharmacovigilance, 'chembl_id', None),
-    ('pharmacovigilance_by_drug', 'adverse_events[]/count'): (Pharmacovigilance, 'count', None),
-    ('pharmacovigilance_by_drug', 'adverse_events[]/logLR'): (Pharmacovigilance, 'llr', None),
-    ('pharmacovigilance_by_drug', 'adverse_events[]/critval'): (Pharmacovigilance, 'critval', None),
-    ('pharmacovigilance_by_drug', 'criticalValue'): (Pharmacovigilance, 'critval', None),
+    ('pharmacovigilance_by_drug_view', 'chembl_id'): (Pharmacovigilance, 'chembl_id', None),
+    ('pharmacovigilance_by_drug_view', 'adverse_events[]/count'): (Pharmacovigilance, 'count', None),
+    ('pharmacovigilance_by_drug_view', 'adverse_events[]/logLR'): (Pharmacovigilance, 'llr', None),
+    ('pharmacovigilance_by_drug_view', 'adverse_events[]/critval'): (Pharmacovigilance, 'critval', None),
+    ('pharmacovigilance_by_drug_view', 'criticalValue'): (Pharmacovigilance, 'critval', None),
     **{('target_view', f.name): (Target, f.name, None) for f in dataset_spec(Target).fields},
     **{
         ('target_view', f'homologues[]/{c}'): (Homology, c, None)
@@ -419,8 +426,8 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     },
     ('target_view', 'credibleSetIds[]'): (CredibleSet, 'id', None),
     ('target_view', 'pharmacogenomicsIds[]'): (Pharmacogenomics, 'pharmacogenomicsId', None),
-    **{('target_by_region', c): (Target, f'genomicLocation/{c}', None) for c in ('chromosome', 'start', 'end')},
-    ('target_by_region', 'target/id'): (Target, 'id', None),
+    **{('target_by_region_view', c): (Target, f'genomicLocation/{c}', None) for c in ('chromosome', 'start', 'end')},
+    ('target_by_region_view', 'target/id'): (Target, 'id', None),
     ('transcript_view', 'targetId'): (Transcript, 'targetId', None),
     **{
         ('transcript_view', f'transcripts[]/{c}'): (Transcript, c, None)
@@ -451,17 +458,17 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     **{(view, c): (CredibleSet, p, None) for view, c, p in CREDIBLE_SET_RENAMED},
     **{(view, c): (CredibleSetVariant, p, None) for view, c, p in LEAD_COLUMNS},
     **{(view, c): (CredibleSetView, c, None) for view, c in COMPUTED_COLUMNS},
-    ('credible_set_locus', 'credibleSetId'): (CredibleSetVariant, 'credibleSetId', None),
-    **{('credible_set_locus', f'locus[]/{c}'): (CredibleSetVariant, c, None) for c in LOCUS_FIELDS[:-1]},
+    ('credible_set_locus_view', 'credibleSetId'): (CredibleSetVariant, 'credibleSetId', None),
+    **{('credible_set_locus_view', f'locus[]/{c}'): (CredibleSetVariant, c, None) for c in LOCUS_FIELDS[:-1]},
     **{(view, 'topL2GGeneId'): (L2gPrediction, 'geneId', True) for view in TOP_L2G_VIEWS},
     **{(view, 'topL2GScore'): (L2gPrediction, 'score', True) for view in TOP_L2G_VIEWS},
-    ('target_credible_set', 'targetId'): (Target, 'id', None),
-    ('target_credible_set', 'condition'): (Study, 'condition', None),
-    ('target_credible_set', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
-    ('variant_credible_set', 'variantId'): (CredibleSetVariant, 'variantId', None),
-    ('variant_credible_set', 'posteriorProbability'): (CredibleSetVariant, 'posteriorProbability', None),
-    ('variant_credible_set', 'studyTargetId'): (Study, 'geneId', None),
-    ('variant_credible_set', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
+    ('target_credible_set_view', 'targetId'): (Target, 'id', None),
+    ('target_credible_set_view', 'condition'): (Study, 'condition', None),
+    ('target_credible_set_view', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
+    ('variant_credible_set_view', 'variantId'): (CredibleSetVariant, 'variantId', None),
+    ('variant_credible_set_view', 'posteriorProbability'): (CredibleSetVariant, 'posteriorProbability', None),
+    ('variant_credible_set_view', 'studyTargetId'): (Study, 'geneId', None),
+    ('variant_credible_set_view', 'biosampleId'): (Study, 'biosampleFromSourceId', None),
 }
 
 
@@ -524,7 +531,7 @@ def test_homologue_high_confidence_is_homology_s_bool() -> None:
 def test_otf_columns_are_every_evidence_s(evidence: type[DatasetModel]) -> None:
     """The views derive from one evidence model; every other has the same columns, each its own datasource."""
     nodes = _nodes(evidence)
-    sides = ((AssociationOtfDisease, 'diseaseId', 'targetId'), (AssociationOtfTarget, 'targetId', 'diseaseId'))
+    sides = ((AssociationOtfDiseaseView, 'diseaseId', 'targetId'), (AssociationOtfTargetView, 'targetId', 'diseaseId'))
     for model, a, b in sides:
         otf = _nodes(model)
         assert [otf[c] for c in ('rowId', 'A', 'B', 'rowScore')] == [nodes[c] for c in ('id', a, b, 'score')]
@@ -535,7 +542,7 @@ def test_otf_columns_are_every_evidence_s(evidence: type[DatasetModel]) -> None:
 @pytest.mark.parametrize('association', ASSOCIATION_INPUTS, ids=lambda m: m.dataset_name)
 def test_timeseries_columns_are_every_input_s(association: type[DatasetModel]) -> None:
     """The view derives from one association; the others agree but for by-datasource's Int32 yearlyEvidenceCount."""
-    view, nodes = _nodes(AssociationTimeseries), _nodes(association)
+    view, nodes = _nodes(AssociationTimeseriesView), _nodes(association)
     assert [view[c] for c in ('diseaseId', 'targetId')] == [nodes[c] for c in ('diseaseId', 'targetId')]
     for c in ('year', 'associationScore', 'novelty'):
         assert view[c] == nodes[f'timeseries[]/{c}'], c
@@ -551,8 +558,8 @@ def test_timeseries_columns_are_every_input_s(association: type[DatasetModel]) -
 
 
 def test_association_timeseries_is_ppp_only() -> None:
-    assert AssociationTimeseries.products == ('ppp',)
-    nodes = _nodes(AssociationTimeseries)
+    assert AssociationTimeseriesView.products == ('ppp',)
+    nodes = _nodes(AssociationTimeseriesView)
     assert nodes['aggregationValue'].dtype == pl.String()
     assert nodes['partitionKey'].dtype == pl.String()
 
@@ -570,12 +577,12 @@ def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
 MARKERS = {
     ('interaction_view', 'interactions[]/speciesB/taxonId'): 'UInt32',
     ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
-    ('coding_variant_by_target', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
-    ('coding_variant_by_variant', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
-    ('study_credible_set', 'topL2GApprovedSymbol'): 'LowCardinality(String)',
-    ('target_credible_set', 'biosampleName'): 'LowCardinality(String)',
+    ('coding_variant_by_target_view', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
+    ('coding_variant_by_variant_view', 'proteinCodingCoords[]/datasources[]/datasourceCount'): 'UInt32',
+    ('study_credible_set_view', 'topL2GApprovedSymbol'): 'LowCardinality(String)',
+    ('target_credible_set_view', 'biosampleName'): 'LowCardinality(String)',
     **{
-        ('variant_credible_set', p): 'LowCardinality(String)'
+        ('variant_credible_set_view', p): 'LowCardinality(String)'
         for p in (
             'studyTargetApprovedSymbol',
             'biosampleName',
@@ -613,11 +620,11 @@ COORD_DECLARED = {
 
 #: every value a view declares rather than derives
 DECLARED: dict[str, set[str]] = {
-    'association_otf_disease': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
-    'association_otf_target': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
-    'association_timeseries': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
-    'coding_variant_by_target': COORD_DECLARED,
-    'coding_variant_by_variant': COORD_DECLARED,
+    'association_otf_disease_view': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
+    'association_otf_target_view': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
+    'association_timeseries_view': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
+    'coding_variant_by_target_view': COORD_DECLARED,
+    'coding_variant_by_variant_view': COORD_DECLARED,
     'disease_view': {
         'synonyms',
         'synonyms[]',
@@ -627,12 +634,12 @@ DECLARED: dict[str, set[str]] = {
         'studyIds',
         'indirectStudyIds',
     },
-    'colocalisation_by_credible_set': {
+    'colocalisation_by_credible_set_view': {
         'colocalisation',
         'colocalisation[]',
         'colocalisation[]/colocalisationMethod',
     },
-    'l2g_prediction_by_credible_set': {
+    'l2g_prediction_by_credible_set_view': {
         'l2g_predictions',
         'l2g_predictions[]',
         'l2g_predictions[]/features',
@@ -640,11 +647,11 @@ DECLARED: dict[str, set[str]] = {
         'l2g_predictions[]/features[]/name',
     },
     'drug_view': {'pharmacogenomicsIds'},
-    'disease_phenotype_by_disease': {'phenotypes', 'phenotypes[]'},
-    'drug_mechanism_of_action_by_drug': {'rows', 'rows[]', 'uniqueTargetTypes', 'uniqueActionTypes'},
-    'drug_warning_by_drug': {'drugWarnings', 'drugWarnings[]'},
-    'mouse_phenotype_by_target': {'mouse_phenotypes', 'mouse_phenotypes[]'},
-    'pharmacovigilance_by_drug': {
+    'disease_phenotype_by_disease_view': {'phenotypes', 'phenotypes[]'},
+    'drug_mechanism_of_action_by_drug_view': {'rows', 'rows[]', 'uniqueTargetTypes', 'uniqueActionTypes'},
+    'drug_warning_by_drug_view': {'drugWarnings', 'drugWarnings[]'},
+    'mouse_phenotype_by_target_view': {'mouse_phenotypes', 'mouse_phenotypes[]'},
+    'pharmacovigilance_by_drug_view': {
         'adverse_events',
         'adverse_events[]',
         'adverse_events[]/name',
@@ -694,7 +701,7 @@ DECLARED: dict[str, set[str]] = {
         'pharmacogenomicsIds',
     },
     'study_view': {'credibleSetIds'},
-    'target_by_region': {'target'},
+    'target_by_region_view': {'target'},
     'target_prioritisation_view': {'items', 'items[]', 'items[]/key', 'items[]/value'},
     'transcript_view': {
         'transcripts',
@@ -707,10 +714,10 @@ DECLARED: dict[str, set[str]] = {
     },
     'variant_view': {'credibleSetIds', 'pharmacogenomicsIds'},
     'credible_set_view': {'leadPosition', 'locusSize', 'isTransQtl'},
-    'credible_set_locus': {'locus', 'locus[]', 'locus[]/qualityControls', 'locus[]/qualityControls[]'},
-    'study_credible_set': {'leadReferenceAllele', 'leadAlternateAllele', 'topL2GApprovedSymbol'},
-    'target_credible_set': {'leadReferenceAllele', 'leadAlternateAllele', 'biosampleName'},
-    'variant_credible_set': {
+    'credible_set_locus_view': {'locus', 'locus[]', 'locus[]/qualityControls', 'locus[]/qualityControls[]'},
+    'study_credible_set_view': {'leadReferenceAllele', 'leadAlternateAllele', 'topL2GApprovedSymbol'},
+    'target_credible_set_view': {'leadReferenceAllele', 'leadAlternateAllele', 'biosampleName'},
+    'variant_credible_set_view': {
         'leadReferenceAllele',
         'leadAlternateAllele',
         'condition',
@@ -794,17 +801,17 @@ OTF_COMMON = ['rowId', 'A', 'B', 'datatypeId', 'datasourceId', 'rowScore', 'sear
 
 
 def test_association_otf_views_are_the_served_columns() -> None:
-    disease = [f.name for f in dataset_spec(AssociationOtfDisease).fields]
-    target = [f.name for f in dataset_spec(AssociationOtfTarget).fields]
+    disease = [f.name for f in dataset_spec(AssociationOtfDiseaseView).fields]
+    target = [f.name for f in dataset_spec(AssociationOtfTargetView).fields]
     assert disease == [*OTF_COMMON, 'noveltyDirect', 'noveltyIndirect', 'indirect']
     assert target == [*OTF_COMMON, 'isMeasurement', 'noveltyDirect', 'noveltyIndirect', 'indirect']
     models = discover_models()
-    assert models['association_otf_disease'] is AssociationOtfDisease
-    assert models['association_otf_target'] is AssociationOtfTarget
+    assert models['association_otf_disease_view'] is AssociationOtfDiseaseView
+    assert models['association_otf_target_view'] is AssociationOtfTargetView
 
 
 def test_association_otf_views_types() -> None:
-    disease, target = _nodes(AssociationOtfDisease), _nodes(AssociationOtfTarget)
+    disease, target = _nodes(AssociationOtfDiseaseView), _nodes(AssociationOtfTargetView)
     assert disease['indirect'].dtype == pl.List(pl.String())
     assert target['indirect'].dtype == pl.List(pl.String())
     assert target['indirect[]'].clickhouse == 'LowCardinality(String)'
@@ -923,7 +930,7 @@ COORD_FIELDS = [
 ]
 
 
-CODING_VARIANT_VIEWS = [(CodingVariantByVariant, 'variantId'), (CodingVariantByTarget, 'targetId')]
+CODING_VARIANT_VIEWS = [(CodingVariantByVariantView, 'variantId'), (CodingVariantByTargetView, 'targetId')]
 
 
 @pytest.mark.parametrize(('model', 'key'), CODING_VARIANT_VIEWS, ids=['variant', 'target'])
@@ -943,7 +950,7 @@ def test_coding_variant_views_are_the_served_columns(model: type[DatasetModel], 
     )
 
 
-@pytest.mark.parametrize('model', [CodingVariantByVariant, CodingVariantByTarget], ids=['variant', 'target'])
+@pytest.mark.parametrize('model', [CodingVariantByVariantView, CodingVariantByTargetView], ids=['variant', 'target'])
 def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[DatasetModel]) -> None:
     """Served as String, not Enum8: the API reads it as String by position."""
     nodes = _nodes(model)
@@ -957,10 +964,10 @@ def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[Dat
 
 #: the small compute views: (view, key, items column, items' output, output fields served in order)
 SMALL_COMPUTE = [
-    (DiseasePhenotypeByDisease, 'disease', 'phenotypes', DiseasePhenotype, ['disease', 'phenotype', 'evidence']),
-    (MousePhenotypeByTarget, 'targetFromSourceId', 'mouse_phenotypes', MousePhenotype, None),
-    (DrugWarningByDrug, 'chemblId', 'drugWarnings', DrugWarning, None),
-    (DrugMechanismOfActionByDrug, 'chemblId', 'rows', DrugMechanismOfAction, MECHANISM_FIELDS),
+    (DiseasePhenotypeByDiseaseView, 'disease', 'phenotypes', DiseasePhenotype, ['disease', 'phenotype', 'evidence']),
+    (MousePhenotypeByTargetView, 'targetFromSourceId', 'mouse_phenotypes', MousePhenotype, None),
+    (DrugWarningByDrugView, 'chemblId', 'drugWarnings', DrugWarning, None),
+    (DrugMechanismOfActionByDrugView, 'chemblId', 'rows', DrugMechanismOfAction, MECHANISM_FIELDS),
 ]
 
 
@@ -980,15 +987,15 @@ def test_small_compute_items_are_output_rows(model, key, items, output, fields) 
 
 
 def test_disease_phenotype_evidence_keeps_qualifier_and_the_enums() -> None:
-    evidence = _nodes(DiseasePhenotypeByDisease)['phenotypes[]/evidence[]']
+    evidence = _nodes(DiseasePhenotypeByDiseaseView)['phenotypes[]/evidence[]']
     assert 'qualifier' in [f.name for f in evidence.fields]
     for name in ('aspect', 'evidenceType', 'sex', 'resource'):
-        assert isinstance(_nodes(DiseasePhenotypeByDisease)[f'phenotypes[]/evidence[]/{name}'].dtype, pl.Enum), name
+        assert isinstance(_nodes(DiseasePhenotypeByDiseaseView)[f'phenotypes[]/evidence[]/{name}'].dtype, pl.Enum), name
 
 
 def test_mechanism_unique_types_are_the_vocabulary_enums() -> None:
-    nodes = _nodes(DrugMechanismOfActionByDrug)
-    assert [f.name for f in dataset_spec(DrugMechanismOfActionByDrug).fields] == [
+    nodes = _nodes(DrugMechanismOfActionByDrugView)
+    assert [f.name for f in dataset_spec(DrugMechanismOfActionByDrugView).fields] == [
         'chemblId',
         'rows',
         'uniqueTargetTypes',
@@ -1000,8 +1007,8 @@ def test_mechanism_unique_types_are_the_vocabulary_enums() -> None:
 
 
 def test_pharmacovigilance_by_drug_is_the_served_shape() -> None:
-    nodes = _nodes(PharmacovigilanceByDrug)
-    assert [f.name for f in dataset_spec(PharmacovigilanceByDrug).fields] == [
+    nodes = _nodes(PharmacovigilanceByDrugView)
+    assert [f.name for f in dataset_spec(PharmacovigilanceByDrugView).fields] == [
         'chembl_id',
         'adverse_events',
         'criticalValue',
@@ -1015,7 +1022,8 @@ def test_pharmacovigilance_declared_values_are_their_output_s_without_low_cardin
     """groupArray stripped LowCardinality, and the served type keeps none (decision 4 changes no LowCardinality)."""
     source = _nodes(Pharmacovigilance)[output_path]
     assert source.clickhouse == 'LowCardinality(String)'
-    assert _nodes(PharmacovigilanceByDrug)[f'adverse_events[]/{path}'] == dataclasses.replace(source, clickhouse=None)
+    derived = _nodes(PharmacovigilanceByDrugView)[f'adverse_events[]/{path}']
+    assert derived == dataclasses.replace(source, clickhouse=None)
 
 
 def test_target_view_ends_with_the_served_id_lists() -> None:
@@ -1029,12 +1037,12 @@ def test_target_view_ends_with_the_served_id_lists() -> None:
 
 def test_target_by_region_is_the_location_and_the_id() -> None:
     """`target` is `Tuple(id String)` (David, 2026-11-24): the API reads only its id."""
-    nodes = _nodes(TargetByRegion)
-    assert [f.name for f in dataset_spec(TargetByRegion).fields] == ['chromosome', 'start', 'end', 'target']
+    nodes = _nodes(TargetByRegionView)
+    assert [f.name for f in dataset_spec(TargetByRegionView).fields] == ['chromosome', 'start', 'end', 'target']
     assert [f.name for f in nodes['target'].fields] == ['id']
     assert not nodes['target'].nullable
     assert nodes['chromosome'].dtype == pl.Enum(list(get_args(v.Chromosome)))
-    assert discover_models()['target_by_region'] is TargetByRegion
+    assert discover_models()['target_by_region_view'] is TargetByRegionView
 
 
 #: the served `transcripts` tuple, in the CAST's field order (the landing's)
@@ -1109,8 +1117,8 @@ def test_genetics_views_are_their_output_then_the_id_lists(view, output, lists) 
 
 
 def test_colocalisation_by_credible_set_is_the_served_shape() -> None:
-    nodes = _nodes(ColocalisationByCredibleSet)
-    assert [f.name for f in dataset_spec(ColocalisationByCredibleSet).fields] == ['credibleSetId', 'colocalisation']
+    nodes = _nodes(ColocalisationByCredibleSetView)
+    assert [f.name for f in dataset_spec(ColocalisationByCredibleSetView).fields] == ['credibleSetId', 'colocalisation']
     assert [f.name for f in nodes['colocalisation[]'].fields] == [
         'credibleSetId',
         'otherCredibleSetId',
@@ -1119,31 +1127,31 @@ def test_colocalisation_by_credible_set_is_the_served_shape() -> None:
     assert nodes['colocalisation'].constraints.min_length == 1
     assert nodes['colocalisation[]/rightStudyType'].dtype == pl.Enum(list(get_args(v.StudyType)))
     assert nodes['colocalisation[]/chromosome'].dtype == pl.Enum(list(get_args(v.Chromosome)))
-    assert discover_models()['colocalisation_by_credible_set'] is ColocalisationByCredibleSet
+    assert discover_models()['colocalisation_by_credible_set_view'] is ColocalisationByCredibleSetView
 
 
 def test_colocalisation_method_is_served_as_a_string() -> None:
     """groupArray stripped LowCardinality and the API decodes a String: never an Enum8."""
     source = _nodes(Colocalisation)['colocalisationMethod']
-    node = _nodes(ColocalisationByCredibleSet)['colocalisation[]/colocalisationMethod']
+    node = _nodes(ColocalisationByCredibleSetView)['colocalisation[]/colocalisationMethod']
     assert source.dtype == pl.Enum(list(get_args(v.ColocalisationMethod)))
     assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, False)
     assert node.constraints.allowed == get_args(v.ColocalisationMethod)
 
 
 def test_l2g_prediction_by_credible_set_is_the_served_shape() -> None:
-    nodes = _nodes(L2gPredictionByCredibleSet)
-    assert [f.name for f in dataset_spec(L2gPredictionByCredibleSet).fields] == ['credibleSetId', 'l2g_predictions']
+    nodes = _nodes(L2gPredictionByCredibleSetView)
+    assert [f.name for f in dataset_spec(L2gPredictionByCredibleSetView).fields] == ['credibleSetId', 'l2g_predictions']
     assert [f.name for f in nodes['l2g_predictions[]'].fields] == [f.name for f in dataset_spec(L2gPrediction).fields]
     assert [f.name for f in nodes['l2g_predictions[]/features[]'].fields] == ['name', 'value', 'shapValue']
     assert nodes['l2g_predictions'].constraints.min_length == 1
-    assert discover_models()['l2g_prediction_by_credible_set'] is L2gPredictionByCredibleSet
+    assert discover_models()['l2g_prediction_by_credible_set_view'] is L2gPredictionByCredibleSetView
 
 
 def test_l2g_feature_name_is_the_output_s_without_low_cardinality() -> None:
     source = _nodes(L2gPrediction)['features[]/name']
     assert source.clickhouse == 'LowCardinality(String)'
-    node = _nodes(L2gPredictionByCredibleSet)['l2g_predictions[]/features[]/name']
+    node = _nodes(L2gPredictionByCredibleSetView)['l2g_predictions[]/features[]/name']
     assert node == dataclasses.replace(source, clickhouse=None)
 
 
@@ -1156,18 +1164,18 @@ CREDIBLE_SET_SERVED: dict[type[DatasetModel], list[str]] = {
         'locusStart', 'locusEnd', 'locusSize', 'fineMappingMethod', 'logBayesFactor', 'confidence', 'purityMeanR2',
         'purityMinR2', 'qualityControls', 'isTransQtl',
     ],
-    CredibleSetLocus: ['credibleSetId', 'locus'],
-    StudyCredibleSet: [
+    CredibleSetLocusView: ['credibleSetId', 'locus'],
+    StudyCredibleSetView: [
         'studyId', 'credibleSetId', 'leadVariantId', 'leadChromosome', 'leadPosition', 'leadReferenceAllele',
         'leadAlternateAllele', 'pValueMantissa', 'pValueExponent', 'beta', 'fineMappingMethod', 'confidence',
         'locusSize', 'topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore',
     ],
-    TargetCredibleSet: [
+    TargetCredibleSetView: [
         'targetId', 'credibleSetId', 'pValueMantissa', 'pValueExponent', 'beta', 'fineMappingMethod', 'confidence',
         'isTransQtl', 'leadVariantId', 'leadChromosome', 'leadPosition', 'leadReferenceAllele', 'leadAlternateAllele',
         'studyId', 'studyType', 'condition', 'biosampleId', 'biosampleName', 'locusSize',
     ],
-    VariantCredibleSet: [
+    VariantCredibleSetView: [
         'studyType', 'variantId', 'credibleSetId', 'posteriorProbability', 'locusSize', 'pValueMantissa',
         'pValueExponent', 'beta', 'fineMappingMethod', 'confidence', 'isTransQtl', 'leadVariantId', 'leadChromosome',
         'leadPosition', 'leadReferenceAllele', 'leadAlternateAllele', 'studyId', 'condition', 'studyTargetId',
@@ -1192,7 +1200,7 @@ def test_credible_set_view_computed_types() -> None:
 
 
 def test_locus_rows_are_credible_set_variants_qualitycontrols_without_low_cardinality() -> None:
-    nodes = _nodes(CredibleSetLocus)
+    nodes = _nodes(CredibleSetLocusView)
     assert [f.name for f in nodes['locus[]'].fields] == LOCUS_FIELDS
     assert nodes['locus'].constraints.min_length == 1
     source = _nodes(CredibleSetVariant)['qualityControls[]']
@@ -1205,7 +1213,7 @@ def test_read_model_defaults_and_low_cardinality() -> None:
     """The scripts' LEFT JOIN defaults: alleles and the target page's biosample name '' (non-null); the variant
     page's biosample name, the symbols and the top L2G null; `any()` stripped LowCardinality from the variant page's
     condition."""
-    study, target, variant = _nodes(StudyCredibleSet), _nodes(TargetCredibleSet), _nodes(VariantCredibleSet)
+    study, target, variant = _nodes(StudyCredibleSetView), _nodes(TargetCredibleSetView), _nodes(VariantCredibleSetView)
     for nodes in (study, target, variant):
         for allele in ('leadReferenceAllele', 'leadAlternateAllele'):
             assert (nodes[allele].nullable, nodes[allele].constraints.pattern) == (False, None), allele
@@ -1215,3 +1223,12 @@ def test_read_model_defaults_and_low_cardinality() -> None:
     assert not variant['traitFromSource'].nullable
     for nodes in (study, variant):
         assert all(nodes[c].nullable for c in ('topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore'))
+
+
+@pytest.mark.parametrize('name', sorted(discover_datasets(VIEWS_PACKAGE)))
+def test_a_view_is_named_view(name):
+    """A view's `dataset_name` ends in `_view`, its module is named after it and its class ends in `View`."""
+    model = discover_datasets(VIEWS_PACKAGE)[name]
+    assert name.endswith('_view')
+    assert model.__module__ == f'{VIEWS_PACKAGE}.{name}'
+    assert model.__name__.endswith('View')

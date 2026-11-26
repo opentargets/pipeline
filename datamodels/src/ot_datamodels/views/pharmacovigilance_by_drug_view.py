@@ -1,4 +1,4 @@
-"""Pharmacovigilance by drug: the `pharmacovigilance_by_drug` view (pts `pharmacovigilance_by_drug`).
+"""Pharmacovigilance by drug: the `pharmacovigilance_by_drug_view` view (pts `pharmacovigilance_by_drug`).
 
 One row per drug of `pharmacovigilance`, as served in `pharmacovigilance`: its adverse events by `logLR` descending,
 then `name`, and the drug's critical value.
@@ -35,10 +35,10 @@ class AdverseEvent(StructModel):
     meddraCode: Literal[''] = Field(description=_description('meddraCode'))
 
 
-class PharmacovigilanceByDrug(DatasetModel):
+class PharmacovigilanceByDrugView(DatasetModel):
     """Pharmacovigilance by drug."""
 
-    dataset_name: ClassVar[str] = 'pharmacovigilance_by_drug'
+    dataset_name: ClassVar[str] = 'pharmacovigilance_by_drug_view'
     dataset_title: ClassVar[str] = 'Pharmacovigilance by drug'
     dataset_description: ClassVar[str] = 'Significant adverse drug reactions of each drug, as served by drug'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)

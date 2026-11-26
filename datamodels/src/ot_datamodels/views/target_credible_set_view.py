@@ -1,4 +1,4 @@
-"""Target credible set: the `target_credible_set` view (pts `credible_set_view`), served as `target_credible_sets`.
+"""Target credible set: the `target_credible_set_view` view (pts `credible_set_view`), served as `target_credible_sets`.
 
 One row per target and credible set of a study of that target (`study.geneId`), for the target page's molQTL
 table: the set's lead variant and statistics, and its study's condition and biosample.
@@ -36,10 +36,10 @@ LocusSize = from_output(CredibleSetView, 'locusSize')
 _SET = CredibleSetView.example
 
 
-class TargetCredibleSet(DatasetModel):
+class TargetCredibleSetView(DatasetModel):
     """Target credible set."""
 
-    dataset_name: ClassVar[str] = 'target_credible_set'
+    dataset_name: ClassVar[str] = 'target_credible_set_view'
     dataset_title: ClassVar[str] = 'Target credible set'
     dataset_description: ClassVar[str] = 'The credible sets of the studies of each target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)

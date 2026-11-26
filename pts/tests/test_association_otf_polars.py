@@ -7,8 +7,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
-from ot_datamodels.views.association_otf_target import AssociationOtfTarget
+from ot_datamodels.views.association_otf_disease_view import AssociationOtfDiseaseView
+from ot_datamodels.views.association_otf_target_view import AssociationOtfTargetView
 
 from pts.schemas.dataset.validate import validate_dataset
 from pts.task_outputs import OutputValidation
@@ -18,7 +18,7 @@ from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 
 EVIDENCE = {'id': pl.String, 'diseaseId': pl.String, 'targetId': pl.String, 'datasourceId': pl.String,
             'datatypeId': pl.String, 'score': pl.Float64, 'extra': pl.String}  # fmt: skip
-MODELS = {'disease': AssociationOtfDisease, 'target': AssociationOtfTarget}
+MODELS = {'disease': AssociationOtfDiseaseView, 'target': AssociationOtfTargetView}
 MEASUREMENT = 'EFO_0001444'
 ANCESTORS = ['EFO_0000001', 'EFO_0000002']
 
@@ -117,7 +117,7 @@ def test_writes_its_models(source: dict[str, str], tmp_path: Path) -> None:
 def test_evidence_as_pts_writes_it_gives_the_same_views(source: dict[str, str], tmp_path: Path) -> None:
     """Evidence stores its datasource and datatype as the shared Enums; the views keep them."""
     strings = _run(source, tmp_path / 'strings')
-    schema = to_polars_schema(AssociationOtfDisease)
+    schema = to_polars_schema(AssociationOtfDiseaseView)
     for path in tmp_path.glob('evidence_*/part-0.parquet'):
         frame = pl.read_parquet(path)
         frame.cast({'datasourceId': schema['datasourceId'], 'datatypeId': schema['datatypeId']}).write_parquet(path)

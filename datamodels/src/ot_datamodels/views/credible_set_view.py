@@ -2,7 +2,7 @@
 
 One row per credible set with the statistics of its lead variant, the number of its variants and whether it is a
 trans QTL. A set is served only with its lead variant's row. Also holds the column types the credible-set read
-models (`study_credible_set`, `target_credible_set`, `variant_credible_set`) share.
+models (`study_credible_set_view`, `target_credible_set_view`, `variant_credible_set_view`) share.
 """
 
 from typing import Annotated, ClassVar

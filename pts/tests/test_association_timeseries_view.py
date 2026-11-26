@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.association_timeseries import AssociationTimeseries
+from ot_datamodels.views.association_timeseries_view import AssociationTimeseriesView
 
 from pts.schemas.association import association_schema
 from pts.schemas.dataset.conform import conform
@@ -77,7 +77,7 @@ def test_explodes_every_timeseries_entry(tmp_path: Path) -> None:
     }
     out = _run(tmp_path, rows)
     assert out.height == 6
-    assert out.schema == to_polars_schema(AssociationTimeseries)
+    assert out.schema == to_polars_schema(AssociationTimeseriesView)
 
 
 def test_by_datasource_int32_counts_upcast_to_int64(tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def test_by_datasource_int32_counts_upcast_to_int64(tmp_path: Path) -> None:
 def test_empty_timeseries_rows_vanish(tmp_path: Path) -> None:
     out = _run(tmp_path, {'overall_direct': [_row('T1', 'D1', None, []), _row('T2', 'D1', None, None)]})
     assert out.height == 0
-    assert out.schema == to_polars_schema(AssociationTimeseries)
+    assert out.schema == to_polars_schema(AssociationTimeseriesView)
 
 
 def test_each_partition_key_in_exactly_one_file_and_files_sorted(tmp_path: Path) -> None:
@@ -186,8 +186,8 @@ def test_writes_its_model(tmp_path: Path) -> None:
     destination = str(tmp_path / 'out')
     association_timeseries_view(_write(tmp_path, rows), destination, {'file_count': 2}, None)
 
-    assert OutputValidation.of(association_timeseries_view, module).outputs == {None: AssociationTimeseries}
-    validate_dataset(AssociationTimeseries, destination)
+    assert OutputValidation.of(association_timeseries_view, module).outputs == {None: AssociationTimeseriesView}
+    validate_dataset(AssociationTimeseriesView, destination)
     assert isinstance(pl.read_parquet_schema(f'{destination}/part-00000.parquet')['aggregationType'], pl.Enum)
 
 

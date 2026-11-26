@@ -41,16 +41,16 @@ opensearch:
 clickhouse:
   aotf_disease:
     table: associations_otf_disease_log
-    input_dir: view/association_otf_disease
-    model: association_otf_disease
+    input_dir: view/association_otf_disease_view
+    model: association_otf_disease_view
     tables:
       - name: associations_otf_disease
         engine: mergetree
         order_by: [A, B, datasourceId]
   aotf_target:
     table: associations_otf_target_log
-    input_dir: view/association_otf_target
-    model: association_otf_target
+    input_dir: view/association_otf_target_view
+    model: association_otf_target_view
     tables:
       - name: associations_otf_target
         engine: mergetree
@@ -77,8 +77,8 @@ clickhouse:
         source_columns: {id: biosampleId, name: biosampleName}
   colocalisation:
     table: colocalisation_log
-    input_dir: view/colocalisation_by_credible_set
-    model: colocalisation_by_credible_set
+    input_dir: view/colocalisation_by_credible_set_view
+    model: colocalisation_by_credible_set_view
     tables:
       - {name: colocalisation, engine: rocksdb}
   credible_sets:
@@ -89,8 +89,8 @@ clickhouse:
       - {name: credible_sets, engine: rocksdb}
   credible_sets_locus:
     table: credible_sets_locus_log
-    input_dir: view/credible_set_locus
-    model: credible_set_locus
+    input_dir: view/credible_set_locus_view
+    model: credible_set_locus_view
     tables:
       - {name: credible_sets_locus, engine: rocksdb}
   disease:
@@ -103,8 +103,8 @@ clickhouse:
       - {name: disease_names, source: disease, key: id, attributes: [name]}
   disease_hpo:
     table: disease_hpo_log
-    input_dir: view/disease_phenotype_by_disease
-    model: disease_phenotype_by_disease
+    input_dir: view/disease_phenotype_by_disease_view
+    model: disease_phenotype_by_disease_view
     tables:
       - {name: disease_hpo, engine: rocksdb}
   drug:
@@ -115,8 +115,8 @@ clickhouse:
       - {name: drug, engine: rocksdb}
   drug_warnings:
     table: drug_warnings_log
-    input_dir: view/drug_warning_by_drug
-    model: drug_warning_by_drug
+    input_dir: view/drug_warning_by_drug_view
+    model: drug_warning_by_drug_view
     tables:
       - {name: drug_warnings, engine: rocksdb}
   enhancer_to_gene:
@@ -169,8 +169,8 @@ clickhouse:
       - {name: hpo, engine: rocksdb}
   l2g_predictions:
     table: l2g_predictions_log
-    input_dir: view/l2g_prediction_by_credible_set
-    model: l2g_prediction_by_credible_set
+    input_dir: view/l2g_prediction_by_credible_set_view
+    model: l2g_prediction_by_credible_set_view
     tables:
       - {name: l2g_predictions, engine: rocksdb}
   literature_entity_lut:
@@ -184,20 +184,20 @@ clickhouse:
         columns: [pmid, pmcid, keywordId, relevance, date, year, month]
   mechanism_of_action:
     table: mechanism_of_action_log
-    input_dir: view/drug_mechanism_of_action_by_drug
-    model: drug_mechanism_of_action_by_drug
+    input_dir: view/drug_mechanism_of_action_by_drug_view
+    model: drug_mechanism_of_action_by_drug_view
     tables:
       - {name: mechanism_of_action, engine: rocksdb}
   mouse_phenotypes:
     table: mouse_phenotypes_log
-    input_dir: view/mouse_phenotype_by_target
-    model: mouse_phenotype_by_target
+    input_dir: view/mouse_phenotype_by_target_view
+    model: mouse_phenotype_by_target_view
     tables:
       - {name: mouse_phenotypes, engine: rocksdb}
   association_time_series:
     table: association_time_series_log
-    input_dir: view/association_timeseries
-    model: association_timeseries
+    input_dir: view/association_timeseries_view
+    model: association_timeseries_view
     tables:
       - name: association_time_series
         engine: mergetree
@@ -206,8 +206,8 @@ clickhouse:
                   yearlyEvidenceCount, isDirect]
   pharmacovigilance:
     table: pharmacovigilance_log
-    input_dir: view/pharmacovigilance_by_drug
-    model: pharmacovigilance_by_drug
+    input_dir: view/pharmacovigilance_by_drug_view
+    model: pharmacovigilance_by_drug_view
     tables:
       - {name: pharmacovigilance, engine: rocksdb}
   otar_projects:
@@ -225,14 +225,14 @@ clickhouse:
       - {name: pharmacogenomics, engine: rocksdb}
   protein_coding_coords_by_target:
     table: protein_coding_coords_by_target_log
-    input_dir: view/coding_variant_by_target
-    model: coding_variant_by_target
+    input_dir: view/coding_variant_by_target_view
+    model: coding_variant_by_target_view
     tables:
       - {name: protein_coding_coords_by_target, engine: rocksdb}
   protein_coding_coords_by_variant:
     table: protein_coding_coords_by_variant_log
-    input_dir: view/coding_variant_by_variant
-    model: coding_variant_by_variant
+    input_dir: view/coding_variant_by_variant_view
+    model: coding_variant_by_variant_view
     tables:
       - {name: protein_coding_coords_by_variant, engine: rocksdb}
   w2v:
@@ -277,8 +277,8 @@ clickhouse:
       - {name: target_symbols, source: targets, key: id, attributes: [approvedSymbol]}
   targets_by_region:
     table: targets_by_region_log
-    input_dir: view/target_by_region
-    model: target_by_region
+    input_dir: view/target_by_region_view
+    model: target_by_region_view
     tables:
       - {name: targets_by_region, engine: mergetree, order_by: [chromosome, start, end]}
   transcript:
@@ -295,24 +295,24 @@ clickhouse:
       - {name: variants, engine: rocksdb}
   variant_credible_sets:
     table: variant_credible_sets_log
-    input_dir: view/variant_credible_set
-    model: variant_credible_set
+    input_dir: view/variant_credible_set_view
+    model: variant_credible_set_view
     tables:
       - name: variant_credible_sets
         engine: mergetree
         order_by: [studyType, variantId, topL2GScore, credibleSetId]
   study_credible_sets:
     table: study_credible_sets_log
-    input_dir: view/study_credible_set
-    model: study_credible_set
+    input_dir: view/study_credible_set_view
+    model: study_credible_set_view
     tables:
       - name: study_credible_sets
         engine: mergetree
         order_by: [studyId, pValueExponent, pValueMantissa, credibleSetId]
   target_credible_sets:
     table: target_credible_sets_log
-    input_dir: view/target_credible_set
-    model: target_credible_set
+    input_dir: view/target_credible_set_view
+    model: target_credible_set_view
     tables:
       - name: target_credible_sets
         engine: mergetree

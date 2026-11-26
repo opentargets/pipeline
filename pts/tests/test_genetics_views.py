@@ -13,8 +13,8 @@ from ot_datamodels import DatasetModel
 from ot_datamodels.outputs.colocalisation import Colocalisation
 from ot_datamodels.outputs.l2g_prediction import L2gPrediction
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
-from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
+from ot_datamodels.views.colocalisation_by_credible_set_view import ColocalisationByCredibleSetView
+from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
 from otter.config.model import Config
 
 from pts.schemas.dataset.validate import validate_dataset
@@ -154,10 +154,10 @@ def test_bucketed_step_writes_the_unbucketed_view(tmp_path: Path, bucket_count: 
     colocalisation_view(str(tmp_path / 'output'), destination, settings, config)
 
     module = importlib.import_module(colocalisation_view.__module__)
-    assert OutputValidation.of(colocalisation_view, module).outputs == {'view': ColocalisationByCredibleSet}
-    validate_dataset(ColocalisationByCredibleSet, destination['view'])
+    assert OutputValidation.of(colocalisation_view, module).outputs == {'view': ColocalisationByCredibleSetView}
+    validate_dataset(ColocalisationByCredibleSetView, destination['view'])
     written = pl.read_parquet(destination['view'])
-    assert written.schema == to_polars_schema(ColocalisationByCredibleSet)
+    assert written.schema == to_polars_schema(ColocalisationByCredibleSetView)
     assert len(list((tmp_path / 'view').glob('*.parquet'))) == bucket_count
     assert _sorted(written).equals(_sorted(colocalisation_view_frame(rows)))
     assert written['credibleSetId'].n_unique() == written.height == 50
@@ -302,8 +302,8 @@ def test_l2g_step_writes_its_model(tmp_path: Path):
 
     module.l2g_prediction_view(str(tmp_path / 'output'), destination, {}, None)
 
-    assert OutputValidation.of(module.l2g_prediction_view, module).outputs == {'view': L2gPredictionByCredibleSet}
-    validate_dataset(L2gPredictionByCredibleSet, destination['view'])
+    assert OutputValidation.of(module.l2g_prediction_view, module).outputs == {'view': L2gPredictionByCredibleSetView}
+    validate_dataset(L2gPredictionByCredibleSetView, destination['view'])
     written = pl.read_parquet(destination['view'])
-    assert written.schema == to_polars_schema(L2gPredictionByCredibleSet)
+    assert written.schema == to_polars_schema(L2gPredictionByCredibleSetView)
     assert written.height == 2

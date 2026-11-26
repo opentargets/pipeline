@@ -1,4 +1,4 @@
-"""Mouse phenotypes by target: the `mouse_phenotype_by_target` view (pts `mouse_phenotype_by_target`).
+"""Mouse phenotypes by target: the `mouse_phenotype_by_target_view` view (pts `mouse_phenotype_by_target`).
 
 One row per human target of `mouse_phenotype`, as served in `mouse_phenotypes`: its mouse phenotypes ordered by
 `modelPhenotypeId, targetInModelMgiId`, each the output row.
@@ -15,10 +15,10 @@ TargetFromSourceId = from_output(MousePhenotype, 'targetFromSourceId', primary_k
 MousePhenotypeItem = row_of(MousePhenotype, list(MousePhenotype.model_fields), name='MousePhenotypeItem')
 
 
-class MousePhenotypeByTarget(DatasetModel):
+class MousePhenotypeByTargetView(DatasetModel):
     """Mouse phenotypes by target."""
 
-    dataset_name: ClassVar[str] = 'mouse_phenotype_by_target'
+    dataset_name: ClassVar[str] = 'mouse_phenotype_by_target_view'
     dataset_title: ClassVar[str] = 'Mouse phenotypes by target'
     dataset_description: ClassVar[str] = 'Phenotypes of mouse models mapped to each human target, as served by target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)

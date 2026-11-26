@@ -1,4 +1,4 @@
-"""Colocalisation by credible set: the `colocalisation_by_credible_set` view, served as `colocalisation`.
+"""Colocalisation by credible set: the `colocalisation_by_credible_set_view` view, served as `colocalisation`.
 
 Written by pts `colocalisation_view`. One row per credible set with every colocalisation it takes part in, from
 both sides: an output row as is (`leftLocusId` as `credibleSetId`) and swapped (`rightLocusId` as `credibleSetId`,
@@ -45,10 +45,10 @@ class ColocalisationRow(StructModel):
     betaRatioSignAverage: BetaRatioSignAverage
 
 
-class ColocalisationByCredibleSet(DatasetModel):
+class ColocalisationByCredibleSetView(DatasetModel):
     """Colocalisation by credible set."""
 
-    dataset_name: ClassVar[str] = 'colocalisation_by_credible_set'
+    dataset_name: ClassVar[str] = 'colocalisation_by_credible_set_view'
     dataset_title: ClassVar[str] = 'Colocalisation by credible set'
     dataset_description: ClassVar[str] = 'The colocalisations of each credible set, from either side'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)

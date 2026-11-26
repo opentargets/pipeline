@@ -1,4 +1,4 @@
-"""Credible set locus: the `credible_set_locus` view (pts `credible_set_view`), served as `credible_sets_locus`.
+"""Credible set locus: the `credible_set_locus_view` view (pts `credible_set_view`), served as `credible_sets_locus`.
 
 One row per credible set with its variants, by `posteriorProbability` descending, then `variantId`.
 """
@@ -72,10 +72,10 @@ class LocusRow(StructModel):
     )
 
 
-class CredibleSetLocus(DatasetModel):
+class CredibleSetLocusView(DatasetModel):
     """Credible set locus."""
 
-    dataset_name: ClassVar[str] = 'credible_set_locus'
+    dataset_name: ClassVar[str] = 'credible_set_locus_view'
     dataset_title: ClassVar[str] = 'Credible set locus'
     dataset_description: ClassVar[str] = 'The variants of each credible set, most probable first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)

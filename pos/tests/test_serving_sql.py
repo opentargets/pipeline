@@ -175,18 +175,19 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 
 
 #: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs;
-#: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug: a top-level list, and in a list of structs;
-#: disease_phenotype_by_disease: Nullable, in a list of structs in a list of structs), and the dataset each loads into.
+#: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug_view: a top-level list, and in a list
+#: of structs; disease_phenotype_by_disease_view: Nullable, in a list of structs in a list of structs), and the
+#: dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
-    'colocalisation_by_credible_set': 'colocalisation',
+    'colocalisation_by_credible_set_view': 'colocalisation',
     'variant_view': 'variants',
     'interaction_view': 'interaction',
     'evidence_gene_burden': 'evidence',
-    'target_by_region': 'targets_by_region',
+    'target_by_region_view': 'targets_by_region',
     'target_view': 'targets',
-    'drug_mechanism_of_action_by_drug': 'mechanism_of_action',
-    'disease_phenotype_by_disease': 'disease_hpo',
+    'drug_mechanism_of_action_by_drug_view': 'mechanism_of_action',
+    'disease_phenotype_by_disease_view': 'disease_hpo',
     'transcript_view': 'transcript',
 }
 

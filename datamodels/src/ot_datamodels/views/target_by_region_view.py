@@ -1,4 +1,4 @@
-"""Target by region: the `target_by_region` view (pts `target_view`), served as `targets_by_region`.
+"""Target by region: the `target_by_region_view` view (pts `target_view`), served as `targets_by_region`.
 
 One row per target: its genomic location and its id, for region lookups.
 """
@@ -22,10 +22,10 @@ class TargetByRegionTarget(StructModel):
     id: RegionTargetId
 
 
-class TargetByRegion(DatasetModel):
+class TargetByRegionView(DatasetModel):
     """Target by region."""
 
-    dataset_name: ClassVar[str] = 'target_by_region'
+    dataset_name: ClassVar[str] = 'target_by_region_view'
     dataset_title: ClassVar[str] = 'Target by region'
     dataset_description: ClassVar[str] = 'The genomic location of every target, with its id'
     example: ClassVar[dict] = {

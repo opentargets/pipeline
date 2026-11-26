@@ -1,4 +1,4 @@
-"""Protein coding coordinates by variant: the `coding_variant_by_variant` view (pts `coding_variant`).
+"""Protein coding coordinates by variant: the `coding_variant_by_variant_view` view (pts `coding_variant`).
 
 One row per variant with evidence and an amino acid changing transcript consequence, as served in
 `protein_coding_coords_by_variant`: its consequences, each with the diseases, therapeutic areas and datasources
@@ -78,10 +78,10 @@ COORD_EXAMPLE = {
 }
 
 
-class CodingVariantByVariant(DatasetModel):
+class CodingVariantByVariantView(DatasetModel):
     """Protein coding coordinates by variant."""
 
-    dataset_name: ClassVar[str] = 'coding_variant_by_variant'
+    dataset_name: ClassVar[str] = 'coding_variant_by_variant_view'
     dataset_title: ClassVar[str] = 'Protein coding coordinates by variant'
     dataset_description: ClassVar[str] = (
         'Amino acid changing consequences of each variant with evidence, with the diseases, therapeutic areas '

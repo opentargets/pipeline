@@ -9,7 +9,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.association_timeseries import AssociationTimeseries
+from ot_datamodels.views.association_timeseries_view import AssociationTimeseriesView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -37,7 +37,7 @@ TIMESERIES = pl.List(
 )
 
 
-@writes(AssociationTimeseries)
+@writes(AssociationTimeseriesView)
 def association_timeseries_view(
     source: dict[str, str],
     destination: str,
@@ -97,10 +97,10 @@ def association_timeseries_view(
                     ignore_nulls=True,
                 ).alias('partitionKey')
             )
-            .select(to_polars_schema(AssociationTimeseries).names())
+            .select(to_polars_schema(AssociationTimeseriesView).names())
             .sort(SORT)
         )
-        conform(view, AssociationTimeseries).collect().write_parquet(
+        conform(view, AssociationTimeseriesView).collect().write_parquet(
             f'{destination}/part-{index:05d}.parquet',
             compression='zstd',
             statistics=True,

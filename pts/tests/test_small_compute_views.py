@@ -16,11 +16,11 @@ from ot_datamodels.outputs.drug_warning import DrugWarning
 from ot_datamodels.outputs.mouse_phenotype import MousePhenotype
 from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
-from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
-from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
-from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
-from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.disease_phenotype_by_disease_view import DiseasePhenotypeByDiseaseView
+from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import MECHANISM_FIELDS, DrugMechanismOfActionByDrugView
+from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView
+from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView
+from ot_datamodels.views.pharmacovigilance_by_drug_view import PharmacovigilanceByDrugView
 
 from pts.schemas.dataset.validate import validate_dataset
 from pts.task_outputs import OutputValidation
@@ -230,11 +230,11 @@ def test_critical_value_is_the_first_event_s():
 # every view
 
 VIEWS = [
-    ('disease_phenotype_by_disease', DiseasePhenotype, DiseasePhenotypeByDisease, 'disease'),
-    ('mouse_phenotype_by_target', MousePhenotype, MousePhenotypeByTarget, 'targetFromSourceId'),
-    ('drug_warning_by_drug', DrugWarning, DrugWarningByDrug, 'chemblIds'),
-    ('drug_mechanism_of_action_by_drug', DrugMechanismOfAction, DrugMechanismOfActionByDrug, 'chemblIds'),
-    ('pharmacovigilance_by_drug', Pharmacovigilance, PharmacovigilanceByDrug, 'chembl_id'),
+    ('disease_phenotype_by_disease', DiseasePhenotype, DiseasePhenotypeByDiseaseView, 'disease'),
+    ('mouse_phenotype_by_target', MousePhenotype, MousePhenotypeByTargetView, 'targetFromSourceId'),
+    ('drug_warning_by_drug', DrugWarning, DrugWarningByDrugView, 'chemblIds'),
+    ('drug_mechanism_of_action_by_drug', DrugMechanismOfAction, DrugMechanismOfActionByDrugView, 'chemblIds'),
+    ('pharmacovigilance_by_drug', Pharmacovigilance, PharmacovigilanceByDrugView, 'chembl_id'),
 ]
 
 

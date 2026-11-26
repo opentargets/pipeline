@@ -18,11 +18,11 @@ import polars as pl
 from loguru import logger
 from ot_datamodels import DatasetModel
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.credible_set_locus import LOCUS_FIELDS, CredibleSetLocus
+from ot_datamodels.views.credible_set_locus_view import LOCUS_FIELDS, CredibleSetLocusView
 from ot_datamodels.views.credible_set_view import CredibleSetView
-from ot_datamodels.views.study_credible_set import StudyCredibleSet
-from ot_datamodels.views.target_credible_set import TargetCredibleSet
-from ot_datamodels.views.variant_credible_set import VariantCredibleSet
+from ot_datamodels.views.study_credible_set_view import StudyCredibleSetView
+from ot_datamodels.views.target_credible_set_view import TargetCredibleSetView
+from ot_datamodels.views.variant_credible_set_view import VariantCredibleSetView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform, without_enums
@@ -61,12 +61,12 @@ READ_MODEL_NAMES = {
 #: Destination key -> the model of the view it holds.
 VIEWS: dict[str, type[DatasetModel]] = {
     'view': CredibleSetView,
-    'locus': CredibleSetLocus,
-    'study': StudyCredibleSet,
-    'target': TargetCredibleSet,
-    'variant': VariantCredibleSet,
+    'locus': CredibleSetLocusView,
+    'study': StudyCredibleSetView,
+    'target': TargetCredibleSetView,
+    'variant': VariantCredibleSetView,
 }
-DISEASES = to_polars_schema(VariantCredibleSet)['diseases']
+DISEASES = to_polars_schema(VariantCredibleSetView)['diseases']
 
 
 def top_l2g(l2g_prediction: pl.DataFrame, target: pl.DataFrame) -> pl.DataFrame:

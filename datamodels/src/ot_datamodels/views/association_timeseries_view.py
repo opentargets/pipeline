@@ -1,4 +1,4 @@
-"""Association timeseries: the `association_timeseries` view (pts `association_timeseries_view`).
+"""Association timeseries: the `association_timeseries_view` view (pts `association_timeseries_view`).
 
 The overall and by-datasource associations, direct and indirect, flattened to one row per association,
 aggregation value and year of its timeseries.
@@ -21,10 +21,10 @@ Novelty = from_output(Timeseries, 'novelty')
 YearlyEvidenceCount = from_output(Timeseries, 'yearlyEvidenceCount')
 
 
-class AssociationTimeseries(DatasetModel):
+class AssociationTimeseriesView(DatasetModel):
     """Association timeseries."""
 
-    dataset_name: ClassVar[str] = 'association_timeseries'
+    dataset_name: ClassVar[str] = 'association_timeseries_view'
     dataset_title: ClassVar[str] = 'Association timeseries'
     dataset_description: ClassVar[str] = (
         'Overall and by data source association scores, direct and indirect, one row per year of their timeseries'

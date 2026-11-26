@@ -1,4 +1,4 @@
-"""L2G prediction by credible set: the `l2g_prediction_by_credible_set` view, served as `l2g_predictions`.
+"""L2G prediction by credible set: the `l2g_prediction_by_credible_set_view` view, served as `l2g_predictions`.
 
 Written by pts `l2g_prediction_view`. One row per credible set with its `l2g_prediction` rows, by `score`
 descending, then `geneId`.
@@ -40,10 +40,10 @@ class L2gPredictionRow(StructModel):
     shapBaseValue: ShapBaseValue
 
 
-class L2gPredictionByCredibleSet(DatasetModel):
+class L2gPredictionByCredibleSetView(DatasetModel):
     """L2G prediction by credible set."""
 
-    dataset_name: ClassVar[str] = 'l2g_prediction_by_credible_set'
+    dataset_name: ClassVar[str] = 'l2g_prediction_by_credible_set_view'
     dataset_title: ClassVar[str] = 'L2G prediction by credible set'
     dataset_description: ClassVar[str] = 'The Locus-to-Gene (L2G) predictions of each credible set, best first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)

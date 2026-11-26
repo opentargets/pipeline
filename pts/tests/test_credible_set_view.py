@@ -18,7 +18,7 @@ from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.credible_set_locus import LOCUS_FIELDS
+from ot_datamodels.views.credible_set_locus_view import LOCUS_FIELDS
 from otter.config.model import Config
 
 from pts.schemas.dataset.validate import validate_dataset

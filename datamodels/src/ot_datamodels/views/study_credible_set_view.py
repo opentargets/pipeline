@@ -1,4 +1,4 @@
-"""Study credible set: the `study_credible_set` view (pts `credible_set_view`), served as `study_credible_sets`.
+"""Study credible set: the `study_credible_set_view` view (pts `credible_set_view`), served as `study_credible_sets`.
 
 One row per GWAS credible set, for the study page: its lead variant and statistics, and its top L2G gene (the
 highest score, then the lowest `geneId`; null without predictions).
@@ -29,10 +29,10 @@ TopL2GScore = from_output(L2gPrediction, 'score', nullable=True)
 _SET = CredibleSetView.example
 
 
-class StudyCredibleSet(DatasetModel):
+class StudyCredibleSetView(DatasetModel):
     """Study credible set."""
 
-    dataset_name: ClassVar[str] = 'study_credible_set'
+    dataset_name: ClassVar[str] = 'study_credible_set_view'
     dataset_title: ClassVar[str] = 'Study credible set'
     dataset_description: ClassVar[str] = (
         'The GWAS credible sets of each study, with their lead variant and top L2G gene'

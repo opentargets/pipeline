@@ -1,4 +1,6 @@
-"""Mechanisms of action by drug: the `drug_mechanism_of_action_by_drug` view (pts `drug_mechanism_of_action_by_drug`).
+"""Mechanisms of action by drug: the `drug_mechanism_of_action_by_drug_view` view.
+
+Written by pts `drug_mechanism_of_action_by_drug`.
 
 One row per molecule named in a `drug_mechanism_of_action` row's `chemblIds`, as served in `mechanism_of_action`:
 the mechanisms naming it and the distinct target and action types among them, in vocabulary order. A mechanism
@@ -22,10 +24,10 @@ MechanismItem = row_of(DrugMechanismOfAction, MECHANISM_FIELDS, name='MechanismI
 _EXAMPLE = DrugMechanismOfAction.example
 
 
-class DrugMechanismOfActionByDrug(DatasetModel):
+class DrugMechanismOfActionByDrugView(DatasetModel):
     """Mechanisms of action by drug."""
 
-    dataset_name: ClassVar[str] = 'drug_mechanism_of_action_by_drug'
+    dataset_name: ClassVar[str] = 'drug_mechanism_of_action_by_drug_view'
     dataset_title: ClassVar[str] = 'Mechanisms of action by drug'
     dataset_description: ClassVar[str] = 'Mechanisms of action of each drug molecule, as served by molecule'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)

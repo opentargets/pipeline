@@ -1,4 +1,4 @@
-"""Association on-the-fly, disease side: the `association_otf_disease` view (pts `association_otf`).
+"""Association on-the-fly, disease side: the `association_otf_disease_view` view (pts `association_otf`).
 
 One row per evidence as served in `associations_otf_disease`: the disease is `A`, the target `B`, and the
 labels are lower-cased for search.
@@ -26,10 +26,10 @@ NoveltyDirect = from_output(AssociationOverallDirect, 'currentNovelty', nullable
 NoveltyIndirect = from_output(AssociationOverallIndirect, 'currentNovelty', nullable=True)
 
 
-class AssociationOtfDisease(DatasetModel):
+class AssociationOtfDiseaseView(DatasetModel):
     """Association on-the-fly, disease side."""
 
-    dataset_name: ClassVar[str] = 'association_otf_disease'
+    dataset_name: ClassVar[str] = 'association_otf_disease_view'
     dataset_title: ClassVar[str] = 'Association on-the-fly, disease side'
     dataset_description: ClassVar[str] = (
         'Every evidence keyed by its disease (A) and target (B), with lower-cased labels for search and the '

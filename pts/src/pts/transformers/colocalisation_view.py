@@ -16,7 +16,7 @@ from typing import Any, get_args
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
+from ot_datamodels.views.colocalisation_by_credible_set_view import ColocalisationByCredibleSetView
 from ot_datamodels.vocabularies import Chromosome, StudyType
 from otter.config.model import Config
 
@@ -86,7 +86,7 @@ def colocalisation_view_frame(rows: pl.DataFrame) -> pl.DataFrame:
     return by_credible_set(both_sides(rows))
 
 
-@writes(view=ColocalisationByCredibleSet)
+@writes(view=ColocalisationByCredibleSetView)
 def colocalisation_view(
     source: str,
     destination: dict[str, str],
@@ -123,7 +123,7 @@ def colocalisation_view(
             rows = read_bucket(directory, bucket)
             if rows is None:
                 return 0, 0
-            view = conform(by_credible_set(rows), ColocalisationByCredibleSet)
+            view = conform(by_credible_set(rows), ColocalisationByCredibleSetView)
             view.write_parquet(f'{path}/part-{bucket:05d}.parquet', compression='zstd', statistics=True)
             served = int(view['colocalisation'].list.len().sum())
             logger.info(f'colocalisation bucket {bucket + 1}/{bucket_count}: {view.height} sets, {served} tuples')
