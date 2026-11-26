@@ -2,8 +2,8 @@
 
 The target dataset with its homologues, tractability, safety liabilities, chemical probes and
 transcripts nested back in, in the shape target had before they were split out of it, then the ids of
-its credible sets and pharmacogenomics records: the served `targets`. `tep` is not reproduced and
-`alternativeGenes` is always null. Also writes the served `targets_by_region` and `transcript`.
+its credible sets and pharmacogenomics records: the served `target_view`. `tep` is not reproduced and
+`alternativeGenes` is always null. Also writes the served `target_by_region_view` and `transcript_view`.
 """
 
 from __future__ import annotations

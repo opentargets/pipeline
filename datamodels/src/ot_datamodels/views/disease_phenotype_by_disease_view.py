@@ -1,6 +1,6 @@
 """Disease phenotypes by disease: the `disease_phenotype_by_disease_view` view (pts `disease_phenotype_by_disease`).
 
-One row per disease of `disease_phenotype`, as served in `disease_hpo`: its phenotypes ordered by `phenotype`, each
+One row per disease of `disease_phenotype`: its phenotypes ordered by `phenotype`, each
 the output row.
 """
 

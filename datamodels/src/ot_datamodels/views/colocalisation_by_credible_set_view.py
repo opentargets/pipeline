@@ -1,4 +1,4 @@
-"""Colocalisation by credible set: the `colocalisation_by_credible_set_view` view, served as `colocalisation`.
+"""Colocalisation by credible set: the `colocalisation_by_credible_set_view` view.
 
 Written by pts `colocalisation_view`. One row per credible set with every colocalisation it takes part in, from
 both sides: an output row as is (`leftLocusId` as `credibleSetId`) and swapped (`rightLocusId` as `credibleSetId`,

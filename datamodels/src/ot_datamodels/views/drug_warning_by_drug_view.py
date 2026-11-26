@@ -1,6 +1,6 @@
 """Drug warnings by drug: the `drug_warning_by_drug_view` view (pts `drug_warning_by_drug`).
 
-One row per molecule named in a `drug_warning` row's `chemblIds`, as served in `drug_warnings`: the warnings naming
+One row per molecule named in a `drug_warning` row's `chemblIds`: the warnings naming
 it, ordered by `id`, each the output row. A warning naming no molecule is in no row.
 """
 

@@ -1,4 +1,4 @@
-"""Study view: the `study_view` view (pts `study_view`), served as `studies`.
+"""Study view: the `study_view` view (pts `study_view`).
 
 Every study row with the ids of its credible sets.
 """

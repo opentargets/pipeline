@@ -19,9 +19,10 @@ It depends on `pydantic` and `polars` only. It imports neither pts nor pandera, 
 | `docs` | documentation JSON |
 | `discovery` | `discover_datasets()`: every concrete model under `ot_datamodels.outputs`; `discover_models()`: those and the views |
 | `derive` | `from_output` and `row_of`: view columns copied from output columns |
+| `serving` | `Serving` and `ClickHouseDictionary`: how a view is served in ClickHouse |
 | `vocabularies` | the closed vocabularies stored as Enums, one `Literal` per vocabulary, with its source |
 | `outputs/` | one module per dataset (or family); `patterns.py` holds shared regexes |
-| `views/` | one module per pts view (`view/<name>`); not release outputs, so not in `discover_datasets()` |
+| `views/` | one module per pts view (`view/<dataset_name>`), named after it; not release outputs, so not in `discover_datasets()` |
 
 ## What a model may state
 
@@ -72,6 +73,32 @@ No generator exists; write the model by hand.
    `StructModel` subclasses. Reuse `outputs/patterns.py` and `outputs/common.py`.
 3. `discover_datasets()` finds it; nothing is registered.
 4. Run the tests here, then pts's and pos's.
+
+## Views
+
+A view's `dataset_name` ends in `_view`, its module is named after it and its class ends in `View`
+(`TargetView` in `views/target_view.py`); pts writes it to `view/<dataset_name>`. pts step names are
+not renamed with it (they are DAG task ids).
+
+Every view declares how pos serves it, on the class:
+
+```python
+class TargetView(Target):
+    dataset_name: ClassVar[str] = 'target_view'
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        dictionaries=(ClickHouseDictionary('target_symbols', key='id', attributes=('approvedSymbol',)),),
+    )
+```
+
+`Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by` (required there,
+refused on RocksDB) and the dictionaries built from the table. The served table is the whole view,
+named `dataset_name`; pos derives the rest from the model: the RocksDB key is its one `PrimaryKey`, the
+landing table `<dataset_name>_log`, the input `view/<dataset_name>` and the products the model's
+(`pos/AGENTS.md`, ClickHouse landing tables). A column the API does not read is dropped from the view,
+not from the table. Renaming a view renames its ClickHouse table: add the rename to
+`pos/docs/api_follow_ups.csv`. `tests/test_serving.py` checks the declarations against the columns;
+output models have no `Serving`.
 
 ## Deriving a view's columns
 

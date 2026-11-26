@@ -1,6 +1,6 @@
 """Interaction view dataset generation.
 
-One row per `targetA` in the served `interaction` shape: its interactions in `interaction` order,
+One row per `targetA` in the served `interaction_view` shape: its interactions in `interaction` order,
 each with its evidence in `interaction_evidence` order.
 """
 

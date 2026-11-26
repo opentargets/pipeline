@@ -1,4 +1,4 @@
-"""Credible set view: the `credible_set_view` view (pts `credible_set_view`), served as `credible_sets`.
+"""Credible set view: the `credible_set_view` view (pts `credible_set_view`).
 
 One row per credible set with the statistics of its lead variant, the number of its variants and whether it is a
 trans QTL. A set is served only with its lead variant's row. Also holds the column types the credible-set read

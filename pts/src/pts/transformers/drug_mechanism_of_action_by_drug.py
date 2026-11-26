@@ -1,4 +1,4 @@
-"""Mechanisms of action by drug: the served `mechanism_of_action` shape.
+"""Mechanisms of action by drug: the served `drug_mechanism_of_action_by_drug_view` shape.
 
 One row per molecule in a mechanism's `chemblIds`: the mechanisms naming it by `mechanismOfAction, actionType,
 targetName, curation` (Enums in vocabulary order, ties in output order), and their distinct target and action types in

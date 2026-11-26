@@ -1,4 +1,4 @@
-"""Pharmacovigilance by drug: the served `pharmacovigilance` shape.
+"""Pharmacovigilance by drug: the served `pharmacovigilance_by_drug_view` shape.
 
 One row per drug: its adverse events by `logLR` descending, then `name`, and `criticalValue`, the first event's
 `critval`.

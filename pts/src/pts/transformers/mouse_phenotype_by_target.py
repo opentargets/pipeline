@@ -1,4 +1,4 @@
-"""Mouse phenotypes by target: the served `mouse_phenotypes` shape.
+"""Mouse phenotypes by target: the served `mouse_phenotype_by_target_view` shape.
 
 One row per human target, its `mouse_phenotype` rows nested by `modelPhenotypeId, targetInModelMgiId`.
 """

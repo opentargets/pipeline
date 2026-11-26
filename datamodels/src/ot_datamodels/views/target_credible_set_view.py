@@ -1,4 +1,4 @@
-"""Target credible set: the `target_credible_set_view` view (pts `credible_set_view`), served as `target_credible_sets`.
+"""Target credible set: the `target_credible_set_view` view (pts `credible_set_view`).
 
 One row per target and credible set of a study of that target (`study.geneId`), for the target page's molQTL
 table: the set's lead variant and statistics, and its study's condition and biosample.

@@ -1,6 +1,6 @@
 """Association on-the-fly, target side: the `association_otf_target_view` view (pts `association_otf`).
 
-One row per evidence as served in `associations_otf_target`: the target is `A`, the disease `B`, and the
+One row per evidence: the target is `A`, the disease `B`, and the
 disease's ancestors are the indirect keys.
 """
 

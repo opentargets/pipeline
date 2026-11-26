@@ -1,4 +1,4 @@
-"""Target prioritisation view: the `target_prioritisation_view` view, served as `target_prioritisation`.
+"""Target prioritisation view: the `target_prioritisation_view` view.
 
 Written by pts `target_prioritisation_view`: one row per `target_prioritisation` row, its non-null values as
 (name, value) strings in ClickHouse `toString` form, then the target's DepMap essentiality.

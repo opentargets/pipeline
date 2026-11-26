@@ -1,5 +1,7 @@
 ---
 # input_dir is relative to the synced release data; croissant is written by ot_croissant.
+# The served views are not here: each view model declares its ClickHouse table (`clickhouse = Serving(...)`)
+# and pos derives its entry (pos.clickhouse_ddl.served_entries); an entry here may not share a view's name.
 # Every clickhouse entry has exactly one of `model:` and `models:` (a glob); its landing table comes from the
 # ot_datamodels model (`pos-ddl <dataset>` prints it); `engine:` defaults to Log.
 # `tables:` and `dictionaries:` declare what a load builds from the landing table, which it then drops

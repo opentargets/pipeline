@@ -1,6 +1,6 @@
 """Association on-the-fly, disease side: the `association_otf_disease_view` view (pts `association_otf`).
 
-One row per evidence as served in `associations_otf_disease`: the disease is `A`, the target `B`, and the
+One row per evidence: the disease is `A`, the target `B`, and the
 labels are lower-cased for search.
 """
 

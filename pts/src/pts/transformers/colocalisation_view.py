@@ -1,4 +1,4 @@
-"""Colocalisation by credible set: the served `colocalisation` shape.
+"""Colocalisation by credible set: the served `colocalisation_by_credible_set_view` shape.
 
 Every output row twice: as is (`leftLocusId` as `credibleSetId`) and swapped (`rightLocusId` as `credibleSetId`,
 `rightStudyType` `gwas`). Repeated tuples are kept once, then each credible set gets its tuples sorted by every

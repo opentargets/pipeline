@@ -1,4 +1,4 @@
-"""Credible set locus: the `credible_set_locus_view` view (pts `credible_set_view`), served as `credible_sets_locus`.
+"""Credible set locus: the `credible_set_locus_view` view (pts `credible_set_view`).
 
 One row per credible set with its variants, by `posteriorProbability` descending, then `variantId`.
 """

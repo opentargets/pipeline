@@ -1,8 +1,7 @@
 """Protein coding coordinates by variant: the `coding_variant_by_variant_view` view (pts `coding_variant`).
 
-One row per variant with evidence and an amino acid changing transcript consequence, as served in
-`protein_coding_coords_by_variant`: its consequences, each with the diseases, therapeutic areas and datasources
-behind the variant.
+One row per variant with evidence and an amino acid changing transcript consequence: its consequences, each with
+the diseases, therapeutic areas and datasources behind the variant.
 """
 
 from typing import Annotated, ClassVar

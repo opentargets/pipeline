@@ -1,4 +1,4 @@
-"""Credible set views: the served `credible_sets`, `credible_sets_locus` and the three credible-set read models.
+"""Credible set views: the served `credible_set_view`, `credible_set_locus_view` and the three credible-set read models.
 
 Replaces `credible_sets.sql`, `study_credible_sets.sql`, `target_credible_sets.sql` and `variant_credible_sets.sql`.
 A set-level frame (each credible set with its lead variant's alleles, its study's trait, condition, target,

@@ -1,4 +1,4 @@
-"""Study view: every study with the ids of its credible sets, the served `studies` (was `studies.sql`)."""
+"""Study view: every study with the ids of its credible sets, the served `study_view` (was `studies.sql`)."""
 
 from __future__ import annotations
 

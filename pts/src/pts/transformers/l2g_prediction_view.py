@@ -1,4 +1,4 @@
-"""L2G prediction by credible set: the served `l2g_predictions` shape.
+"""L2G prediction by credible set: the served `l2g_prediction_by_credible_set_view` shape.
 
 One row per credible set with its predictions by `score` descending, then `geneId`.
 """

@@ -1,4 +1,4 @@
-"""Study credible set: the `study_credible_set_view` view (pts `credible_set_view`), served as `study_credible_sets`.
+"""Study credible set: the `study_credible_set_view` view (pts `credible_set_view`).
 
 One row per GWAS credible set, for the study page: its lead variant and statistics, and its top L2G gene (the
 highest score, then the lowest `geneId`; null without predictions).

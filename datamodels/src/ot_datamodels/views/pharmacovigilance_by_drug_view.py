@@ -1,6 +1,6 @@
 """Pharmacovigilance by drug: the `pharmacovigilance_by_drug_view` view (pts `pharmacovigilance_by_drug`).
 
-One row per drug of `pharmacovigilance`, as served in `pharmacovigilance`: its adverse events by `logLR` descending,
+One row per drug of `pharmacovigilance`: its adverse events by `logLR` descending,
 then `name`, and the drug's critical value.
 """
 

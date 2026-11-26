@@ -1,4 +1,4 @@
-"""Drug warnings by drug: the served `drug_warnings` shape.
+"""Drug warnings by drug: the served `drug_warning_by_drug_view` shape.
 
 One row per molecule in a warning's `chemblIds`, the warnings naming it nested by `id`. A warning naming no molecule
 is in no row; one naming a molecule twice is in its row twice.

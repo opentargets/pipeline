@@ -1,4 +1,4 @@
-"""Variant view: the `variant_view` view (pts `variant_view`), served as `variants`.
+"""Variant view: the `variant_view` view (pts `variant_view`).
 
 Every variant row with the ids of the credible sets it is in and of the pharmacogenomics records naming it.
 """

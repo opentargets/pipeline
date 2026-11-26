@@ -1,4 +1,4 @@
-"""Transcript view: the `transcript_view` view (pts `target_view`), served as `transcript`.
+"""Transcript view: the `transcript_view` view (pts `target_view`).
 
 One row per target with its `transcript` rows nested in, in the transcript's column order.
 """

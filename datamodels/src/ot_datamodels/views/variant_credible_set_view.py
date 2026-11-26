@@ -1,4 +1,4 @@
-"""Variant credible set: the `variant_credible_set_view` view, served as `variant_credible_sets`.
+"""Variant credible set: the `variant_credible_set_view` view.
 
 Written by pts `credible_set_view`.
 

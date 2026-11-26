@@ -1,4 +1,4 @@
-"""Target view: the `target_view` view (pts `target_view`), served as `targets`.
+"""Target view: the `target_view` view (pts `target_view`).
 
 Every target row with its homologues, tractability, safety liabilities, chemical probes and transcripts
 nested back in, then the ids of its credible sets and pharmacogenomics records. Each nested list is null

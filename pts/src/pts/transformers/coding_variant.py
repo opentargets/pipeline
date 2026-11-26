@@ -1,4 +1,4 @@
-"""Coding variant views: the served `protein_coding_coords_by_variant` and `protein_coding_coords_by_target`.
+"""Coding variant views: the served `coding_variant_by_variant_view` and `coding_variant_by_target_view`.
 
 Ported from the pyspark coding_variant step. Lists every amino acid changing consequence of a
 variant that has evidence, with the diseases, therapeutic areas and datasources behind it, grouped

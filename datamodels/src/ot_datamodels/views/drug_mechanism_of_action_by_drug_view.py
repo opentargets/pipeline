@@ -2,7 +2,7 @@
 
 Written by pts `drug_mechanism_of_action_by_drug`.
 
-One row per molecule named in a `drug_mechanism_of_action` row's `chemblIds`, as served in `mechanism_of_action`:
+One row per molecule named in a `drug_mechanism_of_action` row's `chemblIds`:
 the mechanisms naming it and the distinct target and action types among them, in vocabulary order. A mechanism
 naming no molecule is in no row.
 """

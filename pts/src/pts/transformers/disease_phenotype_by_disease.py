@@ -1,4 +1,4 @@
-"""Disease phenotypes by disease: the served `disease_hpo` shape.
+"""Disease phenotypes by disease: the served `disease_phenotype_by_disease_view` shape.
 
 One row per disease, its `disease_phenotype` rows nested by `phenotype`.
 """

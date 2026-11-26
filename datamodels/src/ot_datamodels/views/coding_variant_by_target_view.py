@@ -1,8 +1,7 @@
 """Protein coding coordinates by target: the `coding_variant_by_target_view` view (pts `coding_variant`).
 
-One row per target with an amino acid changing transcript consequence of a variant with evidence, as served in
-`protein_coding_coords_by_target`: those consequences, each with the diseases, therapeutic areas and datasources
-behind its variant.
+One row per target with an amino acid changing transcript consequence of a variant with evidence: those
+consequences, each with the diseases, therapeutic areas and datasources behind its variant.
 """
 
 from typing import ClassVar

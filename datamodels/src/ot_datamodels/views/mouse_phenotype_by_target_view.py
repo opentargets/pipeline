@@ -1,6 +1,6 @@
 """Mouse phenotypes by target: the `mouse_phenotype_by_target_view` view (pts `mouse_phenotype_by_target`).
 
-One row per human target of `mouse_phenotype`, as served in `mouse_phenotypes`: its mouse phenotypes ordered by
+One row per human target of `mouse_phenotype`: its mouse phenotypes ordered by
 `modelPhenotypeId, targetInModelMgiId`, each the output row.
 """
 

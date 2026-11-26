@@ -1,4 +1,4 @@
-"""Target by region: the `target_by_region_view` view (pts `target_view`), served as `targets_by_region`.
+"""Target by region: the `target_by_region_view` view (pts `target_view`).
 
 One row per target: its genomic location and its id, for region lookups.
 """
