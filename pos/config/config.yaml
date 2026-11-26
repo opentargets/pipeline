@@ -41,7 +41,6 @@ steps:
         - clinical_indication
         - clinical_report
         - clinical_target
-        - colocalisation
         - credible_sets
         - credible_sets_locus
         - disease
@@ -79,6 +78,13 @@ steps:
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
+    - name: clickhouse_load clickhouse load colocalisation
+      requires:
+        - explode load declared datasets
+      dataset: colocalisation
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+      product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
         - explode load declared datasets
