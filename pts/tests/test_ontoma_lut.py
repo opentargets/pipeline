@@ -272,6 +272,46 @@ def test_lower_scored_real_name_does_not_unflag_the_acronym(monkeypatch: pytest.
     assert _flags(lut, 'key') == {'MONDO_1': True}
 
 
+def test_disease_symbol_loses_a_plural_s() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_1', 'LSDs', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_2', 'ALS', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_3', 'Lysosomal storage diseases', 1.0, 'term', 'name', 'DS', 'label'),
+                ('ENSG1', 'EGFRs', 1.0, 'symbol', 'approved_symbol', 'GP', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert set(_ids(lut)) == {
+        ('label', 'DS', 'lsd'),
+        ('label', 'DS', 'als'),
+        ('label', 'DS', 'diseaslysosomstorag'),
+        ('label', 'GP', 'egfrs'),
+    }
+    # the flag reads the label without its plural s: 3 letters
+    assert _flags(lut, 'lsd') == {'MONDO_1': True}
+
+
+def test_plural_label_does_not_outrank_the_singular() -> None:
+    lut = build_lut(
+        [
+            _raw(
+                ('MONDO_1', 'NB', 0.996, 'symbol', 'related_synonym', 'DS', 'label'),
+                ('MONDO_2', 'NBs', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+                ('MONDO_3', 'VHFs', 0.999, 'symbol', 'exact_synonym', 'DS', 'label'),
+            )
+        ],
+        acronym_allowlist=_allowlist(),
+    )
+    assert _ids(lut) == {
+        ('label', 'DS', 'nb'): [('MONDO_1', 'related_synonym')],
+        # no singular holds the key, so the plural fills it
+        ('label', 'DS', 'vhf'): [('MONDO_3', 'exact_synonym')],
+    }
+
+
 def test_curated_labels_never_flagged() -> None:
     lut = build_lut(
         [_raw(('MONDO_1', 'AD', 1.0, 'symbol', 'ot_curation', 'DS', 'label'))], acronym_allowlist=_allowlist()

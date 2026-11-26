@@ -82,6 +82,35 @@ def test_acronym_goes_through_the_symbol_track() -> None:
     assert _map(pl.DataFrame({'label': ['ALS']}))['ids'].to_list() == [['EFO_0000253', 'MONDO_0004976']]
 
 
+PLURAL_LUT = _lut([
+    ('label', 'DS', normalise_symbol('LSD'), [('MONDO_0002561', 'exact_synonym')]),
+    ('label', 'DS', normalise_symbol('CMT2'), [('MONDO_0018993', 'exact_synonym')]),
+    ('label', 'DS', normalise_symbol('AL'), [('MONDO_0019438', 'exact_synonym')]),
+    ('label', 'GP', normalise_symbol('EGFR'), [('ENSG00000146648', 'approved_symbol')]),
+])
+
+
+@pytest.mark.parametrize(
+    ('label', 'type_', 'expected'),
+    [
+        ('LSDs', 'DS', ['MONDO_0002561']),
+        ('LSD', 'DS', ['MONDO_0002561']),
+        # an s after a digit is kept
+        ('CMT2s', 'DS', None),
+        # an uppercase S is part of the acronym, not a plural
+        ('ALS', 'DS', None),
+        ('LSDS', 'DS', None),
+        # diseases only
+        ('EGFRs', 'GP', None),
+        ('EGFR', 'GP', ['ENSG00000146648']),
+    ],
+)
+def test_disease_symbol_loses_a_plural_s(label: str, type_: str, expected: list[str] | None) -> None:
+    df = pl.DataFrame({'label': [label]})
+    out = map_entities(df.lazy(), PLURAL_LUT.lazy(), 'ids', 'label', 'label', type_col=pl.lit(type_)).collect()
+    assert out['ids'].to_list() == [expected]
+
+
 def test_identical_rows_collapse_as_in_ontoma() -> None:
     df = pl.DataFrame({'label': ['cystic fibrosis', 'cystic fibrosis', 'cystic fibrosis'], 'n': [1, 1, 2]})
     assert _map(df).rows() == [('cystic fibrosis', 1, ['MONDO_0009061']), ('cystic fibrosis', 2, ['MONDO_0009061'])]
