@@ -45,7 +45,6 @@ class AssociationTimeseriesView(DatasetModel):
         'novelty': 0.00017643219529906104,
         'yearlyEvidenceCount': 1,
         'isDirect': True,
-        'partitionKey': 'ENSG00000009413_EFO_0000180_true',
     }
 
     diseaseId: DiseaseId
@@ -61,6 +60,3 @@ class AssociationTimeseriesView(DatasetModel):
     novelty: Novelty
     yearlyEvidenceCount: YearlyEvidenceCount
     isDirect: bool = Field(description='Whether the association is direct')
-    partitionKey: str = Field(
-        min_length=1, description='targetId, diseaseId and isDirect (`true` or `false`), joined by `_`'
-    )

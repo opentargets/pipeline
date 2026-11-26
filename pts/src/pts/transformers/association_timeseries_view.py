@@ -25,7 +25,7 @@ INPUTS = {
     'association_by_datasource_direct': True,
     'association_overall_direct': True,
 }
-SORT = ['partitionKey', 'aggregationValue', 'year']
+SORT = ['targetId', 'diseaseId', 'isDirect', 'aggregationValue', 'year']
 SPLIT_COLUMNS = ['diseaseId', 'targetId', 'aggregationType', 'aggregationValue', 'timeseries']
 TIMESERIES = pl.List(
     pl.Struct({
@@ -47,7 +47,7 @@ def association_timeseries_view(
     """Explode the four association datasets into a timeseries view of `file_count` sorted files.
 
     Each input is read once and split in memory by targetId hash; each output file is built from
-    its own split only, so every partitionKey lands in one file.
+    its own split only, so every target lands in one file.
 
     Args:
         source: paths keyed by the four association datasets.
@@ -88,15 +88,6 @@ def association_timeseries_view(
             .explode('timeseries')
             .drop_nulls('timeseries')
             .unnest('timeseries')
-            .with_columns(
-                pl.concat_str(
-                    pl.col('targetId'),
-                    pl.col('diseaseId'),
-                    pl.col('isDirect').cast(pl.String),
-                    separator='_',
-                    ignore_nulls=True,
-                ).alias('partitionKey')
-            )
             .select(to_polars_schema(AssociationTimeseriesView).names())
             .sort(SORT)
         )

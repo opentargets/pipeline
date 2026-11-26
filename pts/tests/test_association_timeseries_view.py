@@ -54,22 +54,6 @@ def _run(tmp_path: Path, rows: dict[str, list[dict]], file_count: int = 3) -> pl
     return pl.read_parquet(destination / '*.parquet')
 
 
-def test_partition_key_renders_booleans_like_spark(tmp_path: Path) -> None:
-    out = _run(
-        tmp_path,
-        {
-            'overall_direct': [_row('ENSG1', 'EFO_1', None, [2020])],
-            'overall_indirect': [_row('ENSG1', 'EFO_1', None, [2020])],
-        },
-    )
-    assert sorted(out['partitionKey']) == ['ENSG1_EFO_1_false', 'ENSG1_EFO_1_true']
-
-
-def test_partition_key_skips_null_ids_like_concat_ws(tmp_path: Path) -> None:
-    out = _run(tmp_path, {'overall_direct': [_row('ENSG1', None, None, [2020])]})
-    assert out['partitionKey'].to_list() == ['ENSG1_true']
-
-
 def test_explodes_every_timeseries_entry(tmp_path: Path) -> None:
     rows = {
         'overall_direct': [_row('T1', 'D1', None, [2018, 2019, 2020]), _row('T2', 'D1', None, [2020])],
@@ -92,7 +76,7 @@ def test_empty_timeseries_rows_vanish(tmp_path: Path) -> None:
     assert out.schema == to_polars_schema(AssociationTimeseriesView)
 
 
-def test_each_partition_key_in_exactly_one_file_and_files_sorted(tmp_path: Path) -> None:
+def test_each_association_in_exactly_one_file_and_files_sorted(tmp_path: Path) -> None:
     rows = {
         name: [_row(f'T{t}', f'D{d}', v, [2021, 2019, 2020]) for t in range(8) for d in range(3) for v in values]
         for name, values in (
@@ -105,11 +89,11 @@ def test_each_partition_key_in_exactly_one_file_and_files_sorted(tmp_path: Path)
     _run(tmp_path, rows)
     files = sorted((tmp_path / 'out').glob('part-*.parquet'))
     assert [f.name for f in files] == ['part-00000.parquet', 'part-00001.parquet', 'part-00002.parquet']
-    seen: dict[str, str] = {}
+    seen: dict[tuple, str] = {}
     for file in files:
         frame = pl.read_parquet(file)
-        assert frame.equals(frame.sort('partitionKey', 'aggregationValue', 'year'))
-        for key in frame['partitionKey'].unique():
+        assert frame.equals(frame.sort('targetId', 'diseaseId', 'isDirect', 'aggregationValue', 'year'))
+        for key in frame.select('targetId', 'diseaseId', 'isDirect').unique().rows():
             assert seen.setdefault(key, file.name) == file.name
     assert len(seen) == 8 * 3 * 2
 

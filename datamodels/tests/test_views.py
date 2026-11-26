@@ -104,6 +104,9 @@ PTS_SCHEMAS = {
 #: columns appended after the frozen pre-piece-3 baseline's
 ADDED: dict[str, list[str]] = {'target_view': ['credibleSetIds', 'pharmacogenomicsIds']}
 
+#: columns of the frozen pre-piece-3 baseline the view no longer has
+REMOVED: dict[str, list[str]] = {'association_timeseries_view': ['partitionKey']}
+
 #: columns whose dtype differs from the frozen pre-piece-3 baseline: Enums the baseline holds as strings, and
 #: the bool `homologues[].isHighConfidence` it holds as '1'/'0'
 CHANGED: dict[str, set[str]] = {
@@ -489,9 +492,10 @@ def _as_pts_writes(
 def test_view_matches_the_pre_piece_3_pts_schema(name: str) -> None:
     schema, pts = to_polars_schema(VIEWS[name]), PTS_SCHEMAS[name]
 
-    added = ADDED.get(name, [])
-    assert list(schema) == [*pts, *added]
-    assert {c for c in pts if schema[c] != pts[c]} == CHANGED[name]
+    added, removed = ADDED.get(name, []), REMOVED.get(name, [])
+    kept = [c for c in pts if c not in removed]
+    assert list(schema) == [*kept, *added]
+    assert {c for c in kept if schema[c] != pts[c]} == CHANGED[name]
     assert all(_as_pts_writes(schema[c], c) == pts[c] for c in CHANGED[name])
 
 
@@ -561,7 +565,6 @@ def test_association_timeseries_is_ppp_only() -> None:
     assert AssociationTimeseriesView.products == ('ppp',)
     nodes = _nodes(AssociationTimeseriesView)
     assert nodes['aggregationValue'].dtype == pl.String()
-    assert nodes['partitionKey'].dtype == pl.String()
 
 
 def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
@@ -622,7 +625,7 @@ COORD_DECLARED = {
 DECLARED: dict[str, set[str]] = {
     'association_otf_disease_view': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'indirect', 'indirect[]'},
     'association_otf_target_view': {'datasourceId', 'datatypeId', 'searchA', 'searchB', 'isMeasurement'},
-    'association_timeseries_view': {'aggregationType', 'aggregationValue', 'isDirect', 'partitionKey'},
+    'association_timeseries_view': {'aggregationType', 'aggregationValue', 'isDirect'},
     'coding_variant_by_target_view': COORD_DECLARED,
     'coding_variant_by_variant_view': COORD_DECLARED,
     'disease_view': {
