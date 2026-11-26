@@ -40,8 +40,6 @@ class UnifiedPipelineConfig:
         self.service_account_extra_scopes = ['https://www.googleapis.com/auth/drive']
         """Extra scopes to be added to the service account in executor machines"""
         """- the drive scope is needed to download Google Drive spreadsheets for the pis_otar step"""
-        self.num_partitions = 20
-        """The default number of partitions for steps using spark that do not specify it."""
 
         self.pis = AppConfig.from_file(file_path=config_path.parents[4] / 'pis' / 'config.yaml')
         """The internal configuration for PIS steps."""
@@ -148,9 +146,6 @@ class UnifiedPipelineConfig:
 
         # GENTROPY-specific settings.
         self.gentropy_main_python_file_uri = 'gs://genetics_etl_python_playground/initialisation/cli.py'
-        self.gentropy_cluster_init_script_uri = (
-            'gs://genetics_etl_python_playground/initialisation/install_dependencies_on_cluster.sh'
-        )
 
     @property
     def release_uri(self) -> str:

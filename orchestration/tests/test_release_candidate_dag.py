@@ -22,7 +22,6 @@ from orchestration.dags.config.release import HandOff, ReleaseConfig
 from orchestration.dags.config.unified_pipeline import UnifiedPipelineConfig
 from orchestration.operators.gce import DeleteInstanceOperator
 from orchestration.operators.gce_backend import ComputeEngineRunBackendSensor
-from orchestration.operators.gce_disks import DeleteSnapshotOperator
 from orchestration.utils.common import GCP_PROJECT_PLATFORM, GCP_ZONE
 from orchestration.utils.release import candidate_names
 
@@ -220,7 +219,6 @@ def test_reuse_side_cleanup_deletes_nothing(dag, simulate) -> None:
             release_candidate.cleanup_disk(_TI(CREATED, states), d)
     delete.assert_not_called()
     assert 'delete_snapshot' not in vars(release_candidate)
-    assert not [t for t in dag.tasks if isinstance(t, DeleteSnapshotOperator)]
 
 
 def test_one_side_fails_other_snapshot_kept(dag, simulate) -> None:

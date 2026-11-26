@@ -1,9 +1,7 @@
 """Module for Google Cloud Path naive parsers."""
 
-import concurrent.futures
 import json
 import logging
-import multiprocessing
 import re
 from abc import abstractmethod
 from functools import cached_property
@@ -15,7 +13,6 @@ from google.cloud import storage
 from requests.adapters import HTTPAdapter
 
 CHUNK_SIZE = 1024 * 256
-MAX_N_THREADS = 32
 URI_PATTERN = r'^^((?P<protocol>.*)://)?(?P<root>[(\w)-]+)/(?P<path>([(\w)-/])+)'
 PARTITION_REGEX = r'\w*=(\w*)'
 
@@ -370,126 +367,6 @@ class IOManager:
                 )
             case _:
                 raise NotImplementedError('IOManager.resolve is not implemented for path=%s', path)
-
-    def resolve_paths(self, paths: list[str]) -> list[ProtoPath]:
-        """Resolve multiple paths by the protocols.
-
-        Args:
-            paths (list[str]): Paths to resolve.
-
-        Returns:
-            list[ProtoPath]: List of path objects following ProtoPath protocol.
-        """
-        return [self.resolve(p) for p in paths]
-
-    def load_many(self, paths: list[str], n_threads: int | None = None) -> list[Any]:
-        """Load many objects by concurrent operations. Thread safe.
-
-        By default this method spawns 32 or num of cpus treads depending on which number is
-        closer to the overall concurrent process count.
-
-        Args:
-            paths (list[str]): Paths to read from.
-            n_threads (int | None): number of concurrent threads to use. If None, default is used. See description.
-
-        Returns:
-            list[Any]: Objects that were read.
-        """
-        if not paths:
-            logger.warning('Nothing to load.')
-            return []
-
-        resolved_paths = self.resolve_paths(paths)
-        if not n_threads:
-            n_threads = self._find_optimal_thread_num(len(paths))
-        logger.info('LOADING %s OBJECTS by %s THREADS.', len(paths), n_threads)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
-            futures: list[concurrent.futures.Future] = []
-            for path in resolved_paths:
-                method = lambda path=path: path.load()
-                futures.append(executor.submit(method))
-        results = []
-
-        concurrent.futures.wait(futures)
-        for idx, future in enumerate(futures):
-            exe = future.exception()
-            if exe:
-                logger.error(exe)
-            else:
-                logger.info(f'Successfully loaded {idx + 1}/{len(futures)} objects.')
-                results.append(future.result())
-        return results
-
-    def dump_many(self, objects: list[Any], paths: list[str], n_threads: int | None = None) -> None:
-        """Dump many objects by concurrent operations. Not thread safe.
-
-        When dumping many objects make sure, you are not writing to the same object multiple times.
-
-        By default this method spawns 32 or num of cpus treads depending on which number is
-        closer to the overall concurrent process count.
-
-        Args:
-            objects (list[Any]): Objects to write.
-            paths (list[str]): Paths to write the objects to.
-            n_threads (int | None): number of concurrent threads to use. If None, default is used. See description.
-
-        Raises:
-            ValueError: When number of objects does not match paths.
-            ThreadSafetyError: When attempting to write to the same file from multiple threads.
-
-        """
-        if len(paths) != len(objects):
-            raise ValueError('Empty paths or unequal number of objects')
-        if not paths:
-            logger.warning('Nothing to dump.')
-            return None
-
-        resolved_paths = self.resolve_paths(paths)
-        unique_paths = set(paths)
-        if len(paths) != len(unique_paths):
-            duplicated_paths = [p for p in paths if p not in unique_paths]
-            raise ThreadSafetyError(
-                'You are trying to write to the same file multiple times %s',
-                duplicated_paths,
-            )
-        if not n_threads:
-            n_threads = self._find_optimal_thread_num(len(paths))
-        logger.info('DUMPING %s OBJECTS by %s THREADS.', len(paths), n_threads)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
-            futures: list[concurrent.futures.Future] = []
-            for path, ob in zip(resolved_paths, objects, strict=True):
-                method = lambda path=path, ob=ob: path.dump(ob)
-                futures.append(executor.submit(method))
-
-        concurrent.futures.wait(futures)
-        for idx, future in enumerate(futures):
-            exe = future.exception()
-            if exe:
-                logger.error(exe)
-            else:
-                logger.info(f'Successfully dumped {idx + 1}/{len(futures)} objects.')
-
-    @staticmethod
-    def _find_optimal_thread_num(n_processes: int, max_n_threads: int = MAX_N_THREADS) -> int:
-        """Find optimal number of threads to spawn for the concurrent IO operations.
-
-        Args:
-            n_processes(int): Number of concurrent processes.
-            max_n_threads(int): Max number of threads to spawn.
-
-        Returns:
-            int: Either max_n_threads or number of cpu cores depending on which is closer to the number of n_processes.
-        """
-        n_cpus = multiprocessing.cpu_count()
-        if abs(n_cpus - n_processes) < abs(max_n_threads - n_processes):
-            return n_cpus
-        else:
-            return max_n_threads
-
-
-class ThreadSafetyError(Exception):
-    """Exception raised for errors in thread safety."""
-
 
 def extract_partition_from_blob(blob: storage.Blob | str, with_prefix: bool = True) -> str:
     """Extract partition prefix from a Google Cloud Storage Blob.

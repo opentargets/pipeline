@@ -6,13 +6,6 @@ from enum import Enum
 from typing import Any, Literal, TypedDict
 
 
-class DataprocSpecs(TypedDict):
-    python_main_module: str
-    cluster_init_script: str
-    cluster_metadata: dict[str, str]
-    cluster_name: str
-
-
 class Environment(Enum):
     TEST = 'Test'
     PROD = 'Prod'
