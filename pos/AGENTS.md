@@ -76,7 +76,9 @@ declarations against the landing columns (`test_yaml_declarations_are_valid`).
 Declared datasets load in `explode load declared datasets`; a `postload_script` (under
 `scripts/`) is only for an undeclared dataset. Every undeclared load, top-level ones included,
 requires the declared explode, directly or through another task; a declared
-dataset outside it must be product-gated (`test_undeclared_loads_wait_for_the_declared_ones`).
+dataset outside it must be product-gated or wait for it too
+(`test_undeclared_loads_wait_for_the_declared_ones`). `colocalisation` loads alone after the
+explode: its RocksDB bulk insert is the largest ClickHouse memory peak of the step.
 A declared model loads only for its products, so a PPP-only one (`otar_projects`,
 `association_time_series`) is a top-level task with `products: [ppp]`
 (`test_a_declared_model_loads_only_for_its_products`). No script may read a declared

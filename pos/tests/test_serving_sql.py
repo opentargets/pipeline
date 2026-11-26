@@ -1054,12 +1054,16 @@ BOTH_SIDES = (
 
 
 def test_genetics_a_loads_from_its_declarations():
-    """Both entries load in the declared explode; nothing else loads them or waits on a `load l2g_predictions`
-    task; the other-datasets explode is gone; their scripts are frozen."""
+    """`l2g_predictions` loads in the declared explode, `colocalisation` alone after it; nothing else loads them
+    or waits on a `load l2g_predictions` task; the other-datasets explode is gone; their scripts are frozen."""
     (explode,) = [t for t in STEP if t['name'] == 'explode load declared datasets']
-    assert set(GENETICS_A) <= set(explode['foreach'])
+    assert 'l2g_predictions' in explode['foreach']
+    assert 'colocalisation' not in explode['foreach']
     assert all(is_declared(DATASETS[d]) for d in GENETICS_A)
-    assert not [t['name'] for t in STEP if t.get('dataset') in GENETICS_A]
+    (coloc,) = [t for t in STEP if t.get('dataset') in GENETICS_A]
+    assert coloc['dataset'] == 'colocalisation'
+    assert coloc['requires'] == [explode['name']]
+    assert 'products' not in coloc
     assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
     assert not [t['name'] for t in STEP if 'clickhouse_load clickhouse load l2g_predictions' in t.get('requires', [])]
     for script in GENETICS_A:

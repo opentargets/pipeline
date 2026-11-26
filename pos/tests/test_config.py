@@ -294,7 +294,7 @@ DECLARED_LOADS = 'explode load declared datasets'
 
 def test_undeclared_loads_wait_for_the_declared_ones():
     """Every load of an undeclared dataset requires the declared explode, directly or through another task; a
-    declared dataset outside that explode is product-gated."""
+    declared dataset outside that explode is product-gated or waits for it too."""
     tasks = {t['name']: t for t in CONFIG['steps']['backend_clickhouse']}
     assert all(is_declared(DATASETS['clickhouse'][d]) for d in tasks[DECLARED_LOADS]['foreach'])
 
@@ -307,7 +307,7 @@ def test_undeclared_loads_wait_for_the_declared_ones():
             continue
         datasets = task.get('foreach', [task.get('dataset')])
         if all(is_declared(DATASETS['clickhouse'][d]) for d in datasets):
-            assert task.get('products'), f'{name}: a declared dataset outside {DECLARED_LOADS}'
+            assert task.get('products') or waits(name), f'{name}: a declared dataset outside {DECLARED_LOADS}'
             continue
         assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
 
