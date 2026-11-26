@@ -13,6 +13,7 @@ from pydantic import Field
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel, from_output
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 from ot_datamodels.outputs.variant import TranscriptConsequences, Variant, VariantEffect
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import CodingVariantDatasource
 
 TargetId = from_output(TranscriptConsequences, 'targetId')
@@ -88,6 +89,7 @@ class CodingVariantByVariantView(DatasetModel):
         'and datasources behind the variant, as served by variant'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {'variantId': '17_7674220_C_T', 'proteinCodingCoords': [COORD_EXAMPLE]}
 
     variantId: VariantKey

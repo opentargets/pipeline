@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect, Timeseries
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import AggregationType, enum_of
 
 # the four inputs agree on these, but by-datasource yearlyEvidenceCount is Int32, cast up (tests/test_views.py)
@@ -31,6 +32,9 @@ class AssociationTimeseriesView(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     products: ClassVar[tuple[str, ...]] = ('ppp',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('diseaseId', 'targetId', 'isDirect', 'aggregationValue', 'year')
+    )
     example: ClassVar[dict] = {
         'diseaseId': 'EFO_0000180',
         'targetId': 'ENSG00000009413',

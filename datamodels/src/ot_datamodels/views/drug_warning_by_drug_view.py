@@ -11,6 +11,7 @@ from pydantic import Field
 from ot_datamodels import DatasetModel, PrimaryKey, Reference, row_of
 from ot_datamodels.outputs.drug_warning import DrugWarning
 from ot_datamodels.outputs.patterns import CHEMBL_ID
+from ot_datamodels.serving import Serving
 
 DrugWarningItem = row_of(DrugWarning, list(DrugWarning.model_fields), name='DrugWarningItem')
 
@@ -22,6 +23,7 @@ class DrugWarningByDrugView(DatasetModel):
     dataset_title: ClassVar[str] = 'Drug warnings by drug'
     dataset_description: ClassVar[str] = 'Blackbox and withdrawn warnings of each drug molecule, as served by molecule'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {'chemblId': DrugWarning.example['chemblIds'][0], 'drugWarnings': [DrugWarning.example]}
 
     chemblId: Annotated[str, Reference('drug_molecule', 'id'), PrimaryKey()] = Field(

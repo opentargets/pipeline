@@ -15,6 +15,7 @@ from pydantic import Field
 from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, row_of
 from ot_datamodels.outputs.drug_mechanism_of_action import DrugMechanismOfAction
 from ot_datamodels.outputs.patterns import CHEMBL_ID
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import ChemblActionType, ChemblTargetType
 
 #: the mechanism fields served, in output order
@@ -31,6 +32,7 @@ class DrugMechanismOfActionByDrugView(DatasetModel):
     dataset_title: ClassVar[str] = 'Mechanisms of action by drug'
     dataset_description: ClassVar[str] = 'Mechanisms of action of each drug molecule, as served by molecule'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'chemblId': _EXAMPLE['chemblIds'][0],
         'rows': [{f: _EXAMPLE[f] for f in MECHANISM_FIELDS}],

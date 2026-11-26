@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.target import GenomicLocation, Target
+from ot_datamodels.serving import Serving
 
 RegionChromosome = from_output(GenomicLocation, 'chromosome')
 RegionStart = from_output(GenomicLocation, 'start')
@@ -28,6 +29,7 @@ class TargetByRegionView(DatasetModel):
     dataset_name: ClassVar[str] = 'target_by_region_view'
     dataset_title: ClassVar[str] = 'Target by region'
     dataset_description: ClassVar[str] = 'The genomic location of every target, with its id'
+    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('chromosome', 'start', 'end'))
     example: ClassVar[dict] = {
         'chromosome': 'X',
         'start': 100627108,

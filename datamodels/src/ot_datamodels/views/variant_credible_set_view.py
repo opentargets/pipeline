@@ -18,6 +18,7 @@ from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 from ot_datamodels.outputs.study import Study
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.credible_set_view import ApprovedSymbol, CredibleSetView, LeadAllele
 from ot_datamodels.views.study_credible_set_view import StudyCredibleSetView
 
@@ -64,6 +65,9 @@ class VariantCredibleSetView(DatasetModel):
         'The credible sets of each variant, with their lead variant, study and top L2G gene'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('studyType', 'variantId', 'topL2GScore', 'credibleSetId')
+    )
     example: ClassVar[dict] = {
         'studyType': _SET['studyType'],
         'variantId': _SET['leadVariantId'],

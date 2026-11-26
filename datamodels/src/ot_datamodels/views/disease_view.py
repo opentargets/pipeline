@@ -11,6 +11,7 @@ from pydantic import Field
 from ot_datamodels import DatasetModel, StructModel
 from ot_datamodels.derive import from_output
 from ot_datamodels.outputs.disease import Disease, Ontology
+from ot_datamodels.serving import ClickHouseDictionary, Serving
 
 # a list element takes no description, so not `from_output`; tests/test_views.py checks it equals studyId
 _StudyId = Annotated[str, Field(min_length=1)]
@@ -48,6 +49,10 @@ class DiseaseView(DatasetModel):
     dataset_description: ClassVar[str] = (
         'Diseases or phenotypes as served, with their synonyms by relation and the studies mapped to '
         'each disease and to its descendants'
+    )
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        dictionaries=(ClickHouseDictionary('disease_names', key='id', attributes=('name',)),),
     )
     example: ClassVar[dict] = {
         **{

@@ -11,6 +11,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.variant import TranscriptConsequences
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.coding_variant_by_variant_view import COORD_EXAMPLE, ProteinCodingCoord
 
 TargetKey = from_output(TranscriptConsequences, 'targetId', primary_key=True)
@@ -26,6 +27,7 @@ class CodingVariantByTargetView(DatasetModel):
         'therapeutic areas and datasources behind each variant, as served by target'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {'targetId': 'ENSG00000141510', 'proteinCodingCoords': [COORD_EXAMPLE]}
 
     targetId: TargetKey

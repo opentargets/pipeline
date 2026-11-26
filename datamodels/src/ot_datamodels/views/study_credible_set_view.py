@@ -10,6 +10,7 @@ from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.l2g_prediction import L2gPrediction
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.credible_set_view import ApprovedSymbol, CredibleSetView, LeadAllele
 
 StudyId = from_output(CredibleSet, 'studyId')
@@ -38,6 +39,9 @@ class StudyCredibleSetView(DatasetModel):
         'The GWAS credible sets of each study, with their lead variant and top L2G gene'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('studyId', 'pValueExponent', 'pValueMantissa', 'credibleSetId')
+    )
     example: ClassVar[dict] = {
         'studyId': _SET['studyId'],
         'credibleSetId': _SET['credibleSetId'],

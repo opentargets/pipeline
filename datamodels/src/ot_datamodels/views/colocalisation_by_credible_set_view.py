@@ -13,6 +13,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.colocalisation import Colocalisation
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import ColocalisationMethod
 
 CredibleSetId = from_output(Colocalisation, 'leftLocusId', primary_key=True)
@@ -52,6 +53,7 @@ class ColocalisationByCredibleSetView(DatasetModel):
     dataset_title: ClassVar[str] = 'Colocalisation by credible set'
     dataset_description: ClassVar[str] = 'The colocalisations of each credible set, from either side'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['leftLocusId'],
         'colocalisation': [

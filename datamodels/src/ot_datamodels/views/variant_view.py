@@ -10,6 +10,7 @@ from pydantic import Field
 from ot_datamodels import ClickHouseType
 from ot_datamodels.outputs.patterns import MD5_HEX
 from ot_datamodels.outputs.variant import Variant
+from ot_datamodels.serving import Serving
 
 # list elements, so not `from_output`; tests/test_views.py checks them against credible_set.id and
 # pharmacogenomics.pharmacogenomicsId
@@ -25,6 +26,7 @@ class VariantView(Variant):
     dataset_description: ClassVar[str] = (
         'Variants with the identifiers of their credible sets and pharmacogenomics records nested in'
     )
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = Variant.example | {
         'credibleSetIds': ['0002c80bb07a1c4ab11e5b6d2c9e0d6c'],
         'pharmacogenomicsIds': [1],

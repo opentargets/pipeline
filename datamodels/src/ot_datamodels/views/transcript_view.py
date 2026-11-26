@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.transcript import Transcript
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import TranscriptFlagLabel, TranscriptFlagValue
 
 TargetId = from_output(Transcript, 'targetId', primary_key=True)
@@ -62,6 +63,7 @@ class TranscriptView(DatasetModel):
     dataset_name: ClassVar[str] = 'transcript_view'
     dataset_title: ClassVar[str] = 'Transcript view'
     dataset_description: ClassVar[str] = 'The transcripts of each target, by transcriptId'
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'targetId': Transcript.example['targetId'],
         'transcripts': [{k: v for k, v in Transcript.example.items() if k != 'targetId'}],

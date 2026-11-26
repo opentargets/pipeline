@@ -13,6 +13,7 @@ from pydantic import Field
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
+from ot_datamodels.serving import Serving
 
 CredibleSetId = from_output(CredibleSet, 'id', primary_key=True)
 StudyId = from_output(CredibleSet, 'studyId')
@@ -56,6 +57,7 @@ class CredibleSetView(DatasetModel):
         'Credible sets with the statistics of their lead variant and the number of their variants'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['id'],
         'studyId': _EXAMPLE['studyId'],

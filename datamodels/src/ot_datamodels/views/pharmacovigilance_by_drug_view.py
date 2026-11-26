@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
+from ot_datamodels.serving import Serving
 
 ChemblId = from_output(Pharmacovigilance, 'chembl_id', primary_key=True)
 Count = from_output(Pharmacovigilance, 'count')
@@ -42,6 +43,7 @@ class PharmacovigilanceByDrugView(DatasetModel):
     dataset_title: ClassVar[str] = 'Pharmacovigilance by drug'
     dataset_description: ClassVar[str] = 'Significant adverse drug reactions of each drug, as served by drug'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'chembl_id': _EXAMPLE['chembl_id'],
         'adverse_events': [

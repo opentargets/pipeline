@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.target_prioritisation import TargetPrioritisation
+from ot_datamodels.serving import Serving
 
 # the pair names, in served order; a plain Literal, served as String
 PrioritisationKey = Literal[
@@ -55,6 +56,7 @@ class TargetPrioritisationView(DatasetModel):
     dataset_name: ClassVar[str] = 'target_prioritisation_view'
     dataset_title: ClassVar[str] = 'Target prioritisation view'
     dataset_description: ClassVar[str] = 'The target prioritisation values of each target as name/value strings'
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000000003',
         'items': [

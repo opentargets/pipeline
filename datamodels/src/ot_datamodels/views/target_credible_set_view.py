@@ -14,6 +14,7 @@ from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.credible_set_view import CredibleSetView, LeadAllele
 
 TargetId = from_output(Target, 'id')
@@ -43,6 +44,9 @@ class TargetCredibleSetView(DatasetModel):
     dataset_title: ClassVar[str] = 'Target credible set'
     dataset_description: ClassVar[str] = 'The credible sets of the studies of each target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('targetId', 'pValueExponent', 'pValueMantissa', 'credibleSetId')
+    )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000198931',
         'credibleSetId': _SET['credibleSetId'],

@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, from_output, row_of
 from ot_datamodels.outputs.mouse_phenotype import MousePhenotype
+from ot_datamodels.serving import Serving
 
 TargetFromSourceId = from_output(MousePhenotype, 'targetFromSourceId', primary_key=True)
 MousePhenotypeItem = row_of(MousePhenotype, list(MousePhenotype.model_fields), name='MousePhenotypeItem')
@@ -22,6 +23,7 @@ class MousePhenotypeByTargetView(DatasetModel):
     dataset_title: ClassVar[str] = 'Mouse phenotypes by target'
     dataset_description: ClassVar[str] = 'Phenotypes of mouse models mapped to each human target, as served by target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'targetFromSourceId': MousePhenotype.example['targetFromSourceId'],
         'mouse_phenotypes': [MousePhenotype.example],

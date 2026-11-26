@@ -12,6 +12,7 @@ from ot_datamodels import ClickHouseType, DatasetModel, StructModel
 from ot_datamodels.derive import from_output
 from ot_datamodels.outputs.interaction import Interaction, SpeciesA, SpeciesB
 from ot_datamodels.outputs.interaction_evidence import InteractionEvidence, InteractionResources
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import InteractionSource, SpeciesMnemonic, SpeciesScientificName
 
 # IntAct's negative pseudo-taxids (-1 in vitro ... -4 in vivo) are served wrapped, x mod 2^32
@@ -122,6 +123,7 @@ class InteractionView(DatasetModel):
     dataset_description: ClassVar[str] = (
         'Molecular interactions as served, one row per target A with its interactions and their evidence nested in'
     )
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'targetA': _INTERACTION['targetA'],
         'interactions': [
