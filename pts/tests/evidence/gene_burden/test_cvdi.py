@@ -23,7 +23,7 @@ CUTOFFS_WITH_M02 = [*CVDI_CUTOFFS[:4], (None, 'Missense0.2 (MAF<0.001%)', 3e-8),
 NICE_NAME = 'Broad CVDI Human Disease Portal'
 LOF_OVERVIEW = 'Mixed-effects test carried out with LOF variants with a MAF smaller than 0.1%.'
 URL = (
-    'https://hugeamp.org:8000/research.html?ancestry=mixed&cohort=UKB_450k_AoU_250k_MGB_53k_META_overlapcorrected'
+    'https://hugeamp.org/research.html?ancestry=mixed&cohort=UKB_450k_AoU_250k_MGB_53k_META_overlapcorrected'
     '&file=600Traits.csv&gene={}&pageid=600_traits_app'
 )
 

@@ -39,7 +39,7 @@ METHOD_DESCRIPTIONS = {
     'Cauchy': 'Combined test after combining mask-specific using Cauchy distribution.',
 }
 URL_PREFIX = (
-    'https://hugeamp.org:8000/research.html?ancestry=mixed&cohort=UKB_450k_AoU_250k_MGB_53k_META_overlapcorrected'
+    'https://hugeamp.org/research.html?ancestry=mixed&cohort=UKB_450k_AoU_250k_MGB_53k_META_overlapcorrected'
     '&file=600Traits.csv&gene='
 )
 URL_SUFFIX = '&pageid=600_traits_app'
