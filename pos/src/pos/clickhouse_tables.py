@@ -1,4 +1,6 @@
-"""The ClickHouse tables and dictionaries a `datasets.yaml` entry declares under `tables` and `dictionaries`.
+"""The ClickHouse tables and dictionaries an entry declares under `tables` and `dictionaries`.
+
+An entry is a `datasets.yaml` one, or one derived from a served view model (`pos.clickhouse_ddl.served_entries`).
 
 A table states only what the dataset's model cannot: the RocksDB key is the model's `PrimaryKey`, the products are
 the model's, and a MergeTree table is always optimised, with `allow_nullable_key` set when an `order_by` column is
@@ -7,8 +9,10 @@ nullable.
 
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from typing import Literal
+
+from ot_datamodels.serving import ClickHouseDictionary
 
 
 @dataclass(frozen=True)
@@ -28,25 +32,6 @@ class ClickHouseTable:
     order_by: tuple[str, ...] = ()
     columns: tuple[str, ...] | None = None
     where: str | None = None
-
-
-@dataclass(frozen=True)
-class ClickHouseDictionary:
-    """A dictionary over a table declared on the same entry.
-
-    Attributes:
-        name: the dictionary's name.
-        source: the `ClickHouseTable.name` it reads.
-        key: the lookup key column.
-        attributes: the dictionary's value columns.
-        source_columns: dictionary column to source column, where they differ.
-    """
-
-    name: str
-    source: str
-    key: str
-    attributes: tuple[str, ...]
-    source_columns: Mapping[str, str] = field(default_factory=dict)
 
 
 def _known(entry: Mapping, kind: type[ClickHouseTable] | type[ClickHouseDictionary], item: Mapping) -> None:
@@ -86,6 +71,13 @@ def entry_dictionaries(entry: Mapping) -> list[ClickHouseDictionary]:
             )
         )
     return dictionaries
+
+
+def source_table(dictionary: ClickHouseDictionary) -> str:
+    """The table a dictionary reads; an entry's dictionaries always name it (`served_entries` fills it in)."""
+    if dictionary.source is None:
+        raise ValueError(f'{dictionary.name}: no source table')
+    return dictionary.source
 
 
 _WHERE_TOKEN = re.compile(r"'(?:[^'\\]|\\.)*'|`([^`]*)`|([A-Za-z_]\w*)(\s*\()?")

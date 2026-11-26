@@ -39,22 +39,6 @@ opensearch:
     input_dir: export/search_variant
     mappings: config/opensearch/search.json
 clickhouse:
-  aotf_disease:
-    table: associations_otf_disease_log
-    input_dir: view/association_otf_disease_view
-    model: association_otf_disease_view
-    tables:
-      - name: associations_otf_disease
-        engine: mergetree
-        order_by: [A, B, datasourceId]
-  aotf_target:
-    table: associations_otf_target_log
-    input_dir: view/association_otf_target_view
-    model: association_otf_target_view
-    tables:
-      - name: associations_otf_target
-        engine: mergetree
-        order_by: [A, B, datasourceId]
   baseline_expression:
     table: baseline_expression_log
     input_dir: output/baseline_expression
@@ -75,50 +59,6 @@ clickhouse:
         key: id
         attributes: [name]
         source_columns: {id: biosampleId, name: biosampleName}
-  colocalisation:
-    table: colocalisation_log
-    input_dir: view/colocalisation_by_credible_set_view
-    model: colocalisation_by_credible_set_view
-    tables:
-      - {name: colocalisation, engine: rocksdb}
-  credible_sets:
-    table: credible_sets_log
-    input_dir: view/credible_set_view
-    model: credible_set_view
-    tables:
-      - {name: credible_sets, engine: rocksdb}
-  credible_sets_locus:
-    table: credible_sets_locus_log
-    input_dir: view/credible_set_locus_view
-    model: credible_set_locus_view
-    tables:
-      - {name: credible_sets_locus, engine: rocksdb}
-  disease:
-    table: disease_log
-    input_dir: view/disease_view
-    model: disease_view
-    tables:
-      - {name: disease, engine: rocksdb}
-    dictionaries:
-      - {name: disease_names, source: disease, key: id, attributes: [name]}
-  disease_hpo:
-    table: disease_hpo_log
-    input_dir: view/disease_phenotype_by_disease_view
-    model: disease_phenotype_by_disease_view
-    tables:
-      - {name: disease_hpo, engine: rocksdb}
-  drug:
-    table: drug_log
-    input_dir: view/drug_view
-    model: drug_view
-    tables:
-      - {name: drug, engine: rocksdb}
-  drug_warnings:
-    table: drug_warnings_log
-    input_dir: view/drug_warning_by_drug_view
-    model: drug_warning_by_drug_view
-    tables:
-      - {name: drug_warnings, engine: rocksdb}
   enhancer_to_gene:
     table: enhancer_to_gene_log
     input_dir: output/enhancer_to_gene
@@ -150,12 +90,6 @@ clickhouse:
     model: go
     tables:
       - {name: gene_ontology, engine: rocksdb}
-  interaction:
-    table: interaction_log
-    input_dir: view/interaction_view
-    model: interaction_view
-    tables:
-      - {name: interaction, engine: rocksdb}
   # interaction_evidence declares no tables: the API reads interaction_evidence_log.
   interaction_evidence:
     table: interaction_evidence_log
@@ -167,12 +101,6 @@ clickhouse:
     model: disease_hpo
     tables:
       - {name: hpo, engine: rocksdb}
-  l2g_predictions:
-    table: l2g_predictions_log
-    input_dir: view/l2g_prediction_by_credible_set_view
-    model: l2g_prediction_by_credible_set_view
-    tables:
-      - {name: l2g_predictions, engine: rocksdb}
   literature_entity_lut:
     table: literature_entity_lut_log
     input_dir: output/literature_entity_lut
@@ -182,34 +110,6 @@ clickhouse:
         engine: mergetree
         order_by: [keywordId, year, month, relevance]
         columns: [pmid, pmcid, keywordId, relevance, date, year, month]
-  mechanism_of_action:
-    table: mechanism_of_action_log
-    input_dir: view/drug_mechanism_of_action_by_drug_view
-    model: drug_mechanism_of_action_by_drug_view
-    tables:
-      - {name: mechanism_of_action, engine: rocksdb}
-  mouse_phenotypes:
-    table: mouse_phenotypes_log
-    input_dir: view/mouse_phenotype_by_target_view
-    model: mouse_phenotype_by_target_view
-    tables:
-      - {name: mouse_phenotypes, engine: rocksdb}
-  association_time_series:
-    table: association_time_series_log
-    input_dir: view/association_timeseries_view
-    model: association_timeseries_view
-    tables:
-      - name: association_time_series
-        engine: mergetree
-        order_by: [diseaseId, targetId, isDirect, aggregationValue, year]
-        columns: [diseaseId, targetId, aggregationType, aggregationValue, year, associationScore, novelty,
-                  yearlyEvidenceCount, isDirect]
-  pharmacovigilance:
-    table: pharmacovigilance_log
-    input_dir: view/pharmacovigilance_by_drug_view
-    model: pharmacovigilance_by_drug_view
-    tables:
-      - {name: pharmacovigilance, engine: rocksdb}
   otar_projects:
     table: otar_projects_log
     input_dir: output/otar
@@ -223,30 +123,12 @@ clickhouse:
     model: pharmacogenomics
     tables:
       - {name: pharmacogenomics, engine: rocksdb}
-  protein_coding_coords_by_target:
-    table: protein_coding_coords_by_target_log
-    input_dir: view/coding_variant_by_target_view
-    model: coding_variant_by_target_view
-    tables:
-      - {name: protein_coding_coords_by_target, engine: rocksdb}
-  protein_coding_coords_by_variant:
-    table: protein_coding_coords_by_variant_log
-    input_dir: view/coding_variant_by_variant_view
-    model: coding_variant_by_variant_view
-    tables:
-      - {name: protein_coding_coords_by_variant, engine: rocksdb}
   w2v:
     table: ml_w2v_log
     input_dir: output/literature_vector
     model: literature_vector
     tables:
       - {name: ml_w2v, engine: mergetree, order_by: [word], columns: [category, word, norm, vector]}
-  studies:
-    table: studies_log
-    input_dir: view/study_view
-    model: study_view
-    tables:
-      - {name: studies, engine: rocksdb}
   so:
     table: sequence_ontology_log
     input_dir: output/so
@@ -261,62 +143,6 @@ clickhouse:
     model: target_essentiality
     tables:
       - {name: target_essentiality, engine: rocksdb}
-  target_prioritisation:
-    table: target_prioritisation_log
-    input_dir: view/target_prioritisation_view
-    model: target_prioritisation_view
-    tables:
-      - {name: target_prioritisation, engine: rocksdb}
-  targets:
-    table: targets_log
-    input_dir: view/target_view
-    model: target_view
-    tables:
-      - {name: targets, engine: rocksdb}
-    dictionaries:
-      - {name: target_symbols, source: targets, key: id, attributes: [approvedSymbol]}
-  targets_by_region:
-    table: targets_by_region_log
-    input_dir: view/target_by_region_view
-    model: target_by_region_view
-    tables:
-      - {name: targets_by_region, engine: mergetree, order_by: [chromosome, start, end]}
-  transcript:
-    table: transcript_log
-    input_dir: view/transcript_view
-    model: transcript_view
-    tables:
-      - {name: transcript, engine: rocksdb}
-  variants:
-    table: variants_log
-    input_dir: view/variant_view
-    model: variant_view
-    tables:
-      - {name: variants, engine: rocksdb}
-  variant_credible_sets:
-    table: variant_credible_sets_log
-    input_dir: view/variant_credible_set_view
-    model: variant_credible_set_view
-    tables:
-      - name: variant_credible_sets
-        engine: mergetree
-        order_by: [studyType, variantId, topL2GScore, credibleSetId]
-  study_credible_sets:
-    table: study_credible_sets_log
-    input_dir: view/study_credible_set_view
-    model: study_credible_set_view
-    tables:
-      - name: study_credible_sets
-        engine: mergetree
-        order_by: [studyId, pValueExponent, pValueMantissa, credibleSetId]
-  target_credible_sets:
-    table: target_credible_sets_log
-    input_dir: view/target_credible_set_view
-    model: target_credible_set_view
-    tables:
-      - name: target_credible_sets
-        engine: mergetree
-        order_by: [targetId, pValueExponent, pValueMantissa, credibleSetId]
   clinical_indication:
     table: clinical_indication_log
     input_dir: output/clinical_indication

@@ -13,9 +13,17 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
-from pos.clickhouse_ddl import declarations, entry_model, is_declared, source_problem
+from pos.clickhouse_ddl import (
+    clickhouse_entries,
+    declarations,
+    entry_model,
+    is_declared,
+    served_entries,
+    source_problem,
+)
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
+from pos.tasks.clickhouse_load_views import ClickhouseLoadViewsError, ClickhouseLoadViewsSpec, load_spec, view_loads
 
 ROOT = Path(__file__).parents[1]
 CONFIG = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
@@ -27,6 +35,9 @@ BACKEND_GUARDS = {
     'backend_opensearch': 'open_search_prepare cluster settings',
 }
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
+#: the clickhouse entries: datasets.yaml's and the served views'
+CLICKHOUSE = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
+SERVED_LOADS = 'clickhouse_load_views load served views'
 
 
 def _specs(tasks: list[dict]) -> list[dict]:
@@ -113,6 +124,8 @@ def test_croissant_only_in_opensearch_step():
 def _loaded(step: str, task_type: str) -> set[str]:
     loaded = set()
     for task in CONFIG['steps'][step]:
+        if task_type == 'clickhouse_load' and task['name'].split(' ')[0] == 'clickhouse_load_views':
+            loaded |= set(served_entries()) - set(task.get('exclude', []))
         for spec in [task, *task.get('do', [])]:
             if spec['name'].split(' ')[0] == task_type:
                 loaded |= set(task['foreach']) if spec['dataset'] == '${each}' else {spec['dataset']}
@@ -120,9 +133,9 @@ def _loaded(step: str, task_type: str) -> set[str]:
 
 
 def test_every_dataset_loads_in_its_servers_step():
-    assert set(DATASETS['clickhouse']) <= _loaded('backend_clickhouse', 'clickhouse_load')
+    assert set(CLICKHOUSE) <= _loaded('backend_clickhouse', 'clickhouse_load')
     assert set(DATASETS['opensearch']) <= _loaded('backend_opensearch', 'open_search_load')
-    assert not set(DATASETS['clickhouse']) & _loaded('backend_opensearch', 'open_search_load')
+    assert not set(CLICKHOUSE) & _loaded('backend_opensearch', 'open_search_load')
 
 
 def test_croissant_lands_where_opensearch_loads_it():
@@ -222,6 +235,9 @@ def _built_loads(runner) -> list[ClickhouseLoadSpec]:
     built = []
     for spec in runner.specs:
         top = runner.task_registry.build(spec).spec
+        if isinstance(top, ClickhouseLoadViewsSpec):
+            built += [runner.task_registry.build(load_spec(top, v)).spec for v in view_loads(top.product, top.exclude)]
+            continue
         if not isinstance(top, ExplodeSpec):
             built.append(top)
             continue
@@ -260,13 +276,13 @@ def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
 
 
 def test_clickhouse_entries_have_one_of_model_and_models():
-    problems = {name: source_problem(entry) for name, entry in DATASETS['clickhouse'].items()}
+    problems = {name: source_problem(entry) for name, entry in CLICKHOUSE.items()}
     assert not {name: problem for name, problem in problems.items() if problem}
 
 
 def test_clickhouse_models_are_datasets():
     models = discover_models()
-    for name, entry in DATASETS['clickhouse'].items():
+    for name, entry in CLICKHOUSE.items():
         input_dir = entry.get('input_dir', '')
         for prefix in ('output/', 'view/'):
             if input_dir.startswith(prefix) and input_dir.removeprefix(prefix) in models:
@@ -288,23 +304,55 @@ DECLARED_LOADS = 'explode load declared datasets'
 
 
 def test_undeclared_loads_wait_for_the_declared_ones():
-    """Every load of an undeclared dataset requires the declared explode, directly or through another task; a
-    declared dataset outside that explode is product-gated or waits for it too."""
+    """Every load of an undeclared dataset requires the declared explode and the served views' loads, directly or
+    through another task; a declared dataset outside them is product-gated or waits for both too."""
     tasks = {t['name']: t for t in CONFIG['steps']['backend_clickhouse']}
-    assert all(is_declared(DATASETS['clickhouse'][d]) for d in tasks[DECLARED_LOADS]['foreach'])
+    assert all(is_declared(CLICKHOUSE[d]) for d in tasks[DECLARED_LOADS]['foreach'])
+    assert set(tasks[SERVED_LOADS]['requires']) == set(tasks[DECLARED_LOADS]['requires'])
 
-    def waits(name: str) -> bool:
+    def waits(name: str, on: str) -> bool:
         requires = tasks[name].get('requires', [])
-        return DECLARED_LOADS in requires or any(waits(r) for r in requires if r in tasks)
+        return on in requires or any(waits(r, on) for r in requires if r in tasks)
 
     for name, task in tasks.items():
-        if name == DECLARED_LOADS or not name.startswith(('clickhouse_load', 'explode ')):
+        if name in {DECLARED_LOADS, SERVED_LOADS} or not name.startswith(('clickhouse_load', 'explode ')):
             continue
+        both = waits(name, DECLARED_LOADS) and waits(name, SERVED_LOADS)
         datasets = task.get('foreach', [task.get('dataset')])
-        if all(is_declared(DATASETS['clickhouse'][d]) for d in datasets):
-            assert task.get('products') or waits(name), f'{name}: a declared dataset outside {DECLARED_LOADS}'
+        if all(is_declared(CLICKHOUSE[d]) for d in datasets):
+            assert task.get('products') or both, f'{name}: a declared dataset outside {DECLARED_LOADS}'
             continue
-        assert waits(name), f'{name} does not wait for {DECLARED_LOADS}'
+        assert both, f'{name} does not wait for {DECLARED_LOADS} and {SERVED_LOADS}'
+
+
+#: The served views each product loads in the served views' task: every view of the product but colocalisation.
+VIEW_LOADS = [
+    'association_otf_disease_view', 'association_otf_target_view', 'coding_variant_by_target_view',
+    'coding_variant_by_variant_view', 'credible_set_locus_view', 'credible_set_view',
+    'disease_phenotype_by_disease_view', 'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view',
+    'drug_warning_by_drug_view', 'interaction_view', 'l2g_prediction_by_credible_set_view',
+    'mouse_phenotype_by_target_view', 'pharmacovigilance_by_drug_view', 'study_credible_set_view', 'study_view',
+    'target_by_region_view', 'target_credible_set_view', 'target_prioritisation_view', 'target_view',
+    'transcript_view', 'variant_credible_set_view', 'variant_view',
+]  # fmt: skip
+
+
+def test_the_served_views_each_product_loads(load):
+    _load, _ = load
+    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view'])}
+    for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
+        runner, _ = _load('backend_clickhouse', run=run)
+        (top,) = [s for s in (runner.task_registry.build(s).spec for s in runner.specs) if s.name == SERVED_LOADS]
+        assert isinstance(top, ClickhouseLoadViewsSpec)
+        assert view_loads(top.product, top.exclude) == expected[product]
+        loaded = {s.dataset for s in _built_loads(runner)}
+        assert set(served_entries(product)) <= loaded
+        assert not set(served_entries()) - set(served_entries(product)) & loaded
+
+
+def test_served_loads_exclude_only_served_views():
+    with pytest.raises(ClickhouseLoadViewsError, match=r"not served: \['nope'\]"):
+        view_loads('platform', ['nope'])
 
 
 def test_a_declared_model_loads_only_for_its_products(load):
@@ -313,18 +361,19 @@ def test_a_declared_model_loads_only_for_its_products(load):
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         loaded = {s.dataset for s in _built_loads(_load('backend_clickhouse', run=run)[0])}
         for name in loaded:
-            entry = DATASETS['clickhouse'][name]
+            entry = CLICKHOUSE[name]
             model = entry_model(entry)
             if model is not None and is_declared(entry):
                 assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
         assert ('otar_projects' in loaded) == (product == 'ppp')
+        assert ('association_timeseries_view' in loaded) == (product == 'ppp')
 
 
 @pytest.mark.parametrize('product', sorted(PRODUCTS))
 def test_declared_names_are_unique(product):
     """A table or dictionary name declared twice would drop the first one's table at load time."""
     names = []
-    for entry in DATASETS['clickhouse'].values():
+    for entry in CLICKHOUSE.values():
         tables, dictionaries = declarations(entry, product)
         names += [t.name for t in tables] + [d.name for d in dictionaries]
     assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)

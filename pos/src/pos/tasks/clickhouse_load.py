@@ -11,6 +11,7 @@ from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
 from pos.clickhouse_ddl import (
+    clickhouse_entries,
     columns,
     ddl_for,
     declarations,
@@ -23,7 +24,6 @@ from pos.clickhouse_ddl import (
     uniqueness_sql,
 )
 from pos.services.clickhouse import connect
-from pos.utils import get_config
 
 # synchronous, so an insert returns once its data is written
 INSERT_SETTINGS = {'async_insert': 0}
@@ -67,15 +67,15 @@ class ClickhouseLoad(Task):
         super().__init__(spec, context)
         self.spec: ClickhouseLoadSpec
         try:
-            self._entry = get_config(self.spec.dataset_config_path).clickhouse[self.spec.dataset]
-            self._table_name = self._entry['table']
-            self._optional = bool(self._entry.get('optional', False))
-            self._input_dir = self._entry.get('input_dir')
-            self._models = self._entry.get('models')
-            self._optional_models = set(self._entry.get('optional_models', []))
-            self._file: Path | None = None  # the file being inserted
-        except AttributeError:
-            raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
+            self._entry = clickhouse_entries(self.spec.dataset_config_path)[self.spec.dataset]
+        except (KeyError, ValueError) as e:
+            raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}: {e}') from e
+        self._table_name = self._entry['table']
+        self._optional = bool(self._entry.get('optional', False))
+        self._input_dir = self._entry.get('input_dir')
+        self._models = self._entry.get('models')
+        self._optional_models = set(self._entry.get('optional_models', []))
+        self._file: Path | None = None  # the file being inserted
         if (problem := source_problem(self._entry)) is not None:
             raise ClickhouseLoadError(f'{self.spec.dataset}: {problem}')
         self._declared = is_declared(self._entry)

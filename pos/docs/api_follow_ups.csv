@@ -6,3 +6,31 @@ credible_set_variant,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx
 enhancer_to_gene,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT`"
 variants,chromosome,"API `Chromosome` enum is `chr1`..`chr22`, `chrx`, `chry`, `chrmt`; data and Enum are `1`..`22`, `X`, `Y`, `MT` (also `EvidenceEva.variantChromosome`)"
 homology,isHighConfidence,"`isHighConfidence` String → Bool: changes in BigQuery, the published parquet and croissant; ClickHouse `targets` now serves `Bool` too"
+association_otf_disease_view,,table associations_otf_disease is now association_otf_disease_view
+association_otf_target_view,,table associations_otf_target is now association_otf_target_view
+association_timeseries_view,,table association_time_series is now association_timeseries_view
+coding_variant_by_target_view,,table protein_coding_coords_by_target is now coding_variant_by_target_view
+coding_variant_by_variant_view,,table protein_coding_coords_by_variant is now coding_variant_by_variant_view
+colocalisation_by_credible_set_view,,table colocalisation is now colocalisation_by_credible_set_view
+credible_set_locus_view,,table credible_sets_locus is now credible_set_locus_view
+credible_set_view,,table credible_sets is now credible_set_view
+disease_phenotype_by_disease_view,,table disease_hpo is now disease_phenotype_by_disease_view
+disease_view,,table disease is now disease_view
+drug_mechanism_of_action_by_drug_view,,table mechanism_of_action is now drug_mechanism_of_action_by_drug_view
+drug_view,,table drug is now drug_view
+drug_warning_by_drug_view,,table drug_warnings is now drug_warning_by_drug_view
+interaction_view,,table interaction is now interaction_view
+l2g_prediction_by_credible_set_view,,table l2g_predictions is now l2g_prediction_by_credible_set_view
+mouse_phenotype_by_target_view,,table mouse_phenotypes is now mouse_phenotype_by_target_view
+pharmacovigilance_by_drug_view,,table pharmacovigilance is now pharmacovigilance_by_drug_view
+study_credible_set_view,,table study_credible_sets is now study_credible_set_view
+study_view,,table studies is now study_view
+target_by_region_view,,table targets_by_region is now target_by_region_view
+target_credible_set_view,,table target_credible_sets is now target_credible_set_view
+target_prioritisation_view,,table target_prioritisation is now target_prioritisation_view
+target_view,,table targets is now target_view
+transcript_view,,table transcript is now transcript_view
+variant_credible_set_view,,table variant_credible_sets is now variant_credible_set_view
+variant_view,,table variants is now variant_view
+disease_view,,dictionary disease_names reads table disease_view (was disease)
+target_view,,dictionary target_symbols reads table target_view (was targets)

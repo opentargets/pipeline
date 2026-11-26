@@ -34,43 +34,19 @@ steps:
         - sync_bucket etl view files
         - clickhouse_create_database release database
       foreach:
-        - aotf_disease
-        - aotf_target
         - baseline_expression
         - biosample
         - clinical_indication
         - clinical_report
         - clinical_target
-        - credible_sets
-        - credible_sets_locus
-        - disease
-        - disease_hpo
-        - drug
-        - drug_warnings
         - enhancer_to_gene
         - evidence
         - go
         - hpo
-        - interaction
-        - l2g_predictions
         - literature_entity_lut
-        - mechanism_of_action
-        - mouse_phenotypes
         - pharmacogenomics
-        - pharmacovigilance
-        - protein_coding_coords_by_target
-        - protein_coding_coords_by_variant
         - so
-        - studies
-        - study_credible_sets
-        - target_credible_sets
         - target_essentiality
-        - target_prioritisation
-        - targets
-        - targets_by_region
-        - transcript
-        - variant_credible_sets
-        - variants
         - w2v
       do:
         - name: clickhouse_load clickhouse load ${each}
@@ -78,27 +54,31 @@ steps:
           clickhouse_database: ${database_namespace}
           data_dir_parent: ${local_data}
           product: ${product}
-    - name: clickhouse_load clickhouse load colocalisation
+    # one load per served view of the product, declared on the view models
+    - name: clickhouse_load_views load served views
+      requires:
+        - sync_bucket etl output files
+        - sync_bucket etl view files
+        - clickhouse_create_database release database
+      exclude:
+        - colocalisation_by_credible_set_view
+      clickhouse_database: ${database_namespace}
+      data_dir_parent: ${local_data}
+      product: ${product}
+    # alone, after every other table: its RocksDB insert is the step's memory peak
+    - name: clickhouse_load clickhouse load colocalisation_by_credible_set_view
       requires:
         - explode load declared datasets
-      dataset: colocalisation
+        - clickhouse_load_views load served views
+      dataset: colocalisation_by_credible_set_view
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
     - name: clickhouse_load clickhouse load interaction_evidence
       requires:
         - explode load declared datasets
+        - clickhouse_load_views load served views
       dataset: interaction_evidence
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load association_time_series
-      products: [ppp]
-      requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: association_time_series
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}
