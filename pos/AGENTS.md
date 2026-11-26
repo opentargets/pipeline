@@ -60,8 +60,8 @@ loads it, builds the served tables and dictionaries from it, then drops it.
 **Served views** are declared on their models. A view model with `clickhouse = Serving(...)`
 (`ot_datamodels.serving`) is one served table named after its `dataset_name`, built from the
 whole view: `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by`
-and the dictionaries built from the table (`ClickHouseDictionary`; its `source` defaults to the
-view's own table). Everything else is derived (`served_entries()`): the input folder
+and the dictionaries built from the table (`ClickHouseDictionary`, `source` unset: a view's
+dictionary reads the view's own table; only the `datasets.yaml` entries name another). Everything else is derived (`served_entries()`): the input folder
 `view/<dataset_name>`, the landing table `<dataset_name>_log`, the RocksDB key (the model's one
 `PrimaryKey`) and the products (the model's). Every view model has a `Serving`
 (datamodels `tests/test_serving.py`).

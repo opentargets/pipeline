@@ -512,14 +512,14 @@ def served_entries(product: str | None = None) -> dict[str, dict]:
     return entries
 
 
-def clickhouse_entries(config_path: str | Path = 'config/datasets.yaml', product: str | None = None) -> dict[str, Any]:
-    """The `clickhouse` entries of `datasets.yaml` and those of the served views (`served_entries`).
+def clickhouse_entries(config_path: str | Path = 'config/datasets.yaml') -> dict[str, Any]:
+    """The `clickhouse` entries of `datasets.yaml` and those of every product's served views (`served_entries`).
 
     Raises:
         ValueError: if a name is both a `datasets.yaml` entry and a served view.
     """
     declared = yaml.safe_load(Path(config_path).read_text()).get('clickhouse') or {}
-    served = served_entries(product)
+    served = served_entries()
     if both := sorted(set(declared) & set(served)):
         raise ValueError(f'{config_path}: entries {both} are served views, declared on their models')
     return {**declared, **served}

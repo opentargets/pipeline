@@ -39,6 +39,7 @@ def test_dictionaries_name_existing_columns(name):
     serving = VIEWS[name].clickhouse
     assert serving is not None
     for d in serving.dictionaries:
+        assert d.source in (None, name), "a view's dictionary reads the view's own table"
         assert set(d.source_columns) <= {d.key, *d.attributes}
         assert {d.source_columns.get(c, c) for c in (d.key, *d.attributes)} <= set(_columns(name))
 
