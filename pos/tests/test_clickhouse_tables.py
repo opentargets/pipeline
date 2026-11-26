@@ -177,11 +177,9 @@ def test_dictionary_source_must_be_a_table_of_the_entry():
     assert _problems(dictionaries=(dictionary,)) == ["sample_log.d: source 'missing' is not a table of the entry"]
 
 
-def test_tables_with_a_postload_script_are_a_problem():
-    entry = {
-        'table': 'sample_log',
-        'model': 'sample',
-        'postload_script': 'post.sql',
-        'tables': [{'name': 'sample', 'engine': 'rocksdb'}],
-    }
-    assert entry_problems(entry, 'platform') == ['sample_log: declares ClickHouse tables and has a postload_script']
+def test_an_entry_needs_exactly_one_of_model_and_models():
+    tables = [{'name': 'sample', 'engine': 'rocksdb'}]
+    neither = {'table': 'sample_log', 'tables': tables}
+    assert entry_problems(neither, 'platform') == ['sample_log: has neither model nor models']
+    both = {'table': 'sample_log', 'model': 'sample', 'models': 'sample*', 'tables': tables}
+    assert entry_problems(both, 'platform') == ['sample_log: has both model and models']

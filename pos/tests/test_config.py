@@ -13,7 +13,7 @@ from otter.scratchpad.model import Scratchpad
 from otter.tasks.explode import ExplodeSpec
 
 from pos import core
-from pos.clickhouse_ddl import declarations, entry_model, is_declared
+from pos.clickhouse_ddl import declarations, entry_model, is_declared, source_problem
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
@@ -259,12 +259,9 @@ def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
     assert any('product: Field required' in line for line in lines)
 
 
-def test_clickhouse_entries_have_one_ddl_source():
-    for name, entry in DATASETS['clickhouse'].items():
-        sources = [k for k in ('model', 'models', 'preload_script') if k in entry]
-        assert len(sources) == 1, f'{name}: {sources}'
-    hand_written = [n for n, e in DATASETS['clickhouse'].items() if 'preload_script' in e and not e.get('derived')]
-    assert not hand_written, f'landing tables with no model: {hand_written}'
+def test_clickhouse_entries_have_one_of_model_and_models():
+    problems = {name: source_problem(entry) for name, entry in DATASETS['clickhouse'].items()}
+    assert not {name: problem for name, problem in problems.items() if problem}
 
 
 def test_clickhouse_models_are_datasets():
@@ -282,11 +279,9 @@ def test_clickhouse_models_are_datasets():
             assert optional in models and fnmatch(optional, entry.get('models', '')), f'{name}: {optional}'
 
 
-def test_no_hand_written_landing_ddl():
-    assert not list((ROOT / 'config' / 'clickhouse' / 'schema').glob('*'))
-    for name, entry in DATASETS['clickhouse'].items():
-        if 'preload_script' in entry:
-            assert entry['preload_script'].startswith('config/clickhouse/scripts/'), name
+def test_no_hand_written_clickhouse_sql():
+    found = sorted(p.name for p in (ROOT / 'config' / 'clickhouse').iterdir() if not p.name.startswith('.'))
+    assert found == ['config.d', 'users.d']
 
 
 DECLARED_LOADS = 'explode load declared datasets'

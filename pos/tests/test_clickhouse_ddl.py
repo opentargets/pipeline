@@ -296,8 +296,8 @@ def test_landing_columns(monkeypatch):
     glob = {'input_dir': 'output', 'models': 'member_*'}
     assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
     assert landing_columns({'input_dir': 'output/x', 'model': 'toy_ppp'}, 'platform') == columns(PppOnly)
-    assert landing_columns({'input_dir': 'view/toy', 'preload_script': 'toy.sql'}, 'platform') is None
-    assert landing_columns({'input_dir': 'output/toy'}, 'platform') is None
+    with pytest.raises(ValueError, match=r'^toy_log: has neither model nor models$'):
+        landing_columns({'table': 'toy_log', 'input_dir': 'output/toy'}, 'platform')
 
 
 def test_ddl_for(monkeypatch):
@@ -311,7 +311,8 @@ def test_ddl_for(monkeypatch):
         ('member_b_log', create_table('member_b_log', columns(MemberB))),
         ('u_log', create_table('u_log', union_columns([MemberA, MemberB]))),
     ]
-    assert ddl_for({'table': 'v', 'preload_script': 'v.sql'}, 'platform') == []
+    with pytest.raises(ValueError, match=r'^v: has both model and models$'):
+        ddl_for({'table': 'v', 'model': 'toy_ppp', 'models': 'member_*'}, 'platform')
     with pytest.raises(ValueError, match=r"^p_log: models 'toy_\*' matches no model for platform$"):
         ddl_for({'table': 'p_log', 'models': 'toy_*'}, 'platform')
 
@@ -338,7 +339,7 @@ def test_pos_ddl_evidence_follows_the_product(monkeypatch, capsys):
     assert platform.count('CREATE TABLE') == len(members('evidence_*', 'platform')) + 1
 
 
-def test_pos_ddl_all_prints_every_modelled_entry(monkeypatch, capsys):
+def test_pos_ddl_all_prints_every_entry(monkeypatch, capsys):
     monkeypatch.chdir(ROOT)
     monkeypatch.setattr('sys.argv', ['pos-ddl', '--all'])
     clickhouse_ddl.main()

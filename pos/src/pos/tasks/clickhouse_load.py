@@ -19,10 +19,10 @@ from pos.clickhouse_ddl import (
     is_declared,
     member_table,
     members,
+    source_problem,
     uniqueness_sql,
 )
 from pos.services.clickhouse import connect
-from pos.sql import split_statements
 from pos.utils import get_config
 
 # synchronous, so an insert returns once its data is written
@@ -69,19 +69,16 @@ class ClickhouseLoad(Task):
         try:
             self._entry = get_config(self.spec.dataset_config_path).clickhouse[self.spec.dataset]
             self._table_name = self._entry['table']
-            self._derived = bool(self._entry.get('derived', False))
             self._optional = bool(self._entry.get('optional', False))
             self._input_dir = self._entry.get('input_dir')
-            self._pre_load_sql = self._entry.get('preload_script')
-            self._post_load_sql = self._entry.get('postload_script')
             self._models = self._entry.get('models')
             self._optional_models = set(self._entry.get('optional_models', []))
             self._file: Path | None = None  # the file being inserted
         except AttributeError:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}')
+        if (problem := source_problem(self._entry)) is not None:
+            raise ClickhouseLoadError(f'{self.spec.dataset}: {problem}')
         self._declared = is_declared(self._entry)
-        if self._declared and self._post_load_sql is not None:
-            raise ClickhouseLoadError(f'{self.spec.dataset}: declares ClickHouse tables and has a postload_script')
         if self._declared and not declarations(self._entry, self.spec.product)[0]:
             raise ClickhouseLoadError(f'{self.spec.dataset}: declares no ClickHouse table for {self.spec.product}')
 
@@ -95,22 +92,15 @@ class ClickhouseLoad(Task):
                 self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
             self._load_members(client, ddl, member_files)
         else:
-            files = [] if self._derived else self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
+            files = self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
             client = self._connect()
-            ddl = ddl_for(self._entry, self.spec.product)
-            create = ddl[0][1] if ddl else None
+            ((_, create),) = ddl_for(self._entry, self.spec.product)
             if self._declared:
                 self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
-            if create is not None:
-                self._create(client, create)
-            else:
-                self._execute_script(client, self._pre_load_sql)
-            if not self._derived:
-                self._load_named(client, self.spec.dataset, self._table_name, files, create)
+            self._create(client, create)
+            self._load_named(client, self.spec.dataset, self._table_name, files, create)
         if self._declared:
             self._build_declared(client)
-        if self._post_load_sql is not None:
-            self._execute_script(client, self._post_load_sql)
         return self
 
     def _connect(self):
@@ -195,13 +185,13 @@ class ClickhouseLoad(Task):
         logger.info(sql)
         client.command(sql)
 
-    def _load_named(self, client, name: str, table: str, files: list[Path], create: str | None) -> None:
+    def _load_named(self, client, name: str, table: str, files: list[Path], create: str) -> None:
         """`_load`; an error the retry does not clear names the dataset, the file and the generated table."""
         try:
             self._load(client, table, files)
         except ClickHouseError as e:
-            its_table = f'; its table: {create}' if create is not None else ''
-            raise ClickhouseLoadError(f'loading {name} into {table} failed on {self._file}: {e}{its_table}') from e
+            message = f'loading {name} into {table} failed on {self._file}: {e}; its table: {create}'
+            raise ClickhouseLoadError(message) from e
 
     def _load(self, client, table: str, files: list[Path]) -> None:
         """Insert the files; on an error truncate the table and insert them all once more."""
@@ -226,9 +216,3 @@ class ClickhouseLoad(Task):
 
     def _get_parquet_path(self) -> Path:
         return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')
-
-    @staticmethod
-    def _execute_script(client, script: str) -> None:
-        for sql in split_statements(Path(script).read_text()):
-            logger.info(sql)
-            client.query(sql)
