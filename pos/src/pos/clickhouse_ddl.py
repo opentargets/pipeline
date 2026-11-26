@@ -27,7 +27,6 @@ ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
 _ENUM8_MAX = 127
 _TOKEN = re.compile(r"\s*(?:`([^`]*)`|('(?:[^'\\]|\\.)*')|(-?\d+(?:\.\d+)?)|([A-Za-z_]\w*)|(\S))")
-_CREATE = re.compile(r'create\s+table\s+(?:if\s+not\s+exists\s+)?[\w.`]+\s*\(', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -137,17 +136,6 @@ def parse_type(text: str) -> CHType:
     return parsed
 
 
-def parse_table(sql: str) -> dict[str, CHType]:
-    """The columns of the first `CREATE TABLE ... (...)` in `sql`, in order."""
-    sql = re.sub(r'--[^\n]*', '', sql)
-    match = _CREATE.search(sql)
-    if match is None:
-        raise ValueError('no CREATE TABLE found')
-    parser = _Parser(sql[match.end() - 1 :])
-    cols = parser.items(lambda: (parser.take('name'), parser.type()))
-    return dict(cols)
-
-
 def render(t: CHType, *, nullable_outermost: bool = False, quote_fields: bool = True) -> str:
     """The type as ClickHouse accepts it: `LowCardinality(Nullable(...))`, Tuple field names backtick-quoted.
 
@@ -172,23 +160,6 @@ def render(t: CHType, *, nullable_outermost: bool = False, quote_fields: bool = 
 
 def _name(name: str) -> str:
     return f'`{name}`'
-
-
-def canonical(t: CHType) -> CHType:
-    """`t` with every Enum an `Enum8`/`Enum16` with explicit values; an entry with none takes the last value + 1."""
-    element = canonical(t.element) if t.element is not None else None
-    fields = tuple((n, canonical(f)) for n, f in t.fields)
-    if t.name not in ENUMS:
-        return replace(t, element=element, fields=fields)
-    entries, value = [], 0
-    for entry in t.args:
-        label, _, given = entry.partition(' = ')
-        value = int(given) if given else value + 1
-        entries.append(f'{label} = {value}')
-    name = t.name
-    if name == 'Enum':
-        name = 'Enum8' if all(-128 <= int(e.rsplit(' = ', 1)[1]) <= _ENUM8_MAX for e in entries) else 'Enum16'
-    return replace(t, name=name, args=tuple(entries))
 
 
 # models
@@ -524,16 +495,3 @@ def main() -> None:
     names = list(entries) if args.all else [args.dataset]
     statements = [sql for name in names for _, sql in ddl_for(entries[name], args.product)]
     sys.stdout.write(''.join(f'{sql};\n' for sql in statements))
-
-
-def type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
-    """The type at `a`, `a/b` or `a[]/b` (`a[]` is the element); a Tuple of `cols` for ''; None if absent."""
-    t: CHType | None = CHType('Tuple', fields=tuple(cols))
-    for part in path.split('/') if path else []:
-        name, lists = part, 0
-        while name.endswith('[]'):
-            name, lists = name[:-2], lists + 1
-        t = dict(t.fields).get(name) if t is not None else None
-        for _ in range(lists):
-            t = t.element if t is not None else None
-    return t

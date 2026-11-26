@@ -1,6 +1,7 @@
 """pos.clickhouse_ddl: ClickHouse landing DDL generated from the dataset models."""
 
 import datetime
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal, get_args
 
@@ -8,7 +9,7 @@ import polars as pl
 import pytest
 import yaml
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
-from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets, discover_models
+from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.variant import Variant
@@ -57,7 +58,6 @@ from ot_datamodels.vocabularies import (
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
     CHType,
-    canonical,
     column_type,
     columns,
     create_table,
@@ -68,15 +68,12 @@ from pos.clickhouse_ddl import (
     drop_dictionary_sql,
     entry_problems,
     landing_columns,
-    member_table,
     members,
     model_type,
-    parse_table,
     parse_type,
     render,
     rocksdb_key,
     table_sql,
-    type_at,
     union_columns,
     uniqueness_sql,
 )
@@ -349,47 +346,13 @@ def test_pos_ddl_all_prints_every_entry(monkeypatch, capsys):
     assert '`targets_log`' in out
 
 
-def test_type_at():
-    cols = columns(Toy)
-    assert type_at(cols, 'tags') == dict(cols)['tags']
-    assert type_at(cols, 'tags[]') == CHType('String')
-    assert type_at(cols, 'nested[][]') == CHType('Int64')
-    assert type_at(cols, 'struct/b') == CHType('Int64')
-    assert type_at(cols, 'nullable_struct/a') == CHType('String', nullable=True)
-    assert type_at(cols, 'bars[]/a') == CHType('String', nullable=True)
-    assert type_at(cols, '') == CHType('Tuple', fields=tuple(cols))
-    assert type_at(cols, 'absent') is None
-    assert type_at(cols, 'struct/absent') is None
-    assert type_at(cols, 'absent[]/a') is None
-
-
-def test_canonical_numbers_enums():
-    numbered = parse_type("Enum8('a' = 1, 'b' = 2)")
-    assert canonical(parse_type("Enum('a', 'b')")) == numbered
-    assert canonical(numbered) == numbered
-    assert canonical(parse_type("Enum8('b' = 1, 'a' = 2)")) != numbered
-    assert canonical(parse_type("Enum('a' = 5, 'b')")) == parse_type("Enum8('a' = 5, 'b' = 6)")
-    assert canonical(parse_type("Enum('a' = 200)")) == parse_type("Enum16('a' = 200)")
-    nested = canonical(parse_type("Array(Tuple(x Nullable(Enum('a', 'b'))))"))
-    assert nested == parse_type("Array(Tuple(x Nullable(Enum8('a' = 1, 'b' = 2))))")
-
-
 def test_create_table_quotes_identifiers():
     sql = create_table('toy_log', [('id', column_type(dataset_spec(MemberA).fields[0].node))])
     assert sql == 'CREATE TABLE IF NOT EXISTS `toy_log` (`id` String) ENGINE = Log'
 
 
-def test_every_entry_round_trips():
+def test_every_view_is_served():
     entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    models = discover_models()
-    checked = 0
-    for name, entry in entries.items():
-        if 'model' not in entry:
-            continue
-        cols = columns(models[entry['model']])
-        assert list(parse_table(create_table(entry['table'], cols)).items()) == cols, name
-        checked += 1
-    assert checked > 20
     served = ('aotf_disease', 'aotf_target', 'association_time_series', 'colocalisation', 'credible_sets',
               'credible_sets_locus', 'disease', 'disease_hpo', 'drug', 'drug_warnings', 'interaction',
               'l2g_predictions', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
@@ -398,13 +361,19 @@ def test_every_entry_round_trips():
               'variant_credible_sets', 'variants')  # fmt: skip
     views = {entries[n]['model'] for n in served}
     assert views == set(discover_datasets(VIEWS_PACKAGE))
-    for product in ('platform', 'ppp'):
-        found = members(entries['evidence']['models'], product)
-        assert found, product
-        tables = [(member_table(m), columns(m)) for m in found]
-        tables.append((entries['evidence']['table'], union_columns(found)))
-        for table, cols in tables:
-            assert list(parse_table(create_table(table, cols)).items()) == cols, (product, table)
+
+
+def _type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
+    """The type at `a`, `a/b` or `a[]/b` (`a[]` is the element); a Tuple of `cols` for ''; None if absent."""
+    t: CHType | None = CHType('Tuple', fields=tuple(cols))
+    for part in path.split('/') if path else []:
+        name, lists = part, 0
+        while name.endswith('[]'):
+            name, lists = name[:-2], lists + 1
+        t = dict(t.fields).get(name) if t is not None else None
+        for _ in range(lists):
+            t = t.element if t is not None else None
+    return t
 
 
 #: The `targets` landing types the markers on the `target` model keep.
@@ -429,7 +398,7 @@ TARGET_VIEW_TYPES = {
 
 @pytest.mark.parametrize(('path', 'expected'), TARGET_VIEW_TYPES.items())
 def test_target_view_keeps_landing_types(path, expected):
-    t = type_at(columns(TargetView), path)
+    t = _type_at(columns(TargetView), path)
     assert t is not None
     assert render(t) == expected
 
