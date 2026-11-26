@@ -9,6 +9,7 @@ otter, which bills the project of the surrounding `storage_context`, rather than
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 from typing import Any
@@ -20,21 +21,40 @@ from pts.transformers.utils.dataset import list_parts
 
 COPY_BYTES = 16 * 1024 * 1024
 
+MUNGE_VERSION = 2
+"""The version of the munged format and of how it is made: a run reuses a previous run's munged
+studies only if both were made with the same version. Increment it with any change to
+`munge_study` or `read_panel` that changes what a munged study holds."""
+
 VARIANT_KEY = ['chromosome', 'position', 'ref', 'alt']
 
 MUNGED_SCHEMA = pl.Schema({
-    'chromosome': pl.String,
-    'position': pl.Int64,
-    'ref': pl.String,
-    'alt': pl.String,
-    'beta': pl.Float64,
-    'standardError': pl.Float64,
+    'snp': pl.UInt32,
+    'z': pl.Float64,
     'sampleSize': pl.Float64,
     'ldScore': pl.Float64,
 })
-"""One munged study: its effects on the panel's SNPs, in genomic order."""
+"""One munged study: its z-scores on the panel's SNPs, aligned to the panel's alleles. `snp` is the
+SNP's row in the panel (`read_panel`), so sorting by it is genomic order and two studies of one
+ancestry join on it."""
 
-PANELS_SCHEMA = pl.Schema({'ldAncestry': pl.String, 'mSnps': pl.Int64})
+STUDIES_SCHEMA = pl.Schema({
+    'studyId': pl.String,
+    'ldAncestry': pl.String,
+    'nSnps': pl.Int64,
+    'isUsable': pl.Boolean,
+    'isReused': pl.Boolean,
+})
+"""Each munged study's number of panel SNPs, whether it has enough to be correlated, and whether it
+was copied from the previous run rather than munged."""
+
+PANELS_SCHEMA = pl.Schema({
+    'ldAncestry': pl.String,
+    'mSnps': pl.Int64,
+    'panelChecksum': pl.String,
+    'mungeVersion': pl.Int64,
+})
+"""Each panel's M, the checksum of its files, and the `MUNGE_VERSION` its studies were munged with."""
 
 _PANEL_COLUMNS = {
     'CHR': pl.String,
@@ -79,7 +99,8 @@ def read_panel(path: str, scratch: Path) -> pl.DataFrame:
         scratch: where the parts of a remote panel are copied to be read.
 
     Returns:
-        `chromosome`, `position`, `ref`, `alt`, `ldScore` and, when the panel has one, `alleleFrequency`.
+        `snp`, the row in genomic order, then `chromosome`, `position`, `ref`, `alt`, `ldScore` and,
+        when the panel has one, `alleleFrequency`.
     """
     parts = [fetch(part, scratch / Path(part).name) for part in list_parts(path, '*.csv*')]
     scan = pl.scan_csv(parts, separator='\t', schema_overrides=_PANEL_COLUMNS)
@@ -94,7 +115,35 @@ def read_panel(path: str, scratch: Path) -> pl.DataFrame:
     ]
     if 'AF' in columns:
         selected.append(pl.col('AF').alias('alleleFrequency'))
-    return scan.select(selected).filter(pl.col('ldScore').is_not_null()).unique(VARIANT_KEY).collect()
+    return (
+        scan
+        .select(selected)
+        .filter(pl.col('ldScore').is_not_null())
+        .unique(VARIANT_KEY)
+        .sort(VARIANT_KEY)
+        .with_row_index('snp')
+        .collect()
+    )
+
+
+def panel_checksum(path: str) -> str:
+    """The SHA-256 of a panel's files, in the order `read_panel` reads them."""
+    digest = hashlib.sha256()
+    for part in list_parts(path, '*.csv*'):
+        with StorageHandle(part).open('rb') if is_remote(part) else Path(part).open('rb') as handle:
+            while block := handle.read(COPY_BYTES):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def copy(source: str, target: str, scratch: Path) -> None:
+    """Copy one file between local paths or object store URIs, through `scratch`."""
+    local = fetch(source, scratch / Path(source).name)
+    if not is_remote(source):
+        staged = scratch / f'{Path(source).name}.copy'
+        shutil.copyfile(local, staged)
+        local = staged
+    publish(local, target)
 
 
 def panel_size(panel: pl.DataFrame, maf_threshold: float) -> int:
@@ -106,37 +155,55 @@ def panel_size(panel: pl.DataFrame, maf_threshold: float) -> int:
 
 
 def munge_study(sumstats: pl.LazyFrame, fallback_sample_size: float | None, panel: pl.DataFrame) -> pl.DataFrame:
-    """Join one study's summary statistics to the panel, in `MUNGED_SCHEMA`.
+    """Align one study's summary statistics to the panel, in `MUNGED_SCHEMA`.
 
-    Alleles come from `variantId` (`chr_pos_ref_alt`). A variant without a sample size of its own
-    takes the study's effective one. Variants with no effect, no error, or a duplicate key are dropped.
+    Alleles come from `variantId` (`chr_pos_ref_alt`). A variant whose alleles are the panel's
+    swapped is kept with its z-score negated; one that matches both ways keeps the direct match.
+    A variant without a sample size of its own takes the study's effective one. Variants with no
+    effect, no error, or a duplicate key are dropped.
     """
     alleles = pl.col('variantId').str.split('_')
-    key = pl.col('chromosome').cast(pl.String)
-    return (
+    positions = panel.lazy().select('chromosome', 'position').unique()
+    study = (
         sumstats
+        .with_columns(pl.col('chromosome').cast(pl.String), pl.col('position').cast(pl.Int64))
+        # most of a study's variants are not on the panel: drop them before anything else is computed
+        .join(positions, on=['chromosome', 'position'], how='semi')
         .select(
-            key,
-            pl.col('position').cast(pl.Int64),
+            'chromosome',
+            'position',
             alleles.list.get(2, null_on_oob=True).alias('ref'),
             alleles.list.get(3, null_on_oob=True).alias('alt'),
-            pl.col('beta').cast(pl.Float64),
-            pl.col('standardError').cast(pl.Float64),
+            (pl.col('beta').cast(pl.Float64) / pl.col('standardError').cast(pl.Float64)).alias('z'),
             pl.coalesce(pl.col('sampleSize').cast(pl.Float64), pl.lit(fallback_sample_size, dtype=pl.Float64)).alias(
                 'sampleSize'
             ),
+            pl.col('standardError').cast(pl.Float64).alias('_se'),
         )
         .filter(
-            pl.col('beta').is_not_null(),
-            pl.col('standardError') > 0,
+            pl.col('z').is_finite(),
+            pl.col('_se') > 0,
             pl.col('sampleSize').is_not_null(),
             pl.col('ref').is_not_null(),
             pl.col('alt').is_not_null(),
         )
+        .drop('_se')
         .unique(VARIANT_KEY)
-        .join(panel.lazy().select(*VARIANT_KEY, 'ldScore'), on=VARIANT_KEY)
-        .sort('chromosome', 'position')
+    )
+    keys = panel.lazy().select(
+        'snp', 'chromosome', 'position', pl.col('ref').alias('_ref'), pl.col('alt').alias('_alt'), 'ldScore'
+    )
+    direct = (pl.col('ref') == pl.col('_ref')) & (pl.col('alt') == pl.col('_alt'))
+    swapped = (pl.col('ref') == pl.col('_alt')) & (pl.col('alt') == pl.col('_ref'))
+    return (
+        study
+        .join(keys, on=['chromosome', 'position'])
+        .filter(direct | swapped)
+        .with_columns(pl.when(direct).then(pl.col('z')).otherwise(-pl.col('z')).alias('z'), swapped.alias('_swapped'))
+        .sort('snp', '_swapped')
+        .unique('snp', keep='first', maintain_order=True)
         .select(list(MUNGED_SCHEMA))
+        .cast(MUNGED_SCHEMA)
         .collect()
     )
 

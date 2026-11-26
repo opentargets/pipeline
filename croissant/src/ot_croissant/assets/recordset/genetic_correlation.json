@@ -1,5 +1,9 @@
 [
   {
+    "id": "deprecationReason",
+    "description": "Why the pair is deprecated, naming the study or studies no longer correlated; null for a current pair"
+  },
+  {
     "id": "geneticCovariance",
     "description": "Genetic covariance of the two studies' traits, the slope of their z-score product on LD score"
   },
@@ -14,6 +18,10 @@
   {
     "id": "interceptStandardError",
     "description": "Block jackknife standard error of the intercept"
+  },
+  {
+    "id": "isDeprecated",
+    "description": "Whether the pair is no longer current: a previous run correlated it, but one of its studies is no longer a representative or no longer has enough panel SNPs. A deprecated pair keeps the values of the run that computed it"
   },
   {
     "id": "ldAncestry",

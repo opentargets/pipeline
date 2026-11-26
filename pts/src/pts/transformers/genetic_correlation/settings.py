@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pts.transformers.genetic_correlation.previous import PreviousOutput
 from pts.transformers.study import QualityFlag
 
 LD_ANCESTRIES = ('afr', 'amr', 'eas', 'fin', 'nfe')
@@ -24,6 +25,17 @@ class RepresentativesSource(BaseModel):
     """The release's credible sets; a study's genome-wide significant ones rank it."""
     excluded_study: str | None = None
     """The studies the release excluded, read only with `include_excluded_studies`."""
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, to compare the representatives with."""
+
+
+class RepresentativesDestination(BaseModel):
+    """The representatives, and how they changed since the previous run."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    representatives: str
+    changes: str
 
 
 class RepresentativesSettings(BaseModel):
@@ -85,14 +97,17 @@ class MungeSource(BaseModel):
     """Directory of one panel per ancestry, named by `MungeSettings.ldscore_template`."""
     sumstats: str
     """Directory with one parquet dataset per study, named by its `studyId`."""
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, whose munged studies are reused where nothing changed."""
 
 
 class MungeDestination(BaseModel):
-    """One parquet file per study under `munged/<ancestry>/`, and each panel's SNP count."""
+    """One parquet file per study under `munged/<ancestry>/`, each study's SNP count, and each panel's M."""
 
     model_config = ConfigDict(extra='forbid')
 
     munged: str
+    studies: str
     panels: str
 
 
@@ -108,16 +123,30 @@ class MungeSettings(BaseModel):
     of SNPs the LD scores stand for; LDSC's `M_5_50` convention."""
     billing_project: str | None = None
     """Project billed for reading the summary statistics, when their bucket is requester pays."""
+    min_snps: int = Field(default=200_000, gt=0)
+    """Fewest panel SNPs a munged study needs to be correlated; LDSC warns below 200,000."""
 
 
 class PairsSource(BaseModel):
-    """The representatives and the munged studies, with each panel's SNP count."""
+    """The munged studies, their index from the munge step, and each panel's M."""
 
     model_config = ConfigDict(extra='forbid')
 
-    representatives: str
+    studies: str
     munged: str
     panels: str
+    previous_output: PreviousOutput = None
+    """The previous run's output folder, whose pairs are reused where nothing changed and kept,
+    flagged as deprecated, where a study is no longer correlated."""
+
+
+class PairsDestination(BaseModel):
+    """The genetic correlation of every pair, and the parameters it was computed with."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    genetic_correlation: str
+    parameters: str
 
 
 class PairsSettings(BaseModel):
@@ -132,5 +161,9 @@ class PairsSettings(BaseModel):
     intercept: float | None = None
     """Fix the genetic covariance intercept; None estimates it."""
     min_overlap_snps: int = Field(default=50, gt=0)
-    pairs_per_chunk: int = Field(default=200, gt=0)
-    """Pairs in one Spark task."""
+    tile_studies: int = Field(default=20, gt=0)
+    """Studies on each side of a tile: a Spark task loads up to twice this many studies and
+    correlates every pair between them."""
+    min_tiles: int = Field(default=500, gt=0)
+    """Fewest tiles a run is cut into, shrinking `tile_studies` for a small run so that it still
+    spreads over the cluster; the dynamic allocation of executors hides the cluster's size."""
