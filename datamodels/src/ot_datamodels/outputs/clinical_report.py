@@ -9,11 +9,12 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ONTOLOGY_ID
 from ot_datamodels.vocabularies import (
     ClinicalReportType,
+    ClinicalSource,
     ClinicalStage,
     Origin,
     Provider,
@@ -132,8 +133,8 @@ class ClinicalReport(DatasetModel):
             'Kind of evidence the report describes: INDICATION for a drug/disease claim, SAFETY for a drug warning'
         )
     )
-    source: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description=('Source database or registry from which the clinical report was obtained')
+    source: Annotated[ClinicalSource, PolarsDtype(pl.Enum)] = Field(
+        description=('Source database or registry from which the clinical report was obtained')
     )
     provider: Annotated[Provider, PolarsDtype(pl.Enum)] = Field(
         description=(

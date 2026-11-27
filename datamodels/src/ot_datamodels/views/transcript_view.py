@@ -14,6 +14,7 @@ from ot_datamodels.vocabularies import TranscriptFlagLabel, TranscriptFlagValue
 
 TargetId = from_output(Transcript, 'targetId', primary_key=True)
 TranscriptId = from_output(Transcript, 'transcriptId')
+Biotype = from_output(Transcript, 'biotype')
 ProteinId = from_output(Transcript, 'proteinId')
 UniprotSwissprotIds = from_output(Transcript, 'uniprotSwissprotIds')
 UniprotTremblIds = from_output(Transcript, 'uniprotTremblIds')
@@ -37,10 +38,10 @@ class TranscriptFlag(StructModel):
 
 
 class TranscriptViewRow(StructModel):
-    """`transcripts[]`: a `transcript` row without its `targetId`, `biotype` without LowCardinality."""
+    """`transcripts[]`: a `transcript` row without its `targetId`."""
 
     transcriptId: TranscriptId
-    biotype: str = Field(min_length=1, description='Biotype classification of the transcript')
+    biotype: Biotype
     proteinId: ProteinId
     uniprotSwissprotIds: UniprotSwissprotIds
     uniprotTremblIds: UniprotTremblIds

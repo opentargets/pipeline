@@ -3,7 +3,7 @@
 One row per credible set with its variants, by `posteriorProbability` descending, then `variantId`.
 """
 
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
 from pydantic import Field
 
@@ -27,6 +27,7 @@ ConditionalStandardError = from_output(CredibleSetVariant, 'conditionalStandardE
 RescaledAbsBeta = from_output(CredibleSetVariant, 'rescaledAbsBeta')
 RescaledStandardError = from_output(CredibleSetVariant, 'rescaledStandardError')
 RescaledDirection = from_output(CredibleSetVariant, 'rescaledDirection')
+QualityControls = from_output(CredibleSetVariant, 'qualityControls')
 
 _EXAMPLE = CredibleSetVariant.example
 #: The served row, also the order of `LocusRow`.
@@ -51,7 +52,7 @@ LOCUS_FIELDS = [
 
 
 class LocusRow(StructModel):
-    """`locus[]`: a credible set variant, `qualityControls` without LowCardinality."""
+    """`locus[]`: a credible set variant."""
 
     variantId: VariantId
     posteriorProbability: PosteriorProbability
@@ -68,9 +69,7 @@ class LocusRow(StructModel):
     rescaledAbsBeta: RescaledAbsBeta
     rescaledStandardError: RescaledStandardError
     rescaledDirection: RescaledDirection
-    qualityControls: list[Annotated[str, Field(min_length=1)]] = Field(
-        description=CredibleSetVariant.model_fields['qualityControls'].description
-    )
+    qualityControls: QualityControls
 
 
 class CredibleSetLocusView(DatasetModel):

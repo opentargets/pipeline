@@ -10,7 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_PROTEIN_ID, ENSEMBL_TRANSCRIPT_ID
-from ot_datamodels.vocabularies import Chromosome, TranscriptFlagLabel, TranscriptFlagValue
+from ot_datamodels.vocabularies import Chromosome, TranscriptBiotype, TranscriptFlagLabel, TranscriptFlagValue
 
 
 class DbXrefs(StructModel):
@@ -88,8 +88,8 @@ class Transcript(DatasetModel):
     transcriptId: Annotated[str, Bioregistry('ensembl'), PrimaryKey()] = Field(
         pattern=ENSEMBL_TRANSCRIPT_ID, description='Ensembl identifier of the transcript (ENST###)'
     )
-    biotype: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Biotype classification of the transcript'
+    biotype: Annotated[TranscriptBiotype, PolarsDtype(pl.Enum)] = Field(
+        description='Biotype classification of the transcript'
     )
     proteinId: Annotated[str, Bioregistry('ensembl')] | None = Field(
         pattern=ENSEMBL_PROTEIN_ID,
