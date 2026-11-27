@@ -81,7 +81,11 @@ def read_results(path: str) -> pl.DataFrame:
         'studyId',
         pl
         .when(_PAIRED)
-        .then(pl.concat_str(pl.col('ids').list.get(1), pl.col('ids').list.get(0), separator=PAIR_SEPARATOR))
+        .then(
+            pl.concat_str(
+                pl.col('ids').list.get(1, null_on_oob=True), pl.col('ids').list.get(0), separator=PAIR_SEPARATOR
+            )
+        )
         .otherwise(pl.col('ids').list.first())
         .alias('biosampleKey'),
         pl.col('Coefficient').alias('beta'),
