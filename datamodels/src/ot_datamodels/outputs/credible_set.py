@@ -84,5 +84,5 @@ class CredibleSet(DatasetModel):
         ge=0.0, description='Minimum pairwise LD r2 between the variants of the credible set'
     )
     qualityControls: list[Annotated[CredibleSetQualityControl, PolarsDtype(pl.Enum)]] = Field(
-        description=('Quality control flags of the credible set, including TRANS_QTL and REPLICATED')
+        description='Quality control flags of the credible set'
     )
