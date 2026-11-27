@@ -49,6 +49,7 @@ def test_a_copy_view_is_one_column_projection_or_the_whole_output(view: str, out
     model, source = COPY_VIEWS[view], OUTPUTS[output]
     if view == 'literature_entity_lut_view':
         assert not issubclass(model, source)
+        assert model.products == source.products
     else:
         assert issubclass(model, source)
         assert _columns(model) == _columns(source)

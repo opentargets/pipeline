@@ -961,6 +961,11 @@ def test_yaml_declarations_are_valid(product):
     assert [p for e in declared for p in entry_problems(e, product)] == []
 
 
+def test_no_yaml_entry_is_optional():
+    entries = clickhouse_entries(DATASETS_YAML)
+    assert [name for name, e in entries.items() if 'optional' in e] == []
+
+
 def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
     client = clickhouse_database
     table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3')
