@@ -29,17 +29,20 @@ class ClickHouseDictionary:
 
 @dataclass(frozen=True)
 class Serving:
-    """How a view is served: its table's engine, a MergeTree's sort order, and the dictionaries built from it.
+    """How a view is served: its table's engine, a MergeTree's sort order, its dictionaries and its column types.
 
     Attributes:
         engine: `rocksdb` (point lookups on the model's one `PrimaryKey`) or `mergetree` (ordered by `order_by`).
         order_by: the MergeTree sort order, also its primary key; MergeTree only, and required there.
         dictionaries: the dictionaries built from the table.
+        column_types: the ClickHouse type of a primitive's non-null value, where it differs from its dtype's, by
+            `spec.walk` path (`column`, `column[]`, `column/field`).
     """
 
     engine: Literal['rocksdb', 'mergetree']
     order_by: tuple[str, ...] = ()
     dictionaries: tuple[ClickHouseDictionary, ...] = ()
+    column_types: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.engine not in ('rocksdb', 'mergetree'):

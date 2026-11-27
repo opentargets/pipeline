@@ -4,7 +4,7 @@ import pytest
 
 from ot_datamodels import Serving
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
-from ot_datamodels.spec import dataset_spec
+from ot_datamodels.spec import dataset_spec, walk
 
 VIEWS = discover_datasets(VIEWS_PACKAGE)
 
@@ -51,6 +51,15 @@ def test_the_served_dictionaries():
         'so_view': ['sequence_ontology'],
         'target_view': ['target_symbols'],
     }
+
+
+@pytest.mark.parametrize('name', sorted(VIEWS))
+def test_column_types_name_primitive_values(name):
+    serving = VIEWS[name].clickhouse
+    assert serving is not None
+    primitives = {path for path, node in walk(dataset_spec(VIEWS[name])) if node.kind == 'primitive'}
+    assert set(serving.column_types) <= primitives
+    assert all(t.strip() for t in serving.column_types.values())
 
 
 def test_no_output_is_served_from_its_model():

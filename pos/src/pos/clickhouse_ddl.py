@@ -13,7 +13,7 @@ import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets, discover_models
-from ot_datamodels.spec import Node, dataset_spec
+from ot_datamodels.spec import Node, dataset_spec, walk
 
 from pos.clickhouse_tables import (
     ClickHouseDictionary,
@@ -181,8 +181,10 @@ def model_type(node: Node, path: str = '') -> CHType:
     return replace(_dtype_type(node, path), nullable=node.nullable)
 
 
-def _primitive(node: Node, path: str) -> CHType:
-    """The non-null type of a primitive: its marker, else its dtype."""
+def _primitive(node: Node, path: str, types: Mapping[str, str]) -> CHType:
+    """The non-null type of a primitive: its entry in `types` (a view's `column_types`), else its marker or dtype."""
+    if path in types:
+        return replace(parse_type(types[path]), nullable=False)
     if node.clickhouse:
         return replace(parse_type(node.clickhouse), nullable=False)
     return _dtype_type(node, path)
@@ -200,24 +202,35 @@ def _dtype_type(node: Node, path: str) -> CHType:
     return CHType(_POLARS_NAMES.get(name, name))
 
 
-def _type(node: Node, force: bool, path: str) -> CHType:
+def _type(node: Node, force: bool, path: str, types: Mapping[str, str]) -> CHType:
     if node.kind == 'list':
         assert node.element is not None
-        return CHType('Array', element=_type(node.element, False, f'{path}[]'))
+        return CHType('Array', element=_type(node.element, False, f'{path}[]', types))
     if node.kind == 'struct':
         inner = force or node.nullable
-        return CHType('Tuple', fields=tuple((f.name, _type(f.node, inner, f'{path}/{f.name}')) for f in node.fields))
-    return replace(_primitive(node, path), nullable=node.nullable or force)
+        return CHType(
+            'Tuple', fields=tuple((f.name, _type(f.node, inner, f'{path}/{f.name}', types)) for f in node.fields)
+        )
+    return replace(_primitive(node, path, types), nullable=node.nullable or force)
 
 
 def column_type(node: Node, in_nullable_struct: bool = False) -> CHType:
     """The landing type of a node; every field of a nullable struct is Nullable, down to the next Array."""
-    return _type(node, in_nullable_struct, '')
+    return _type(node, in_nullable_struct, '', {})
 
 
 def columns(model: type[DatasetModel]) -> list[tuple[str, CHType]]:
-    """The model's top-level columns and their landing types, in model order."""
-    return [(f.name, _type(f.node, False, f.name)) for f in dataset_spec(model).fields]
+    """The model's top-level columns and their landing types, in model order; a served view's take its `column_types`.
+
+    Raises:
+        ValueError: if a `column_types` path is not a primitive value of the view.
+    """
+    spec = dataset_spec(model)
+    types = model.clickhouse.column_types if model.clickhouse is not None else {}
+    primitives = {path for path, node in walk(spec) if node.kind == 'primitive'}
+    if unknown := sorted(set(types) - primitives):
+        raise ValueError(f'{model.dataset_name}: column_types paths {unknown} are not primitive values')
+    return [(f.name, _type(f.node, False, f.name, types)) for f in spec.fields]
 
 
 def _non_null(t: CHType) -> CHType:

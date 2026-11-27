@@ -93,7 +93,9 @@ class TargetView(Target):
 ```
 
 `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by` (required there,
-refused on RocksDB) and the dictionaries built from the table. The served table is the whole view,
+refused on RocksDB), the dictionaries built from the table and `column_types`: the ClickHouse type of a
+primitive's non-null value where it differs from its dtype's, by `spec.walk` path (`column`,
+`column[]` for a list element, `column/field` for a struct field: `constraint[]/obs`). The served table is the whole view,
 named `dataset_name`; pos derives the rest from the model: the RocksDB key is its one `PrimaryKey`, the
 landing table `<dataset_name>_log`, the input `view/<dataset_name>` and the products the model's
 (`pos/AGENTS.md`, ClickHouse landing tables). A column the API does not read is dropped from the view,

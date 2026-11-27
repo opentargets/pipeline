@@ -59,8 +59,10 @@ loads it, builds the served tables and dictionaries from it, then drops it.
 
 **Served views** are declared on their models. A view model with `clickhouse = Serving(...)`
 (`ot_datamodels.serving`) is one served table named after its `dataset_name`, built from the
-whole view: `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by`
-and the dictionaries built from the table (`ClickHouseDictionary`, which reads the view's own table).
+whole view: `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by`,
+the dictionaries built from the table (`ClickHouseDictionary`, which reads the view's own table) and
+`column_types`, the ClickHouse type of a primitive by `spec.walk` path where it differs from the dtype's
+(`columns()` fails on a path that is not a primitive of the view).
 Everything else is derived (`served_entries()`): the input folder
 `view/<dataset_name>`, the landing table `<dataset_name>_log`, the RocksDB key (the model's one
 `PrimaryKey`) and the products (the model's). Every view model has a `Serving`
