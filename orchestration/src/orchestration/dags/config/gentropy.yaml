@@ -42,8 +42,11 @@ steps:
         - PREAPPROVAL
       # Legacy OTG gold standard curation with remapped disease ids; pis_l2g stages it.
       step.gold_standard_path: '{{release_uri}}/input/l2g/otg_gold_standard.json'
+      # Pairs only from drugs with more targets go to the plausible effector gene list.
+      step.max_targets_per_drug: 5
       # OUTPUTS
       step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+      step.plausible_effector_gene_list_path: '{{release_uri}}/intermediate/l2g_plausible_effector_gene_list'
 
   l2g_training_set:
     params:
@@ -60,6 +63,8 @@ steps:
       step.credible_set_path: '{{release_uri}}/output/credible_set'
       step.study_index_path: '{{release_uri}}/output/study'
       step.effector_gene_list_path: '{{release_uri}}/intermediate/l2g_effector_gene_list'
+      # Drops negatives that are plausible effectors for the study's disease.
+      step.plausible_effector_gene_list_path: '{{release_uri}}/intermediate/l2g_plausible_effector_gene_list'
       step.interaction_path: '{{release_uri}}/output/interaction'
       # OUTPUTS
       step.training_set_path: '{{release_uri}}/intermediate/l2g_training_set'
