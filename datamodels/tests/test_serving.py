@@ -1,8 +1,10 @@
 """Every view declares how it is served in ClickHouse, on its model, and the declaration names its columns."""
 
+from pathlib import Path
+
 import pytest
 
-from ot_datamodels import Serving
+from ot_datamodels import Serving, views
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.spec import dataset_spec, walk
 
@@ -77,3 +79,29 @@ def test_no_output_is_served_from_its_model():
 def test_serving_refuses_a_wrong_key(fields, problem):
     with pytest.raises(ValueError, match=problem):
         Serving(**fields)
+
+
+#: the outputs pos still serves from `datasets.yaml`, whose values keep their `ClickHouseType`; PR 3 removes it
+CLICKHOUSE_TYPED_OUTPUTS = frozenset({
+    'clinical_indication', 'clinical_target', 'evidence_cancer_biomarkers', 'evidence_cancer_gene_census',
+    'evidence_clingen', 'evidence_clinical_precedence', 'evidence_crispr', 'evidence_crispr_screen', 'evidence_encore',
+    'evidence_europepmc', 'evidence_eva', 'evidence_eva_somatic', 'evidence_expression_atlas',
+    'evidence_gene2phenotype', 'evidence_gene_burden', 'evidence_genomics_england', 'evidence_gwas_credible_sets',
+    'evidence_impc', 'evidence_intogen', 'evidence_orphanet', 'evidence_ot_crispr', 'evidence_ot_crispr_validation',
+    'evidence_reactome', 'evidence_uniprot_literature', 'evidence_uniprot_variants',
+})  # fmt: skip
+
+
+def test_only_the_yaml_served_outputs_carry_clickhouse_types():
+    """A served view declares its ClickHouse types in `Serving.column_types`."""
+    typed = {
+        name
+        for name, model in discover_datasets().items()
+        if any(node.clickhouse is not None for _, node in walk(dataset_spec(model)))
+    }
+    assert typed <= CLICKHOUSE_TYPED_OUTPUTS
+
+
+def test_views_import_no_clickhouse_type():
+    for path in sorted(Path(views.__file__).parent.glob('*.py')):
+        assert 'ClickHouseType' not in path.read_text(), path.name

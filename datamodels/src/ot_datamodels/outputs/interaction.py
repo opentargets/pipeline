@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.vocabularies import InteractionSource, SpeciesMnemonic, SpeciesScientificName
 
 
@@ -21,18 +21,14 @@ class SpeciesA(StructModel):
     scientificName: Annotated[SpeciesScientificName, PolarsDtype(pl.Enum)] = Field(
         description='Scientific name of the species associated with target A'
     )
-    taxonId: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='NCBI taxon ID of the species associated with target A'
-    )
+    taxonId: int = Field(ge=0, le=4294967295, description='NCBI taxon ID of the species associated with target A')
 
 
 class SpeciesB(StructModel):
     """`speciesB`."""
 
-    mnemonic: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Short mnemonic name of the species associated with target B'
-    )
-    scientificName: Annotated[str, ClickHouseType('LowCardinality(String)')] | None = Field(
+    mnemonic: str = Field(min_length=1, description='Short mnemonic name of the species associated with target B')
+    scientificName: str | None = Field(
         min_length=1, description='Scientific name of the species associated with target B'
     )
     taxonId: int = Field(description='NCBI taxon ID of the species associated with target B')
@@ -74,23 +70,17 @@ class Interaction(DatasetModel):
         min_length=1, description=('Open Targets target identifier of the first molecule (target A) in the interaction')
     )
     intA: str = Field(min_length=1, description='Identifier for target A in source')
-    intABiologicalRole: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Biological role of target A in the interaction'
-    )
+    intABiologicalRole: str = Field(min_length=1, description='Biological role of target A in the interaction')
     targetB: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] | None = Field(
         min_length=1,
         description=('Open Targets target identifier of the second molecule (target B) in the interaction'),
     )
     intB: str = Field(min_length=1, description='Identifier for target B in source')
-    intBBiologicalRole: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Biological role of target B in the interaction'
-    )
+    intBBiologicalRole: str = Field(min_length=1, description='Biological role of target B in the interaction')
     speciesA: SpeciesA = Field(description='Taxonomic annotation of target A')
     speciesB: SpeciesB = Field(description='Taxonomic annotation of target B')
-    count: Annotated[int, ClickHouseType('UInt8')] = Field(
-        ge=0, le=255, description='Number of interaction occurrences reported in the source databases'
-    )
+    count: int = Field(ge=0, le=255, description='Number of interaction occurrences reported in the source databases')
     scoring: float | None = Field(ge=0.0, le=1.0, description='Scoring or confidence value assigned to the interaction')
-    interactionId: Annotated[int, PrimaryKey(), ClickHouseType('UInt64')] = Field(
+    interactionId: Annotated[int, PrimaryKey()] = Field(
         ge=0, description='Unique identifier of the molecular interaction'
     )

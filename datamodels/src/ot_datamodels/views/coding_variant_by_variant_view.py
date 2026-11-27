@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel, from_output
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, Reference, StructModel, from_output
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 from ot_datamodels.outputs.variant import TranscriptConsequences, Variant, VariantEffect
 from ot_datamodels.serving import Serving
@@ -27,7 +27,7 @@ _DiseaseId = Annotated[str, Reference('disease', 'id'), Field(pattern=ONTOLOGY_I
 class ProteinCodingCoordDatasource(StructModel):
     """`proteinCodingCoords[].datasources[]`."""
 
-    datasourceCount: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
+    datasourceCount: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         ge=0, description='Number of distinct evidence of the datasource on the variant'
     )
     datasourceId: CodingVariantDatasource = Field(description='Identifier of the datasource')
@@ -88,7 +88,13 @@ class CodingVariantByVariantView(DatasetModel):
         'and datasources behind the variant, as served by variant'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'proteinCodingCoords[]/variantEffect': 'Float64',
+            'proteinCodingCoords[]/datasources[]/datasourceCount': 'UInt32',
+        },
+    )
     example: ClassVar[dict] = {'variantId': '17_7674220_C_T', 'proteinCodingCoords': [COORD_EXAMPLE]}
 
     variantId: VariantKey

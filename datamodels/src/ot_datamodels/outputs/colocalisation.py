@@ -21,7 +21,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, Note, PolarsDtype, PrimaryKey, Reference, RowCheck
+from ot_datamodels import DatasetModel, Note, PolarsDtype, PrimaryKey, Reference, RowCheck
 from ot_datamodels.vocabularies import Chromosome, ColocalisationMethod, StudyType
 
 #: Rounding slack allowed on a sum of probabilities.
@@ -84,7 +84,7 @@ class Colocalisation(DatasetModel):
         PolarsDtype(pl.Enum),
         Note('both methods are run on every pair, and reported in one row'),
     ] = Field(description='Method used to estimate colocalisation (e.g., coloc)')
-    numberColocalisingVariants: Annotated[int, ClickHouseType('UInt32')] = Field(
+    numberColocalisingVariants: int = Field(
         ge=1,
         le=4294967295,
         description='Number of variants shared by the two colocalising credible sets',

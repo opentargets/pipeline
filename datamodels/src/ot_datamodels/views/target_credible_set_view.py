@@ -4,11 +4,11 @@ One row per target and credible set of a study of that target (`study.geneId`), 
 table: the set's lead variant and statistics, and its study's condition and biosample.
 """
 
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, from_output
+from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.biosample import Biosample
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
@@ -45,7 +45,13 @@ class TargetCredibleSetView(DatasetModel):
     dataset_description: ClassVar[str] = 'The credible sets of the studies of each target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
     clickhouse: ClassVar[Serving] = Serving(
-        engine='mergetree', order_by=('targetId', 'pValueExponent', 'pValueMantissa', 'credibleSetId')
+        engine='mergetree',
+        order_by=('targetId', 'pValueExponent', 'pValueMantissa', 'credibleSetId'),
+        column_types={
+            'confidence': 'UInt8',
+            'condition': 'LowCardinality(String)',
+            'biosampleName': 'LowCardinality(String)',
+        },
     )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000198931',
@@ -86,7 +92,7 @@ class TargetCredibleSetView(DatasetModel):
     studyType: StudyType
     condition: Condition
     biosampleId: BiosampleId
-    biosampleName: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+    biosampleName: str = Field(
         description=f"{Biosample.model_fields['biosampleName'].description}; '' when the biosample is not known"
     )
     locusSize: LocusSize

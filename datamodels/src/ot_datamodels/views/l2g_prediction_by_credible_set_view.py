@@ -48,7 +48,14 @@ class L2gPredictionByCredibleSetView(DatasetModel):
     dataset_title: ClassVar[str] = 'L2G prediction by credible set'
     dataset_description: ClassVar[str] = 'The Locus-to-Gene (L2G) predictions of each credible set, best first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'l2g_predictions[]/features[]/value': 'Float64',
+            'l2g_predictions[]/features[]/shapValue': 'Float64',
+            'l2g_predictions[]/shapBaseValue': 'Float64',
+        },
+    )
     example: ClassVar[dict] = {'credibleSetId': _EXAMPLE['credibleSetId'], 'l2g_predictions': [_EXAMPLE]}
 
     credibleSetId: CredibleSetId

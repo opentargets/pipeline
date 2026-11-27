@@ -15,4 +15,15 @@ class EnhancerToGeneView(EnhancerToGene):
     dataset_name: ClassVar[str] = 'enhancer_to_gene_view'
     dataset_title: ClassVar[str] = 'Enhancer to gene view'
     dataset_description: ClassVar[str] = EnhancerToGene.dataset_description
-    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('chromosome', 'start', 'end'))
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree',
+        order_by=('chromosome', 'start', 'end'),
+        column_types={
+            'start': 'UInt32',
+            'end': 'UInt32',
+            'resourceScore[]/name': 'LowCardinality(String)',
+            'resourceScore[]/value': 'Float64',
+            'biosampleName': 'LowCardinality(String)',
+            'biosampleId': 'LowCardinality(String)',
+        },
+    )

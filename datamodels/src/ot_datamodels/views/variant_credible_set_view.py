@@ -7,11 +7,11 @@ and statistics, the set's study (trait, condition, target, biosample, diseases a
 top L2G gene (the highest score, then the lowest `geneId`; null without predictions).
 """
 
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, StructModel, from_output
+from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.biosample import Biosample
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
@@ -48,12 +48,8 @@ _SET = CredibleSetView.example
 class DiseaseName(StructModel):
     """A disease or therapeutic area: its id and name."""
 
-    id: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        pattern=ONTOLOGY_ID, description=Disease.model_fields['id'].description
-    )
-    name: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description=Disease.model_fields['name'].description
-    )
+    id: str = Field(pattern=ONTOLOGY_ID, description=Disease.model_fields['id'].description)
+    name: str = Field(min_length=1, description=Disease.model_fields['name'].description)
 
 
 class VariantCredibleSetView(DatasetModel):
@@ -66,7 +62,19 @@ class VariantCredibleSetView(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
     clickhouse: ClassVar[Serving] = Serving(
-        engine='mergetree', order_by=('studyType', 'variantId', 'topL2GScore', 'credibleSetId')
+        engine='mergetree',
+        order_by=('studyType', 'variantId', 'topL2GScore', 'credibleSetId'),
+        column_types={
+            'confidence': 'UInt8',
+            'studyTargetApprovedSymbol': 'LowCardinality(String)',
+            'biosampleName': 'LowCardinality(String)',
+            'traitFromSource': 'LowCardinality(String)',
+            'diseases[]/id': 'LowCardinality(String)',
+            'diseases[]/name': 'LowCardinality(String)',
+            'diseaseTherapeuticAreas[]/id': 'LowCardinality(String)',
+            'diseaseTherapeuticAreas[]/name': 'LowCardinality(String)',
+            'topL2GApprovedSymbol': 'LowCardinality(String)',
+        },
     )
     example: ClassVar[dict] = {
         'studyType': _SET['studyType'],
@@ -120,11 +128,11 @@ class VariantCredibleSetView(DatasetModel):
     studyTargetId: StudyTargetId
     studyTargetApprovedSymbol: ApprovedSymbol
     biosampleId: BiosampleId
-    biosampleName: Annotated[str, ClickHouseType('LowCardinality(String)')] | None = Field(
+    biosampleName: str | None = Field(
         min_length=1,
         description=f'{Biosample.model_fields["biosampleName"].description}; null when the biosample is not known',
     )
-    traitFromSource: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+    traitFromSource: str = Field(
         description=f"{Study.model_fields['traitFromSource'].description}; '' when the study is not known"
     )
     diseases: list[DiseaseName] = Field(

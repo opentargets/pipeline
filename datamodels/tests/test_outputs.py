@@ -76,19 +76,26 @@ INTEGER_RANGES = {
     'Int32': (-(2**31), 2**31 - 1),
     'Int64': (-(2**63), 2**63 - 1),
 }
+
+
+def _clickhouse_type(model: type[DatasetModel], path: str, node: Node) -> str | None:
+    """A served view's `column_types` entry, else the node's marker."""
+    types = model.clickhouse.column_types if model.clickhouse is not None else {}
+    return types.get(path, node.clickhouse)
+
+
 INTEGER_MARKERS = [
-    (model, path, node)
+    (model, path, node, clickhouse)
     for model in sorted(MODELS.values(), key=lambda model: model.dataset_name)
     for path, node in walk(dataset_spec(model))
-    if node.clickhouse in INTEGER_RANGES
+    if (clickhouse := _clickhouse_type(model, path, node)) in INTEGER_RANGES
 ]
 
 
-@pytest.mark.parametrize(('model', 'path', 'node'), INTEGER_MARKERS)
-def test_integer_markers_have_bounds(model: type[DatasetModel], path: str, node: Node) -> None:
-    """An integer marker whose range does not cover its dtype's has bounds inside the marker's range."""
-    assert node.clickhouse is not None
-    low, high = INTEGER_RANGES[node.clickhouse]
+@pytest.mark.parametrize(('model', 'path', 'node', 'clickhouse'), INTEGER_MARKERS)
+def test_integer_markers_have_bounds(model: type[DatasetModel], path: str, node: Node, clickhouse: str) -> None:
+    """An integer ClickHouse type whose range does not cover its dtype's has bounds inside the type's range."""
+    low, high = INTEGER_RANGES[clickhouse]
     dtype_low, dtype_high = INTEGER_RANGES[str(node.dtype)]
     if low <= dtype_low and dtype_high <= high:
         return

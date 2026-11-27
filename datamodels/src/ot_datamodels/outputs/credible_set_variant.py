@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import MD5_HEX, VARIANT_ID
 from ot_datamodels.vocabularies import VariantQualityControl
 
@@ -64,7 +64,7 @@ class CredibleSetVariant(DatasetModel):
             'Frequency of the effect allele, from the study or otherwise from gnomAD for the study populations'
         ),
     )
-    sampleSize: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
+    sampleSize: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='Sample size of the association of the variant'
     )
     reportedBeta: float | None = Field(description='Effect size of the variant as reported by the study')

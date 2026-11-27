@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, StructModel, from_output, row_of
+from ot_datamodels import Bioregistry, StructModel, from_output, row_of
 from ot_datamodels.outputs.chemical_probe import ChemicalProbe
 from ot_datamodels.outputs.homology import Homology
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_TRANSCRIPT_ID, MD5_HEX
@@ -99,7 +99,7 @@ _TranscriptIdElement = Annotated[str, Bioregistry('ensembl'), Field(pattern=ENSE
 # list elements, so not `from_output`; tests/test_views.py checks them against credible_set.id and
 # pharmacogenomics.pharmacogenomicsId
 _CredibleSetId = Annotated[str, Field(pattern=MD5_HEX)]
-_PharmacogenomicsId = Annotated[int, ClickHouseType('UInt64'), Field(ge=0)]
+_PharmacogenomicsId = Annotated[int, Field(ge=0)]
 
 
 class TranscriptRow(StructModel):
@@ -141,6 +141,27 @@ class TargetView(Target):
     clickhouse: ClassVar[Serving] = Serving(
         engine='rocksdb',
         dictionaries=(ClickHouseDictionary('target_symbols', key='id', attributes=('approvedSymbol',)),),
+        column_types={
+            'genomicLocation/start': 'UInt32',
+            'genomicLocation/end': 'UInt32',
+            'genomicLocation/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+            'hallmarks/attributes[]/pmid': 'UInt32',
+            'hallmarks/cancerHallmarks[]/pmid': 'UInt32',
+            'targetClass[]/id': 'UInt32',
+            'constraint[]/score': 'Float64',
+            'constraint[]/exp': 'Float64',
+            'constraint[]/obs': 'UInt32',
+            'constraint[]/oe': 'Float64',
+            'constraint[]/oeLower': 'Float64',
+            'constraint[]/oeUpper': 'Float64',
+            'constraint[]/upperRank': 'UInt32',
+            'constraint[]/upperBin': 'UInt32',
+            'constraint[]/upperBin6': 'UInt32',
+            'canonicalTranscript/start': 'UInt32',
+            'canonicalTranscript/end': 'UInt32',
+            'canonicalTranscript/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+            'pharmacogenomicsIds[]': 'UInt64',
+        },
     )
     example: ClassVar[dict] = Target.example | {
         'homologues': [{k: v for k, v in Homology.example.items() if k != 'targetId'}],

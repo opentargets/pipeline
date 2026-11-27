@@ -36,7 +36,15 @@ class AssociationOtfTargetView(DatasetModel):
         'for associations computed on the fly'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
-    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('A', 'B', 'datasourceId'))
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree',
+        order_by=('A', 'B', 'datasourceId'),
+        column_types={
+            'A': 'LowCardinality(String)',
+            'B': 'LowCardinality(String)',
+            'indirect[]': 'LowCardinality(String)',
+        },
+    )
     example: ClassVar[dict] = {
         'rowId': '0000155ec8bd9ff7b4e5e3b4e1c9c5f0f1e2d3a4',
         'A': 'ENSG00000100031',

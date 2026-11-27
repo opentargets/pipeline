@@ -29,7 +29,11 @@ class TargetByRegionView(DatasetModel):
     dataset_name: ClassVar[str] = 'target_by_region_view'
     dataset_title: ClassVar[str] = 'Target by region'
     dataset_description: ClassVar[str] = 'The genomic location of every target, with its id'
-    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('chromosome', 'start', 'end'))
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree',
+        order_by=('chromosome', 'start', 'end'),
+        column_types={'start': 'UInt32', 'end': 'UInt32'},
+    )
     example: ClassVar[dict] = {
         'chromosome': 'X',
         'start': 100627108,

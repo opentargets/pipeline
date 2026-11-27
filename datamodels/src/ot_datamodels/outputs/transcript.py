@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ENSEMBL_PROTEIN_ID, ENSEMBL_TRANSCRIPT_ID
 from ot_datamodels.vocabularies import Chromosome, TranscriptBiotype, TranscriptFlagLabel, TranscriptFlagValue
 
@@ -40,13 +40,9 @@ class Exons(StructModel):
     chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
         description='Chromosome on which the exon is located'
     )
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Genomic start position of the exon'
-    )
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Genomic end position of the exon'
-    )
-    strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
+    start: int = Field(ge=0, le=4294967295, description='Genomic start position of the exon')
+    end: int = Field(ge=0, le=4294967295, description='Genomic end position of the exon')
+    strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         description=('Strand orientation of the exon: 1 for the forward strand, -1 for the reverse strand')
     )
 
@@ -114,16 +110,12 @@ class Transcript(DatasetModel):
     chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(
         description='Chromosome on which the transcript is located'
     )
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Genomic start position of the transcript'
-    )
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Genomic end position of the transcript'
-    )
-    strand: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")] = Field(
+    start: int = Field(ge=0, le=4294967295, description='Genomic start position of the transcript')
+    end: int = Field(ge=0, le=4294967295, description='Genomic end position of the transcript')
+    strand: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         description=('Strand orientation of the transcript: 1 for the forward strand, -1 for the reverse strand')
     )
-    transcriptionStartSite: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
+    transcriptionStartSite: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         ge=0,
         description=(
             "Transcription Start Site (TSS) genomic position, derived from the transcript's strand and coordinates"

@@ -33,7 +33,9 @@ class AssociationTimeseriesView(DatasetModel):
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     products: ClassVar[tuple[str, ...]] = ('ppp',)
     clickhouse: ClassVar[Serving] = Serving(
-        engine='mergetree', order_by=('diseaseId', 'targetId', 'isDirect', 'aggregationValue', 'year')
+        engine='mergetree',
+        order_by=('diseaseId', 'targetId', 'isDirect', 'aggregationValue', 'year'),
+        column_types={'year': 'UInt16', 'yearlyEvidenceCount': 'UInt32'},
     )
     example: ClassVar[dict] = {
         'diseaseId': 'EFO_0000180',

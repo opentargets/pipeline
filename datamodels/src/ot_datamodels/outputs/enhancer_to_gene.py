@@ -10,7 +10,6 @@ from pydantic import Field
 
 from ot_datamodels import (
     Bioregistry,
-    ClickHouseType,
     DatasetModel,
     PolarsDtype,
     Reference,
@@ -23,10 +22,10 @@ from ot_datamodels.vocabularies import Chromosome, IntervalDatasource, IntervalT
 class ResourceScore(StructModel):
     """`resourceScore[]`."""
 
-    name: Annotated[Literal['DNase', 'HiC_contacts'], ClickHouseType('LowCardinality(String)')] = Field(
+    name: Literal['DNase', 'HiC_contacts'] = Field(
         description=('Individual components which contributes to the interval score (e.g., DNase, HiC_contacts)')
     )
-    value: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
+    value: Annotated[float, PolarsDtype(pl.Float32)] = Field(
         ge=0.0, le=1.0, description='Raw signal value from the resourceScore(s)'
     )
 
@@ -59,12 +58,8 @@ class EnhancerToGene(DatasetModel):
     }
 
     chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(description='Chromosome the interval is located on')
-    start: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Basepair position of the interval start'
-    )
-    end: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Basepair position of the interval end'
-    )
+    start: int = Field(ge=0, le=4294967295, description='Basepair position of the interval start')
+    end: int = Field(ge=0, le=4294967295, description='Basepair position of the interval end')
     geneId: Annotated[str, Bioregistry('ensembl'), Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Ensembl gene identifier of the target the interval is linked with'
     )
@@ -87,14 +82,14 @@ class EnhancerToGene(DatasetModel):
     pmid: str = Field(
         pattern=DIGITS, description='Pubmed identifier of the publication that reported the interval data'
     )
-    biosampleName: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+    biosampleName: str = Field(
         min_length=1, description='Name of the cell type/anatomical unit the interval was identified in'
     )
     biosampleFromSourceId: str | None = Field(
         description=('Original identifier of the cell type/anatomical unit the interval was identified in')
     )
-    biosampleId: Annotated[str, Reference('biosample', 'biosampleId'), ClickHouseType('LowCardinality(String)')] = (
-        Field(pattern=ONTOLOGY_ID, description='Identifier of the biosample in where the interval was discovered in')
+    biosampleId: Annotated[str, Reference('biosample', 'biosampleId')] = Field(
+        pattern=ONTOLOGY_ID, description='Identifier of the biosample in where the interval was discovered in'
     )
     studyId: str = Field(min_length=1, description='Identifier of the interval study')
     intervalId: str = Field(pattern=MD5_HEX, description='Identifier of the interval')

@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, StructModel
+from ot_datamodels import DatasetModel, PrimaryKey, StructModel
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 
 
@@ -93,9 +93,7 @@ class Disease(DatasetModel):
     dbXRefs: list[Annotated[str, Field(min_length=1)]] = Field(
         description='Cross-references in other disease ontologies'
     )
-    parents: list[Annotated[str, Field(pattern=ONTOLOGY_ID), ClickHouseType('LowCardinality(String)')]] = Field(
-        description='List of parent disease terms'
-    )
+    parents: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(description='List of parent disease terms')
     exactSynonyms: list[Annotated[str, Field(min_length=1)]] = Field(description='List of exact synonyms')
     relatedSynonyms: list[Annotated[str, Field(min_length=1)]] = Field(description='List of related synonyms')
     narrowSynonyms: list[Annotated[str, Field(min_length=1)]] = Field(description='List of closely related sysnonyms')
@@ -103,11 +101,11 @@ class Disease(DatasetModel):
     obsoleteTerms: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(description='List of obsoleted terms')
     obsoleteXRefs: list[Annotated[str, Field(min_length=1)]] = Field(description='List of obsoleted cross references')
     children: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(description='List of children disease terms')
-    ancestors: list[Annotated[str, Field(pattern=ONTOLOGY_ID), ClickHouseType('LowCardinality(String)')]] = Field(
+    ancestors: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(
         description='List of all ancestral disease terms'
     )
-    therapeuticAreas: list[Annotated[str, Field(pattern=ONTOLOGY_ID), ClickHouseType('LowCardinality(String)')]] = (
-        Field(description='List of major therapeutic areas the disease belongs to')
+    therapeuticAreas: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(
+        description='List of major therapeutic areas the disease belongs to'
     )
     descendants: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] = Field(description='List of all descendant terms')
     ontology: Ontology = Field(description="Description of the disease's place in the ontology tree")

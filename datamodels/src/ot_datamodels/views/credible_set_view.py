@@ -10,7 +10,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, from_output
+from ot_datamodels import DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.serving import Serving
@@ -40,7 +40,7 @@ LeadAllele = Annotated[
     str, Field(description="Allele of the lead variant; '' when the lead variant is not in the variant dataset")
 ]
 ApprovedSymbol = Annotated[
-    Annotated[str, ClickHouseType('LowCardinality(String)')] | None,
+    str | None,
     Field(min_length=1, description='Approved symbol of the target; null when the gene is not a target'),
 ]
 
@@ -57,7 +57,10 @@ class CredibleSetView(DatasetModel):
         'Credible sets with the statistics of their lead variant and the number of their variants'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={'leadSampleSize': 'UInt32', 'locusStart': 'UInt32', 'locusEnd': 'UInt32', 'confidence': 'UInt8'},
+    )
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['id'],
         'studyId': _EXAMPLE['studyId'],

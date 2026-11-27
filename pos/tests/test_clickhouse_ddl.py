@@ -687,9 +687,14 @@ def test_target_view_lands_target_then_the_id_lists():
 )
 def test_genetics_b_views_land_the_output_then_the_id_lists(view, output, lists):
     """`studies` and `variants`: the output's landing columns, then the lists studies.sql and variants.sql joined
-    on; `studies` without `credible_sets_by_study.studyId` (David, 2026-11-25)."""
+    on; `studies` without `credible_sets_by_study.studyId` (David, 2026-11-25). The output's columns take the
+    view's `column_types`."""
     landed = [(n, render(t, quote_fields=False)) for n, t in columns(view)]
-    base = [(n, render(t, quote_fields=False)) for n, t in columns(output)]
+    types = view.clickhouse.column_types
+    base = [
+        (f.name, render(clickhouse_ddl._type(f.node, False, f.name, types), quote_fields=False))
+        for f in dataset_spec(output).fields
+    ]
     assert landed == [*base, *lists]
 
 

@@ -21,7 +21,21 @@ class StudyView(Study):
     dataset_name: ClassVar[str] = 'study_view'
     dataset_title: ClassVar[str] = 'Study view'
     dataset_description: ClassVar[str] = 'Studies with the identifiers of their credible sets nested in'
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'publicationJournal': 'LowCardinality(String)',
+            'nCases': 'UInt32',
+            'nControls': 'UInt32',
+            'nSamples': 'UInt32',
+            'discoverySamples[]/sampleSize': 'UInt32',
+            'discoverySamples[]/ancestry': 'LowCardinality(String)',
+            'replicationSamples[]/sampleSize': 'UInt32',
+            'replicationSamples[]/ancestry': 'LowCardinality(String)',
+            'condition': 'LowCardinality(String)',
+            'sumstatQCValues[]/QCCheckValue': 'Float64',
+        },
+    )
     example: ClassVar[dict] = Study.example | {'credibleSetIds': ['0002c80bb07a1c4ab11e5b6d2c9e0d6c']}
 
     credibleSetIds: list[_CredibleSetId] = Field(description='Credible sets of the study, sorted')

@@ -53,7 +53,10 @@ class ColocalisationByCredibleSetView(DatasetModel):
     dataset_title: ClassVar[str] = 'Colocalisation by credible set'
     dataset_description: ClassVar[str] = 'The colocalisations of each credible set, from either side'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={'colocalisation[]/numberColocalisingVariants': 'UInt32'},
+    )
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['leftLocusId'],
         'colocalisation': [

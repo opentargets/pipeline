@@ -43,7 +43,10 @@ class PharmacovigilanceByDrugView(DatasetModel):
     dataset_title: ClassVar[str] = 'Pharmacovigilance by drug'
     dataset_description: ClassVar[str] = 'Significant adverse drug reactions of each drug, as served by drug'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={'adverse_events[]/count': 'UInt32'},
+    )
     example: ClassVar[dict] = {
         'chembl_id': _EXAMPLE['chembl_id'],
         'adverse_events': [
