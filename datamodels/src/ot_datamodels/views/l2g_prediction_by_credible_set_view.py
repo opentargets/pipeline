@@ -1,4 +1,4 @@
-"""L2G prediction by credible set: the `l2g_prediction_by_credible_set` view, served as `l2g_predictions`.
+"""L2G prediction by credible set: the `l2g_prediction_by_credible_set_view` view.
 
 Written by pts `l2g_prediction_view`. One row per credible set with its `l2g_prediction` rows, by `score`
 descending, then `geneId`.
@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.l2g_prediction import Features, L2gPrediction
+from ot_datamodels.serving import Serving
 
 CredibleSetId = from_output(L2gPrediction, 'credibleSetId', primary_key=True)
 RowCredibleSetId = from_output(L2gPrediction, 'credibleSetId')
@@ -40,13 +41,14 @@ class L2gPredictionRow(StructModel):
     shapBaseValue: ShapBaseValue
 
 
-class L2gPredictionByCredibleSet(DatasetModel):
+class L2gPredictionByCredibleSetView(DatasetModel):
     """L2G prediction by credible set."""
 
-    dataset_name: ClassVar[str] = 'l2g_prediction_by_credible_set'
+    dataset_name: ClassVar[str] = 'l2g_prediction_by_credible_set_view'
     dataset_title: ClassVar[str] = 'L2G prediction by credible set'
     dataset_description: ClassVar[str] = 'The Locus-to-Gene (L2G) predictions of each credible set, best first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {'credibleSetId': _EXAMPLE['credibleSetId'], 'l2g_predictions': [_EXAMPLE]}
 
     credibleSetId: CredibleSetId

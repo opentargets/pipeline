@@ -1,4 +1,4 @@
-"""Pharmacovigilance by drug: the served `pharmacovigilance` shape.
+"""Pharmacovigilance by drug: the served `pharmacovigilance_by_drug_view` shape.
 
 One row per drug: its adverse events by `logLR` descending, then `name`, and `criticalValue`, the first event's
 `critval`.
@@ -10,7 +10,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
+from ot_datamodels.views.pharmacovigilance_by_drug_view import PharmacovigilanceByDrugView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -37,7 +37,7 @@ def pharmacovigilance_by_drug_frame(events: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-@writes(view=PharmacovigilanceByDrug)
+@writes(view=PharmacovigilanceByDrugView)
 def pharmacovigilance_by_drug(
     source: str,
     destination: dict[str, str],
@@ -54,4 +54,4 @@ def pharmacovigilance_by_drug(
     """
     result = pharmacovigilance_by_drug_frame(scan_dataset(str(source)).collect())
     logger.info(f'{result.height} drugs in the pharmacovigilance view')
-    write_dataset(conform(result, PharmacovigilanceByDrug), str(destination['view']))
+    write_dataset(conform(result, PharmacovigilanceByDrugView), str(destination['view']))

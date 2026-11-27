@@ -1,4 +1,4 @@
-"""Credible set locus: the `credible_set_locus` view (pts `credible_set_view`), served as `credible_sets_locus`.
+"""Credible set locus: the `credible_set_locus_view` view (pts `credible_set_view`).
 
 One row per credible set with its variants, by `posteriorProbability` descending, then `variantId`.
 """
@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
+from ot_datamodels.serving import Serving
 
 CredibleSetId = from_output(CredibleSetVariant, 'credibleSetId', primary_key=True)
 VariantId = from_output(CredibleSetVariant, 'variantId')
@@ -72,13 +73,14 @@ class LocusRow(StructModel):
     )
 
 
-class CredibleSetLocus(DatasetModel):
+class CredibleSetLocusView(DatasetModel):
     """Credible set locus."""
 
-    dataset_name: ClassVar[str] = 'credible_set_locus'
+    dataset_name: ClassVar[str] = 'credible_set_locus_view'
     dataset_title: ClassVar[str] = 'Credible set locus'
     dataset_description: ClassVar[str] = 'The variants of each credible set, most probable first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['credibleSetId'],
         'locus': [{k: _EXAMPLE[k] for k in LOCUS_FIELDS}],

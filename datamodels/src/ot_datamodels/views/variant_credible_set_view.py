@@ -1,4 +1,6 @@
-"""Variant credible set: the `variant_credible_set` view (pts `credible_set_view`), served as `variant_credible_sets`.
+"""Variant credible set: the `variant_credible_set_view` view.
+
+Written by pts `credible_set_view`.
 
 One row per credible set variant, for the variant page: the variant's posterior probability, its set's lead variant
 and statistics, the set's study (trait, condition, target, biosample, diseases and their therapeutic areas) and its
@@ -16,8 +18,9 @@ from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.disease import Disease
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 from ot_datamodels.outputs.study import Study
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.credible_set_view import ApprovedSymbol, CredibleSetView, LeadAllele
-from ot_datamodels.views.study_credible_set import StudyCredibleSet
+from ot_datamodels.views.study_credible_set_view import StudyCredibleSetView
 
 StudyType = from_output(CredibleSet, 'studyType')
 VariantId = from_output(CredibleSetVariant, 'variantId')
@@ -36,8 +39,8 @@ LeadPosition = from_output(CredibleSetView, 'leadPosition')
 StudyId = from_output(CredibleSet, 'studyId')
 StudyTargetId = from_output(Study, 'geneId')
 BiosampleId = from_output(Study, 'biosampleFromSourceId')
-TopL2GGeneId = from_output(StudyCredibleSet, 'topL2GGeneId')
-TopL2GScore = from_output(StudyCredibleSet, 'topL2GScore')
+TopL2GGeneId = from_output(StudyCredibleSetView, 'topL2GGeneId')
+TopL2GScore = from_output(StudyCredibleSetView, 'topL2GScore')
 
 _SET = CredibleSetView.example
 
@@ -53,15 +56,18 @@ class DiseaseName(StructModel):
     )
 
 
-class VariantCredibleSet(DatasetModel):
+class VariantCredibleSetView(DatasetModel):
     """Variant credible set."""
 
-    dataset_name: ClassVar[str] = 'variant_credible_set'
+    dataset_name: ClassVar[str] = 'variant_credible_set_view'
     dataset_title: ClassVar[str] = 'Variant credible set'
     dataset_description: ClassVar[str] = (
         'The credible sets of each variant, with their lead variant, study and top L2G gene'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('studyType', 'variantId', 'topL2GScore', 'credibleSetId')
+    )
     example: ClassVar[dict] = {
         'studyType': _SET['studyType'],
         'variantId': _SET['leadVariantId'],

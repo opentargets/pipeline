@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import yaml
@@ -20,6 +21,7 @@ from pos.clickhouse_tables import (
     dictionary_problems,
     entry_dictionaries,
     entry_tables,
+    source_table,
     table_problems,
 )
 
@@ -339,7 +341,7 @@ def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) 
         parts.append(f'{_name(name)} {render(replace(types[source], low_cardinality=False))}{expression}')
     return (
         f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
-        f"SOURCE(CLICKHOUSE(TABLE '{d.source}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+        f"SOURCE(CLICKHOUSE(TABLE '{source_table(d)}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
 
 
@@ -459,7 +461,7 @@ def declared_sql(entry: Mapping, product: str) -> list[str]:
     statements = [drop_dictionary_sql(d) for d in dictionaries]
     for table in tables:
         statements += table_sql(table, cols, landing, key)
-    statements += [dictionary_sql(d, table_columns(by_name[d.source], cols)) for d in dictionaries]
+    statements += [dictionary_sql(d, table_columns(by_name[source_table(d)], cols)) for d in dictionaries]
     return [*statements, f'DROP TABLE {_name(landing)} SYNC']
 
 
@@ -480,6 +482,49 @@ def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
     return [(member_table(m), create_table(member_table(m), columns(m))) for m in found] + [union]
 
 
+def served_entries(product: str | None = None) -> dict[str, dict]:
+    """The entry of every served view model (`clickhouse` set), by `dataset_name`; for `product`, only its views.
+
+    Each is shaped as a `datasets.yaml` entry: landing table `<name>_log` from `view/<name>`, one table named
+    `<name>` built from the whole view, and its dictionaries, reading that table unless they name another.
+    """
+    entries = {}
+    for name, model in sorted(discover_models().items()):
+        serving = model.clickhouse
+        if serving is None or (product is not None and product not in model.products):
+            continue
+        table: dict = {'name': name, 'engine': serving.engine}
+        if serving.order_by:
+            table['order_by'] = list(serving.order_by)
+        entry: dict = {'table': f'{name}_log', 'input_dir': f'view/{name}', 'model': name, 'tables': [table]}
+        if serving.dictionaries:
+            entry['dictionaries'] = [
+                {
+                    'name': d.name,
+                    'source': d.source or name,
+                    'key': d.key,
+                    'attributes': list(d.attributes),
+                    'source_columns': dict(d.source_columns),
+                }
+                for d in serving.dictionaries
+            ]
+        entries[name] = entry
+    return entries
+
+
+def clickhouse_entries(config_path: str | Path = 'config/datasets.yaml') -> dict[str, Any]:
+    """The `clickhouse` entries of `datasets.yaml` and those of every product's served views (`served_entries`).
+
+    Raises:
+        ValueError: if a name is both a `datasets.yaml` entry and a served view.
+    """
+    declared = yaml.safe_load(Path(config_path).read_text()).get('clickhouse') or {}
+    served = served_entries()
+    if both := sorted(set(declared) & set(served)):
+        raise ValueError(f'{config_path}: entries {both} are served views, declared on their models')
+    return {**declared, **served}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Print the generated ClickHouse landing DDL.')
     parser.add_argument('dataset', nargs='?', help='a clickhouse entry of the datasets config')
@@ -489,7 +534,7 @@ def main() -> None:
     args = parser.parse_args()
     if bool(args.dataset) == args.all:
         parser.error('give one dataset or --all')
-    entries = yaml.safe_load(Path(args.config).read_text())['clickhouse']
+    entries = clickhouse_entries(args.config)
     if args.dataset and args.dataset not in entries:
         parser.error(f'no clickhouse entry {args.dataset}')
     names = list(entries) if args.all else [args.dataset]

@@ -1,4 +1,4 @@
-"""Association timeseries: the `association_timeseries` view (pts `association_timeseries_view`).
+"""Association timeseries: the `association_timeseries_view` view (pts `association_timeseries_view`).
 
 The overall and by-datasource associations, direct and indirect, flattened to one row per association,
 aggregation value and year of its timeseries.
@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, from_output
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect, Timeseries
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import AggregationType, enum_of
 
 # the four inputs agree on these, but by-datasource yearlyEvidenceCount is Int32, cast up (tests/test_views.py)
@@ -21,16 +22,19 @@ Novelty = from_output(Timeseries, 'novelty')
 YearlyEvidenceCount = from_output(Timeseries, 'yearlyEvidenceCount')
 
 
-class AssociationTimeseries(DatasetModel):
+class AssociationTimeseriesView(DatasetModel):
     """Association timeseries."""
 
-    dataset_name: ClassVar[str] = 'association_timeseries'
+    dataset_name: ClassVar[str] = 'association_timeseries_view'
     dataset_title: ClassVar[str] = 'Association timeseries'
     dataset_description: ClassVar[str] = (
         'Overall and by data source association scores, direct and indirect, one row per year of their timeseries'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
     products: ClassVar[tuple[str, ...]] = ('ppp',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('diseaseId', 'targetId', 'isDirect', 'aggregationValue', 'year')
+    )
     example: ClassVar[dict] = {
         'diseaseId': 'EFO_0000180',
         'targetId': 'ENSG00000009413',
@@ -41,7 +45,6 @@ class AssociationTimeseries(DatasetModel):
         'novelty': 0.00017643219529906104,
         'yearlyEvidenceCount': 1,
         'isDirect': True,
-        'partitionKey': 'ENSG00000009413_EFO_0000180_true',
     }
 
     diseaseId: DiseaseId
@@ -57,6 +60,3 @@ class AssociationTimeseries(DatasetModel):
     novelty: Novelty
     yearlyEvidenceCount: YearlyEvidenceCount
     isDirect: bool = Field(description='Whether the association is direct')
-    partitionKey: str = Field(
-        min_length=1, description='targetId, diseaseId and isDirect (`true` or `false`), joined by `_`'
-    )

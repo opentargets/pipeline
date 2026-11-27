@@ -19,6 +19,8 @@ from typing import Any, ClassVar
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from ot_datamodels.serving import Serving
+
 
 class SchemaModel(BaseModel):
     """Shared configuration of every model making up a dataset schema.
@@ -71,6 +73,8 @@ class DatasetModel(SchemaModel):
             in it should hold at least one element, so every nested field is exercised.
         row_checks: rules across a row's columns that no field constraint states. Inherited, so a
             dataset adds to its base's with `Base.row_checks + (...)`.
+        clickhouse: how a view is served in ClickHouse (`ot_datamodels.serving`); None for a dataset not served
+            from its model.
     """
 
     dataset_name: ClassVar[str]
@@ -80,6 +84,7 @@ class DatasetModel(SchemaModel):
     products: ClassVar[tuple[str, ...]] = ('platform', 'ppp')
     example: ClassVar[dict[str, Any]]
     row_checks: ClassVar[tuple[RowCheck, ...]] = ()
+    clickhouse: ClassVar[Serving | None] = None
 
     @classmethod
     def is_concrete(cls) -> bool:

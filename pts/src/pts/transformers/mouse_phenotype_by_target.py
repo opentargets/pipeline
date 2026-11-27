@@ -1,4 +1,4 @@
-"""Mouse phenotypes by target: the served `mouse_phenotypes` shape.
+"""Mouse phenotypes by target: the served `mouse_phenotype_by_target_view` shape.
 
 One row per human target, its `mouse_phenotype` rows nested by `modelPhenotypeId, targetInModelMgiId`.
 """
@@ -9,7 +9,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget, MousePhenotypeItem
+from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView, MousePhenotypeItem
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -29,7 +29,7 @@ def mouse_phenotype_by_target_frame(phenotypes: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-@writes(view=MousePhenotypeByTarget)
+@writes(view=MousePhenotypeByTargetView)
 def mouse_phenotype_by_target(
     source: str,
     destination: dict[str, str],
@@ -46,4 +46,4 @@ def mouse_phenotype_by_target(
     """
     result = mouse_phenotype_by_target_frame(scan_dataset(str(source)).collect())
     logger.info(f'{result.height} targets in the mouse phenotype view')
-    write_dataset(conform(result, MousePhenotypeByTarget), str(destination['view']))
+    write_dataset(conform(result, MousePhenotypeByTargetView), str(destination['view']))

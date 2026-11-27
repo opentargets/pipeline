@@ -1,4 +1,4 @@
-"""Target prioritisation view dataset generation: the served `target_prioritisation`.
+"""Target prioritisation view dataset generation: the served `target_prioritisation_view`.
 
 Each `target_prioritisation` row as (name, value) string pairs, in ClickHouse `toString` form, then the
 target's DepMap essentiality. Python per value: the input is one row per target.

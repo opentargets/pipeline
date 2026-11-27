@@ -1,4 +1,4 @@
-"""Target credible set: the `target_credible_set` view (pts `credible_set_view`), served as `target_credible_sets`.
+"""Target credible set: the `target_credible_set_view` view (pts `credible_set_view`).
 
 One row per target and credible set of a study of that target (`study.geneId`), for the target page's molQTL
 table: the set's lead variant and statistics, and its study's condition and biosample.
@@ -14,6 +14,7 @@ from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
+from ot_datamodels.serving import Serving
 from ot_datamodels.views.credible_set_view import CredibleSetView, LeadAllele
 
 TargetId = from_output(Target, 'id')
@@ -36,13 +37,16 @@ LocusSize = from_output(CredibleSetView, 'locusSize')
 _SET = CredibleSetView.example
 
 
-class TargetCredibleSet(DatasetModel):
+class TargetCredibleSetView(DatasetModel):
     """Target credible set."""
 
-    dataset_name: ClassVar[str] = 'target_credible_set'
+    dataset_name: ClassVar[str] = 'target_credible_set_view'
     dataset_title: ClassVar[str] = 'Target credible set'
     dataset_description: ClassVar[str] = 'The credible sets of the studies of each target'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree', order_by=('targetId', 'pValueExponent', 'pValueMantissa', 'credibleSetId')
+    )
     example: ClassVar[dict] = {
         'targetId': 'ENSG00000198931',
         'credibleSetId': _SET['credibleSetId'],

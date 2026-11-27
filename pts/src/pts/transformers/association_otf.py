@@ -7,8 +7,8 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
-from ot_datamodels.views.association_otf_target import AssociationOtfTarget
+from ot_datamodels.views.association_otf_disease_view import AssociationOtfDiseaseView
+from ot_datamodels.views.association_otf_target_view import AssociationOtfTargetView
 
 from pts.schemas.dataset.conform import conform
 from pts.task_outputs import writes
@@ -67,7 +67,7 @@ def _side(evidence: pl.LazyFrame, a: str, b: str, search_a: str, search_b: str, 
     )
 
 
-@writes(disease=AssociationOtfDisease, target=AssociationOtfTarget)
+@writes(disease=AssociationOtfDiseaseView, target=AssociationOtfTargetView)
 def association_otf(source: dict[str, str], destination: dict[str, str], settings: Any, config: Any) -> None:
     """Write every evidence row keyed by disease (`disease`) and by target (`target`), as served.
 
@@ -94,6 +94,6 @@ def association_otf(source: dict[str, str], destination: dict[str, str], setting
     )
     logger.info('Writing association OTF data to {} and {}', destination['disease'], destination['target'])
     pl.collect_all([
-        sink_dataset(conform(disease_side, AssociationOtfDisease), destination['disease']),
-        sink_dataset(conform(target_side, AssociationOtfTarget), destination['target']),
+        sink_dataset(conform(disease_side, AssociationOtfDiseaseView), destination['disease']),
+        sink_dataset(conform(target_side, AssociationOtfTargetView), destination['target']),
     ])

@@ -1,4 +1,4 @@
-"""Variant view: every variant with its credible-set and pharmacogenomics ids, the served `variants`.
+"""Variant view: every variant with its credible-set and pharmacogenomics ids, the served `variant_view`.
 
 Replaces `variants.sql`. The id lists are held in memory; `variant` is read one part at a time, each written
 as one part.

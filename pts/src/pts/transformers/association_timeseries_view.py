@@ -9,7 +9,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.association_timeseries import AssociationTimeseries
+from ot_datamodels.views.association_timeseries_view import AssociationTimeseriesView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -25,7 +25,7 @@ INPUTS = {
     'association_by_datasource_direct': True,
     'association_overall_direct': True,
 }
-SORT = ['partitionKey', 'aggregationValue', 'year']
+SORT = ['targetId', 'diseaseId', 'isDirect', 'aggregationValue', 'year']
 SPLIT_COLUMNS = ['diseaseId', 'targetId', 'aggregationType', 'aggregationValue', 'timeseries']
 TIMESERIES = pl.List(
     pl.Struct({
@@ -37,7 +37,7 @@ TIMESERIES = pl.List(
 )
 
 
-@writes(AssociationTimeseries)
+@writes(AssociationTimeseriesView)
 def association_timeseries_view(
     source: dict[str, str],
     destination: str,
@@ -47,7 +47,7 @@ def association_timeseries_view(
     """Explode the four association datasets into a timeseries view of `file_count` sorted files.
 
     Each input is read once and split in memory by targetId hash; each output file is built from
-    its own split only, so every partitionKey lands in one file.
+    its own split only, so every target lands in one file.
 
     Args:
         source: paths keyed by the four association datasets.
@@ -88,19 +88,10 @@ def association_timeseries_view(
             .explode('timeseries')
             .drop_nulls('timeseries')
             .unnest('timeseries')
-            .with_columns(
-                pl.concat_str(
-                    pl.col('targetId'),
-                    pl.col('diseaseId'),
-                    pl.col('isDirect').cast(pl.String),
-                    separator='_',
-                    ignore_nulls=True,
-                ).alias('partitionKey')
-            )
-            .select(to_polars_schema(AssociationTimeseries).names())
+            .select(to_polars_schema(AssociationTimeseriesView).names())
             .sort(SORT)
         )
-        conform(view, AssociationTimeseries).collect().write_parquet(
+        conform(view, AssociationTimeseriesView).collect().write_parquet(
             f'{destination}/part-{index:05d}.parquet',
             compression='zstd',
             statistics=True,

@@ -1,8 +1,8 @@
-"""Credible set view: the `credible_set_view` view (pts `credible_set_view`), served as `credible_sets`.
+"""Credible set view: the `credible_set_view` view (pts `credible_set_view`).
 
 One row per credible set with the statistics of its lead variant, the number of its variants and whether it is a
 trans QTL. A set is served only with its lead variant's row. Also holds the column types the credible-set read
-models (`study_credible_set`, `target_credible_set`, `variant_credible_set`) share.
+models (`study_credible_set_view`, `target_credible_set_view`, `variant_credible_set_view`) share.
 """
 
 from typing import Annotated, ClassVar
@@ -13,6 +13,7 @@ from pydantic import Field
 from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.credible_set import CredibleSet
 from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
+from ot_datamodels.serving import Serving
 
 CredibleSetId = from_output(CredibleSet, 'id', primary_key=True)
 StudyId = from_output(CredibleSet, 'studyId')
@@ -56,6 +57,7 @@ class CredibleSetView(DatasetModel):
         'Credible sets with the statistics of their lead variant and the number of their variants'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['id'],
         'studyId': _EXAMPLE['studyId'],

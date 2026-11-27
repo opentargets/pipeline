@@ -24,6 +24,7 @@ from ot_datamodels.discovery import discover_models
 from ot_datamodels.polars import to_polars_schema
 
 from pos.clickhouse_ddl import (
+    clickhouse_entries,
     columns,
     create_table,
     ddl_for,
@@ -35,14 +36,16 @@ from pos.clickhouse_ddl import (
     member_table,
     members,
     render,
+    served_entries,
 )
 from pos.clickhouse_tables import entry_tables
 from pos.services.clickhouse import connect
 from pos.tasks.clickhouse_load import INSERT_SETTINGS, ClickhouseLoad, ClickhouseLoadError, member_drops, union_inserts
+from pos.tasks.clickhouse_load_views import view_loads
 
 ROOT = Path(__file__).parents[1]
 STEP = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_clickhouse']
-DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+DATASETS = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
 # read at import: the autouse fixture clears POS_* before each test
 SERVER = os.environ.get('POS_TEST_CLICKHOUSE', 'localhost:8123')
 REQUIRE = os.environ.get('POS_REQUIRE_CLICKHOUSE') == '1'
@@ -57,14 +60,20 @@ def _reachable(host: str, port: int) -> bool:
 
 
 def _tasks(product: str) -> list[dict]:
-    """The step's tasks for the product, explode children expanded, in `requires:` order; requiring an explode
-    requires its children."""
+    """The step's tasks for the product, explode and served-view children expanded, in `requires:` order;
+    requiring a generating task requires its children."""
     by_name: dict[str, dict] = {}
     children: dict[str, list[str]] = {}
     for task in STEP:
         if product not in task.get('products', [product]):
             continue
-        if 'foreach' in task:
+        if task['name'].startswith('clickhouse_load_views '):
+            children[task['name']] = []
+            for view in view_loads(product, task.get('exclude', [])):
+                name = f'clickhouse_load clickhouse load {view}'
+                by_name[name] = {'name': name, 'dataset': view, 'requires': task.get('requires', [])}
+                children[task['name']].append(name)
+        elif 'foreach' in task:
             children[task['name']] = []
             for each in task['foreach']:
                 for child in task['do']:
@@ -175,19 +184,20 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 
 
 #: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs;
-#: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug: a top-level list, and in a list of structs;
-#: disease_phenotype_by_disease: Nullable, in a list of structs in a list of structs), and the dataset each loads into.
+#: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug_view: a top-level list, and in a list
+#: of structs; disease_phenotype_by_disease_view: Nullable, in a list of structs in a list of structs), and the
+#: dataset each loads into.
 ENUM_MODELS = {
     'clinical_report': 'clinical_report',
-    'colocalisation_by_credible_set': 'colocalisation',
-    'variant_view': 'variants',
-    'interaction_view': 'interaction',
+    'colocalisation_by_credible_set_view': 'colocalisation_by_credible_set_view',
+    'variant_view': 'variant_view',
+    'interaction_view': 'interaction_view',
     'evidence_gene_burden': 'evidence',
-    'target_by_region': 'targets_by_region',
-    'target_view': 'targets',
-    'drug_mechanism_of_action_by_drug': 'mechanism_of_action',
-    'disease_phenotype_by_disease': 'disease_hpo',
-    'transcript_view': 'transcript',
+    'target_by_region_view': 'target_by_region_view',
+    'target_view': 'target_view',
+    'drug_mechanism_of_action_by_drug_view': 'drug_mechanism_of_action_by_drug_view',
+    'disease_phenotype_by_disease_view': 'disease_phenotype_by_disease_view',
+    'transcript_view': 'transcript_view',
 }
 
 
@@ -218,43 +228,41 @@ def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
             assert list(_labels(got[name], dtype, name)) == list(_labels(want[name], dtype, name)), name
 
 
-#: The explode every declared dataset but `colocalisation` and the PPP-only models loads in.
+#: The explode every declared datasets.yaml entry but the PPP-only `otar_projects` loads in.
 DECLARED_LOADS = 'explode load declared datasets'
+#: The task that loads every served view but colocalisation.
+SERVED_LOADS = 'clickhouse_load_views load served views'
+COLOCALISATION = 'colocalisation_by_credible_set_view'
 #: Entries and tasks the declarations replaced.
 RETIRED = ('aotf', 'credible_set_variant', 'credible_sets_build_cleanup', 'protein_coding_coords')
-#: Entries that moved from serving scripts into the declared explode.
-IN_EXPLODE = (
-    'aotf_disease', 'aotf_target', 'credible_sets', 'credible_sets_locus', 'interaction', 'l2g_predictions',
-    'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies', 'study_credible_sets',
-    'target_credible_sets', 'target_prioritisation', 'targets', 'targets_by_region', 'transcript', 'variants',
-    'variant_credible_sets',
-)  # fmt: skip
-#: Entries that land a pts view, served as computed.
-VIEWS = ('disease_hpo', 'drug_warnings', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance')
 
 
 def test_declared_datasets_load_in_the_declared_explode():
-    """The declared explode is the step's only one; `colocalisation` loads alone after it, its RocksDB insert being
-    the step's memory peak; every other load waits only on what the explode waits on; `interaction_evidence` is an
-    undeclared landing table, which the API reads."""
+    """The declared explode is the step's only one and the served views load in their own task; colocalisation
+    loads alone after both, its RocksDB insert being the step's memory peak; every other load waits only on what
+    they wait on; `interaction_evidence` is an undeclared landing table, which the API reads."""
     (explode,) = [t for t in STEP if t['name'] == DECLARED_LOADS]
+    (served,) = [t for t in STEP if t['name'] == SERVED_LOADS]
     assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
     assert all(is_declared(DATASETS[d]) for d in explode['foreach'])
-    assert set(IN_EXPLODE + VIEWS) <= set(explode['foreach'])
+    assert set(explode['foreach']).isdisjoint(served_entries())
+    assert served['exclude'] == [COLOCALISATION]
+    assert served['requires'] == explode['requires']
     loaded = [t['dataset'] for t in STEP if 'dataset' in t and t['name'].startswith('clickhouse_load')]
     assert set(loaded).isdisjoint(explode['foreach'])
-    (coloc,) = [t for t in STEP if t.get('dataset') == 'colocalisation']
-    assert coloc['requires'] == [explode['name']]
+    assert set(loaded) & set(served_entries()) == {COLOCALISATION}
+    (coloc,) = [t for t in STEP if t.get('dataset') == COLOCALISATION]
+    assert coloc['requires'] == [explode['name'], served['name']]
     assert 'products' not in coloc
     assert 'interaction_evidence' in loaded
     assert not is_declared(DATASETS['interaction_evidence'])
     assert set(RETIRED).isdisjoint(DATASETS)
     assert set(RETIRED).isdisjoint(loaded)
-    for dataset in VIEWS:
-        assert DATASETS[dataset]['input_dir'] == f'view/{DATASETS[dataset]["model"]}', dataset
+    for name, entry in served_entries().items():
+        assert entry['input_dir'] == f'view/{name}', name
     assert not [t.name for e in DATASETS.values() for t in entry_tables(e) if t.name.endswith('_mergetree')]
     loads = [t for t in STEP if t['name'].startswith('clickhouse_load') or 'foreach' in t]
-    allowed = {*explode['requires'], explode['name']}
+    allowed = {*explode['requires'], explode['name'], served['name']}
     assert all(set(t.get('requires', [])) <= allowed for t in loads)
 
 

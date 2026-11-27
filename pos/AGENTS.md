@@ -45,47 +45,64 @@ datasets) from it. A task with `products: [...]` runs only for those products.
 - `bigquery` tables are `ot_datamodels` datasets present under `<release_uri>/output/`;
   `ot_release` is kept. It leaves prod untouched if any staging load fails or is empty.
   Rerun it after a failed swap: staging stays complete.
-- `config/datasets.yaml` maps datasets to ClickHouse tables and OpenSearch indices.
+- `config/datasets.yaml` maps datasets to OpenSearch indices, and the datasets loaded from `output/` to
+  ClickHouse tables; the served views are declared on their models (ClickHouse landing tables, below).
   `config/clickhouse/` holds the server config (`config.d/`, `users.d/`) and nothing else;
   `config/opensearch/` the index settings.
 
 ## ClickHouse landing tables
 
-Every ClickHouse landing table has an `ot_datamodels` model (`discover_models()`: the outputs
-and the `view/` models in `ot_datamodels.views`) and gets `model: <dataset_name>` in
-`config/datasets.yaml`: `clickhouse_load` builds its landing table
-from the model (`pos.clickhouse_ddl`) at load time. `engine:` overrides the default `Log`.
+Every ClickHouse table is built from a landing table with an `ot_datamodels` model
+(`discover_models()`: the outputs and the `view/` models in `ot_datamodels.views`):
+`clickhouse_load` builds the landing table from the model (`pos.clickhouse_ddl`) at load time,
+loads it, builds the served tables and dictionaries from it, then drops it.
+
+**Served views** are declared on their models. A view model with `clickhouse = Serving(...)`
+(`ot_datamodels.serving`) is one served table named after its `dataset_name`, built from the
+whole view: `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by`
+and the dictionaries built from the table (`ClickHouseDictionary`, `source` unset: a view's
+dictionary reads the view's own table; only the `datasets.yaml` entries name another). Everything else is derived (`served_entries()`): the input folder
+`view/<dataset_name>`, the landing table `<dataset_name>_log`, the RocksDB key (the model's one
+`PrimaryKey`) and the products (the model's). Every view model has a `Serving`
+(datamodels `tests/test_serving.py`).
+
+**The other entries** (the datasets still loaded from `output/`) are in `config/datasets.yaml`, with
+`model: <dataset_name>` and `engine:` (default `Log`) for the landing table, and `tables` and
+`dictionaries` for what the load builds from it (`ClickHouseTable`, `ClickHouseDictionary` in
+`pos.clickhouse_tables`). A table declares only its name, engine, `order_by`, `columns` and
+`where`; a dictionary its name, `source` table, `key`, `attributes` and `source_columns`.
 `evidence` has `models: 'evidence_*'`: each member for the run's product loads into
 `evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
-columns), and the member tables are dropped. A member with no parquet fails the load unless
-it is in `optional_models`. PPP-only models (`products = ('ppp',)`) are left out of a Platform
-load. Each entry has exactly one of `model`, `models`: an entry with neither, or both, fails the load at spec
-time and `entry_problems` (`test_clickhouse_entries_have_one_of_model_and_models`).
+columns), and the member tables are dropped. A member with no parquet fails the load unless it is
+in `optional_models`. Each entry has exactly one of `model`, `models`: an entry with neither, or
+both, fails the load at spec time and `entry_problems`
+(`test_clickhouse_entries_have_one_of_model_and_models`).
 
-Storage is declared in `config/datasets.yaml`: an entry's `tables` and `dictionaries` list what
-its load builds from the landing table (`ClickHouseTable`, `ClickHouseDictionary` in
-`pos.clickhouse_tables`). A table declares only its name, engine, `order_by`, `columns` and
-`where`; a dictionary its name, `source` table, `key`, `attributes` and `source_columns`. The
-rest is derived from the model: the RocksDB key is its one `PrimaryKey` column (for `evidence`,
-the one its members share), a `model` entry builds only for the model's products,
-`allow_nullable_key` is set when an `order_by` column is nullable, and every MergeTree table gets
-`OPTIMIZE FINAL`. `clickhouse_load` checks each RocksDB key is unique in the landing table,
-builds the tables and dictionaries from it, then drops it. `entry_problems` checks the
-declarations against the landing columns (`test_yaml_declarations_are_valid`).
-Declared datasets load in `explode load declared datasets`. Every undeclared load, top-level ones included,
-requires the declared explode, directly or through another task; a declared
-dataset outside it must be product-gated or wait for it too
-(`test_undeclared_loads_wait_for_the_declared_ones`). `colocalisation` loads alone after the
-explode: its RocksDB bulk insert is the largest ClickHouse memory peak of the step.
-A declared model loads only for its products, so a PPP-only one (`otar_projects`,
-`association_time_series`) is a top-level task with `products: [ppp]`
-(`test_a_declared_model_loads_only_for_its_products`). `interaction_evidence_log` is the only
-undeclared landing table: the API reads it (`test_declared_datasets_load_in_the_declared_explode`).
+`clickhouse_entries()` merges both, and is what `clickhouse_load`, `pos-ddl` and the tests read; a
+name in `datasets.yaml` that is also a served view fails. For both kinds: the RocksDB key is the
+model's one `PrimaryKey` column (for `evidence`, the one its members share), a `model` entry builds
+only for the model's products, `allow_nullable_key` is set when an `order_by` column is nullable,
+and every MergeTree table gets `OPTIMIZE FINAL`. `clickhouse_load` checks each RocksDB key is
+unique in the landing table. `entry_problems` checks the declarations against the landing columns
+(`test_yaml_declarations_are_valid`).
+
+**Load order** (`config/config.yaml`): the `datasets.yaml` entries load in `explode load declared
+datasets`; `clickhouse_load_views load served views` appends one `clickhouse_load clickhouse load
+<dataset_name>` per served view whose model lists the run's product, so a PPP-only view
+(`association_timeseries_view`) loads for PPP alone (`test_the_served_views_each_product_loads`
+pins both lists). Its `exclude` leaves out `colocalisation_by_credible_set_view`, which loads alone
+after both: its RocksDB bulk insert is the largest ClickHouse memory peak of the step. Every other
+load, top-level ones included, requires both, directly or through another task; a declared dataset
+outside them must be product-gated or wait for both too
+(`test_undeclared_loads_wait_for_the_declared_ones`). `otar_projects` is PPP-only, a top-level
+task with `products: [ppp]` (`test_a_declared_model_loads_only_for_its_products`).
+`interaction_evidence_log` is the only undeclared landing table: the API reads it
+(`test_declared_datasets_load_in_the_declared_explode`).
 
 Print the generated DDL:
 
 ```sh
-cd pos && uv run pos-ddl disease
+cd pos && uv run pos-ddl disease_view
 cd pos && uv run pos-ddl evidence --product ppp
 cd pos && uv run pos-ddl --all
 ```
@@ -190,7 +207,7 @@ destinations, for test runs that must not touch the public release:
 
 ## Tests
 
-`tests/test_contract.py` checks that every dataset `config/datasets.yaml` loads from
+`tests/test_contract.py` checks that every dataset `config/datasets.yaml` or a served view loads from
 `output/`, `view/` or `export/` is a `destination:` of a step in `pts/config.yaml`. A
 dataset pts stops writing fails it. Keep `datasets.yaml` and `pts/config.yaml` in step
 in the same PR.

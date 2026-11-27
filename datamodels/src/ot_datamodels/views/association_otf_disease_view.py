@@ -1,6 +1,6 @@
-"""Association on-the-fly, disease side: the `association_otf_disease` view (pts `association_otf`).
+"""Association on-the-fly, disease side: the `association_otf_disease_view` view (pts `association_otf`).
 
-One row per evidence as served in `associations_otf_disease`: the disease is `A`, the target `B`, and the
+One row per evidence: the disease is `A`, the target `B`, and the
 labels are lower-cased for search.
 """
 
@@ -13,6 +13,7 @@ from ot_datamodels import DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.association_overall_direct import AssociationOverallDirect
 from ot_datamodels.outputs.association_overall_indirect import AssociationOverallIndirect
 from ot_datamodels.outputs.evidence_eva import EvidenceEva
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import Datasource, Datatype
 
 # every evidence model has the same id, diseaseId, targetId and score (tests/test_views.py)
@@ -26,16 +27,17 @@ NoveltyDirect = from_output(AssociationOverallDirect, 'currentNovelty', nullable
 NoveltyIndirect = from_output(AssociationOverallIndirect, 'currentNovelty', nullable=True)
 
 
-class AssociationOtfDisease(DatasetModel):
+class AssociationOtfDiseaseView(DatasetModel):
     """Association on-the-fly, disease side."""
 
-    dataset_name: ClassVar[str] = 'association_otf_disease'
+    dataset_name: ClassVar[str] = 'association_otf_disease_view'
     dataset_title: ClassVar[str] = 'Association on-the-fly, disease side'
     dataset_description: ClassVar[str] = (
         'Every evidence keyed by its disease (A) and target (B), with lower-cased labels for search and the '
         'novelty of its direct and indirect association, as served for associations computed on the fly'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
+    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('A', 'B', 'datasourceId'))
     example: ClassVar[dict] = {
         'rowId': '0000155ec8bd9ff7b4e5e3b4e1c9c5f0f1e2d3a4',
         'A': 'EFO_0000270',

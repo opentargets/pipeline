@@ -6,8 +6,8 @@ import polars as pl
 import pytest
 from ot_datamodels.discovery import discover_datasets
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
-from ot_datamodels.views.coding_variant_by_variant import COORD_EXAMPLE, CodingVariantByVariant
+from ot_datamodels.views.coding_variant_by_target_view import CodingVariantByTargetView
+from ot_datamodels.views.coding_variant_by_variant_view import COORD_EXAMPLE, CodingVariantByVariantView
 
 from pts.schemas.dataset.conform import conform
 from pts.schemas.dataset.validate import validate_dataset
@@ -44,7 +44,7 @@ GWAS = {
     'score': pl.Float64,
     'id': pl.String,
 }
-VIEWS = {'variant': CodingVariantByVariant, 'target': CodingVariantByTarget}
+VIEWS = {'variant': CodingVariantByVariantView, 'target': CodingVariantByTargetView}
 KEYS = {'variant': 'variantId', 'target': 'targetId'}
 
 
@@ -480,8 +480,8 @@ def test_served_groups_by_key_in_the_array_order() -> None:
     assert by_target.to_dicts() == grouped(EXPECTED, 'targetId', 'variantId')
     assert by_target['targetId'].to_list() == ['T1', 'T2', 'T3', 'T4']
     assert [c['variantId'] for c in by_target['proteinCodingCoords'][0]] == ['V1', 'V6']
-    assert by_variant.schema == to_polars_schema(CodingVariantByVariant)
-    assert by_target.schema == to_polars_schema(CodingVariantByTarget)
+    assert by_variant.schema == to_polars_schema(CodingVariantByVariantView)
+    assert by_target.schema == to_polars_schema(CodingVariantByTargetView)
 
 
 def test_served_orders_each_array_by_the_whole_tail_and_keeps_duplicates() -> None:
@@ -641,6 +641,6 @@ def test_an_unknown_datasource_breaks_the_model(tmp_path: Path) -> None:
         frame = served(pl.DataFrame([coord], schema=COORD_SCHEMA), 'variantId', 'targetId')
         (tmp_path / datasource).mkdir()
         frame.write_parquet(tmp_path / datasource / 'part-0.parquet')
-    validate_dataset(CodingVariantByVariant, str(tmp_path / 'eva'))
-    with pytest.raises(ValueError, match='breaks its model CodingVariantByVariant'):
-        validate_dataset(CodingVariantByVariant, str(tmp_path / 'nope'))
+    validate_dataset(CodingVariantByVariantView, str(tmp_path / 'eva'))
+    with pytest.raises(ValueError, match='breaks its model CodingVariantByVariantView'):
+        validate_dataset(CodingVariantByVariantView, str(tmp_path / 'nope'))

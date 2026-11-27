@@ -1,6 +1,6 @@
-"""Pharmacovigilance by drug: the `pharmacovigilance_by_drug` view (pts `pharmacovigilance_by_drug`).
+"""Pharmacovigilance by drug: the `pharmacovigilance_by_drug_view` view (pts `pharmacovigilance_by_drug`).
 
-One row per drug of `pharmacovigilance`, as served in `pharmacovigilance`: its adverse events by `logLR` descending,
+One row per drug of `pharmacovigilance`: its adverse events by `logLR` descending,
 then `name`, and the drug's critical value.
 """
 
@@ -10,6 +10,7 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, StructModel, from_output
 from ot_datamodels.outputs.pharmacovigilance import Pharmacovigilance
+from ot_datamodels.serving import Serving
 
 ChemblId = from_output(Pharmacovigilance, 'chembl_id', primary_key=True)
 Count = from_output(Pharmacovigilance, 'count')
@@ -35,13 +36,14 @@ class AdverseEvent(StructModel):
     meddraCode: Literal[''] = Field(description=_description('meddraCode'))
 
 
-class PharmacovigilanceByDrug(DatasetModel):
+class PharmacovigilanceByDrugView(DatasetModel):
     """Pharmacovigilance by drug."""
 
-    dataset_name: ClassVar[str] = 'pharmacovigilance_by_drug'
+    dataset_name: ClassVar[str] = 'pharmacovigilance_by_drug_view'
     dataset_title: ClassVar[str] = 'Pharmacovigilance by drug'
     dataset_description: ClassVar[str] = 'Significant adverse drug reactions of each drug, as served by drug'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {
         'chembl_id': _EXAMPLE['chembl_id'],
         'adverse_events': [

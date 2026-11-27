@@ -73,7 +73,7 @@ def test_entry_tables_and_dictionaries_parse_the_yaml_lists():
         ClickHouseTable('by_name', 'mergetree', order_by=('name',), columns=('name',), where='x'),
     ]
     assert entry_dictionaries(entry) == [
-        ClickHouseDictionary('d', 'sample', key='id', attributes=('title',), source_columns={'title': 'name'})
+        ClickHouseDictionary('d', source='sample', key='id', attributes=('title',), source_columns={'title': 'name'})
     ]
     assert entry_tables({'table': 't'}) == []
     assert entry_dictionaries({'table': 't'}) == []

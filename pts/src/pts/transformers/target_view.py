@@ -2,8 +2,8 @@
 
 The target dataset with its homologues, tractability, safety liabilities, chemical probes and
 transcripts nested back in, in the shape target had before they were split out of it, then the ids of
-its credible sets and pharmacogenomics records: the served `targets`. `tep` is not reproduced and
-`alternativeGenes` is always null. Also writes the served `targets_by_region` and `transcript`.
+its credible sets and pharmacogenomics records: the served `target_view`. `tep` is not reproduced and
+`alternativeGenes` is always null. Also writes the served `target_by_region_view` and `transcript_view`.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_by_region_view import TargetByRegionView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView, TranscriptViewRow
 from otter.config.model import Config
@@ -210,7 +210,7 @@ def build_target_view(
 
 
 def build_target_by_region(view: pl.DataFrame) -> pl.DataFrame:
-    """One row per view row: its genomic location and id, by location then id, conformed to `TargetByRegion`."""
+    """One row per view row: its genomic location and id, by location then id, conformed to `TargetByRegionView`."""
     location = pl.col('genomicLocation')
     frame = view.rechunk().select(
         chromosome=location.struct.field('chromosome'),
@@ -219,7 +219,7 @@ def build_target_by_region(view: pl.DataFrame) -> pl.DataFrame:
         target=pl.struct('id'),
     )
     frame = frame.sort('chromosome', 'start', 'end', pl.col('target').struct.field('id'), maintain_order=True)
-    return conform(frame, TargetByRegion)
+    return conform(frame, TargetByRegionView)
 
 
 def build_transcript_view(transcript: pl.DataFrame) -> pl.DataFrame:
@@ -232,7 +232,7 @@ def build_transcript_view(transcript: pl.DataFrame) -> pl.DataFrame:
     return conform(frame, TranscriptView)
 
 
-@writes(view=TargetView, by_region=TargetByRegion, transcript=TranscriptView)
+@writes(view=TargetView, by_region=TargetByRegionView, transcript=TranscriptView)
 def target_view(
     source: dict[str, str],
     destination: dict[str, str],

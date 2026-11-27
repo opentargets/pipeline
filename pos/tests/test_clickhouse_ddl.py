@@ -14,29 +14,29 @@ from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.variant import Variant
 from ot_datamodels.spec import dataset_spec
-from ot_datamodels.views.association_otf_disease import AssociationOtfDisease
-from ot_datamodels.views.association_otf_target import AssociationOtfTarget
-from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
-from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
-from ot_datamodels.views.colocalisation_by_credible_set import ColocalisationByCredibleSet
-from ot_datamodels.views.credible_set_locus import CredibleSetLocus
+from ot_datamodels.views.association_otf_disease_view import AssociationOtfDiseaseView
+from ot_datamodels.views.association_otf_target_view import AssociationOtfTargetView
+from ot_datamodels.views.coding_variant_by_target_view import CodingVariantByTargetView
+from ot_datamodels.views.coding_variant_by_variant_view import CodingVariantByVariantView
+from ot_datamodels.views.colocalisation_by_credible_set_view import ColocalisationByCredibleSetView
+from ot_datamodels.views.credible_set_locus_view import CredibleSetLocusView
 from ot_datamodels.views.credible_set_view import CredibleSetView
-from ot_datamodels.views.disease_phenotype_by_disease import DiseasePhenotypeByDisease
+from ot_datamodels.views.disease_phenotype_by_disease_view import DiseasePhenotypeByDiseaseView
 from ot_datamodels.views.disease_view import DiseaseView
-from ot_datamodels.views.drug_mechanism_of_action_by_drug import DrugMechanismOfActionByDrug
-from ot_datamodels.views.drug_warning_by_drug import DrugWarningByDrug
+from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import DrugMechanismOfActionByDrugView
+from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView
 from ot_datamodels.views.interaction_view import InteractionView
-from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
-from ot_datamodels.views.mouse_phenotype_by_target import MousePhenotypeByTarget
-from ot_datamodels.views.pharmacovigilance_by_drug import PharmacovigilanceByDrug
-from ot_datamodels.views.study_credible_set import StudyCredibleSet
+from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
+from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView
+from ot_datamodels.views.pharmacovigilance_by_drug_view import PharmacovigilanceByDrugView
+from ot_datamodels.views.study_credible_set_view import StudyCredibleSetView
 from ot_datamodels.views.study_view import StudyView
-from ot_datamodels.views.target_by_region import TargetByRegion
-from ot_datamodels.views.target_credible_set import TargetCredibleSet
+from ot_datamodels.views.target_by_region_view import TargetByRegionView
+from ot_datamodels.views.target_credible_set_view import TargetCredibleSetView
 from ot_datamodels.views.target_prioritisation_view import TargetPrioritisationView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
-from ot_datamodels.views.variant_credible_set import VariantCredibleSet
+from ot_datamodels.views.variant_credible_set_view import VariantCredibleSetView
 from ot_datamodels.views.variant_view import VariantView
 from ot_datamodels.vocabularies import (
     ChemblActionType,
@@ -58,6 +58,7 @@ from ot_datamodels.vocabularies import (
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
     CHType,
+    clickhouse_entries,
     column_type,
     columns,
     create_table,
@@ -73,6 +74,7 @@ from pos.clickhouse_ddl import (
     parse_type,
     render,
     rocksdb_key,
+    served_entries,
     table_sql,
     union_columns,
     uniqueness_sql,
@@ -80,6 +82,7 @@ from pos.clickhouse_ddl import (
 from pos.clickhouse_tables import ClickHouseDictionary, ClickHouseTable, entry_tables
 
 ROOT = Path(__file__).parents[1]
+DATASETS_YAML = ROOT / 'config' / 'datasets.yaml'
 
 
 class Foo(StructModel):
@@ -316,10 +319,10 @@ def test_ddl_for(monkeypatch):
 
 def test_pos_ddl_prints_one_dataset(monkeypatch, capsys):
     monkeypatch.chdir(ROOT)
-    monkeypatch.setattr('sys.argv', ['pos-ddl', 'disease'])
+    monkeypatch.setattr('sys.argv', ['pos-ddl', 'disease_view'])
     clickhouse_ddl.main()
     out = capsys.readouterr().out
-    assert out.startswith('CREATE TABLE IF NOT EXISTS `disease_log` (')
+    assert out.startswith('CREATE TABLE IF NOT EXISTS `disease_view_log` (')
 
 
 def test_pos_ddl_evidence_follows_the_product(monkeypatch, capsys):
@@ -341,9 +344,10 @@ def test_pos_ddl_all_prints_every_entry(monkeypatch, capsys):
     monkeypatch.setattr('sys.argv', ['pos-ddl', '--all'])
     clickhouse_ddl.main()
     out = capsys.readouterr().out
-    assert '`disease_log`' in out
+    assert '`disease_view_log`' in out
     assert '`evidence_log`' in out
-    assert '`targets_log`' in out
+    assert '`target_view_log`' in out
+    assert '`association_timeseries_view_log`' in out
 
 
 def test_create_table_quotes_identifiers():
@@ -352,15 +356,49 @@ def test_create_table_quotes_identifiers():
 
 
 def test_every_view_is_served():
-    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
-    served = ('aotf_disease', 'aotf_target', 'association_time_series', 'colocalisation', 'credible_sets',
-              'credible_sets_locus', 'disease', 'disease_hpo', 'drug', 'drug_warnings', 'interaction',
-              'l2g_predictions', 'mechanism_of_action', 'mouse_phenotypes', 'pharmacovigilance',
-              'protein_coding_coords_by_target', 'protein_coding_coords_by_variant', 'studies', 'study_credible_sets',
-              'target_credible_sets', 'target_prioritisation', 'targets', 'targets_by_region', 'transcript',
-              'variant_credible_sets', 'variants')  # fmt: skip
-    views = {entries[n]['model'] for n in served}
-    assert views == set(discover_datasets(VIEWS_PACKAGE))
+    assert set(served_entries()) == set(discover_datasets(VIEWS_PACKAGE))
+    assert set(served_entries()).isdisjoint(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse'])
+
+
+def test_a_served_entry_is_derived_from_its_model():
+    entries = served_entries()
+    assert entries['disease_view'] == {
+        'table': 'disease_view_log',
+        'input_dir': 'view/disease_view',
+        'model': 'disease_view',
+        'tables': [{'name': 'disease_view', 'engine': 'rocksdb'}],
+        'dictionaries': [
+            {'name': 'disease_names', 'source': 'disease_view', 'key': 'id', 'attributes': ['name'],
+             'source_columns': {}},
+        ],
+    }  # fmt: skip
+    assert entries['target_by_region_view'] == {
+        'table': 'target_by_region_view_log',
+        'input_dir': 'view/target_by_region_view',
+        'model': 'target_by_region_view',
+        'tables': [
+            {'name': 'target_by_region_view', 'engine': 'mergetree', 'order_by': ['chromosome', 'start', 'end']},
+        ],
+    }  # fmt: skip
+
+
+def test_served_entries_follow_the_product():
+    assert set(served_entries()) - set(served_entries('platform')) == {'association_timeseries_view'}
+    assert set(served_entries('ppp')) == set(served_entries())
+
+
+def test_clickhouse_entries_merge_the_yaml_and_the_served_views():
+    entries = clickhouse_entries(DATASETS_YAML)
+    assert set(entries) == set(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse']) | set(served_entries())
+    assert entries['target_view']['table'] == 'target_view_log'
+    assert entries['biosample']['table'] == 'biosample_log'
+
+
+def test_a_yaml_entry_named_as_a_served_view_fails(tmp_path):
+    config = tmp_path / 'datasets.yaml'
+    config.write_text('clickhouse:\n  disease_view:\n    table: x_log\n    model: disease_view\n')
+    with pytest.raises(ValueError, match=r"entries \['disease_view'\] are served views"):
+        clickhouse_entries(config)
 
 
 def _type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
@@ -437,8 +475,8 @@ AOTF_SERVED = {
 @pytest.mark.parametrize(
     ('model', 'extra'),
     [
-        (AssociationOtfDisease, {'indirect': 'Array(String)'}),
-        (AssociationOtfTarget, {'isMeasurement': 'Bool', 'indirect': 'Array(LowCardinality(String))'}),
+        (AssociationOtfDiseaseView, {'indirect': 'Array(String)'}),
+        (AssociationOtfTargetView, {'isMeasurement': 'Bool', 'indirect': 'Array(LowCardinality(String))'}),
     ],
     ids=['disease', 'target'],
 )
@@ -492,7 +530,7 @@ PROTEIN_CODING_COORDS = (
 
 @pytest.mark.parametrize(
     ('model', 'key'),
-    [(CodingVariantByVariant, 'variantId'), (CodingVariantByTarget, 'targetId')],
+    [(CodingVariantByVariantView, 'variantId'), (CodingVariantByTargetView, 'targetId')],
     ids=['variant', 'target'],
 )
 def test_coding_variant_views_land_the_served_columns(model, key):
@@ -511,34 +549,34 @@ def test_coding_variant_views_land_the_served_columns(model, key):
 #: curation Enum8 (String), references (source, ids, urls) ((ids, source, urls)); adverse events (name, count, logLR,
 #: critval, meddraCode) ((count, critval, name, logLR, meddraCode)).
 SMALL_COMPUTE_SERVED = {
-    DiseasePhenotypeByDisease: (
+    DiseasePhenotypeByDiseaseView: (
         'disease String, phenotypes Array(Tuple(disease String, phenotype String, evidence Array(Tuple('
         f'aspect {_enum8(HpoAspect)}, bioCuration String, diseaseFromSourceId String, diseaseFromSource String, '
         f'diseaseName String, evidenceType {_enum8(HpoEvidenceCode)}, frequency Nullable(String), '
         'modifiers Array(String), onset Array(String), qualifier Nullable(String), qualifierNot Bool, '
         f'references Array(String), sex Nullable({_enum8(HpoSex)}), resource {_enum8(HpoResource)}))))'
     ),
-    MousePhenotypeByTarget: (
+    MousePhenotypeByTargetView: (
         'targetFromSourceId String, mouse_phenotypes Array(Tuple(targetInModel String, targetInModelMgiId String, '
         'targetInModelEnsemblId String, targetFromSourceId String, modelPhenotypeId String, '
         'modelPhenotypeLabel String, biologicalModels Array(Tuple(allelicComposition String, '
         'geneticBackground String, id Nullable(String), literature Array(String))), '
         'modelPhenotypeClasses Array(Tuple(id String, label String))))'
     ),
-    DrugWarningByDrug: (
+    DrugWarningByDrugView: (
         'chemblId String, drugWarnings Array(Tuple(chemblIds Array(String), toxicityClass Nullable(String), '
         'country String, description Nullable(String), id UInt32, '
         'references Array(Tuple(id String, source String, url String)), '
         f'warningType {_enum8(ChemblWarningType)}, year Nullable(UInt16), efoTerm Nullable(String), '
         'efoId Nullable(String), efoIdForWarningClass Nullable(String)))'
     ),
-    DrugMechanismOfActionByDrug: (
+    DrugMechanismOfActionByDrugView: (
         f'chemblId String, rows Array(Tuple(mechanismOfAction String, actionType {_enum8(ChemblActionType)}, '
         'references Array(Tuple(source String, ids Array(String), urls Array(String))), targetName String, '
         f'targets Array(String), curation {_enum8(MechanismCuration)})), '
         f'uniqueTargetTypes Array({_enum8(ChemblTargetType)}), uniqueActionTypes Array({_enum8(ChemblActionType)})'
     ),
-    PharmacovigilanceByDrug: (
+    PharmacovigilanceByDrugView: (
         'chembl_id String, adverse_events Array(Tuple(name String, count UInt32, logLR Float64, critval Float64, '
         'meddraCode String)), criticalValue Float64'
     ),
@@ -556,7 +594,7 @@ _STRAND = "Enum8('-1' = -1, '0' = 0, '1' = 1)"
 #: (read off system.columns): no LowCardinality survives groupArray, transcript flags are Nullable(String);
 #: targets_by_region.target is Tuple(id String) (David, 2026-11-24)
 TARGET_GROUP_SERVED = {
-    TargetByRegion: (
+    TargetByRegionView: (
         f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, target Tuple(id String)'
     ),
     TranscriptView: (
@@ -605,13 +643,13 @@ def test_genetics_b_views_land_the_output_then_the_id_lists(view, output, lists)
 #: "Served DDL", read off system.columns): groupArray stripped LowCardinality from colocalisationMethod and
 #: features.name, which stay String; rightStudyType and chromosome stay Enum8
 GENETICS_A_SERVED = {
-    ColocalisationByCredibleSet: (
+    ColocalisationByCredibleSetView: (
         'credibleSetId String, colocalisation Array(Tuple(credibleSetId String, otherCredibleSetId String, '
         f'rightStudyType {_enum8(StudyType)}, chromosome {_enum8(Chromosome)}, colocalisationMethod String, '
         'numberColocalisingVariants UInt32, h3 Float64, h4 Float64, clpp Float64, '
         'betaRatioSignAverage Nullable(Float64)))'
     ),
-    L2gPredictionByCredibleSet: (
+    L2gPredictionByCredibleSetView: (
         'credibleSetId String, l2g_predictions Array(Tuple(credibleSetId String, geneId String, score Float64, '
         'features Array(Tuple(name String, value Float64, shapValue Float64)), shapBaseValue Float64))'
     ),
@@ -644,7 +682,7 @@ GENETICS_C_SERVED = {
         'confidence UInt8, purityMeanR2 Nullable(Float64), purityMinR2 Nullable(Float64), '
         'qualityControls Array(LowCardinality(String)), isTransQtl UInt8'
     ),
-    CredibleSetLocus: (
+    CredibleSetLocusView: (
         'credibleSetId String, locus Array(Tuple(variantId String, posteriorProbability Float32, '
         'logBayesFactor Nullable(Float32), pValueMantissa Nullable(Float32), pValueExponent Nullable(Int32), '
         'effectAlleleFrequency Nullable(Float32), sampleSize Nullable(UInt32), reportedBeta Nullable(Float64), '
@@ -652,19 +690,19 @@ GENETICS_C_SERVED = {
         'conditionalStandardError Nullable(Float32), rescaledAbsBeta Nullable(Float32), '
         'rescaledStandardError Nullable(Float32), rescaledDirection Nullable(Int8), qualityControls Array(String)))'
     ),
-    StudyCredibleSet: (
+    StudyCredibleSetView: (
         f'studyId String, credibleSetId String, leadVariantId String, leadChromosome {_CHR}, leadPosition UInt32, '
         f'leadReferenceAllele String, leadAlternateAllele String, {_LEAD_STATS}, fineMappingMethod {_FMM}, '
         f'confidence UInt8, locusSize UInt32, {_TOP_L2G}'
     ),
-    TargetCredibleSet: (
+    TargetCredibleSetView: (
         f'targetId String, credibleSetId String, {_LEAD_STATS}, fineMappingMethod {_FMM}, confidence UInt8, '
         f'isTransQtl UInt8, leadVariantId String, leadChromosome {_CHR}, leadPosition UInt32, '
         f'leadReferenceAllele String, leadAlternateAllele String, studyId String, studyType {_ST}, '
         'condition LowCardinality(Nullable(String)), biosampleId Nullable(String), '
         'biosampleName LowCardinality(String), locusSize UInt32'
     ),
-    VariantCredibleSet: (
+    VariantCredibleSetView: (
         f'studyType {_ST}, variantId String, credibleSetId String, posteriorProbability Float32, locusSize UInt32, '
         f'{_LEAD_STATS}, fineMappingMethod {_FMM}, confidence UInt8, isTransQtl UInt8, leadVariantId String, '
         f'leadChromosome {_CHR}, leadPosition UInt32, leadReferenceAllele String, leadAlternateAllele String, '
@@ -760,7 +798,7 @@ def test_no_columns_keeps_every_landing_column():
 def test_dictionary_sql_renames_through_expression():
     d = ClickHouseDictionary(
         'biosample_names',
-        'biosample',
+        source='biosample',
         key='id',
         attributes=('name',),
         source_columns={'id': 'biosampleId', 'name': 'biosampleName'},
@@ -774,7 +812,7 @@ def test_dictionary_sql_renames_through_expression():
 
 
 def test_dictionary_sql_identity_columns_have_no_expression():
-    d = ClickHouseDictionary('d', 't', key='id', attributes=('name',))
+    d = ClickHouseDictionary('d', source='t', key='id', attributes=('name',))
     assert dictionary_sql(d, [('id', STR), ('name', STR)]) == (
         'CREATE OR REPLACE DICTIONARY `d` (`id` String, `name` String) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
@@ -782,7 +820,7 @@ def test_dictionary_sql_identity_columns_have_no_expression():
 
 
 def test_dictionary_sql_drops_low_cardinality():
-    d = ClickHouseDictionary('sequence_ontology', 'sequence_ontology_source', key='id', attributes=('label',))
+    d = ClickHouseDictionary('sequence_ontology', source='sequence_ontology_source', key='id', attributes=('label',))
     low = CHType('String', low_cardinality=True)
     assert dictionary_sql(d, [('id', low), ('label', low)]).startswith(
         'CREATE OR REPLACE DICTIONARY `sequence_ontology` (`id` String, `label` String) PRIMARY KEY `id` '
@@ -790,7 +828,7 @@ def test_dictionary_sql_drops_low_cardinality():
 
 
 def test_drop_dictionary_sql():
-    d = ClickHouseDictionary('biosample_names', 'biosample', key='id', attributes=('name',))
+    d = ClickHouseDictionary('biosample_names', source='biosample', key='id', attributes=('name',))
     assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
 
 
@@ -910,7 +948,7 @@ def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch
 
 @pytest.mark.parametrize('product', ['platform', 'ppp'])
 def test_yaml_declarations_are_valid(product):
-    entries = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())['clickhouse']
+    entries = clickhouse_entries(DATASETS_YAML)
     declared = [e for e in entries.values() if 'tables' in e or 'dictionaries' in e]
     assert declared
     assert [p for e in declared for p in entry_problems(e, product)] == []
@@ -938,7 +976,7 @@ def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
     table = ClickHouseTable('ddl_dict_src', 'rocksdb')
     cols = [('k', STR), ('v', STR)]
     d = ClickHouseDictionary(
-        'ddl_dict', 'ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
+        'ddl_dict', source='ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
     )
     client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
     client.command('CREATE TABLE ddl_dict_log (k String, v String) ENGINE = Log')

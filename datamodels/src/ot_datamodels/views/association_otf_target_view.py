@@ -1,6 +1,6 @@
-"""Association on-the-fly, target side: the `association_otf_target` view (pts `association_otf`).
+"""Association on-the-fly, target side: the `association_otf_target_view` view (pts `association_otf`).
 
-One row per evidence as served in `associations_otf_target`: the target is `A`, the disease `B`, and the
+One row per evidence: the target is `A`, the disease `B`, and the
 disease's ancestors are the indirect keys.
 """
 
@@ -11,7 +11,8 @@ from pydantic import Field
 
 from ot_datamodels import DatasetModel, PolarsDtype, from_output
 from ot_datamodels.outputs.disease import Disease
-from ot_datamodels.views.association_otf_disease import (
+from ot_datamodels.serving import Serving
+from ot_datamodels.views.association_otf_disease_view import (
     DiseaseId,
     NoveltyDirect,
     NoveltyIndirect,
@@ -24,10 +25,10 @@ from ot_datamodels.vocabularies import Datasource, Datatype
 Ancestors = from_output(Disease, 'ancestors')
 
 
-class AssociationOtfTarget(DatasetModel):
+class AssociationOtfTargetView(DatasetModel):
     """Association on-the-fly, target side."""
 
-    dataset_name: ClassVar[str] = 'association_otf_target'
+    dataset_name: ClassVar[str] = 'association_otf_target_view'
     dataset_title: ClassVar[str] = 'Association on-the-fly, target side'
     dataset_description: ClassVar[str] = (
         'Every evidence keyed by its target (A) and disease (B), with lower-cased labels for search, the '
@@ -35,6 +36,7 @@ class AssociationOtfTarget(DatasetModel):
         'for associations computed on the fly'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Target-Disease',)
+    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('A', 'B', 'datasourceId'))
     example: ClassVar[dict] = {
         'rowId': '0000155ec8bd9ff7b4e5e3b4e1c9c5f0f1e2d3a4',
         'A': 'ENSG00000100031',

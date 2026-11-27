@@ -16,7 +16,7 @@ from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.target_by_region import TargetByRegion
+from ot_datamodels.views.target_by_region_view import TargetByRegionView
 from ot_datamodels.views.target_view import TargetView
 from ot_datamodels.views.transcript_view import TranscriptView
 
@@ -470,7 +470,7 @@ def test_writes_its_model(tmp_path: Path):
 
     target_view(source, destination, {}, None)
 
-    models = {'view': TargetView, 'by_region': TargetByRegion, 'transcript': TranscriptView}
+    models = {'view': TargetView, 'by_region': TargetByRegionView, 'transcript': TranscriptView}
     assert OutputValidation.of(target_view, module).outputs == models
     for key, model in models.items():
         validate_dataset(model, destination[key])
@@ -533,7 +533,7 @@ def test_empty_id_sources_give_empty_lists(tmp_path: Path):
 def test_target_by_region_is_one_row_per_target(tmp_path: Path):
     frames = _run_all(tmp_path)
     view, by_region = frames['view'], frames['by_region']
-    assert by_region.schema == to_polars_schema(TargetByRegion)
+    assert by_region.schema == to_polars_schema(TargetByRegionView)
     assert sorted(by_region['target'].struct.field('id').to_list(), key=str) == sorted(view['id'].to_list(), key=str)
     (located,) = by_region.filter(pl.col('target').struct.field('id') == 'ENSG1').to_dicts()
     assert located == {'chromosome': '1', 'start': 1, 'end': 2, 'target': {'id': 'ENSG1'}}

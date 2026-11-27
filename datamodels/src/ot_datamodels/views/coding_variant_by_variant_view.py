@@ -1,8 +1,7 @@
-"""Protein coding coordinates by variant: the `coding_variant_by_variant` view (pts `coding_variant`).
+"""Protein coding coordinates by variant: the `coding_variant_by_variant_view` view (pts `coding_variant`).
 
-One row per variant with evidence and an amino acid changing transcript consequence, as served in
-`protein_coding_coords_by_variant`: its consequences, each with the diseases, therapeutic areas and datasources
-behind the variant.
+One row per variant with evidence and an amino acid changing transcript consequence: its consequences, each with
+the diseases, therapeutic areas and datasources behind the variant.
 """
 
 from typing import Annotated, ClassVar
@@ -13,6 +12,7 @@ from pydantic import Field
 from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel, from_output
 from ot_datamodels.outputs.patterns import ONTOLOGY_ID
 from ot_datamodels.outputs.variant import TranscriptConsequences, Variant, VariantEffect
+from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import CodingVariantDatasource
 
 TargetId = from_output(TranscriptConsequences, 'targetId')
@@ -78,16 +78,17 @@ COORD_EXAMPLE = {
 }
 
 
-class CodingVariantByVariant(DatasetModel):
+class CodingVariantByVariantView(DatasetModel):
     """Protein coding coordinates by variant."""
 
-    dataset_name: ClassVar[str] = 'coding_variant_by_variant'
+    dataset_name: ClassVar[str] = 'coding_variant_by_variant_view'
     dataset_title: ClassVar[str] = 'Protein coding coordinates by variant'
     dataset_description: ClassVar[str] = (
         'Amino acid changing consequences of each variant with evidence, with the diseases, therapeutic areas '
         'and datasources behind the variant, as served by variant'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
+    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
     example: ClassVar[dict] = {'variantId': '17_7674220_C_T', 'proteinCodingCoords': [COORD_EXAMPLE]}
 
     variantId: VariantKey

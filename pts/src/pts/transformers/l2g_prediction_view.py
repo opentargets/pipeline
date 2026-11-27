@@ -1,4 +1,4 @@
-"""L2G prediction by credible set: the served `l2g_predictions` shape.
+"""L2G prediction by credible set: the served `l2g_prediction_by_credible_set_view` shape.
 
 One row per credible set with its predictions by `score` descending, then `geneId`.
 """
@@ -9,7 +9,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.l2g_prediction_by_credible_set import L2gPredictionByCredibleSet
+from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -32,7 +32,7 @@ def l2g_prediction_view_frame(predictions: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-@writes(view=L2gPredictionByCredibleSet)
+@writes(view=L2gPredictionByCredibleSetView)
 def l2g_prediction_view(
     source: str,
     destination: dict[str, str],
@@ -49,4 +49,4 @@ def l2g_prediction_view(
     """
     result = l2g_prediction_view_frame(scan_dataset(str(source)).select(FIELDS).collect())
     logger.info(f'{result.height} credible sets in the l2g prediction view')
-    write_dataset(conform(result, L2gPredictionByCredibleSet), str(destination['view']))
+    write_dataset(conform(result, L2gPredictionByCredibleSetView), str(destination['view']))

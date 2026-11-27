@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pos.clickhouse_ddl import members
+from pos.clickhouse_ddl import clickhouse_entries, members
 
 ROOT = Path(__file__).parents[1]
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
+#: with the served views' entries, derived from their models
+DATASETS['clickhouse'] = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
 PTS_PREFIXES = ('output', 'view', 'export')
 # written by pos itself: the croissant doc by ot_croissant
 POS_WRITTEN = ('croissant',)

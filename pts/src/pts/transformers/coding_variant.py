@@ -1,4 +1,4 @@
-"""Coding variant views: the served `protein_coding_coords_by_variant` and `protein_coding_coords_by_target`.
+"""Coding variant views: the served `coding_variant_by_variant_view` and `coding_variant_by_target_view`.
 
 Ported from the pyspark coding_variant step. Lists every amino acid changing consequence of a
 variant that has evidence, with the diseases, therapeutic areas and datasources behind it, grouped
@@ -13,8 +13,8 @@ import numpy as np
 import polars as pl
 from loguru import logger
 from ot_datamodels.polars import to_polars_schema
-from ot_datamodels.views.coding_variant_by_target import CodingVariantByTarget
-from ot_datamodels.views.coding_variant_by_variant import CodingVariantByVariant
+from ot_datamodels.views.coding_variant_by_target_view import CodingVariantByTargetView
+from ot_datamodels.views.coding_variant_by_variant_view import CodingVariantByVariantView
 from otter.config.model import Config
 from otter.storage.synchronous.handle import StorageHandle
 
@@ -37,7 +37,7 @@ EVIDENCE_SOURCES = ['evidence_eva', 'evidence_eva_somatic', 'evidence_uniprot_va
 
 
 def _coord_schema() -> pl.Schema:
-    dtype = to_polars_schema(CodingVariantByVariant)['proteinCodingCoords']
+    dtype = to_polars_schema(CodingVariantByVariantView)['proteinCodingCoords']
     if not (isinstance(dtype, pl.List) and isinstance(dtype.inner, pl.Struct)):
         raise TypeError(f'proteinCodingCoords is {dtype}, not a list of structs')
     return pl.Schema(dtype.inner.to_schema())
@@ -59,7 +59,7 @@ ARRAY_ORDER = [
 SORT_COLUMNS = ['variantId', 'targetId', *ARRAY_ORDER]
 
 
-@writes(variant=CodingVariantByVariant, target=CodingVariantByTarget)
+@writes(variant=CodingVariantByVariantView, target=CodingVariantByTargetView)
 def coding_variant(
     source: dict[str, str],
     destination: dict[str, str],
@@ -79,8 +79,8 @@ def coding_variant(
     variants = read_variants(source['variant'])
     frames = {name: without_enums(scan_dataset(path)) for name, path in source.items() if name != 'variant'}
     flat = build_view(variants, frames).collect().rechunk()
-    write_dataset(conform(served(flat, 'variantId', 'targetId'), CodingVariantByVariant), destination['variant'])
-    write_dataset(conform(served(flat, 'targetId', 'variantId'), CodingVariantByTarget), destination['target'])
+    write_dataset(conform(served(flat, 'variantId', 'targetId'), CodingVariantByVariantView), destination['variant'])
+    write_dataset(conform(served(flat, 'targetId', 'variantId'), CodingVariantByTargetView), destination['target'])
     logger.info(f'wrote coding variant views to {destination}')
 
 

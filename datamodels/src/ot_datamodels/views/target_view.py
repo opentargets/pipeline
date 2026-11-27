@@ -1,4 +1,4 @@
-"""Target view: the `target_view` view (pts `target_view`), served as `targets`.
+"""Target view: the `target_view` view (pts `target_view`).
 
 Every target row with its homologues, tractability, safety liabilities, chemical probes and transcripts
 nested back in, then the ids of its credible sets and pharmacogenomics records. Each nested list is null
@@ -17,6 +17,7 @@ from ot_datamodels.outputs.target import Target
 from ot_datamodels.outputs.target_safety_event import TargetSafetyEvent
 from ot_datamodels.outputs.target_tractability import TargetTractability
 from ot_datamodels.outputs.transcript import Transcript
+from ot_datamodels.serving import ClickHouseDictionary, Serving
 
 Homologue = row_of(
     Homology,
@@ -136,6 +137,10 @@ class TargetView(Target):
     dataset_description: ClassVar[str] = (
         'Targets with their homologues, tractability, safety liabilities, chemical probes and transcripts '
         'nested in, in the shape target had before they were split out of it'
+    )
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        dictionaries=(ClickHouseDictionary('target_symbols', key='id', attributes=('approvedSymbol',)),),
     )
     example: ClassVar[dict] = Target.example | {
         'homologues': [{k: v for k, v in Homology.example.items() if k != 'targetId'}],

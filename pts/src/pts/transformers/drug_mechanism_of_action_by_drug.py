@@ -1,4 +1,4 @@
-"""Mechanisms of action by drug: the served `mechanism_of_action` shape.
+"""Mechanisms of action by drug: the served `drug_mechanism_of_action_by_drug_view` shape.
 
 One row per molecule in a mechanism's `chemblIds`: the mechanisms naming it by `mechanismOfAction, actionType,
 targetName, curation` (Enums in vocabulary order, ties in output order), and their distinct target and action types in
@@ -11,7 +11,7 @@ from typing import Any
 
 import polars as pl
 from loguru import logger
-from ot_datamodels.views.drug_mechanism_of_action_by_drug import MECHANISM_FIELDS, DrugMechanismOfActionByDrug
+from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import MECHANISM_FIELDS, DrugMechanismOfActionByDrugView
 from otter.config.model import Config
 
 from pts.schemas.dataset.conform import conform
@@ -38,7 +38,7 @@ def drug_mechanism_of_action_by_drug_frame(mechanisms: pl.DataFrame) -> pl.DataF
     )
 
 
-@writes(view=DrugMechanismOfActionByDrug)
+@writes(view=DrugMechanismOfActionByDrugView)
 def drug_mechanism_of_action_by_drug(
     source: str,
     destination: dict[str, str],
@@ -57,4 +57,4 @@ def drug_mechanism_of_action_by_drug(
     dropped = mechanisms.filter(pl.col('chemblIds').list.len() == 0).height
     result = drug_mechanism_of_action_by_drug_frame(mechanisms)
     logger.info(f'{result.height} molecules in the mechanism of action view; {dropped} mechanisms name no molecule')
-    write_dataset(conform(result, DrugMechanismOfActionByDrug), str(destination['view']))
+    write_dataset(conform(result, DrugMechanismOfActionByDrugView), str(destination['view']))
