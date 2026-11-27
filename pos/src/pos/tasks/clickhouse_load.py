@@ -71,7 +71,6 @@ class ClickhouseLoad(Task):
         except (KeyError, ValueError) as e:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}: {e}') from e
         self._table_name = self._entry['table']
-        self._optional = bool(self._entry.get('optional', False))
         self._input_dir = self._entry.get('input_dir')
         self._models = self._entry.get('models')
         self._optional_models = set(self._entry.get('optional_models', []))
@@ -92,7 +91,7 @@ class ClickhouseLoad(Task):
                 self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
             self._load_members(client, ddl, member_files)
         else:
-            files = self._files(self._get_parquet_path(), self._optional, self.spec.dataset)
+            files = self._files(self._get_parquet_path(), False, self.spec.dataset)
             client = self._connect()
             ((_, create),) = ddl_for(self._entry, self.spec.product)
             if self._declared:

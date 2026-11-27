@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Literal, get_args
 
 import polars as pl
@@ -381,6 +382,13 @@ def test_a_served_entry_is_derived_from_its_model():
     }  # fmt: skip
 
 
+def test_an_output_declaring_clickhouse_fails_the_served_entries(monkeypatch):
+    served = SimpleNamespace(clickhouse=DiseaseView.clickhouse)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: {'disease': served, 'target': Target})
+    with pytest.raises(ValueError, match=r"output models \['disease'\] declare clickhouse"):
+        served_entries()
+
+
 def test_served_entries_follow_the_product():
     assert set(served_entries()) - set(served_entries('platform')) == {'association_timeseries_view', 'otar_view'}
     assert set(served_entries('ppp')) == set(served_entries())
@@ -390,7 +398,8 @@ def test_clickhouse_entries_merge_the_yaml_and_the_served_views():
     entries = clickhouse_entries(DATASETS_YAML)
     assert set(entries) == set(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse']) | set(served_entries())
     assert entries['target_view']['table'] == 'target_view_log'
-    assert entries['biosample']['table'] == 'biosample_log'
+    assert entries['evidence']['table'] == 'evidence_log'
+    assert entries['biosample_view']['table'] == 'biosample_view_log'
 
 
 def test_a_yaml_entry_named_as_a_served_view_fails(tmp_path):
@@ -881,7 +890,7 @@ KEYED = {
     'table': 'keyed_log',
     'model': 'keyed',
     'tables': [{'name': 'keyed', 'engine': 'rocksdb'}],
-    'dictionaries': [{'name': 'keyed_names', 'source': 'keyed', 'key': 'id', 'attributes': ['id']}],
+    'dictionaries': [{'name': 'keyed_names', 'key': 'id', 'attributes': ['id']}],
 }
 PPP_ONLY = {'table': 'ppp_only_log', 'model': 'keyed_ppp_only', 'tables': [{'name': 'ppp_only', 'engine': 'rocksdb'}]}
 

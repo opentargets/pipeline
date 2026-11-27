@@ -254,7 +254,8 @@ def test_every_clickhouse_load_builds_with_the_product(load):
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         loads = _built_loads(runner)
-        assert len(loads) > 30
+        # the served views (Platform 37, PPP 39, colocalisation included) and the three datasets.yaml entries
+        assert len(loads) == {'platform': 37, 'ppp': 39}[product] + 3
         assert {s.product for s in loads} == {product}
 
 
@@ -348,6 +349,7 @@ def test_the_served_views_each_product_loads(load):
         (top,) = [s for s in (runner.task_registry.build(s).spec for s in runner.specs) if s.name == SERVED_LOADS]
         assert isinstance(top, ClickhouseLoadViewsSpec)
         assert view_loads(top.product, top.exclude) == expected[product]
+        assert len(served_entries(product)) == {'platform': 37, 'ppp': 39}[product]
         loaded = {s.dataset for s in _built_loads(runner)}
         assert set(served_entries(product)) <= loaded
         assert not set(served_entries()) - set(served_entries(product)) & loaded
@@ -368,7 +370,7 @@ def test_a_declared_model_loads_only_for_its_products(load):
             model = entry_model(entry)
             if model is not None and is_declared(entry):
                 assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
-        assert ('otar_projects' in loaded) == (product == 'ppp')
+        assert ('otar_view' in loaded) == (product == 'ppp')
         assert ('association_timeseries_view' in loaded) == (product == 'ppp')
 
 

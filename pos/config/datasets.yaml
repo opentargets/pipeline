@@ -41,32 +41,6 @@ opensearch:
     input_dir: export/search_variant
     mappings: config/opensearch/search.json
 clickhouse:
-  baseline_expression:
-    table: baseline_expression_log
-    input_dir: output/baseline_expression
-    model: baseline_expression
-    tables:
-      - name: baseline_expression
-        engine: mergetree
-        order_by: [targetId, tissueBiosampleId, celltypeBiosampleId]
-  biosample:
-    table: biosample_log
-    input_dir: output/biosample
-    model: biosample
-    tables:
-      - {name: biosample, engine: rocksdb}
-    dictionaries:
-      - name: biosample_names
-        source: biosample
-        key: id
-        attributes: [name]
-        source_columns: {id: biosampleId, name: biosampleName}
-  enhancer_to_gene:
-    table: enhancer_to_gene_log
-    input_dir: output/enhancer_to_gene
-    model: enhancer_to_gene
-    tables:
-      - {name: enhancer_to_gene, engine: mergetree, order_by: [chromosome, start, end]}
   evidence:
     table: evidence_log
     input_dir: output
@@ -86,65 +60,6 @@ clickhouse:
         order_by: [datasourceId, diseaseId, targetId, score]
         columns: [datasourceId, diseaseId, targetId, score, id]
         where: diseaseId IS NOT NULL AND targetId IS NOT NULL
-  go:
-    table: gene_ontology_log
-    input_dir: output/go
-    model: go
-    tables:
-      - {name: gene_ontology, engine: rocksdb}
-  # interaction_evidence declares no tables: the API reads interaction_evidence_log.
-  interaction_evidence:
-    table: interaction_evidence_log
-    input_dir: output/interaction_evidence
-    model: interaction_evidence
-  hpo:
-    table: hpo_log
-    input_dir: output/disease_hpo
-    model: disease_hpo
-    tables:
-      - {name: hpo, engine: rocksdb}
-  literature_entity_lut:
-    table: literature_entity_lut_log
-    input_dir: output/literature_entity_lut
-    model: literature_entity_lut
-    tables:
-      - name: literature_entity_lut
-        engine: mergetree
-        order_by: [keywordId, year, month, relevance]
-        columns: [pmid, pmcid, keywordId, relevance, date, year, month]
-  otar_projects:
-    table: otar_projects_log
-    input_dir: output/otar
-    optional: true
-    model: otar
-    tables:
-      - {name: otar_projects, engine: rocksdb}
-  pharmacogenomics:
-    table: pharmacogenomics_log
-    input_dir: output/pharmacogenomics
-    model: pharmacogenomics
-    tables:
-      - {name: pharmacogenomics, engine: rocksdb}
-  w2v:
-    table: ml_w2v_log
-    input_dir: output/literature_vector
-    model: literature_vector
-    tables:
-      - {name: ml_w2v, engine: mergetree, order_by: [word], columns: [category, word, norm, vector]}
-  so:
-    table: sequence_ontology_log
-    input_dir: output/so
-    model: so
-    tables:
-      - {name: sequence_ontology_source, engine: rocksdb}
-    dictionaries:
-      - {name: sequence_ontology, source: sequence_ontology_source, key: id, attributes: [label]}
-  target_essentiality:
-    table: target_essentiality_log
-    input_dir: output/target_essentiality
-    model: target_essentiality
-    tables:
-      - {name: target_essentiality, engine: rocksdb}
   clinical_indication:
     table: clinical_indication_log
     input_dir: output/clinical_indication
@@ -160,12 +75,6 @@ clickhouse:
         order_by: [diseaseId, id]
         columns: [id, drugId, diseaseId, maxClinicalStage, clinicalReportIds]
         where: diseaseId IS NOT NULL
-  clinical_report:
-    table: clinical_report_log
-    input_dir: output/clinical_report
-    model: clinical_report
-    tables:
-      - {name: clinical_report, engine: rocksdb}
   clinical_target:
     table: clinical_target_log
     input_dir: output/clinical_target

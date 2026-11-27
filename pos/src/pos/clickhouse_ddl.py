@@ -12,7 +12,7 @@ from typing import Any
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_models
+from ot_datamodels.discovery import discover_datasets, discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
 from pos.clickhouse_tables import (
@@ -420,6 +420,8 @@ def entry_problems(entry: Mapping, product: str) -> list[str]:
     owner = entry['table']
     if (problem := source_problem(entry)) is not None:
         return [f'{owner}: {problem}']
+    if 'optional' in entry:
+        return [f'{owner}: optional is not supported, a dataset with no parquet fails its load']
     keys = _primary_keys(_entry_models(entry, product))
     shared = set(keys.values())
     keyed = any(t.engine == 'rocksdb' for t in tables)
@@ -488,8 +490,13 @@ def served_entries(product: str | None = None) -> dict[str, dict]:
 
     Each is shaped as a `datasets.yaml` entry: landing table `<name>_log` from `view/<name>`, one table named
     `<name>` built from the whole view, and its dictionaries, reading that table.
+
+    Raises:
+        ValueError: if an output model declares `clickhouse`.
     """
     entries = {}
+    if outputs := sorted(name for name, model in discover_datasets().items() if model.clickhouse is not None):
+        raise ValueError(f'output models {outputs} declare clickhouse: only a view is served')
     for name, model in sorted(discover_models().items()):
         serving = model.clickhouse
         if serving is None or (product is not None and product not in model.products):

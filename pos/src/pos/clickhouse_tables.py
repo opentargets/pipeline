@@ -35,8 +35,7 @@ class ClickHouseTable:
 
 
 def _known(entry: Mapping, kind: type[ClickHouseTable] | type[ClickHouseDictionary], item: Mapping) -> None:
-    # a dictionary's `source:` is ignored until the YAML entries go: it always reads its entry's one table
-    if unknown := set(item) - {f.name for f in fields(kind)} - {'source'}:
+    if unknown := set(item) - {f.name for f in fields(kind)}:
         raise ValueError(f'{entry["table"]}: unknown {kind.__name__} fields {sorted(unknown)}')
 
 
@@ -73,14 +72,20 @@ def entry_dictionaries(entry: Mapping) -> list[ClickHouseDictionary]:
     return dictionaries
 
 
+def _one_table_problem(dictionary: ClickHouseDictionary, tables: Sequence[ClickHouseTable]) -> str | None:
+    if len(tables) != 1:
+        return f"{dictionary.name}: a dictionary reads its entry's one table, the entry has {len(tables)}"
+    return None
+
+
 def source_table(dictionary: ClickHouseDictionary, tables: Sequence[ClickHouseTable]) -> ClickHouseTable:
-    """The table a dictionary reads: its entry's first, which is the served view's one table.
+    """The table a dictionary reads: its entry's one table, the served view's.
 
     Raises:
-        ValueError: if the entry has no table.
+        ValueError: if the entry has no table or several.
     """
-    if not tables:
-        raise ValueError(f"{dictionary.name}: a dictionary reads its entry's table, the entry has none")
+    if (problem := _one_table_problem(dictionary, tables)) is not None:
+        raise ValueError(problem)
     return tables[0]
 
 
@@ -135,8 +140,8 @@ def dictionary_problems(
 ) -> list[str]:
     """The problems in one dictionary over the entry's `tables`, built from a landing table with columns `fields`."""
     where = f'{owner}.{dictionary.name}'
-    if not tables:
-        return [f"{where}: a dictionary reads its entry's table, the entry has none"]
+    if (problem := _one_table_problem(dictionary, tables)) is not None:
+        return [f'{owner}.{problem}']
     source = tables[0]
     known = set(column_names(source, fields))
     return [

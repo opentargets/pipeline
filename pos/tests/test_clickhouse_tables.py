@@ -66,7 +66,6 @@ def test_entry_tables_and_dictionaries_parse_the_yaml_lists():
         ],
         'dictionaries': [
             {'name': 'd', 'key': 'id', 'attributes': ['title'], 'source_columns': {'title': 'name'}},
-            {'name': 'old', 'source': 'sample', 'key': 'id', 'attributes': []},  # the YAML's `source:` is ignored
         ],
     }
     assert entry_tables(entry) == [
@@ -75,15 +74,15 @@ def test_entry_tables_and_dictionaries_parse_the_yaml_lists():
     ]
     assert entry_dictionaries(entry) == [
         ClickHouseDictionary('d', key='id', attributes=('title',), source_columns={'title': 'name'}),
-        ClickHouseDictionary('old', key='id', attributes=()),
     ]
     assert entry_tables({'table': 't'}) == []
     assert entry_dictionaries({'table': 't'}) == []
 
 
-def test_entry_dictionaries_take_only_the_dictionary_fields():
-    entry = {'table': 'e_log', 'dictionaries': [{'name': 'd', 'source_table': 's', 'key': 'id', 'attributes': []}]}
-    with pytest.raises(ValueError, match=r"e_log: unknown ClickHouseDictionary fields \['source_table'\]"):
+@pytest.mark.parametrize('field', ['source', 'source_table'])
+def test_entry_dictionaries_take_only_the_dictionary_fields(field):
+    entry = {'table': 'e_log', 'dictionaries': [{'name': 'd', field: 's', 'key': 'id', 'attributes': []}]}
+    with pytest.raises(ValueError, match=rf"e_log: unknown ClickHouseDictionary fields \['{field}'\]"):
         entry_dictionaries(entry)
 
 
@@ -103,7 +102,8 @@ def test_valid_declarations_have_no_problems():
         'attributes': ['title'],
         'source_columns': {'title': 'name'},
     }
-    assert _problems(*tables, dictionaries=(dictionary,)) == []
+    assert _problems(*tables) == []
+    assert _problems(tables[0], dictionaries=(dictionary,)) == []
 
 
 def test_rocksdb_needs_one_primary_key_column():
@@ -173,10 +173,15 @@ def test_dictionary_source_columns_name_the_source_table_columns():
     assert problems == ["sample_log.d: column 'title' is not a column of 'sample'"]
 
 
-def test_dictionary_needs_an_entry_with_a_table():
+def test_dictionary_needs_an_entry_with_one_table():
     dictionary = {'name': 'd', 'key': 'id', 'attributes': ['name']}
+    table = {'name': 'sample', 'engine': 'rocksdb'}
+    by_name = {'name': 'sample_by_name', 'engine': 'mergetree', 'order_by': ['name']}
     assert _problems(dictionaries=(dictionary,)) == [
-        "sample_log.d: a dictionary reads its entry's table, the entry has none"
+        "sample_log.d: a dictionary reads its entry's one table, the entry has 0"
+    ]
+    assert _problems(table, by_name, dictionaries=(dictionary,)) == [
+        "sample_log.d: a dictionary reads its entry's one table, the entry has 2"
     ]
 
 
@@ -186,3 +191,11 @@ def test_an_entry_needs_exactly_one_of_model_and_models():
     assert entry_problems(neither, 'platform') == ['sample_log: has neither model nor models']
     both = {'table': 'sample_log', 'model': 'sample', 'models': 'sample*', 'tables': tables}
     assert entry_problems(both, 'platform') == ['sample_log: has both model and models']
+
+
+def test_an_entry_cannot_be_optional():
+    tables = [{'name': 'sample', 'engine': 'rocksdb'}]
+    entry = {'table': 'sample_log', 'model': 'sample', 'optional': True, 'tables': tables}
+    assert entry_problems(entry, 'platform') == [
+        'sample_log: optional is not supported, a dataset with no parquet fails its load'
+    ]
