@@ -21,6 +21,7 @@ from pts.transformers.drug_enrichment import (
     promiscuous_drugs,
 )
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from tests.credible_set_fixtures import published_credible_set
 
 CANCER = 'MONDO_0045024'
 
@@ -162,10 +163,10 @@ def _credible_set_evidence() -> pl.DataFrame:
 
 
 def _credible_set() -> pl.DataFrame:
-    return pl.DataFrame({
-        'id': ['qualified', 'unqualified'],
-        'qualityControls': [[CredibleSetFlag.QUALIFIED_DISEASE_SET.value, 'other'], ['other']],
-    })
+    return published_credible_set(
+        {'id': 'qualified', 'qualityControls': [CredibleSetFlag.QUALIFIED_DISEASE_SET.value, 'other']},
+        {'id': 'unqualified', 'qualityControls': ['other']},
+    )
 
 
 def test_flagged_set_evidence_keeps_the_evidence_of_flagged_sets() -> None:
