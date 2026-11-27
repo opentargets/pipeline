@@ -6,6 +6,9 @@ Minikel et al. 2024 (doi.org/10.1038/s41586-024-07316-0). A pair is supported wh
 association, the highest evidence score over the disease and its descendants, reaches
 `score_threshold`. Ported from gentropy `chemblDrugEnrichment.drug_enrichemnt_from_evidence`.
 
+Evidence from a credible set (`studyLocusId`) counts only when the set carries every flag of
+`credible_set_flags`, such as the qualified disease credible sets.
+
 Not part of the unified pipeline: run on demand against a release.
 """
 
@@ -22,6 +25,7 @@ from scipy.stats import chi2, fisher_exact
 
 from pts.schemas.dataset.conform import without_enums
 from pts.schemas.drug_enrichment import drug_enrichment_schema
+from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
 
 #: Clinical phase of each `clinicalStage`. Other stages are left out.
@@ -44,7 +48,7 @@ PHASES = (2, 3, 4)
 Z = 1.96
 
 #: Source keys that are not evidence datasets to test.
-_FIXED_SOURCES = {'disease', 'drug_mechanism_of_action', 'clinical_precedence'}
+_FIXED_SOURCES = {'disease', 'drug_mechanism_of_action', 'clinical_precedence', 'credible_set'}
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,8 @@ class Settings:
     excluded_ancestors: tuple[str, ...] = ('MONDO_0045024',)
     #: Drugs with more distinct targets than this are left out.
     max_drug_targets: int = 5
+    #: Credible set flags, by name, that a set needs for its evidence to count.
+    credible_set_flags: tuple[CredibleSetFlag, ...] = ()
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any]) -> Settings:
@@ -69,15 +75,19 @@ class Settings:
             The settings.
 
         Raises:
-            ValueError: for an unknown setting.
+            ValueError: for an unknown setting or credible set flag.
         """
         unknown = set(settings) - {f.name for f in fields(cls)}
         if unknown:
             raise ValueError(f'unknown settings {sorted(unknown)}')
+        unknown_flags = set(settings.get('credible_set_flags', ())) - set(CredibleSetFlag.__members__)
+        if unknown_flags:
+            raise ValueError(f'unknown credible set flags {sorted(unknown_flags)}')
         return cls(
             score_threshold=float(settings.get('score_threshold', cls.score_threshold)),
             excluded_ancestors=tuple(settings.get('excluded_ancestors', cls.excluded_ancestors)),
             max_drug_targets=int(settings.get('max_drug_targets', cls.max_drug_targets)),
+            credible_set_flags=tuple(CredibleSetFlag[name] for name in settings.get('credible_set_flags', ())),
         )
 
 
@@ -167,6 +177,26 @@ def clinical_pairs(
         .group_by('targetId', 'diseaseId')
         .agg(pl.col('phase').max().alias('maxPhase'))
     )
+
+
+def flagged_set_evidence(
+    evidence: pl.LazyFrame, credible_set: pl.LazyFrame, flags: tuple[CredibleSetFlag, ...]
+) -> pl.LazyFrame:
+    """The evidence whose credible set carries every one of `flags`.
+
+    Args:
+        evidence: an evidence dataset with `studyLocusId`.
+        credible_set: the credible set dataset.
+        flags: the flags a set needs.
+
+    Returns:
+        The rows of `evidence` whose `studyLocusId` is such a set.
+    """
+    qc = pl.col('qualityControls').cast(pl.List(pl.String)).fill_null([])
+    flagged = credible_set.filter(pl.all_horizontal(qc.list.contains(flag.value) for flag in flags)).select(
+        pl.col('id').alias('studyLocusId')
+    )
+    return evidence.join(flagged, on='studyLocusId', how='semi')
 
 
 def indirect_scores(evidence: pl.LazyFrame, lineage: pl.LazyFrame, excluded: pl.LazyFrame) -> pl.LazyFrame:
@@ -285,19 +315,23 @@ def drug_enrichment(
     """Write the drug enrichment table of each evidence dataset.
 
     Args:
-        source: paths keyed by disease, drug_mechanism_of_action and clinical_precedence, and one
-            `evidence_<name>` key per evidence dataset to test.
+        source: paths keyed by disease, drug_mechanism_of_action and clinical_precedence, one
+            `evidence_<name>` key per evidence dataset to test, and credible_set when
+            `credible_set_flags` is set.
         destination: path of the drug enrichment table.
         settings: as `Settings.from_settings` reads them.
         config: unused.
 
     Raises:
-        ValueError: when no evidence dataset is given.
+        ValueError: when no evidence dataset is given, or `credible_set_flags` without a
+            credible_set source.
     """
     options = Settings.from_settings(settings)
     evidence_keys = sorted(key for key in source if key not in _FIXED_SOURCES)
     if not evidence_keys:
         raise ValueError('no evidence dataset to test: add an evidence_<name> source')
+    if options.credible_set_flags and 'credible_set' not in source:
+        raise ValueError('credible_set_flags needs a credible_set source')
 
     lineage = disease_lineage(scan_dataset(source['disease'])).collect()
     excluded = excluded_diseases(lineage.lazy(), options.excluded_ancestors).collect()
@@ -314,7 +348,10 @@ def drug_enrichment(
 
     rows = []
     for key in evidence_keys:
-        indirect = indirect_scores(scan_dataset(source[key]), lineage.lazy(), excluded.lazy()).collect()
+        evidence = scan_dataset(source[key])
+        if options.credible_set_flags and 'studyLocusId' in evidence.collect_schema():
+            evidence = flagged_set_evidence(evidence, scan_dataset(source['credible_set']), options.credible_set_flags)
+        indirect = indirect_scores(evidence, lineage.lazy(), excluded.lazy()).collect()
         rows.extend(enrichment(clinical, indirect, options.score_threshold))
     output = pl.DataFrame(rows, schema=drug_enrichment_schema)
     write_dataset(output, destination)

@@ -8,12 +8,14 @@ import pytest
 from scipy.stats import fisher_exact
 
 from pts.schemas.drug_enrichment import drug_enrichment_schema
+from pts.transformers.credible_set.flags import CredibleSetFlag
 from pts.transformers.drug_enrichment import (
     Settings,
     clinical_pairs,
     disease_lineage,
     drug_enrichment,
     excluded_diseases,
+    flagged_set_evidence,
     indirect_scores,
     phase_test,
     promiscuous_drugs,
@@ -146,3 +148,62 @@ def test_drug_enrichment(tmp_path: Path) -> None:
     assert (phase_3['supportedReachedPhase'], phase_3['supportedBelowPhase']) == (1, 0)
     assert (phase_3['unsupportedReachedPhase'], phase_3['unsupportedBelowPhase']) == (1, 2)
     assert output['supportedAssociations'].unique().to_list() == [3]
+
+
+def _credible_set_evidence() -> pl.DataFrame:
+    """T1:A1 from a qualified set and T2:A1 from an unqualified one."""
+    return pl.DataFrame({
+        'datasourceId': ['gwas_credible_sets'] * 2,
+        'targetId': ['T1', 'T2'],
+        'diseaseId': ['A1', 'A1'],
+        'score': [0.9, 0.9],
+        'studyLocusId': ['qualified', 'unqualified'],
+    })
+
+
+def _credible_set() -> pl.DataFrame:
+    return pl.DataFrame({
+        'id': ['qualified', 'unqualified'],
+        'qualityControls': [[CredibleSetFlag.QUALIFIED_DISEASE_SET.value, 'other'], ['other']],
+    })
+
+
+def test_flagged_set_evidence_keeps_the_evidence_of_flagged_sets() -> None:
+    kept = flagged_set_evidence(
+        _credible_set_evidence().lazy(), _credible_set().lazy(), (CredibleSetFlag.QUALIFIED_DISEASE_SET,)
+    ).collect()
+    assert kept['studyLocusId'].to_list() == ['qualified']
+
+
+def test_unknown_credible_set_flag_is_rejected() -> None:
+    with pytest.raises(ValueError, match='unknown credible set flags'):
+        Settings.from_settings({'credible_set_flags': ['QUALIFIED']})
+
+
+def test_credible_set_flags_need_a_credible_set_source(tmp_path: Path) -> None:
+    source = {'disease': '', 'drug_mechanism_of_action': '', 'clinical_precedence': '', 'evidence_x': ''}
+    with pytest.raises(ValueError, match='needs a credible_set source'):
+        drug_enrichment(source, str(tmp_path), {'credible_set_flags': ['QUALIFIED_DISEASE_SET']}, None)
+
+
+# each evidence row supports its disease A1 and the ancestors A and ROOT
+@pytest.mark.parametrize(('flags', 'supported'), [([], 6), (['QUALIFIED_DISEASE_SET'], 3)])
+def test_drug_enrichment_counts_only_the_evidence_of_flagged_sets(
+    tmp_path: Path, flags: list[str], supported: int
+) -> None:
+    inputs = {
+        'disease': _disease(),
+        'drug_mechanism_of_action': _moa(),
+        'clinical_precedence': _clinical(),
+        'credible_set': _credible_set(),
+        'evidence_gwas_credible_sets': _credible_set_evidence(),
+    }
+    source = {}
+    for key, frame in inputs.items():
+        source[key] = str(tmp_path / key)
+        write_dataset(frame, source[key])
+    destination = str(tmp_path / 'drug_enrichment')
+
+    drug_enrichment(source, destination, {'credible_set_flags': flags}, None)
+
+    assert scan_dataset(destination).collect()['supportedAssociations'].unique().to_list() == [supported]

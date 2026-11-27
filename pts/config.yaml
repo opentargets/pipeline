@@ -1743,6 +1743,7 @@ steps:
         disease: output/disease
         drug_mechanism_of_action: output/drug_mechanism_of_action
         clinical_precedence: output/evidence_clinical_precedence
+        credible_set: output/credible_set
         # every other key is an evidence dataset to test
         evidence_gwas_credible_sets: output/evidence_gwas_credible_sets
       destination: etc/drug_enrichment
@@ -1752,6 +1753,8 @@ steps:
         excluded_ancestors:
           - MONDO_0045024
         max_drug_targets: 5
+        credible_set_flags:
+          - QUALIFIED_DISEASE_SET
 
   #: VEP_VIEW STEP :################################################################################
   vep_view:
