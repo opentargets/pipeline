@@ -49,3 +49,8 @@ biosample_view,,dictionary biosample_names reads table biosample_view (was biosa
 disease_view,,dictionary disease_names reads table disease_view (was disease)
 so_view,,dictionary sequence_ontology reads table so_view (was sequence_ontology_source)
 target_view,,dictionary target_symbols reads table target_view (was targets)
+clinical_report_view,source,"LowCardinality(String) → Enum8: the 24 `ClinicalSource` values (ot_datamodels.vocabularies); a String in the published parquet before, now a dictionary-encoded Enum"
+credible_set_locus_view,locus[].qualityControls[],"String → Enum8: the 19 `VariantQualityControl` values; credible_set_variant.qualityControls in the published parquet is an Enum list too"
+credible_set_view,qualityControls[],"LowCardinality(String) → Enum8: the 27 `CredibleSetQualityControl` values; credible_set.qualityControls in the published parquet is an Enum list too"
+target_view,transcripts[].biotype,"LowCardinality(String) → Enum8: the 44 `TranscriptBiotype` values (Ensembl 116 transcript biotypes)"
+transcript_view,transcripts[].biotype,"String → Enum8: the 44 `TranscriptBiotype` values (Ensembl 116 transcript biotypes); transcript.biotype in the published parquet is an Enum too"

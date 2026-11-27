@@ -120,6 +120,7 @@ CHANGED: dict[str, set[str]] = {
         'tractability',
         'safetyLiabilities',
         'canonicalTranscript',
+        'transcripts',
     },
 }
 
@@ -437,6 +438,7 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
         ('transcript_view', f'transcripts[]/{c}'): (Transcript, c, None)
         for c in (
             'transcriptId',
+            'biotype',
             'proteinId',
             'uniprotSwissprotIds',
             'uniprotTremblIds',
@@ -463,7 +465,7 @@ DERIVED: dict[tuple[str, str], tuple[type[DatasetModel], str, bool | None]] = {
     **{(view, c): (CredibleSetVariant, p, None) for view, c, p in LEAD_COLUMNS},
     **{(view, c): (CredibleSetView, c, None) for view, c in COMPUTED_COLUMNS},
     ('credible_set_locus_view', 'credibleSetId'): (CredibleSetVariant, 'credibleSetId', None),
-    **{('credible_set_locus_view', f'locus[]/{c}'): (CredibleSetVariant, c, None) for c in LOCUS_FIELDS[:-1]},
+    **{('credible_set_locus_view', f'locus[]/{c}'): (CredibleSetVariant, c, None) for c in LOCUS_FIELDS},
     **{(view, 'topL2GGeneId'): (L2gPrediction, 'geneId', True) for view in TOP_L2G_VIEWS},
     **{(view, 'topL2GScore'): (L2gPrediction, 'score', True) for view in TOP_L2G_VIEWS},
     ('target_credible_set_view', 'targetId'): (Target, 'id', None),
@@ -710,7 +712,6 @@ DECLARED: dict[str, set[str]] = {
     'transcript_view': {
         'transcripts',
         'transcripts[]',
-        'transcripts[]/biotype',
         'transcripts[]/flags',
         'transcripts[]/flags[]',
         'transcripts[]/flags[]/label',
@@ -718,7 +719,7 @@ DECLARED: dict[str, set[str]] = {
     },
     'variant_view': {'credibleSetIds', 'pharmacogenomicsIds'},
     'credible_set_view': {'leadPosition', 'locusSize', 'isTransQtl'},
-    'credible_set_locus_view': {'locus', 'locus[]', 'locus[]/qualityControls', 'locus[]/qualityControls[]'},
+    'credible_set_locus_view': {'locus', 'locus[]'},
     'study_credible_set_view': {'leadReferenceAllele', 'leadAlternateAllele', 'topL2GApprovedSymbol'},
     'target_credible_set_view': {'leadReferenceAllele', 'leadAlternateAllele', 'biosampleName'},
     'variant_credible_set_view': {
@@ -1059,7 +1060,8 @@ def test_transcript_view_is_the_served_transcript() -> None:
     assert [f.name for f in nodes['transcripts[]'].fields] == TRANSCRIPT_FIELDS
     assert nodes['transcripts'].constraints.min_length == 1
     biotype = nodes['transcripts[]/biotype']
-    assert (biotype.dtype, biotype.clickhouse, biotype.nullable) == (pl.String(), None, False)
+    assert biotype.dtype == pl.Enum(get_args(v.TranscriptBiotype))
+    assert (biotype.clickhouse, biotype.nullable) == (None, False)
     for field, vocabulary in (('label', v.TranscriptFlagLabel), ('value', v.TranscriptFlagValue)):
         node = nodes[f'transcripts[]/flags[]/{field}']
         assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, True), field
@@ -1203,14 +1205,12 @@ def test_credible_set_view_computed_types() -> None:
     assert nodes['locusSize'].constraints.ge == 1
 
 
-def test_locus_rows_are_credible_set_variants_qualitycontrols_without_low_cardinality() -> None:
+def test_locus_rows_are_credible_set_variants() -> None:
     nodes = _nodes(CredibleSetLocusView)
     assert [f.name for f in nodes['locus[]'].fields] == LOCUS_FIELDS
     assert nodes['locus'].constraints.min_length == 1
-    source = _nodes(CredibleSetVariant)['qualityControls[]']
-    assert source.clickhouse == 'LowCardinality(String)'
     element = nodes['locus[]/qualityControls[]']
-    assert (element.dtype, element.clickhouse) == (pl.String(), None)
+    assert (element.dtype, element.clickhouse) == (pl.Enum(get_args(v.VariantQualityControl)), None)
 
 
 def test_read_model_defaults_and_low_cardinality() -> None:

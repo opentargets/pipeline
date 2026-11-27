@@ -44,6 +44,7 @@ from ot_datamodels.vocabularies import (
     ChemblTargetType,
     ChemblWarningType,
     Chromosome,
+    CredibleSetQualityControl,
     Datasource,
     Datatype,
     FineMappingMethod,
@@ -54,6 +55,8 @@ from ot_datamodels.vocabularies import (
     InteractionSource,
     MechanismCuration,
     StudyType,
+    TranscriptBiotype,
+    VariantQualityControl,
 )
 
 from pos import clickhouse_ddl
@@ -600,14 +603,15 @@ def test_small_compute_views_land_the_served_columns(model):
 _STRAND = "Enum8('-1' = -1, '0' = 0, '1' = 1)"
 #: the served tables of the target group as targets.sql, transcript.sql and target_prioritisation.sql built them
 #: (read off system.columns): no LowCardinality survives groupArray, transcript flags are Nullable(String);
-#: targets_by_region.target is Tuple(id String) (David, 2026-11-24)
+#: targets_by_region.target is Tuple(id String) (David, 2026-11-24); biotype is the transcript's Enum8
 TARGET_GROUP_SERVED = {
     TargetByRegionView: (
         f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, target Tuple(id String)'
     ),
     TranscriptView: (
-        'targetId String, transcripts Array(Tuple(transcriptId String, biotype String, proteinId Nullable(String), '
-        'uniprotSwissprotIds Array(String), uniprotTremblIds Array(String), uniprotIsoformIds Array(String), '
+        f'targetId String, transcripts Array(Tuple(transcriptId String, biotype {_enum8(TranscriptBiotype)}, '
+        'proteinId Nullable(String), uniprotSwissprotIds Array(String), uniprotTremblIds Array(String), '
+        'uniprotIsoformIds Array(String), '
         'alphafoldIds Array(String), dbXrefs Array(Tuple(id String, source String)), isEnsemblCanonical Bool, '
         f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, strand {_STRAND}, '
         'transcriptionStartSite UInt32, flags Array(Tuple(label Nullable(String), value Nullable(String))), '
@@ -677,9 +681,9 @@ _TOP_L2G = (
 )
 _DISEASES = 'Array(Tuple(id LowCardinality(String), name LowCardinality(String)))'
 #: the served credible_sets, credible_sets_locus and read models as credible_sets.sql and the three read-model
-#: scripts built them (design "Served DDL", read off system.columns): isTransQtl UInt8 (has()); groupArray stripped
-#: LowCardinality from locus qualityControls and any() from variant_credible_sets.condition; the LEFT JOIN
-#: defaults keep target_credible_sets.biosampleName non-null and variant_credible_sets.biosampleName nullable.
+#: scripts built them (design "Served DDL", read off system.columns): isTransQtl UInt8 (has()); any() stripped
+#: LowCardinality from variant_credible_sets.condition; the LEFT JOIN defaults keep target_credible_sets.biosampleName
+#: non-null and variant_credible_sets.biosampleName nullable. Both qualityControls are their outputs' Enum8s.
 GENETICS_C_SERVED = {
     CredibleSetView: (
         f'credibleSetId String, studyId String, studyType {_ST}, chromosome {_CHR}, leadVariantId String, '
@@ -688,7 +692,7 @@ GENETICS_C_SERVED = {
         'leadEffectAlleleFrequency Nullable(Float32), leadSampleSize Nullable(UInt32), locusStart UInt32, '
         f'locusEnd UInt32, locusSize UInt32, fineMappingMethod {_FMM}, logBayesFactor Nullable(Float64), '
         'confidence UInt8, purityMeanR2 Nullable(Float64), purityMinR2 Nullable(Float64), '
-        'qualityControls Array(LowCardinality(String)), isTransQtl UInt8'
+        f'qualityControls Array({_enum8(CredibleSetQualityControl)}), isTransQtl UInt8'
     ),
     CredibleSetLocusView: (
         'credibleSetId String, locus Array(Tuple(variantId String, posteriorProbability Float32, '
@@ -696,7 +700,8 @@ GENETICS_C_SERVED = {
         'effectAlleleFrequency Nullable(Float32), sampleSize Nullable(UInt32), reportedBeta Nullable(Float64), '
         'reportedStandardError Nullable(Float64), r2Overall Nullable(Float32), conditionalBeta Nullable(Float32), '
         'conditionalStandardError Nullable(Float32), rescaledAbsBeta Nullable(Float32), '
-        'rescaledStandardError Nullable(Float32), rescaledDirection Nullable(Int8), qualityControls Array(String)))'
+        'rescaledStandardError Nullable(Float32), rescaledDirection Nullable(Int8), '
+        f'qualityControls Array({_enum8(VariantQualityControl)})))'
     ),
     StudyCredibleSetView: (
         f'studyId String, credibleSetId String, leadVariantId String, leadChromosome {_CHR}, leadPosition UInt32, '

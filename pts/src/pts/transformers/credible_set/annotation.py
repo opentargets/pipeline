@@ -112,5 +112,5 @@ def annotation(
     )
     pl.collect_all([
         sink_dataset(conform(credible_set, CredibleSet), destinations.credible_set),
-        sink_dataset(credible_set_variant, destinations.credible_set_variant),
+        sink_dataset(conform(credible_set_variant, CredibleSetVariant), destinations.credible_set_variant),
     ])

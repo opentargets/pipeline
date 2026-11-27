@@ -17,7 +17,12 @@ from ot_datamodels.spec import dataset_spec, walk
 from pts.schemas.credible_set import CHROMOSOMES, FINEMAPPING_METHODS
 from pts.schemas.study import STUDY_TYPES
 from pts.transformers.clinical_mira.moa.schemas import ActionType
-from pts.transformers.clinical_mira.schemas import ClinicalProvider, ClinicalReportType, ClinicalStageCategory
+from pts.transformers.clinical_mira.schemas import (
+    ClinicalProvider,
+    ClinicalReportType,
+    ClinicalSource,
+    ClinicalStageCategory,
+)
 from pts.transformers.clinical_report import ClinicalReportFlags
 from pts.transformers.credible_set.flags import CredibleSetFlag, CredibleSetVariantFlag
 from pts.transformers.enhancer_to_gene import QualityFlag as EnhancerToGeneFlag
@@ -54,6 +59,7 @@ VOCABULARIES: list[tuple[str, str, type[Enum] | tuple[str, ...]]] = [
 
 #: (dataset, value path, values a transformer writes from a constant)
 WRITTEN: list[tuple[str, str, Iterable[str]]] = [
+    ('clinical_report', 'source', [source.value for source in ClinicalSource]),
     ('evidence_europepmc', 'textMiningSentences[]/section', europepmc.SECTIONS_OF_INTEREST),
     ('evidence_gene2phenotype', 'confidence', gene2phenotype.CONFIDENCE_SCORES),
     ('evidence_gene_burden', 'ancestry', brava.ANCESTRY_LABELS.values()),

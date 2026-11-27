@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 import polars as pl
 import pytest
+from ot_datamodels.outputs.credible_set import CredibleSet
+from ot_datamodels.outputs.credible_set_variant import CredibleSetVariant
 from otter.config.model import Config
 from polars.io.plugins import register_io_source
 
@@ -15,6 +17,7 @@ from pts.schemas.credible_set import (
     credible_set_variant_schema,
     validated_credible_set_schema,
 )
+from pts.schemas.dataset.conform import conformed_schema
 from pts.schemas.study import study_schema
 from pts.schemas.target import GENOMIC_LOCATION
 from pts.schemas.variant import variant_schema
@@ -211,14 +214,15 @@ def test_every_stage_writes_the_new_schemas(tmp_path: Path) -> None:
             == credible_set_variant_schema
         )
     assert _read(tmp_path / 'excluded/credible_set').schema == credible_set_schema
-    for name in ('intermediate/validated/credible_set', 'output/credible_set'):
-        assert _read(tmp_path / name).schema == validated_credible_set_schema, name
-    for name in (
-        'intermediate/validated/credible_set_variant',
-        'excluded/credible_set_variant',
-        'output/credible_set_variant',
-    ):
+    assert _read(tmp_path / 'intermediate/validated/credible_set').schema == validated_credible_set_schema
+    for name in ('intermediate/validated/credible_set_variant', 'excluded/credible_set_variant'):
         assert _read(tmp_path / name).schema == credible_set_variant_schema, name
+    # the published datasets store their quality flags as the models' Enums
+    for name, schema, model in (
+        ('credible_set', validated_credible_set_schema, CredibleSet),
+        ('credible_set_variant', credible_set_variant_schema, CredibleSetVariant),
+    ):
+        assert _read(tmp_path / f'output/{name}').schema == conformed_schema(schema, model), name
 
 
 def test_annotation_reads_each_input_dataset_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -40,6 +40,7 @@ def snake_to_camel(snake_str: str) -> str:
 class ClinicalSource(str, Enum):
     """The data source of the evidence."""
 
+    # the sources pts names in code; the full set is `ot_datamodels.vocabularies.ClinicalSource`
     CLINICAL_TRIALS_GOV = 'ClinicalTrials.gov'
     USAN = 'USAN'
     EMA = 'EMA'

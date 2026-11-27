@@ -30,10 +30,12 @@ __all__ = [
     'ChemblWarningType',
     'Chromosome',
     'ClinicalReportType',
+    'ClinicalSource',
     'ClinicalStage',
     'CodingVariantDatasource',
     'ColocalisationMethod',
     'ConstraintType',
+    'CredibleSetQualityControl',
     'Datasource',
     'Datatype',
     'DirectionOnTarget',
@@ -73,6 +75,7 @@ __all__ = [
     'SpeciesScientificName',
     'StudyType',
     'TractabilityModality',
+    'TranscriptBiotype',
     'TranscriptFlagLabel',
     'TranscriptFlagValue',
     'TrialAgencyClass',
@@ -83,6 +86,7 @@ __all__ = [
     'TrialStopReasonCategory',
     'TrialStudyType',
     'VariantEffectMethod',
+    'VariantQualityControl',
     'enum_of',
 ]
 
@@ -193,6 +197,34 @@ Provider = Literal['ChEMBL', 'TTD', 'AACT', 'EMA', 'PMDA', 'FDA']
 # API `Origin`
 Origin = Literal['CLINICAL_TRIAL', 'DRUG_LABEL', 'REGULATORY_AGENCY', 'CURATED_RESOURCE']
 ClinicalReportType = Literal['INDICATION', 'SAFETY']
+# pts `clinical_report` sources: clinical_mira `ClinicalSource` and the ChEMBL indication and warning ref_types;
+# the 2612-3 values, sorted
+ClinicalSource = Literal[
+    'ATC',
+    'ClinicalTrials.gov',
+    'DOI',
+    'DailyMed',
+    'Drugs@FDA',
+    'EMA',
+    'EMA Human Drugs',
+    'FDA',
+    'HIS',
+    'HPRA',
+    'Health Canada',
+    'INN',
+    'MEDSAFE',
+    'MHRA',
+    'NICE',
+    'NTP',
+    'Other',
+    'PMDA',
+    'PubMed',
+    'TGA',
+    'TTD',
+    'USAN',
+    'USGPO',
+    'WHO',
+]
 DirectionOnTarget = Literal['GoF', 'LoF']
 DirectionOnTrait = Literal['protect', 'risk']
 ColocalisationMethod = Literal['COLOC_PIP_ECAVIAR']
@@ -237,6 +269,58 @@ TrialStopReasonCategory = Literal[
 ]
 # pts `transcript` flag labels (_STATIC_FLAGS, then appris)
 TranscriptFlagLabel = Literal['appris', 'ensembl_canonical', 'gencode_primary', 'mane']
+# pts `credible_set` flags (credible_set/flags.py CredibleSetFlag), in its order
+CredibleSetQualityControl = Literal[
+    'Explained by a more significant variant in the same window',
+    'Explained by a more significant variant in high LD',
+    'Study does not have population annotation to resolve LD',
+    'Variant not found in LD reference',
+    'Study locus finemapped without in-sample LD reference',
+    'Subsignificant p-value',
+    'Composite association',
+    'Variant inconsistency',
+    'Palindrome alleles - cannot harmonize',
+    'Study locus from curated top hit',
+    'Trans QTL',
+    'Lead variant is replicated in an independent study',
+    'Study not found in the study index',
+    'Curated top hit is flagged because summary statistics are available for study',
+    'MHC region',
+    'Chromosome not in 1:22, X, Y or MT',
+    'PICS results from summary statistics available for this same study',
+    'Study locus in region explained by a SuSiE credible set',
+    'Credible set identifier repeated within its source',
+    'Credible set identifier also in another source, whose copy is kept',
+    'Credible set has a variant with an excluding quality flag',
+    'Credible set identifier is not a 32-character hexadecimal md5',
+    'Chromosome of the lead variant differs from the credible set chromosome',
+    'Fine-mapping method is not supported',
+    'Study type of the source is not a supported study type',
+    'Study type of the credible set differs from the study index',
+    'Lead variant of the credible set has no row among its variants',
+]
+# pts `credible_set_variant` flags (credible_set/flags.py CredibleSetVariantFlag), in its order
+VariantQualityControl = Literal[
+    'Allele frequency reported by the study',
+    'Allele frequency taken from gnomAD',
+    'Allele frequency is missing from the study and from gnomAD',
+    'Allele frequency reported by the study is not in [0, 1]',
+    'Rescaled effect derived from the conditional effect',
+    'Rescaled effect derived from the marginal effect',
+    'Variant in LD with the lead has no statistics in the locus',
+    'Variant identifier is not a valid chromosome_position_ref_alt',
+    'Variant appears more than once in its credible set',
+    'Credible set of the variant is excluded',
+    'Credible set identifier is not a 32-character hexadecimal md5',
+    'Variant is outside the 95% coverage of the credible set',
+    'Credible set PIPs do not sum to the expected coverage, or a PIP is not in (0, 1]',
+    'Reported and conditional effects have opposite signs',
+    'Only one of the reported beta and standard error is present',
+    'Only one of the conditional beta and standard error is present',
+    'P-value mantissa or exponent is missing',
+    'Credible set of the variant is not among the credible sets of its source',
+    'Chromosome of the variant differs from the credible set chromosome',
+]
 # gene burden sample sex, as the gene burden sources write it
 GeneBurdenSex = Literal['men', 'women']
 # API `TrialStudyType`; ClinicalTrials.gov StudyType
@@ -407,6 +491,54 @@ HomologyType = Literal[
 # Ensembl appris transcript attributes (principal1-5, alternative1-2, and the M forms Ensembl 116 also
 # writes), as VEP abbreviates them
 Appris = Literal['P1', 'P2', 'P3', 'P4', 'P5', 'PM', 'A1', 'A2', 'AM']
+# Ensembl 116 transcript biotypes of the human GTF (Homo_sapiens.GRCh38.116.gtf.gz); append new ones, checked
+# at each `ensembl_version` bump
+TranscriptBiotype = Literal[
+    'IG_C_gene',
+    'IG_C_pseudogene',
+    'IG_D_gene',
+    'IG_J_gene',
+    'IG_J_pseudogene',
+    'IG_V_gene',
+    'IG_V_pseudogene',
+    'IG_pseudogene',
+    'Mt_rRNA',
+    'Mt_tRNA',
+    'TEC',
+    'TR_C_gene',
+    'TR_D_gene',
+    'TR_J_gene',
+    'TR_J_pseudogene',
+    'TR_V_gene',
+    'TR_V_pseudogene',
+    'artifact',
+    'lncRNA',
+    'miRNA',
+    'misc_RNA',
+    'non_stop_decay',
+    'nonsense_mediated_decay',
+    'processed_pseudogene',
+    'processed_transcript',
+    'protein_coding',
+    'protein_coding_CDS_not_defined',
+    'protein_coding_LoF',
+    'pseudogene',
+    'rRNA',
+    'rRNA_pseudogene',
+    'retained_intron',
+    'ribozyme',
+    'sRNA',
+    'scaRNA',
+    'snRNA',
+    'snoRNA',
+    'transcribed_processed_pseudogene',
+    'transcribed_unitary_pseudogene',
+    'transcribed_unprocessed_pseudogene',
+    'translated_processed_pseudogene',
+    'unitary_pseudogene',
+    'unprocessed_pseudogene',
+    'vault_RNA',
+]
 # pts `transcript` flags: MANE (select, plus_clinical), gencode_primary and ensembl_canonical (true), and
 # the appris attributes spelled as GENCODE tags them
 TranscriptFlagValue = Literal[

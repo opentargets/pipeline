@@ -159,6 +159,10 @@ FIELDS: dict[str, Any] = {
     'chembl_bioactivity.actionTypes[]': v.ChemblActionType,
     'evidence_gene_burden.sex[]': v.GeneBurdenSex,
     'transcript.flags[]/label': v.TranscriptFlagLabel,
+    'transcript.biotype': v.TranscriptBiotype,
+    'credible_set.qualityControls[]': v.CredibleSetQualityControl,
+    'credible_set_variant.qualityControls[]': v.VariantQualityControl,
+    'clinical_report.source': v.ClinicalSource,
 }
 
 #: API `Datasource`, in its order (platform-api-nextgen schema.graphql)
