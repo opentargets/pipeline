@@ -491,7 +491,8 @@ HomologyType = Literal[
 # Ensembl appris transcript attributes (principal1-5, alternative1-2, and the M forms Ensembl 116 also
 # writes), as VEP abbreviates them
 Appris = Literal['P1', 'P2', 'P3', 'P4', 'P5', 'PM', 'A1', 'A2', 'AM']
-# Ensembl 116 transcript biotypes of the human GTF (Homo_sapiens.GRCh38.116.gtf.gz), sorted
+# Ensembl 116 transcript biotypes of the human GTF (Homo_sapiens.GRCh38.116.gtf.gz); append new ones, checked
+# at each `ensembl_version` bump
 TranscriptBiotype = Literal[
     'IG_C_gene',
     'IG_C_pseudogene',

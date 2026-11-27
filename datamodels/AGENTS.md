@@ -45,7 +45,8 @@ Only a strict subset of Pydantic is supported (`spec`); anything outside it rais
   Rules across datasets cannot be in a model, since a model sees only its own dataset.
 - **Closed vocabularies:** a `Literal` only where the list holds by construction (an
   enum in the code, constants the code writes, a fixed standard vocabulary).
-  Input data passed through stays open: a non-empty string, or a pattern. A vocabulary
+  Input data passed through stays open: a non-empty string, or a pattern, unless David decides to
+  close it (`TranscriptBiotype`, `ClinicalSource`): a new value then fails validation on purpose. A vocabulary
   consumers filter, join or order on is an Enum: its `Literal` lives in `vocabularies`
   (complete, ordered, its source cited) and a field uses it as
   `Annotated[Vocabulary, PolarsDtype(pl.Enum)]`, or `Annotated[Literal['eva'], enum_of(Datasource)]`
