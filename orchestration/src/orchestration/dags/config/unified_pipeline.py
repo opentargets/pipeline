@@ -51,7 +51,8 @@ class UnifiedPipelineConfig:
         self.pis.config['release_uri'] = self.release_uri
         self.pis.config['work_path'] = '/mnt/disks/work'
         self.pis.config['log_level'] = 'INFO'
-        self.pis.config['pool_size'] = 16
+        # ds/ppp-2612-2 only: openFDA rate-limits (HTTP 429) the 16-worker pis_openfda download.
+        self.pis.config['pool_size'] = 4
 
         if self.is_ppp:
             self.pis = self.pis.overwrite(config_path / 'ppp' / 'pis.override.yaml')
