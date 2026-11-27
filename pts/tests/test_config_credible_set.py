@@ -248,6 +248,7 @@ CONSUMER_TEST = {
     'variant': 'test_variant_rows.py',
     'credible_set.annotation': 'test_credible_set_stages.py',
     'coding_variant': 'test_coding_variant.py',
+    'drug_enrichment': 'test_drug_enrichment.py',
     'l2g_train': 'test_l2g_train.py',
     'l2g_predict': 'test_l2g_predict.py',
     'evidence.gwas_credible_sets': 'evidence/test_gwas_credible_sets.py',

@@ -1734,6 +1734,28 @@ steps:
             biosampleType: tissue_celltype
         pool_by_disease: true
 
+  #: DRUG_ENRICHMENT STEP :#########################################################################
+  # not in the unified pipeline; run on demand against a release
+  drug_enrichment:
+    - name: transform drug_enrichment
+      transformer: drug_enrichment
+      source:
+        disease: output/disease
+        drug_mechanism_of_action: output/drug_mechanism_of_action
+        clinical_precedence: output/evidence_clinical_precedence
+        credible_set: output/credible_set
+        # every other key is an evidence dataset to test
+        evidence_gwas_credible_sets: output/evidence_gwas_credible_sets
+      destination: etc/drug_enrichment
+      settings:
+        score_threshold: 0.5
+        # cancer or benign tumor
+        excluded_ancestors:
+          - MONDO_0045024
+        max_drug_targets: 5
+        credible_set_flags:
+          - QUALIFIED_DISEASE_SET
+
   #: VEP_VIEW STEP :################################################################################
   vep_view:
     - name: transform vep view
