@@ -299,6 +299,9 @@ with DAG(
             },
             'gentropy_l2g_effector_gene_list': {
                 'step.effector_gene_list_path': gsp('gentropy_l2g_effector_gene_list', 'step.effector_gene_list_path'),
+                'step.plausible_effector_gene_list_path': gsp(
+                    'gentropy_l2g_effector_gene_list', 'step.plausible_effector_gene_list_path'
+                ),
             },
             'gentropy_l2g_training_set': {
                 'step.training_set_path': gsp('gentropy_l2g_training_set', 'step.training_set_path'),
