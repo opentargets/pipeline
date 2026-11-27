@@ -131,6 +131,8 @@ steps:
           - NO_OT_CURATION
           - CASE_CASE_STUDY_DESIGN
           - DEPRECATED_PROJECT
+        unqualified_pubmed_ids:
+          - '40069456'
 
   #: GO STEP :######################################################################################
   go:

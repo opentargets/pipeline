@@ -3,10 +3,10 @@
 `annotation` reads the validated sets and variants, applies one rule module after another, and
 writes the published datasets:
 
-- on the sets: their confidence (`confidence`), and the TRANS_QTL (`trans_qtl`) and REPLICATED
-  (`replication`) flags;
 - on the variants: their effect allele frequency (`allele_frequency`), then their rescaled effect
-  size (`rescaling`), which needs it.
+  size (`rescaling`), which needs it;
+- on the sets: their confidence (`confidence`), the TRANS_QTL (`trans_qtl`) and REPLICATED
+  (`replication`) flags, and the QUALIFIED flags (`qualification`), which need the annotated lead.
 
 Each input dataset is read once and shared by every rule that uses it.
 """
@@ -27,6 +27,7 @@ from pts.task_outputs import writes
 from pts.transformers.credible_set.allele_frequency import effect_allele_frequency
 from pts.transformers.credible_set.confidence import assign_confidence
 from pts.transformers.credible_set.flags import CredibleSetFlag
+from pts.transformers.credible_set.qualification import flag_qualified_sets
 from pts.transformers.credible_set.replication import replicated_sets
 from pts.transformers.credible_set.rescaling import rescaled_effect_size
 from pts.transformers.credible_set.trans_qtl import trans_qtls
@@ -95,18 +96,22 @@ def annotation(
     validated_variant = scan_dataset(sources.credible_set_variant).cache()
     study = scan_dataset(sources.study).cache()
     target = scan_dataset(sources.target)
-    disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas')
+    disease = scan_dataset(sources.disease).select('id', 'therapeuticAreas').cache()
     trans_set = trans_qtls(validated_set, validated_variant, study, target, options.trans_qtl_threshold)
     replicated = replicated_sets(validated_set, study, disease)
+    credible_set_variant = (
+        validated_variant
+        .pipe(effect_allele_frequency, validated_set, study, scan_dataset(sources.variant))
+        .pipe(rescaled_effect_size, validated_set, study)
+        .cache()
+    )
     credible_set = (
         validated_set
         .pipe(assign_confidence)
         .pipe(flag_matching_ids, 'id', trans_set, CredibleSetFlag.TRANS_QTL)
         .pipe(flag_matching_ids, 'id', replicated, CredibleSetFlag.REPLICATED)
+        .pipe(flag_qualified_sets, credible_set_variant, study)
     )
-    credible_set_variant = validated_variant.pipe(
-        effect_allele_frequency, validated_set, study, scan_dataset(sources.variant)
-    ).pipe(rescaled_effect_size, validated_set, study)
     logger.info(
         'Writing credible sets to {} and variants to {}', destinations.credible_set, destinations.credible_set_variant
     )

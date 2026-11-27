@@ -43,6 +43,8 @@ class CredibleSetFlag(StrEnum):
     INVALID_STUDY_TYPE = 'Study type of the source is not a supported study type'
     STUDY_TYPE_MISMATCH = 'Study type of the credible set differs from the study index'
     LEAD_VARIANT_MISSING = 'Lead variant of the credible set has no row among its variants'
+    QUALIFIED_DISEASE_SET = 'Qualified credible set of a disease GWAS'
+    QUALIFIED_MEASUREMENT_SET = 'Qualified credible set of a measurement GWAS'
 
 
 class CredibleSetVariantFlag(StrEnum):
