@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Literal, get_args
 
 import polars as pl
@@ -368,8 +369,7 @@ def test_a_served_entry_is_derived_from_its_model():
         'model': 'disease_view',
         'tables': [{'name': 'disease_view', 'engine': 'rocksdb'}],
         'dictionaries': [
-            {'name': 'disease_names', 'source': 'disease_view', 'key': 'id', 'attributes': ['name'],
-             'source_columns': {}},
+            {'name': 'disease_names', 'key': 'id', 'attributes': ['name'], 'source_columns': {}},
         ],
     }  # fmt: skip
     assert entries['target_by_region_view'] == {
@@ -382,8 +382,15 @@ def test_a_served_entry_is_derived_from_its_model():
     }  # fmt: skip
 
 
+def test_an_output_declaring_clickhouse_fails_the_served_entries(monkeypatch):
+    served = SimpleNamespace(clickhouse=DiseaseView.clickhouse)
+    monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: {'disease': served, 'target': Target})
+    with pytest.raises(ValueError, match=r"output models \['disease'\] declare clickhouse"):
+        served_entries()
+
+
 def test_served_entries_follow_the_product():
-    assert set(served_entries()) - set(served_entries('platform')) == {'association_timeseries_view'}
+    assert set(served_entries()) - set(served_entries('platform')) == {'association_timeseries_view', 'otar_view'}
     assert set(served_entries('ppp')) == set(served_entries())
 
 
@@ -391,7 +398,8 @@ def test_clickhouse_entries_merge_the_yaml_and_the_served_views():
     entries = clickhouse_entries(DATASETS_YAML)
     assert set(entries) == set(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse']) | set(served_entries())
     assert entries['target_view']['table'] == 'target_view_log'
-    assert entries['biosample']['table'] == 'biosample_log'
+    assert entries['evidence']['table'] == 'evidence_log'
+    assert entries['biosample_view']['table'] == 'biosample_view_log'
 
 
 def test_a_yaml_entry_named_as_a_served_view_fails(tmp_path):
@@ -798,13 +806,12 @@ def test_no_columns_keeps_every_landing_column():
 def test_dictionary_sql_renames_through_expression():
     d = ClickHouseDictionary(
         'biosample_names',
-        source='biosample',
         key='id',
         attributes=('name',),
         source_columns={'id': 'biosampleId', 'name': 'biosampleName'},
     )
     cols = [('biosampleId', STR), ('biosampleName', STR), ('other', STR)]
-    assert dictionary_sql(d, cols) == (
+    assert dictionary_sql(d, 'biosample', cols) == (
         'CREATE OR REPLACE DICTIONARY `biosample_names` '
         '(`id` String EXPRESSION `biosampleId`, `name` String EXPRESSION `biosampleName`) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 'biosample')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
@@ -812,23 +819,23 @@ def test_dictionary_sql_renames_through_expression():
 
 
 def test_dictionary_sql_identity_columns_have_no_expression():
-    d = ClickHouseDictionary('d', source='t', key='id', attributes=('name',))
-    assert dictionary_sql(d, [('id', STR), ('name', STR)]) == (
+    d = ClickHouseDictionary('d', key='id', attributes=('name',))
+    assert dictionary_sql(d, 't', [('id', STR), ('name', STR)]) == (
         'CREATE OR REPLACE DICTIONARY `d` (`id` String, `name` String) PRIMARY KEY `id` '
         "SOURCE(CLICKHOUSE(TABLE 't')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
 
 
 def test_dictionary_sql_drops_low_cardinality():
-    d = ClickHouseDictionary('sequence_ontology', source='sequence_ontology_source', key='id', attributes=('label',))
+    d = ClickHouseDictionary('sequence_ontology', key='id', attributes=('label',))
     low = CHType('String', low_cardinality=True)
-    assert dictionary_sql(d, [('id', low), ('label', low)]).startswith(
+    assert dictionary_sql(d, 'sequence_ontology_source', [('id', low), ('label', low)]).startswith(
         'CREATE OR REPLACE DICTIONARY `sequence_ontology` (`id` String, `label` String) PRIMARY KEY `id` '
     )
 
 
 def test_drop_dictionary_sql():
-    d = ClickHouseDictionary('biosample_names', source='biosample', key='id', attributes=('name',))
+    d = ClickHouseDictionary('biosample_names', key='id', attributes=('name',))
     assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
 
 
@@ -883,7 +890,7 @@ KEYED = {
     'table': 'keyed_log',
     'model': 'keyed',
     'tables': [{'name': 'keyed', 'engine': 'rocksdb'}],
-    'dictionaries': [{'name': 'keyed_names', 'source': 'keyed', 'key': 'id', 'attributes': ['id']}],
+    'dictionaries': [{'name': 'keyed_names', 'key': 'id', 'attributes': ['id']}],
 }
 PPP_ONLY = {'table': 'ppp_only_log', 'model': 'keyed_ppp_only', 'tables': [{'name': 'ppp_only', 'engine': 'rocksdb'}]}
 
@@ -954,6 +961,11 @@ def test_yaml_declarations_are_valid(product):
     assert [p for e in declared for p in entry_problems(e, product)] == []
 
 
+def test_no_yaml_entry_is_optional():
+    entries = clickhouse_entries(DATASETS_YAML)
+    assert [name for name, e in entries.items() if 'optional' in e] == []
+
+
 def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
     client = clickhouse_database
     table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3')
@@ -975,9 +987,7 @@ def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
     client = clickhouse_database
     table = ClickHouseTable('ddl_dict_src', 'rocksdb')
     cols = [('k', STR), ('v', STR)]
-    d = ClickHouseDictionary(
-        'ddl_dict', source='ddl_dict_src', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'}
-    )
+    d = ClickHouseDictionary('ddl_dict', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'})
     client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
     client.command('CREATE TABLE ddl_dict_log (k String, v String) ENGINE = Log')
     client.command("INSERT INTO ddl_dict_log VALUES ('x', 'nx')")
@@ -986,7 +996,7 @@ def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
             client.command(drop_dictionary_sql(d))
             for statement in table_sql(table, cols, 'ddl_dict_log', key='k'):
                 client.command(statement)
-            client.command(dictionary_sql(d, cols))
+            client.command(dictionary_sql(d, 'ddl_dict_src', cols))
         assert client.command("SELECT dictGet('ddl_dict', 'name', tuple('x'))") == 'nx'
     finally:
         client.command('DROP DICTIONARY IF EXISTS ddl_dict')

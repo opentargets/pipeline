@@ -60,22 +60,25 @@ loads it, builds the served tables and dictionaries from it, then drops it.
 **Served views** are declared on their models. A view model with `clickhouse = Serving(...)`
 (`ot_datamodels.serving`) is one served table named after its `dataset_name`, built from the
 whole view: `Serving` holds only the engine (`rocksdb` or `mergetree`), a MergeTree's `order_by`
-and the dictionaries built from the table (`ClickHouseDictionary`, `source` unset: a view's
-dictionary reads the view's own table; only the `datasets.yaml` entries name another). Everything else is derived (`served_entries()`): the input folder
+and the dictionaries built from the table (`ClickHouseDictionary`, which reads the view's own table).
+Everything else is derived (`served_entries()`): the input folder
 `view/<dataset_name>`, the landing table `<dataset_name>_log`, the RocksDB key (the model's one
 `PrimaryKey`) and the products (the model's). Every view model has a `Serving`
-(datamodels `tests/test_serving.py`).
+(datamodels `tests/test_serving.py`); an output model with `clickhouse` set fails `served_entries()`.
 
-**The other entries** (the datasets still loaded from `output/`) are in `config/datasets.yaml`, with
+**The other entries** (`evidence`, `clinical_indication` and `clinical_target`, still loaded from
+`output/` and cut with `where:` or a union) are in `config/datasets.yaml`, with
 `model: <dataset_name>` and `engine:` (default `Log`) for the landing table, and `tables` and
 `dictionaries` for what the load builds from it (`ClickHouseTable`, `ClickHouseDictionary` in
 `pos.clickhouse_tables`). A table declares only its name, engine, `order_by`, `columns` and
-`where`; a dictionary its name, `source` table, `key`, `attributes` and `source_columns`.
+`where`; a dictionary its name, `key`, `attributes` and `source_columns`, and reads the entry's one
+table (an entry with dictionaries and no table or several fails `entry_problems`).
 `evidence` has `models: 'evidence_*'`: each member for the run's product loads into
 `evidence_<source>_log`, then all of them into `evidence_log` (the union of every member's
 columns), and the member tables are dropped. A member with no parquet fails the load unless it is
-in `optional_models`. Each entry has exactly one of `model`, `models`: an entry with neither, or
-both, fails the load at spec time and `entry_problems`
+in `optional_models`; there is no `optional` for a whole entry (`entry_problems` rejects it): a
+dataset with no parquet fails its load. Each entry has exactly one of `model`, `models`: an entry
+with neither, or both, fails the load at spec time and `entry_problems`
 (`test_clickhouse_entries_have_one_of_model_and_models`).
 
 `clickhouse_entries()` merges both, and is what `clickhouse_load`, `pos-ddl` and the tests read; a
@@ -94,10 +97,9 @@ pins both lists). Its `exclude` leaves out `colocalisation_by_credible_set_view`
 after both: its RocksDB bulk insert is the largest ClickHouse memory peak of the step. Every other
 load, top-level ones included, requires both, directly or through another task; a declared dataset
 outside them must be product-gated or wait for both too
-(`test_undeclared_loads_wait_for_the_declared_ones`). `otar_projects` is PPP-only, a top-level
-task with `products: [ppp]` (`test_a_declared_model_loads_only_for_its_products`).
-`interaction_evidence_log` is the only undeclared landing table: the API reads it
-(`test_declared_datasets_load_in_the_declared_explode`).
+(`test_undeclared_loads_wait_for_the_declared_ones`). Platform loads 37 served views and PPP 39
+(`otar_view` is PPP-only too; `test_every_clickhouse_load_builds_with_the_product`). Every landing
+table is dropped after its load (`test_serving_sql`).
 
 Print the generated DDL:
 

@@ -117,6 +117,8 @@ gcloud storage rm --recursive gs://open-targets-pipeline-runs/<run>/output/<data
 
 `pyspark` steps write with Spark's overwrite mode and need no delete.
 
+`copy_view` tasks replace their `view/<view>/` copy, so a rerun needs no delete there either.
+
 ### Re-runs duplicate per-uuid outputs
 
 otter has no resume: a cleared step redoes all its tasks. A destination containing

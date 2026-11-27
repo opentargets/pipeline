@@ -137,7 +137,7 @@ def test_serving_sql(product):
             'SELECT name FROM system.tables WHERE database = {d:String}', parameters={'d': client.database}
         )
         left = {name for (name,) in names.result_rows if name.endswith('_log')}
-        assert left == {'interaction_evidence_log'}, f'landing tables left after the load: {left}'
+        assert not left, f'landing tables left after the load: {left}'
 
 
 def _as_strings(dtype):
@@ -188,7 +188,7 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 #: of structs; disease_phenotype_by_disease_view: Nullable, in a list of structs in a list of structs), and the
 #: dataset each loads into.
 ENUM_MODELS = {
-    'clinical_report': 'clinical_report',
+    'clinical_report_view': 'clinical_report_view',
     'colocalisation_by_credible_set_view': 'colocalisation_by_credible_set_view',
     'variant_view': 'variant_view',
     'interaction_view': 'interaction_view',
@@ -228,19 +228,24 @@ def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
             assert list(_labels(got[name], dtype, name)) == list(_labels(want[name], dtype, name)), name
 
 
-#: The explode every declared datasets.yaml entry but the PPP-only `otar_projects` loads in.
+#: The explode every declared datasets.yaml entry loads in.
 DECLARED_LOADS = 'explode load declared datasets'
 #: The task that loads every served view but colocalisation.
 SERVED_LOADS = 'clickhouse_load_views load served views'
 COLOCALISATION = 'colocalisation_by_credible_set_view'
 #: Entries and tasks the declarations replaced.
-RETIRED = ('aotf', 'credible_set_variant', 'credible_sets_build_cleanup', 'protein_coding_coords')
+RETIRED = (
+    'aotf', 'credible_set_variant', 'credible_sets_build_cleanup', 'protein_coding_coords',
+    # served through their views
+    'baseline_expression', 'biosample', 'clinical_report', 'enhancer_to_gene', 'go', 'hpo', 'interaction_evidence',
+    'literature_entity_lut', 'otar_projects', 'pharmacogenomics', 'so', 'target_essentiality', 'w2v',
+)  # fmt: skip
 
 
 def test_declared_datasets_load_in_the_declared_explode():
     """The declared explode is the step's only one and the served views load in their own task; colocalisation
     loads alone after both, its RocksDB insert being the step's memory peak; every other load waits only on what
-    they wait on; `interaction_evidence` is an undeclared landing table, which the API reads."""
+    they wait on."""
     (explode,) = [t for t in STEP if t['name'] == DECLARED_LOADS]
     (served,) = [t for t in STEP if t['name'] == SERVED_LOADS]
     assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
@@ -254,8 +259,6 @@ def test_declared_datasets_load_in_the_declared_explode():
     (coloc,) = [t for t in STEP if t.get('dataset') == COLOCALISATION]
     assert coloc['requires'] == [explode['name'], served['name']]
     assert 'products' not in coloc
-    assert 'interaction_evidence' in loaded
-    assert not is_declared(DATASETS['interaction_evidence'])
     assert set(RETIRED).isdisjoint(DATASETS)
     assert set(RETIRED).isdisjoint(loaded)
     for name, entry in served_entries().items():
@@ -312,18 +315,17 @@ def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
     """A landing table with a repeated pharmacogenomicsId, or one loaded from a parquet without the column
     (ClickHouse fills 0), fails the load instead of collapsing the served table."""
     with _database() as repeated, _database() as missing:
-        _land(repeated, 'pharmacogenomics', 'platform')
-        repeated.command('INSERT INTO pharmacogenomics_log SELECT * FROM pharmacogenomics_log LIMIT 1')
-        _land(missing, 'pharmacogenomics', 'platform')
-        frame = pl.read_parquet(
-            BytesIO(missing.raw_query('SELECT * EXCEPT (pharmacogenomicsId) FROM pharmacogenomics_log FORMAT Parquet'))
-        )
+        _land(repeated, 'pharmacogenomics_view', 'platform')
+        repeated.command('INSERT INTO pharmacogenomics_view_log SELECT * FROM pharmacogenomics_view_log LIMIT 1')
+        _land(missing, 'pharmacogenomics_view', 'platform')
+        sql = 'SELECT * EXCEPT (pharmacogenomicsId) FROM pharmacogenomics_view_log FORMAT Parquet'
+        frame = pl.read_parquet(BytesIO(missing.raw_query(sql)))
         assert 'pharmacogenomicsId' not in frame.columns
-        missing.command('TRUNCATE TABLE pharmacogenomics_log')
+        missing.command('TRUNCATE TABLE pharmacogenomics_view_log')
         file = tmp_path / 'old.parquet'
         frame.write_parquet(file)
-        insert_file(missing, 'pharmacogenomics_log', str(file), fmt='Parquet', settings=INSERT_SETTINGS)
+        insert_file(missing, 'pharmacogenomics_view_log', str(file), fmt='Parquet', settings=INSERT_SETTINGS)
         for client in (repeated, missing):
-            with pytest.raises(ClickhouseLoadError, match='duplicate pharmacogenomicsId in pharmacogenomics'):
-                _build_declared(client, 'pharmacogenomics', 'platform')
-            assert not client.command('EXISTS TABLE pharmacogenomics')
+            with pytest.raises(ClickhouseLoadError, match='duplicate pharmacogenomicsId in pharmacogenomics_view'):
+                _build_declared(client, 'pharmacogenomics_view', 'platform')
+            assert not client.command('EXISTS TABLE pharmacogenomics_view')

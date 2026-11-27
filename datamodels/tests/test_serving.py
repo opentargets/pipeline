@@ -2,7 +2,7 @@
 
 import pytest
 
-from ot_datamodels import ClickHouseDictionary, Serving
+from ot_datamodels import Serving
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.spec import dataset_spec
 
@@ -14,7 +14,7 @@ def _columns(name: str) -> list[str]:
 
 
 def test_there_are_views():
-    assert len(VIEWS) == 26
+    assert len(VIEWS) == 39
 
 
 @pytest.mark.parametrize('name', sorted(VIEWS))
@@ -39,7 +39,6 @@ def test_dictionaries_name_existing_columns(name):
     serving = VIEWS[name].clickhouse
     assert serving is not None
     for d in serving.dictionaries:
-        assert d.source in (None, name), "a view's dictionary reads the view's own table"
         assert set(d.source_columns) <= {d.key, *d.attributes}
         assert {d.source_columns.get(c, c) for c in (d.key, *d.attributes)} <= set(_columns(name))
 
@@ -47,7 +46,9 @@ def test_dictionaries_name_existing_columns(name):
 def test_the_served_dictionaries():
     found = {name: [d.name for d in m.clickhouse.dictionaries] for name, m in VIEWS.items() if m.clickhouse}
     assert {name: d for name, d in found.items() if d} == {
+        'biosample_view': ['biosample_names'],
         'disease_view': ['disease_names'],
+        'so_view': ['sequence_ontology'],
         'target_view': ['target_symbols'],
     }
 
@@ -67,7 +68,3 @@ def test_no_output_is_served_from_its_model():
 def test_serving_refuses_a_wrong_key(fields, problem):
     with pytest.raises(ValueError, match=problem):
         Serving(**fields)
-
-
-def test_a_dictionary_reads_the_views_own_table_by_default():
-    assert ClickHouseDictionary('d', key='id', attributes=('name',)).source is None

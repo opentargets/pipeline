@@ -12,7 +12,7 @@ from typing import Any
 import polars as pl
 import yaml
 from ot_datamodels.base import DatasetModel
-from ot_datamodels.discovery import discover_models
+from ot_datamodels.discovery import discover_datasets, discover_models
 from ot_datamodels.spec import Node, dataset_spec
 
 from pos.clickhouse_tables import (
@@ -328,8 +328,8 @@ def table_sql(
     return statements
 
 
-def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) -> str:
-    """`CREATE DICTIONARY` over its source table; `cols` are the table's own. Renames go through EXPRESSION.
+def dictionary_sql(d: ClickHouseDictionary, table: str, cols: Sequence[tuple[str, CHType]]) -> str:
+    """`CREATE DICTIONARY` over the table `table`; `cols` are the table's own. Renames go through EXPRESSION.
 
     Columns take their source's type without LowCardinality, which dictionaries do not accept.
     """
@@ -341,7 +341,7 @@ def dictionary_sql(d: ClickHouseDictionary, cols: Sequence[tuple[str, CHType]]) 
         parts.append(f'{_name(name)} {render(replace(types[source], low_cardinality=False))}{expression}')
     return (
         f'CREATE OR REPLACE DICTIONARY {_name(d.name)} ({", ".join(parts)}) PRIMARY KEY {_name(d.key)} '
-        f"SOURCE(CLICKHOUSE(TABLE '{source_table(d)}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
+        f"SOURCE(CLICKHOUSE(TABLE '{table}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)"
     )
 
 
@@ -420,6 +420,8 @@ def entry_problems(entry: Mapping, product: str) -> list[str]:
     owner = entry['table']
     if (problem := source_problem(entry)) is not None:
         return [f'{owner}: {problem}']
+    if 'optional' in entry:
+        return [f'{owner}: optional is not supported, a dataset with no parquet fails its load']
     keys = _primary_keys(_entry_models(entry, product))
     shared = set(keys.values())
     keyed = any(t.engine == 'rocksdb' for t in tables)
@@ -457,11 +459,12 @@ def declared_sql(entry: Mapping, product: str) -> list[str]:
     cols = landing_columns(entry, product)
     landing = entry['table']
     key = entry_key(entry, product) if any(t.engine == 'rocksdb' for t in tables) else None
-    by_name = {t.name: t for t in tables}
     statements = [drop_dictionary_sql(d) for d in dictionaries]
     for table in tables:
         statements += table_sql(table, cols, landing, key)
-    statements += [dictionary_sql(d, table_columns(by_name[source_table(d)], cols)) for d in dictionaries]
+    for d in dictionaries:
+        source = source_table(d, tables)
+        statements.append(dictionary_sql(d, source.name, table_columns(source, cols)))
     return [*statements, f'DROP TABLE {_name(landing)} SYNC']
 
 
@@ -486,9 +489,14 @@ def served_entries(product: str | None = None) -> dict[str, dict]:
     """The entry of every served view model (`clickhouse` set), by `dataset_name`; for `product`, only its views.
 
     Each is shaped as a `datasets.yaml` entry: landing table `<name>_log` from `view/<name>`, one table named
-    `<name>` built from the whole view, and its dictionaries, reading that table unless they name another.
+    `<name>` built from the whole view, and its dictionaries, reading that table.
+
+    Raises:
+        ValueError: if an output model declares `clickhouse`.
     """
     entries = {}
+    if outputs := sorted(name for name, model in discover_datasets().items() if model.clickhouse is not None):
+        raise ValueError(f'output models {outputs} declare clickhouse: only a view is served')
     for name, model in sorted(discover_models().items()):
         serving = model.clickhouse
         if serving is None or (product is not None and product not in model.products):
@@ -501,7 +509,6 @@ def served_entries(product: str | None = None) -> dict[str, dict]:
             entry['dictionaries'] = [
                 {
                     'name': d.name,
-                    'source': d.source or name,
                     'key': d.key,
                     'attributes': list(d.attributes),
                     'source_columns': dict(d.source_columns),

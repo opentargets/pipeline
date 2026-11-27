@@ -34,20 +34,9 @@ steps:
         - sync_bucket etl view files
         - clickhouse_create_database release database
       foreach:
-        - baseline_expression
-        - biosample
         - clinical_indication
-        - clinical_report
         - clinical_target
-        - enhancer_to_gene
         - evidence
-        - go
-        - hpo
-        - literature_entity_lut
-        - pharmacogenomics
-        - so
-        - target_essentiality
-        - w2v
       do:
         - name: clickhouse_load clickhouse load ${each}
           dataset: ${each}
@@ -71,24 +60,6 @@ steps:
         - explode load declared datasets
         - clickhouse_load_views load served views
       dataset: colocalisation_by_credible_set_view
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load interaction_evidence
-      requires:
-        - explode load declared datasets
-        - clickhouse_load_views load served views
-      dataset: interaction_evidence
-      clickhouse_database: ${database_namespace}
-      data_dir_parent: ${local_data}
-      product: ${product}
-    - name: clickhouse_load clickhouse load otar_projects
-      products: [ppp]
-      requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      dataset: otar_projects
       clickhouse_database: ${database_namespace}
       data_dir_parent: ${local_data}
       product: ${product}

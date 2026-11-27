@@ -44,16 +44,14 @@ def test_clickhouse_load_fails_on_no_parquet(tmp_path, monkeypatch):
     client.command.assert_not_called()
 
 
-def test_clickhouse_load_optional_creates_an_empty_table_on_no_parquet(tmp_path, monkeypatch):
+def test_clickhouse_load_fails_on_no_parquet_even_if_optional(tmp_path, monkeypatch):
     client = MagicMock()
-    connected = {}
-    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: connected.update(kw) or client)
+    monkeypatch.setattr(clickhouse_load, 'connect', lambda **kw: client)
     spec = _toy_spec(tmp_path, monkeypatch, TOY + '    optional: true\n')
     task = ClickhouseLoad(spec, MagicMock(config=MagicMock(work_path=tmp_path)))
-    ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
-    assert connected['host'] == 'localhost'
-    assert connected['database'] == 'ot'
-    assert [c.args[0] for c in client.command.call_args_list] == [TOY_CREATE, 'SELECT count() FROM `t_log`']
+    with pytest.raises(ClickhouseLoadError, match=r'dataset t in .*release_data/output/t'):
+        ClickhouseLoad.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
+    client.command.assert_not_called()
 
 
 def _two_file_task(tmp_path, monkeypatch, failures):
@@ -430,8 +428,18 @@ clickhouse:
         order_by: [target, id]
         columns: [id, target]
         where: target IS NOT NULL
+"""
+# a dictionary reads its entry's one table
+NAMED = """\
+clickhouse:
+  declared:
+    table: declared_log
+    input_dir: output/declared
+    model: declared
+    tables:
+      - {name: declared_by_id, engine: rocksdb}
     dictionaries:
-      - {name: declared_names, source: declared_by_id, key: id, attributes: [name]}
+      - {name: declared_names, key: id, attributes: [name]}
 """
 ROWS = {'id': ['a', 'b', 'c'], 'name': ['na', 'nb', 'nc'], 'target': ['t1', None, 't2']}
 
@@ -443,9 +451,9 @@ def live(monkeypatch, clickhouse_database):
     return clickhouse_database
 
 
-def _declared_task(tmp_path, client, server: tuple[str, int], rows: dict) -> ClickhouseLoad:
+def _declared_task(tmp_path, client, server: tuple[str, int], rows: dict, yaml: str = DECLARED) -> ClickhouseLoad:
     config = tmp_path / 'datasets.yaml'
-    config.write_text(DECLARED)
+    config.write_text(yaml)
     data = tmp_path / 'release_data' / 'output' / 'declared'
     data.mkdir(parents=True, exist_ok=True)
     schema = {'id': pl.String, 'name': pl.String, 'target': pl.String}
@@ -471,13 +479,13 @@ def test_declared_tables_are_built_and_the_landing_dropped(tmp_path, live, click
     assert live.query('SELECT id, target FROM declared_by_target ORDER BY id').result_rows == [
         ('a', 't1'), ('c', 't2'),
     ]  # fmt: skip
-    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb'
     assert 'declared_log' not in _tables(live)
 
 
 def test_declared_load_reruns_over_its_dictionary(tmp_path, live, clickhouse_server):
-    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS))
-    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS | {'name': ['na', 'nb2', 'nc']}))
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS, NAMED))
+    assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb'
+    _run(_declared_task(tmp_path, live, clickhouse_server, ROWS | {'name': ['na', 'nb2', 'nc']}, NAMED))
     assert live.command('SELECT count() FROM declared_by_id') == 3
     assert live.command("SELECT dictGet('declared_names', 'name', tuple('b'))") == 'nb2'
 

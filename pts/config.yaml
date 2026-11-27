@@ -80,6 +80,13 @@ steps:
       destination: output/disease_hpo
       transformer: disease_hpo
 
+    - name: transform disease_hpo_view
+      transformer: copy_view
+      source: output/disease_hpo
+      destination: view/disease_hpo_view
+      requires:
+        - transform disease_hpo
+
     - name: transform disease_phenotype
       requires:
         - transform disease_efo
@@ -131,6 +138,13 @@ steps:
       transformer: go
       source: input/go/go.obo
       destination: output/go
+
+    - name: transform go_view
+      transformer: copy_view
+      source: output/go
+      destination: view/go_view
+      requires:
+        - transform go
   ##################################################################################################
 
   #: CREDIBLE_SET STEP :###########################################################################
@@ -278,6 +292,13 @@ steps:
         otar_meta: input/otar/otar_meta.csv
         otar_project_to_efo: input/otar/otar_project_to_efo.csv
       destination: output/otar
+
+    - name: transform otar_view
+      transformer: copy_view
+      source: output/otar
+      destination: view/otar_view
+      requires:
+        - transform otar
   ##################################################################################################
 
   #: REACTOME STEP :################################################################################
@@ -299,6 +320,13 @@ steps:
         uberon: input/biosample/uberon.json
         efo: input/biosample/efo.json
       destination: output/biosample
+
+    - name: transform biosample_view
+      transformer: copy_view
+      source: output/biosample
+      destination: view/biosample_view
+      requires:
+        - transform biosample
   ##################################################################################################
 
   #: EXPRESSION STEP :##############################################################################
@@ -487,6 +515,13 @@ steps:
           - tabula_sapiens/tissue
           - tabula_sapiens/tissue_celltype
           - DICE/celltype
+
+    - name: transform baseline_expression_view
+      transformer: copy_view
+      source: output/baseline_expression
+      destination: view/baseline_expression_view
+      requires:
+        - transform baseline_expression
   ##################################################################################################
 
   #: MOUSE_PHENOTYPES STEP :########################################################################
@@ -562,6 +597,13 @@ steps:
       source: input/so/so.json
       destination: output/so
       transformer: so
+
+    - name: transform so_view
+      transformer: copy_view
+      source: output/so
+      destination: view/so_view
+      requires:
+        - transform so
   ##################################################################################################
 
   #: TARGET STEP :##################################################################################
@@ -686,6 +728,13 @@ steps:
       destination: output/target_essentiality
       settings:
         keep_only_essentials: false
+
+    - name: transform target_essentiality_view
+      transformer: copy_view
+      source: output/target_essentiality
+      destination: view/target_essentiality_view
+      requires:
+        - transform gene_essentiality
   ##################################################################################################
 
   #: PHARMACOGENETICS STEP :########################################################################
@@ -701,6 +750,13 @@ steps:
       destination:
         associations: output/pharmacogenomics
         unparsed_texts: intermediate/pharmacogenetics/unparsed_texts.json
+
+    - name: transform pharmacogenomics_view
+      transformer: copy_view
+      source: output/pharmacogenomics
+      destination: view/pharmacogenomics_view
+      requires:
+        - transform pharmacogenetics
   ##################################################################################################
 
   #: EVIDENCE_PROJECT_SCORE STEP :##################################################################
@@ -959,6 +1015,13 @@ steps:
           - AMBIGUOUS_INTERVAL_TYPE
           - TRANS_CHROMOSOMAL_EFFECT
 
+    - name: transform enhancer_to_gene_view
+      transformer: copy_view
+      source: output/enhancer_to_gene
+      destination: view/enhancer_to_gene_view
+      requires:
+        - transform enhancer to gene
+
   #: ONTOMA STEPS :##################################################################################
   ontoma:
     - name: transform disease lookup tables for ontoma
@@ -1216,6 +1279,13 @@ steps:
         output: output/clinical_report
       settings:
         min_link_confidence: 0.8
+
+    - name: transform clinical_report_view
+      transformer: copy_view
+      source: output/clinical_report
+      destination: view/clinical_report_view
+      requires:
+        - transform clinical_report
   ##################################################################################################
 
   #: CLINICAL_INDICATION STEP :####################################################################
@@ -1738,6 +1808,13 @@ steps:
       settings:
         scorethreshold: 0
         string_version: ${string_version}
+
+    - name: transform interaction_evidence_view
+      transformer: copy_view
+      source: output/interaction_evidence
+      destination: view/interaction_evidence_view
+      requires:
+        - transform interaction
   ##################################################################################################
 
   #: INTERACTION_VIEW STEP :#######################################################################
@@ -1954,6 +2031,13 @@ steps:
       properties:
         'spark.sql.shuffle.partitions': '10000'
 
+    - name: transform literature_entity_lut_view
+      transformer: copy_view
+      source: output/literature_entity_lut
+      destination: view/literature_entity_lut_view
+      requires:
+        - pyspark literature entity lut
+
   literature_embedding:
     - name: pyspark literature embedding
       pyspark: literature_embedding
@@ -1971,6 +2055,13 @@ steps:
         model: etc/model/w2v_model
       destination:
         vectors: output/literature_vector
+
+    - name: transform literature_vector_view
+      transformer: copy_view
+      source: output/literature_vector
+      destination: view/literature_vector_view
+      requires:
+        - pyspark literature vector
 
   literature_cooccurrence:
     - name: pyspark literature cooccurrence

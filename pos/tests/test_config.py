@@ -254,7 +254,8 @@ def test_every_clickhouse_load_builds_with_the_product(load):
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         loads = _built_loads(runner)
-        assert len(loads) > 30
+        # the served views (Platform 37, PPP 39, colocalisation included) and the three datasets.yaml entries
+        assert len(loads) == {'platform': 37, 'ppp': 39}[product] + 3
         assert {s.product for s in loads} == {product}
 
 
@@ -327,24 +328,28 @@ def test_undeclared_loads_wait_for_the_declared_ones():
 
 #: The served views each product loads in the served views' task: every view of the product but colocalisation.
 VIEW_LOADS = [
-    'association_otf_disease_view', 'association_otf_target_view', 'coding_variant_by_target_view',
-    'coding_variant_by_variant_view', 'credible_set_locus_view', 'credible_set_view',
-    'disease_phenotype_by_disease_view', 'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view',
-    'drug_warning_by_drug_view', 'interaction_view', 'l2g_prediction_by_credible_set_view',
-    'mouse_phenotype_by_target_view', 'pharmacovigilance_by_drug_view', 'study_credible_set_view', 'study_view',
-    'target_by_region_view', 'target_credible_set_view', 'target_prioritisation_view', 'target_view',
-    'transcript_view', 'variant_credible_set_view', 'variant_view',
+    'association_otf_disease_view', 'association_otf_target_view', 'baseline_expression_view',
+    'biosample_view', 'clinical_report_view', 'coding_variant_by_target_view', 'coding_variant_by_variant_view',
+    'credible_set_locus_view', 'credible_set_view', 'disease_hpo_view', 'disease_phenotype_by_disease_view',
+    'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view', 'drug_warning_by_drug_view',
+    'enhancer_to_gene_view', 'go_view', 'interaction_evidence_view', 'interaction_view',
+    'l2g_prediction_by_credible_set_view', 'literature_entity_lut_view', 'literature_vector_view',
+    'mouse_phenotype_by_target_view', 'pharmacogenomics_view', 'pharmacovigilance_by_drug_view', 'so_view',
+    'study_credible_set_view', 'study_view', 'target_by_region_view', 'target_credible_set_view',
+    'target_essentiality_view', 'target_prioritisation_view', 'target_view', 'transcript_view',
+    'variant_credible_set_view', 'variant_view',
 ]  # fmt: skip
 
 
 def test_the_served_views_each_product_loads(load):
     _load, _ = load
-    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view'])}
+    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view', 'otar_view'])}
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         (top,) = [s for s in (runner.task_registry.build(s).spec for s in runner.specs) if s.name == SERVED_LOADS]
         assert isinstance(top, ClickhouseLoadViewsSpec)
         assert view_loads(top.product, top.exclude) == expected[product]
+        assert len(served_entries(product)) == {'platform': 37, 'ppp': 39}[product]
         loaded = {s.dataset for s in _built_loads(runner)}
         assert set(served_entries(product)) <= loaded
         assert not set(served_entries()) - set(served_entries(product)) & loaded
@@ -365,7 +370,7 @@ def test_a_declared_model_loads_only_for_its_products(load):
             model = entry_model(entry)
             if model is not None and is_declared(entry):
                 assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
-        assert ('otar_projects' in loaded) == (product == 'ppp')
+        assert ('otar_view' in loaded) == (product == 'ppp')
         assert ('association_timeseries_view' in loaded) == (product == 'ppp')
 
 
