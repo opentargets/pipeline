@@ -765,7 +765,7 @@ wheels = [
 
 [[package]]
 name = "opentargets-otter"
-version = "26.9.1"
+version = "26.9.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -779,9 +779,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/e8/6176c92420f3bf62b431590452b7916d03a3c61c369a3a9e243193a6c1bf/opentargets_otter-26.9.1.tar.gz", hash = "sha256:b4cb005c6a88a4c00d51b174dfdfc77228162b2693e185a542707da753faecf5", size = 233111, upload-time = "2026-08-26T13:05:57.77Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/8a/5983665d44dcba36a2815b32cb6b4a53ffe192bc9c43cc1a512603eedc8a/opentargets_otter-26.9.2.tar.gz", hash = "sha256:7519481f7b2ed5951e10563fc9691d06be038f2459d28a47b2dc01498188cda3", size = 235540, upload-time = "2026-11-27T16:20:28.993Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/21/acbfdbc95a11d7a31ad045c21e59b39c118fda403bfb06a2a97d933d1ef2/opentargets_otter-26.9.1-py3-none-any.whl", hash = "sha256:54af2d7eb569abfdfa21fece69d01e6fe547f674a5954dd1d15d76a8c3d3d768", size = 72495, upload-time = "2026-08-26T13:05:56.268Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/40/0b3ed65d1f77a7ce379b967ca3f358a50d1357b0ac59192d9ff44951600f/opentargets_otter-26.9.2-py3-none-any.whl", hash = "sha256:cab2dc95a178a0c63112a4de4d6783b95f57b76440a005ee5d9cb5ce56dce400", size = 72866, upload-time = "2026-11-27T16:20:27.834Z" },
 ]
 
 [[package]]
@@ -807,7 +807,7 @@ wheels = [
 
 [[package]]
 name = "pis"
-version = "26.12.0rc44"
+version = "26.12.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "jq" },
@@ -830,7 +830,7 @@ test = [
 requires-dist = [
     { name = "jq", specifier = ">=1.11.0" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "opentargets-otter", specifier = ">=26.9.1" },
+    { name = "opentargets-otter", specifier = ">=26.9.2" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "urllib3", specifier = ">=2.7.0" },
 ]
