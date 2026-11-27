@@ -19,6 +19,7 @@ from pts.transformers.biosample_enrichment import (
     gwas_studies,
     specificity_matrix,
 )
+from pts.transformers.enrichment.load_cellect_ldsc import load_cellect_ldsc
 from tests.credible_set_fixtures import published_credible_set
 
 N_GENES = 400
@@ -403,3 +404,79 @@ def test_gwas_studies_pool_only_single_disease_studies() -> None:
         s: (None, s) for s in ['s1', 's2', 's3', 's4', 's5']
     }
     assert unpooled['unitId'].is_unique().all()
+
+
+def _cellect_results(directory: Path, rows: dict[str, list[tuple[str, float]]]) -> str:
+    """One CELLECT-LDSC result file per `<panel>__<studyId>`, with annotations and their p-values."""
+    directory.mkdir()
+    for name, annotations in rows.items():
+        panel = name.split('__')[0]
+        lines = [f'{panel}__{annotation}\t0.5\t0.25\t{p}' for annotation, p in annotations]
+        (directory / f'{name}.cell_type_results.txt').write_text(
+            'Name\tCoefficient\tCoefficient_std_error\tCoefficient_P_value\n' + '\n'.join(lines) + '\n'
+        )
+    # CELLECT's partial results and logs, never read
+    (directory / 'gtex-tissue__GCST_HOT.cell_type_results.tmp.txt').write_text('not a result\n')
+    (directory / 'gtex-tissue__GCST_HOT.log').write_text('not a result\n')
+    return str(directory)
+
+
+@pytest.fixture
+def cellect(workspace, tmp_path: Path) -> dict[str, str]:
+    """CELLECT-LDSC results for GCST_HOT and for GCST_GONE, a study missing from the study index."""
+    results = _cellect_results(
+        tmp_path / 'cellect',
+        {
+            'gtex-tissue__GCST_HOT': [('UBERON_A', 0.01), ('UBERON_MISSING', float('nan'))],
+            'tabula_sapiens-tissue_celltype__GCST_HOT': [('CL_1__UBERON_HOT', 0.2)],
+            'gtex-tissue__GCST_GONE': [('UBERON_B', 0.3)],
+        },
+    )
+    destination = str(tmp_path / 'cellect_out')
+    load_cellect_ldsc(
+        {'cellect_ldsc': results, 'baseline_expression': workspace['baseline_expression']}, destination, {}, None
+    )
+    return {**workspace, 'cellect_ldsc': destination}
+
+
+def test_cellect_ldsc_results_are_labelled_from_baseline_expression(cellect) -> None:
+    out = pl.read_parquet(f'{cellect["cellect_ldsc"]}/*.parquet')
+    assert out.schema == conformed_schema(biosample_enrichment_schema, BiosampleEnrichment)
+    assert out.select(
+        'studyId', 'biosampleDataset', 'biosampleId', 'tissueBiosampleId', 'biosampleFromSource', 'pValue'
+    ).rows() == [
+        ('GCST_GONE', 'gtex', 'UBERON_B', None, 'UBERON_B source', 0.3),
+        ('GCST_HOT', 'gtex', 'UBERON_A', None, 'UBERON_A source', 0.01),
+        # not in baseline expression: kept under CELLECT's id, unlabelled, its NaN p-value null
+        ('GCST_HOT', 'gtex', 'UBERON_MISSING', None, None, None),
+        ('GCST_HOT', 'tabula_sapiens', 'CL_1', 'UBERON_HOT', 'UBERON_HOT organ | CL_1 cell', 0.2),
+    ]
+    assert out['enrichmentApproach'].unique().to_list() == ['cellect_ldsc']
+    assert out['diseaseId'].null_count() == out.height
+    report = validation_report(cellect['cellect_ldsc'], BiosampleEnrichment)
+    assert report.is_empty(), format_report(report)
+
+
+def test_cellect_ldsc_rejects_an_annotation_of_another_panel(workspace, tmp_path: Path) -> None:
+    results = _cellect_results(tmp_path / 'cellect', {'gtex-tissue__GCST_HOT': [('UBERON_A', 0.1)]})
+    (tmp_path / 'cellect' / 'gtex-tissue__GCST_TWIN.cell_type_results.txt').write_text(
+        'Name\tCoefficient\tCoefficient_std_error\tCoefficient_P_value\ntabula_sapiens-tissue__UBERON_A\t1\t1\t0.5\n'
+    )
+    with pytest.raises(ValueError, match='unexpected CELLECT-LDSC result names'):
+        load_cellect_ldsc(
+            {'cellect_ldsc': results, 'baseline_expression': workspace['baseline_expression']},
+            str(tmp_path / 'out'),
+            {},
+            None,
+        )
+
+
+def test_cellect_ldsc_results_join_the_regression_for_released_studies(cellect) -> None:
+    out = _run(cellect)
+    regression = out.filter(pl.col('enrichmentApproach') == 'l2g_regression')
+    loaded = out.filter(pl.col('enrichmentApproach') == 'cellect_ldsc')
+    assert sorted(regression['studyId'].unique()) == ['GCST_HOT', 'GCST_TWIN']
+    assert loaded['studyId'].unique().to_list() == ['GCST_HOT']
+    assert loaded.height == 3
+    report = validation_report(cellect['out'], BiosampleEnrichment)
+    assert report.is_empty(), format_report(report)

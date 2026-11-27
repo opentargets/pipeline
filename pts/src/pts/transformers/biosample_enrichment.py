@@ -2,7 +2,8 @@
 
 For each GWAS study and each tissue or cell type in a specificity panel, tests whether the genes
 L2G prioritises are more specific to that biosample than gene length and gene density explain.
-The regression itself is in `pts.transformers.enrichment.regression`.
+The regression itself is in `pts.transformers.enrichment.regression`. Precomputed results of
+other approaches (`pts.transformers.enrichment.load_cellect_ldsc`) are added to the same dataset.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from ot_datamodels.outputs.biosample_enrichment import BiosampleEnrichment
 from otter.config.model import Config
 
 from pts.schemas.biosample_enrichment import biosample_enrichment_schema, biosample_enrichment_statistics_schema
-from pts.schemas.dataset.conform import conform
+from pts.schemas.dataset.conform import conform, without_enums
 from pts.task_outputs import writes
 from pts.transformers.enrichment import regression
 from pts.transformers.enrichment.regression import StandardErrors
@@ -28,7 +29,7 @@ BiosampleType = Literal['tissue', 'celltype', 'tissue_celltype']
 
 _BIOSAMPLE_TYPES: tuple[BiosampleType, ...] = ('tissue', 'celltype', 'tissue_celltype')
 
-_PAIR_SEPARATOR = '|'
+PAIR_SEPARATOR = '|'
 """Joins a pair's tissue and cell type ids into one column name of the specificity matrix."""
 
 
@@ -65,7 +66,7 @@ def _panel_columns(biosample_type: BiosampleType) -> _PanelColumns:
     # a cell type profiled in one tissue: reported as the cell type, with the tissue alongside
     return _PanelColumns(
         tissue.is_not_null() & celltype.is_not_null(),
-        pl.concat_str(tissue, celltype, separator=_PAIR_SEPARATOR),
+        pl.concat_str(tissue, celltype, separator=PAIR_SEPARATOR),
         celltype,
         tissue,
         pl.concat_str(pl.col('tissueBiosampleFromSource'), pl.col('celltypeBiosampleFromSource'), separator=' | '),
@@ -410,7 +411,8 @@ def biosample_enrichment(
     """Generate the biosample enrichment dataset.
 
     Args:
-        source: paths keyed by l2g_prediction, credible_set, study, target and baseline_expression.
+        source: paths keyed by l2g_prediction, credible_set, study, target and baseline_expression,
+            and optionally cellect_ldsc, precomputed results in the biosample enrichment schema.
         destination: path of the biosample enrichment dataset.
         settings: as `Settings.from_settings` reads them.
         config: unused.
@@ -447,11 +449,28 @@ def biosample_enrichment(
                 pl.lit(ENRICHMENT_APPROACH).alias('enrichmentApproach'),
             )
         )
+    if 'cellect_ldsc' in source:
+        precomputed = without_enums(scan_dataset(source['cellect_ldsc'])).collect()
+        # a study no longer in this release's study index would be a dangling reference
+        released = precomputed.filter(pl.col('studyId').is_in(units['studyId'].implode()))
+        logger.info(
+            f'{released.height} precomputed CELLECT-LDSC rows; {precomputed.height - released.height} dropped '
+            f'for {precomputed["studyId"].n_unique() - released["studyId"].n_unique()} studies not in the study index'
+        )
+        results.append(released)
     output = (
         pl
         .concat(results, how='diagonal_relaxed')
         .select([pl.col(name).cast(dtype) for name, dtype in biosample_enrichment_schema.items()])
-        .sort('diseaseId', 'studyId', 'biosampleDataset', 'biosampleId', 'tissueBiosampleId', nulls_last=True)
+        .sort(
+            'enrichmentApproach',
+            'diseaseId',
+            'studyId',
+            'biosampleDataset',
+            'biosampleId',
+            'tissueBiosampleId',
+            nulls_last=True,
+        )
     )
     write_dataset(conform(output, BiosampleEnrichment), destination)
     logger.info(f'wrote {output.height} rows')

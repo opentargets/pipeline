@@ -185,6 +185,14 @@ steps:
           destination: input/baseline_expression/${each}-parent_mapping.tsv
   ##################################################################################################
 
+  #: BIOSAMPLE_ENRICHMENT_CELLECT STEP :############################################################
+  biosample_enrichment_cellect:
+    # precomputed CELLECT-LDSC results, one file per representative GWAS study and specificity panel
+    - name: copy_many cellect_ldsc results
+      sources: gs://biosample_enrichment/CELLECT-LDSC/out/prioritization/*.cell_type_results.txt
+      destination: input/biosample_enrichment/cellect_ldsc
+  ##################################################################################################
+
   #: BIOSAMPLE STEP :###############################################################################
   biosample:
     - name: copy cell ontology

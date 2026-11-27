@@ -1,4 +1,4 @@
-"""Biosample enrichment of L2G-prioritised genes: the `biosample_enrichment` output.
+"""Biosample enrichment of GWAS signal: the `biosample_enrichment` output.
 
 Written by hand, as no release with this output was available to generate it from: dtypes and column order
 from pts's `biosample_enrichment` schema, descriptions and references from croissant's
@@ -7,7 +7,8 @@ from pts's `biosample_enrichment` schema, descriptions and references from crois
 * each row is one study on its own (`studyId`) or one disease's studies pooled (`diseaseId`), never both
   nor neither -- a row check, as it spans two columns;
 * `tissueBiosampleId` is set only for a tissue x cell type panel;
-* `enrichmentApproach` is the transformer's constant; `biosampleDataset` comes from the step's settings, so
+* `enrichmentApproach` is a constant of the transformer that computes or loads the rows (L2G regression,
+  or precomputed CELLECT-LDSC); `biosampleDataset` comes from the step's settings, so
   it is not a closed vocabulary;
 * undefined statistics are written as null, never NaN; a p-value lies in [0, 1] and a standard error is
   not negative.
@@ -27,13 +28,14 @@ from ot_datamodels.vocabularies import EnrichmentApproach
 
 
 class BiosampleEnrichment(DatasetModel):
-    """Biosample enrichment of L2G-prioritised genes."""
+    """Biosample enrichment of GWAS signal."""
 
     dataset_name: ClassVar[str] = 'biosample_enrichment'
     dataset_title: ClassVar[str] = 'Biosample enrichment'
     dataset_description: ClassVar[str] = (
         'Enrichment of biosample-specific expression among the genes prioritised by locus-to-gene for a GWAS study, '
-        'or for the studies of one disease pooled together'
+        'or for the studies of one disease pooled together, and of GWAS heritability near biosample-specific genes '
+        '(CELLECT-LDSC) for a GWAS study'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics', 'Disease')
     example: ClassVar[dict] = {

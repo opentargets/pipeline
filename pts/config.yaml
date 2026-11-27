@@ -1640,6 +1640,13 @@ steps:
 
   #: BIOSAMPLE_ENRICHMENT STEP :####################################################################
   biosample_enrichment:
+    - name: transform biosample_enrichment cellect_ldsc
+      transformer: enrichment.load_cellect_ldsc
+      source:
+        cellect_ldsc: input/biosample_enrichment/cellect_ldsc
+        baseline_expression: output/baseline_expression
+      destination: intermediate/biosample_enrichment/cellect_ldsc
+
     - name: transform biosample_enrichment
       transformer: biosample_enrichment
       source:
@@ -1648,7 +1655,10 @@ steps:
         study: output/study
         target: output/target
         baseline_expression: output/baseline_expression
+        cellect_ldsc: intermediate/biosample_enrichment/cellect_ldsc
       destination: output/biosample_enrichment
+      requires:
+        - transform biosample_enrichment cellect_ldsc
       settings:
         # the CELLEX specificity panels of the LDSC cell type analysis
         panels:
