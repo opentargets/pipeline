@@ -1,4 +1,4 @@
-"""Literature vector view: the `literature_vector_view` view (pts `literature_vector_view`).
+"""Literature vector view: the `literature_vector_view` view (pts `copy_view`).
 
 A copy of `literature_vector`, served from ClickHouse.
 """

@@ -1,4 +1,4 @@
-"""Target - gene ontology view: the `go_view` view (pts `go_view`).
+"""Target - gene ontology view: the `go_view` view (pts `copy_view`).
 
 A copy of `go`, served from ClickHouse.
 """

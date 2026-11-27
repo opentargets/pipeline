@@ -1,4 +1,4 @@
-"""Baseline expression view: the `baseline_expression_view` view (pts `baseline_expression_view`).
+"""Baseline expression view: the `baseline_expression_view` view (pts `copy_view`).
 
 A copy of `baseline_expression`, served from ClickHouse.
 """

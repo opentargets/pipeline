@@ -1,4 +1,4 @@
-"""Enhancer to gene view: the `enhancer_to_gene_view` view (pts `enhancer_to_gene_view`).
+"""Enhancer to gene view: the `enhancer_to_gene_view` view (pts `copy_view`).
 
 A copy of `enhancer_to_gene`, served from ClickHouse.
 """

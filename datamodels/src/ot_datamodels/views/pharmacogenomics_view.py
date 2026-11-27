@@ -1,4 +1,4 @@
-"""Drug/Target - pharmacogenetics view: the `pharmacogenomics_view` view (pts `pharmacogenomics_view`).
+"""Drug/Target - pharmacogenetics view: the `pharmacogenomics_view` view (pts `copy_view`).
 
 A copy of `pharmacogenomics`, served from ClickHouse.
 """

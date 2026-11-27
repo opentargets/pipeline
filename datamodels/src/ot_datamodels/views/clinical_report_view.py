@@ -1,4 +1,4 @@
-"""Clinical report view: the `clinical_report_view` view (pts `clinical_report_view`).
+"""Clinical report view: the `clinical_report_view` view (pts `copy_view`).
 
 A copy of `clinical_report`, served from ClickHouse.
 """

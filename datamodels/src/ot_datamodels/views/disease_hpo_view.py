@@ -1,4 +1,4 @@
-"""Human Phenotype Ontology view: the `disease_hpo_view` view (pts `disease_hpo_view`).
+"""Human Phenotype Ontology view: the `disease_hpo_view` view (pts `copy_view`).
 
 A copy of `disease_hpo`, served from ClickHouse.
 """

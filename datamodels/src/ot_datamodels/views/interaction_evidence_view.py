@@ -1,4 +1,4 @@
-"""Molecular interactions evidence view: the `interaction_evidence_view` view (pts `interaction_evidence_view`).
+"""Molecular interactions evidence view: the `interaction_evidence_view` view (pts `copy_view`).
 
 A copy of `interaction_evidence`, served from ClickHouse.
 """

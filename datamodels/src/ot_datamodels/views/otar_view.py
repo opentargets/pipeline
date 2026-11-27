@@ -1,4 +1,4 @@
-"""Open Targets Projects view: the `otar_view` view (pts `otar_view`).
+"""Open Targets Projects view: the `otar_view` view (pts `copy_view`).
 
 A copy of `otar`, served from ClickHouse.
 """

@@ -117,3 +117,13 @@ def test_every_copy_task_requires_its_producer() -> None:
         ]
         assert [p['name'] for p in producers] == copy['requires'], copy['name']
         assert Transform.load_output_validation('copy_view').hook is validate
+
+
+def test_a_rerun_replaces_the_copy(tmp_path: Path) -> None:
+    source = _output(tmp_path, Go, 'go')
+    destination = str(tmp_path / 'go_view')
+
+    copy_view(source, destination, None, None)
+    copy_view(source, destination, None, None)
+
+    assert scan_dataset(destination).collect().equals(scan_dataset(source).collect())

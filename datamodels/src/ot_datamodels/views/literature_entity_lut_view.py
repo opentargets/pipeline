@@ -1,4 +1,4 @@
-"""Literature entity lookup view: the `literature_entity_lut_view` view (pts `literature_entity_lut_view`).
+"""Literature entity lookup view: the `literature_entity_lut_view` view (pts `copy_view`).
 
 The columns of `literature_entity_lut` the API reads (all but `day` and `keywordType`), in the order they are served.
 """

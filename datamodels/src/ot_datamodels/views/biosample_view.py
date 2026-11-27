@@ -1,4 +1,4 @@
-"""Biosample core annotation view: the `biosample_view` view (pts `biosample_view`).
+"""Biosample core annotation view: the `biosample_view` view (pts `copy_view`).
 
 A copy of `biosample`, served from ClickHouse.
 """

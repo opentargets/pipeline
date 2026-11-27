@@ -1,4 +1,4 @@
-"""Sequence Ontology view: the `so_view` view (pts `so_view`).
+"""Sequence Ontology view: the `so_view` view (pts `copy_view`).
 
 A copy of `so`, served from ClickHouse.
 """

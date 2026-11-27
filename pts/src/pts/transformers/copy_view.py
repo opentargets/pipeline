@@ -5,9 +5,11 @@ The view is the model whose `dataset_name` is the destination's basename, as pos
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
+from google.cloud import storage
 from loguru import logger
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_models
@@ -30,13 +32,26 @@ def view_model(destination: str) -> type[DatasetModel]:
     return models[name]
 
 
+def clear_destination(destination: str) -> None:
+    """Delete the directory at `destination`, local or `gs://`; a missing one is fine.
+
+    otter's `check_destination` clears only a local file and `StorageHandle` has no delete.
+    """
+    if destination.startswith('gs://'):
+        bucket, _, prefix = destination.removeprefix('gs://').partition('/')
+        for blob in storage.Client().bucket(bucket).list_blobs(prefix=prefix.rstrip('/') + '/'):
+            blob.delete()
+    else:
+        shutil.rmtree(destination, ignore_errors=True)
+
+
 def copy_view(
     source: str,
     destination: str,
     settings: dict[str, Any] | None,
     config: Config | None,
 ) -> None:
-    """Write the view's columns of the source, in model order, streaming.
+    """Write the view's columns of the source, in model order, streaming, replacing any earlier copy.
 
     Args:
         source: the output dataset the view copies.
@@ -50,10 +65,12 @@ def copy_view(
     model = view_model(destination)
     columns = list(model.model_fields)
     frame = scan_dataset(str(source))
-    missing = [column for column in columns if column not in frame.collect_schema().names()]
+    names = set(frame.collect_schema().names())
+    missing = [column for column in columns if column not in names]
     if missing:
         raise ValueError(f'{source} lacks the columns {missing} of {model.__name__}')
     logger.info(f'copying {source} into {destination} as {model.__name__}')
+    clear_destination(str(destination))
     write_dataset(frame.select(columns), str(destination))
 
 

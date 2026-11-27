@@ -1,4 +1,4 @@
-"""Target - DepMap essentiality view: the `target_essentiality_view` view (pts `target_essentiality_view`).
+"""Target - DepMap essentiality view: the `target_essentiality_view` view (pts `copy_view`).
 
 A copy of `target_essentiality`, served from ClickHouse.
 """
