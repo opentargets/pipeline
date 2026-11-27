@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pts.schemas.dataset.conform import conform
 from pts.schemas.study import STUDY_TYPES, study_schema
 from pts.task_outputs import writes
+from pts.transformers.disease.coalescing import MEASUREMENT
 from pts.transformers.evidence.utils.luts import build_disease_lut
 from pts.transformers.utils.dataset import scan_dataset, sink_dataset
 from pts.transformers.utils.quality_flags import flag_rows, resolve_flag_names, valid_rows
@@ -38,6 +39,20 @@ class QualityFlag(StrEnum):
     CASE_CONTROL_SUM_NEQ_SAMPLE_SIZE = 'Study has non empty or zero nCases, nControls & nSamples with non matching sum'
     ONE_ONLY_CASE_OR_CONTROL = 'Study has only cases or only controls'
     MEASUREMENT_STUDY_DESIGN = 'Study has non empty or zero nSamples with empty nCases and nControls'
+    QUALIFIED_DISEASE_STUDY = 'Qualified disease GWAS'
+    QUALIFIED_MEASUREMENT_STUDY = 'Qualified measurement GWAS'
+
+
+MIN_DISEASE_SAMPLES = 1000
+"""The smallest sample size of a qualified disease GWAS."""
+
+
+MIN_CASE_FRACTION = 0.001
+"""The smallest `nCases / nSamples` of a qualified disease GWAS."""
+
+
+UNQUALIFIED_MEASUREMENTS = ('EFO_0004747', 'EFO_0007882')
+"""Protein measurement and microbiome: a measurement GWAS of these terms, or of their descendants, is not qualified."""
 
 
 class StudySource(BaseModel):
@@ -70,6 +85,8 @@ class StudySettings(BaseModel):
     """QC reason names that cause a study to be excluded."""
     deprecated_project_ids: list[str] = Field(default_factory=list)
     """Project IDs that should be flagged as deprecated."""
+    unqualified_pubmed_ids: list[str] = Field(default_factory=list)
+    """PubMed IDs whose disease GWAS are not qualified."""
 
     @field_validator('invalid_qc_reasons', mode='before')
     @classmethod
@@ -267,6 +284,80 @@ def validate_ccs(studies: pl.LazyFrame) -> pl.LazyFrame:
     return studies
 
 
+def qualify_studies(studies: pl.LazyFrame, disease: pl.LazyFrame, unqualified_pubmed_ids: list[str]) -> pl.LazyFrame:
+    """Flag the GWAS that qualify for analysis as disease or as measurement studies.
+
+    A GWAS is a measurement study when any of its `diseaseIds` has the measurement therapeutic
+    area, and a disease study when it has disease terms and none of them is a measurement.
+
+    - QUALIFIED_DISEASE_STUDY: fewer cases than controls, at least `MIN_DISEASE_SAMPLES` samples,
+      a case fraction of at least `MIN_CASE_FRACTION`, and a PubMed ID not in
+      `unqualified_pubmed_ids`;
+    - QUALIFIED_MEASUREMENT_STUDY: not fewer cases than controls, or no counts to compare, and no
+      term in or under `UNQUALIFIED_MEASUREMENTS`.
+
+    A term absent from the disease index is a disease.
+
+    Examples:
+        >>> disease = pl.LazyFrame({
+        ...     'id': ['ibd', 'bmi', 'protein'],
+        ...     'therapeuticAreas': [['EFO_0000540'], [MEASUREMENT], [MEASUREMENT]],
+        ...     'ancestors': [[], [MEASUREMENT], [MEASUREMENT, 'EFO_0004747']],
+        ... })
+        >>> studies = pl.LazyFrame({
+        ...     'studyId': ['disease', 'small', 'bmi', 'protein', 'qtl'],
+        ...     'studyType': ['gwas', 'gwas', 'gwas', 'gwas', 'eqtl'],
+        ...     'diseaseIds': [['ibd'], ['ibd'], ['bmi'], ['protein'], []],
+        ...     'nCases': [1_000, 10, None, None, None],
+        ...     'nControls': [9_000, 90, None, None, None],
+        ...     'nSamples': [10_000, 100, 5_000, 5_000, 500],
+        ...     'pubmedId': ['1', '1', '1', '1', None],
+        ...     'qualityControls': [[], [], [], [], []],
+        ... })
+        >>> qualify_studies(studies, disease, []).collect()['qualityControls'].to_list()
+        [['Qualified disease GWAS'], [], ['Qualified measurement GWAS'], [], []]
+    """
+    logger.info('Flagging qualified disease and measurement studies')
+    terms = (
+        studies
+        .select('studyId', pl.col('diseaseIds').alias('id'))
+        .explode('id')
+        .drop_nulls('id')
+        .join(disease.select('id', 'therapeuticAreas', 'ancestors'), on='id', how='left')
+        .group_by('studyId')
+        .agg(
+            pl.col('therapeuticAreas').list.contains(MEASUREMENT).fill_null(False).any().alias('_measurement'),
+            (
+                pl.col('id').is_in(UNQUALIFIED_MEASUREMENTS)
+                | pl.col('ancestors').list.set_intersection(list(UNQUALIFIED_MEASUREMENTS)).list.len().gt(0)
+            )
+            .fill_null(False)
+            .any()
+            .alias('_unqualified_measurement'),
+        )
+    )
+    cases, controls, samples = (pl.col(name).cast(pl.Float64) for name in ('nCases', 'nControls', 'nSamples'))
+    gwas = pl.col('studyType') == 'gwas'
+    measurement = pl.col('_measurement')
+    fewer_cases = (cases < controls).fill_null(False)
+    disease_study = (
+        gwas
+        & measurement.not_()
+        & fewer_cases
+        & (samples >= MIN_DISEASE_SAMPLES)
+        & (cases / samples >= MIN_CASE_FRACTION)
+        & pl.col('pubmedId').is_in(pl.Series(unqualified_pubmed_ids, dtype=pl.String)).fill_null(False).not_()
+    )
+    measurement_study = gwas & measurement & fewer_cases.not_() & pl.col('_unqualified_measurement').not_()
+    return (
+        studies
+        .join(terms, on='studyId', how='left', maintain_order='left')
+        .pipe(flag_rows, disease_study.fill_null(False), QualityFlag.QUALIFIED_DISEASE_STUDY)
+        .pipe(flag_rows, measurement_study.fill_null(False), QualityFlag.QUALIFIED_MEASUREMENT_STUDY)
+        .drop('_measurement', '_unqualified_measurement')
+    )
+
+
 def collect_heritability(studies: pl.LazyFrame, heritability: pl.LazyFrame) -> pl.LazyFrame:
     """Append successful LDSC estimates to existing summary-statistic QC values."""
     logger.info('Annotating studies with successful LDSC estimates')
@@ -323,8 +414,8 @@ def study(
         source: Study input paths under `study`, plus `target`, `disease`, and
             `biosample` lookup paths and the `heritability` path.
         destination: Dataset paths under `output` and `excluded`.
-        settings: QC reason names under `invalid_qc_reasons` and project IDs
-            under `deprecated_project_ids`.
+        settings: QC reason names under `invalid_qc_reasons`, project IDs
+            under `deprecated_project_ids`, and PubMed IDs under `unqualified_pubmed_ids`.
         config: Pipeline configuration.
     """
     sources = StudySource.model_validate(source)
@@ -333,6 +424,7 @@ def study(
     target = scan_dataset(sources.target)
     biosample = scan_dataset(sources.biosample)
     disease = build_disease_lut(sources.disease).lazy().rename({'diseaseFromSourceMappedId': 'efo'})
+    disease_terms = scan_dataset(sources.disease).select('id', 'therapeuticAreas', 'ancestors')
     heritability = scan_dataset(sources.heritability)
     validated = (
         pl
@@ -351,6 +443,7 @@ def study(
         .pipe(validate_biosample, biosample)
         .pipe(validate_analysis_flags)
         .pipe(validate_ccs)
+        .pipe(qualify_studies, disease_terms, options.unqualified_pubmed_ids)
         .pipe(collect_heritability, heritability)
         .pipe(sort_study_collections)
         .select(study_schema.names())

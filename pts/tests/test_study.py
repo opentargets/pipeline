@@ -17,6 +17,7 @@ from pts.transformers.study import (
     StudySource,
     collect_heritability,
     deconvolute_studies,
+    qualify_studies,
     study,
     validate_analysis_flags,
     validate_biosample,
@@ -437,7 +438,12 @@ def test_study_writes_one_parquet_file_per_accepted_and_excluded_dataset(tmp_pat
         ]).collect(),
         'target': pl.DataFrame({'id': ['gene']}),
         'biosample': pl.DataFrame({'biosampleId': ['tissue']}),
-        'disease': pl.DataFrame({'id': ['disease'], 'obsoleteTerms': [['old']]}),
+        'disease': pl.DataFrame({
+            'id': ['disease'],
+            'obsoleteTerms': [['old']],
+            'therapeuticAreas': [['EFO_0000540']],
+            'ancestors': [['EFO_0000540']],
+        }),
         'heritability': heritability_frame([{'studyId': 'valid', 'runStatus': 'success', 'h2': 0.5}]).collect(),
     }
     paths = {}
@@ -592,3 +598,74 @@ def test_validators_replace_derived_columns_carried_by_the_source():
         [],
     )
     assert (rows['qtl']['diseaseIds'], rows['qtl']['biosampleId'], rows['qtl']['qualityControls']) == ([], 'known', [])
+
+
+QUALIFICATION_DISEASES = pl.LazyFrame({
+    'id': ['ibd', 'bmi', 'protein', 'EFO_0007882'],
+    'therapeuticAreas': [['EFO_0000540'], ['EFO_0001444'], ['EFO_0001444'], ['EFO_0001444']],
+    'ancestors': [[], ['EFO_0001444'], ['EFO_0001444', 'EFO_0004747'], ['EFO_0001444']],
+})
+"""A disease, a measurement, a protein measurement under `EFO_0004747`, and the microbiome root."""
+
+
+@pytest.mark.parametrize(
+    ('row', 'flag'),
+    [
+        ({}, QualityFlag.QUALIFIED_DISEASE_STUDY),
+        ({'nCases': 9_000, 'nControls': 1_000}, None),
+        ({'nCases': 5_000, 'nControls': 5_000}, None),
+        ({'nCases': None, 'nControls': None}, None),
+        ({'nSamples': 999, 'nCases': 100, 'nControls': 899}, None),
+        ({'nSamples': 1_000, 'nCases': 1, 'nControls': 999}, QualityFlag.QUALIFIED_DISEASE_STUDY),
+        ({'nSamples': 100_000, 'nCases': 99, 'nControls': 99_901}, None),
+        ({'pubmedId': 'excluded'}, None),
+        ({'pubmedId': None}, QualityFlag.QUALIFIED_DISEASE_STUDY),
+        ({'studyType': 'eqtl'}, None),
+        ({'diseaseIds': []}, None),
+        ({'diseaseIds': ['unknown']}, QualityFlag.QUALIFIED_DISEASE_STUDY),
+        ({'diseaseIds': ['bmi'], 'nCases': None, 'nControls': None}, QualityFlag.QUALIFIED_MEASUREMENT_STUDY),
+        ({'diseaseIds': ['bmi'], 'nCases': 5_000, 'nControls': 5_000}, QualityFlag.QUALIFIED_MEASUREMENT_STUDY),
+        ({'diseaseIds': ['bmi']}, None),
+        ({'diseaseIds': ['ibd', 'bmi'], 'nCases': None, 'nControls': None}, QualityFlag.QUALIFIED_MEASUREMENT_STUDY),
+        ({'diseaseIds': ['ibd', 'bmi']}, None),
+        ({'diseaseIds': ['bmi', 'protein'], 'nCases': None, 'nControls': None}, None),
+        ({'diseaseIds': ['EFO_0007882'], 'nCases': None, 'nControls': None}, None),
+    ],
+    ids=[
+        'disease',
+        'more-cases',
+        'equal-cases',
+        'no-counts',
+        'small',
+        'smallest',
+        'low-case-fraction',
+        'excluded-pubmed',
+        'no-pubmed',
+        'qtl',
+        'no-disease',
+        'term-not-in-index',
+        'measurement',
+        'measurement-equal-cases',
+        'measurement-fewer-cases',
+        'disease-and-measurement',
+        'disease-and-measurement-fewer-cases',
+        'protein-measurement',
+        'microbiome-root',
+    ],
+)
+def test_qualify_studies(row, flag):
+    """A GWAS qualifies as a disease or a measurement study after its terms, counts and publication."""
+    base = {
+        'studyId': 's',
+        'studyType': 'gwas',
+        'diseaseIds': ['ibd'],
+        'nCases': 1_000,
+        'nControls': 9_000,
+        'nSamples': 10_000,
+        'pubmedId': '1',
+        'qualityControls': ['existing'],
+    }
+    studies = studies_frame([{**base, **row}], schema=study_schema)
+    result = qualify_studies(studies, QUALIFICATION_DISEASES, ['excluded']).collect()
+    assert result['qualityControls'].to_list() == [sorted(['existing', *([flag] if flag else [])])]
+    assert result.schema == study_schema

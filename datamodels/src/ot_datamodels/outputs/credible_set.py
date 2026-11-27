@@ -113,6 +113,8 @@ class CredibleSet(DatasetModel):
                 'Study type of the source is not a supported study type',
                 'Study type of the credible set differs from the study index',
                 'Lead variant of the credible set has no row among its variants',
+                'Qualified credible set of a disease GWAS',
+                'Qualified credible set of a measurement GWAS',
             ],
             ClickHouseType('LowCardinality(String)'),
         ]
