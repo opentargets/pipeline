@@ -67,6 +67,8 @@ steps:
   pis_chembl:
   pis_clinical_report:
   pis_biosample:
+  pis_biosample_enrichment_cellect:
+    ppp_only: true
   pis_disease:
   pis_drug:
   pis_impc:
@@ -548,6 +550,7 @@ steps:
       # pts_l2g brings pts_credible_set, pts_study and pts_target
       - pts_l2g
       - pts_baseline_expression
+      - pis_biosample_enrichment_cellect
 
   # GENETICS STEPS (PTS and Gentropy)
   pts_enhancer_to_gene:

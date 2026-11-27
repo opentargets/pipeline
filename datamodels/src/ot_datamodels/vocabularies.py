@@ -198,7 +198,8 @@ DirectionOnTrait = Literal['protect', 'risk']
 ColocalisationMethod = Literal['COLOC_PIP_ECAVIAR']
 ConstraintType = Literal['lof', 'mis', 'syn']
 MechanismCuration = Literal['electronic', 'manual']
-EnrichmentApproach = Literal['l2g_regression']
+# pts `biosample_enrichment` and `enrichment.load_cellect_ldsc` constants
+EnrichmentApproach = Literal['l2g_regression', 'cellect_ldsc']
 # sorted, then the types pts accepts that 2612-3 lacks; append new ones
 IntervalType = Literal['genic', 'intergenic', 'promoter', 'enhancer', 'intragenic']
 LiteratureKeywordType = Literal['CD', 'DS', 'GP']
