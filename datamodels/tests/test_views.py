@@ -6,6 +6,7 @@ from typing import get_args
 import polars as pl
 import pytest
 from pts_view_schemas import ASSOCIATION_TIMESERIES, TARGET_VIEW
+from test_copy_views import COPY_VIEWS
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -761,7 +762,7 @@ def test_discover_models_is_the_outputs_and_the_views() -> None:
     outputs, models = discover_datasets(), discover_models()
 
     assert not set(outputs) & set(VIEWS)
-    assert models == outputs | VIEWS
+    assert models == outputs | VIEWS | COPY_VIEWS
 
 
 def test_pharmacogenomics_id_leads_and_keys_the_output() -> None:

@@ -327,19 +327,22 @@ def test_undeclared_loads_wait_for_the_declared_ones():
 
 #: The served views each product loads in the served views' task: every view of the product but colocalisation.
 VIEW_LOADS = [
-    'association_otf_disease_view', 'association_otf_target_view', 'coding_variant_by_target_view',
-    'coding_variant_by_variant_view', 'credible_set_locus_view', 'credible_set_view',
-    'disease_phenotype_by_disease_view', 'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view',
-    'drug_warning_by_drug_view', 'interaction_view', 'l2g_prediction_by_credible_set_view',
-    'mouse_phenotype_by_target_view', 'pharmacovigilance_by_drug_view', 'study_credible_set_view', 'study_view',
-    'target_by_region_view', 'target_credible_set_view', 'target_prioritisation_view', 'target_view',
-    'transcript_view', 'variant_credible_set_view', 'variant_view',
+    'association_otf_disease_view', 'association_otf_target_view', 'baseline_expression_view',
+    'biosample_view', 'clinical_report_view', 'coding_variant_by_target_view', 'coding_variant_by_variant_view',
+    'credible_set_locus_view', 'credible_set_view', 'disease_hpo_view', 'disease_phenotype_by_disease_view',
+    'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view', 'drug_warning_by_drug_view',
+    'enhancer_to_gene_view', 'go_view', 'interaction_evidence_view', 'interaction_view',
+    'l2g_prediction_by_credible_set_view', 'literature_entity_lut_view', 'literature_vector_view',
+    'mouse_phenotype_by_target_view', 'pharmacogenomics_view', 'pharmacovigilance_by_drug_view', 'so_view',
+    'study_credible_set_view', 'study_view', 'target_by_region_view', 'target_credible_set_view',
+    'target_essentiality_view', 'target_prioritisation_view', 'target_view', 'transcript_view',
+    'variant_credible_set_view', 'variant_view',
 ]  # fmt: skip
 
 
 def test_the_served_views_each_product_loads(load):
     _load, _ = load
-    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view'])}
+    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view', 'otar_view'])}
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         (top,) = [s for s in (runner.task_registry.build(s).spec for s in runner.specs) if s.name == SERVED_LOADS]

@@ -65,7 +65,8 @@ def test_entry_tables_and_dictionaries_parse_the_yaml_lists():
             {'name': 'by_name', 'engine': 'mergetree', 'order_by': ['name'], 'columns': ['name'], 'where': 'x'},
         ],
         'dictionaries': [
-            {'name': 'd', 'source': 'sample', 'key': 'id', 'attributes': ['title'], 'source_columns': {'title': 'name'}}
+            {'name': 'd', 'key': 'id', 'attributes': ['title'], 'source_columns': {'title': 'name'}},
+            {'name': 'old', 'source': 'sample', 'key': 'id', 'attributes': []},  # the YAML's `source:` is ignored
         ],
     }
     assert entry_tables(entry) == [
@@ -73,7 +74,8 @@ def test_entry_tables_and_dictionaries_parse_the_yaml_lists():
         ClickHouseTable('by_name', 'mergetree', order_by=('name',), columns=('name',), where='x'),
     ]
     assert entry_dictionaries(entry) == [
-        ClickHouseDictionary('d', source='sample', key='id', attributes=('title',), source_columns={'title': 'name'})
+        ClickHouseDictionary('d', key='id', attributes=('title',), source_columns={'title': 'name'}),
+        ClickHouseDictionary('old', key='id', attributes=()),
     ]
     assert entry_tables({'table': 't'}) == []
     assert entry_dictionaries({'table': 't'}) == []
@@ -97,7 +99,6 @@ def test_valid_declarations_have_no_problems():
     )
     dictionary = {
         'name': 'sample_names',
-        'source': 'sample',
         'key': 'id',
         'attributes': ['title'],
         'source_columns': {'title': 'name'},
@@ -158,7 +159,7 @@ def test_where_may_name_a_column_the_table_drops():
 
 def _dictionary_problems(**dictionary) -> list[str]:
     table = {'name': 'sample', 'engine': 'rocksdb', 'columns': ['id', 'name']}
-    return _problems(table, dictionaries=({'name': 'd', 'source': 'sample'} | dictionary,))
+    return _problems(table, dictionaries=({'name': 'd'} | dictionary,))
 
 
 def test_dictionary_column_dropped_by_columns_is_a_problem():
@@ -172,9 +173,11 @@ def test_dictionary_source_columns_name_the_source_table_columns():
     assert problems == ["sample_log.d: column 'title' is not a column of 'sample'"]
 
 
-def test_dictionary_source_must_be_a_table_of_the_entry():
-    dictionary = {'name': 'd', 'source': 'missing', 'key': 'id', 'attributes': ['name']}
-    assert _problems(dictionaries=(dictionary,)) == ["sample_log.d: source 'missing' is not a table of the entry"]
+def test_dictionary_needs_an_entry_with_a_table():
+    dictionary = {'name': 'd', 'key': 'id', 'attributes': ['name']}
+    assert _problems(dictionaries=(dictionary,)) == [
+        "sample_log.d: a dictionary reads its entry's table, the entry has none"
+    ]
 
 
 def test_an_entry_needs_exactly_one_of_model_and_models():

@@ -431,7 +431,7 @@ clickhouse:
         columns: [id, target]
         where: target IS NOT NULL
     dictionaries:
-      - {name: declared_names, source: declared_by_id, key: id, attributes: [name]}
+      - {name: declared_names, key: id, attributes: [name]}
 """
 ROWS = {'id': ['a', 'b', 'c'], 'name': ['na', 'nb', 'nc'], 'target': ['t1', None, 't2']}
 

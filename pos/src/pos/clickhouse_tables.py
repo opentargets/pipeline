@@ -8,7 +8,7 @@ nullable.
 """
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Literal
 
@@ -35,7 +35,8 @@ class ClickHouseTable:
 
 
 def _known(entry: Mapping, kind: type[ClickHouseTable] | type[ClickHouseDictionary], item: Mapping) -> None:
-    if unknown := set(item) - {f.name for f in fields(kind)}:
+    # a dictionary's `source:` is ignored until the YAML entries go: it always reads its entry's one table
+    if unknown := set(item) - {f.name for f in fields(kind)} - {'source'}:
         raise ValueError(f'{entry["table"]}: unknown {kind.__name__} fields {sorted(unknown)}')
 
 
@@ -64,7 +65,6 @@ def entry_dictionaries(entry: Mapping) -> list[ClickHouseDictionary]:
         dictionaries.append(
             ClickHouseDictionary(
                 name=d['name'],
-                source=d['source'],
                 key=d['key'],
                 attributes=tuple(d['attributes']),
                 source_columns=dict(d.get('source_columns', {})),
@@ -73,11 +73,15 @@ def entry_dictionaries(entry: Mapping) -> list[ClickHouseDictionary]:
     return dictionaries
 
 
-def source_table(dictionary: ClickHouseDictionary) -> str:
-    """The table a dictionary reads; an entry's dictionaries always name it (`served_entries` fills it in)."""
-    if dictionary.source is None:
-        raise ValueError(f'{dictionary.name}: no source table')
-    return dictionary.source
+def source_table(dictionary: ClickHouseDictionary, tables: Sequence[ClickHouseTable]) -> ClickHouseTable:
+    """The table a dictionary reads: its entry's first, which is the served view's one table.
+
+    Raises:
+        ValueError: if the entry has no table.
+    """
+    if not tables:
+        raise ValueError(f"{dictionary.name}: a dictionary reads its entry's table, the entry has none")
+    return tables[0]
 
 
 _WHERE_TOKEN = re.compile(r"'(?:[^'\\]|\\.)*'|`([^`]*)`|([A-Za-z_]\w*)(\s*\()?")
@@ -127,16 +131,16 @@ def table_problems(table: ClickHouseTable, owner: str, fields: Collection[str], 
 
 
 def dictionary_problems(
-    dictionary: ClickHouseDictionary, owner: str, tables: Collection[ClickHouseTable], fields: Collection[str]
+    dictionary: ClickHouseDictionary, owner: str, tables: Sequence[ClickHouseTable], fields: Collection[str]
 ) -> list[str]:
     """The problems in one dictionary over the entry's `tables`, built from a landing table with columns `fields`."""
     where = f'{owner}.{dictionary.name}'
-    source = next((t for t in tables if t.name == dictionary.source), None)
-    if source is None:
-        return [f'{where}: source {dictionary.source!r} is not a table of the entry']
+    if not tables:
+        return [f"{where}: a dictionary reads its entry's table, the entry has none"]
+    source = tables[0]
     known = set(column_names(source, fields))
     return [
-        f'{where}: column {c!r} is not a column of {dictionary.source!r}'
+        f'{where}: column {c!r} is not a column of {source.name!r}'
         for c in (dictionary.key, *dictionary.attributes)
         if dictionary.source_columns.get(c, c) not in known
     ]

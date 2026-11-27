@@ -12,21 +12,19 @@ from typing import Literal
 
 @dataclass(frozen=True)
 class ClickHouseDictionary:
-    """A dictionary over a served table.
+    """A dictionary over a served view's own table.
 
     Attributes:
         name: the dictionary's name.
         key: the lookup key column.
         attributes: the dictionary's value columns.
         source_columns: dictionary column to source column, where they differ.
-        source: the table it reads; the view's own table when None.
     """
 
     name: str
     key: str
     attributes: tuple[str, ...]
     source_columns: Mapping[str, str] = field(default_factory=dict)
-    source: str | None = None
 
 
 @dataclass(frozen=True)
