@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff==0.16.10", "ty==0.0.85"]
+dev = ["ruff==0.16.10", "ty==0.0.85", "vulture==2.16"]
 test = ["pytest>=9.0.3"]
 
 [project.scripts]
@@ -31,3 +31,12 @@ testpaths = ["tests"]
 
 [tool.ruff]
 extend = "../ruff.toml"
+extend-exclude = ["vulture_whitelist.py"] # bare names that vulture reads as uses
+
+[tool.ty.src]
+exclude = ["vulture_whitelist.py"]
+
+[tool.vulture]
+paths = ["src", "vulture_whitelist.py"]
+min_confidence = 60
+ignore_names = ["model_post_init", "main", "validate", "scratchpad_ignore_missing"]

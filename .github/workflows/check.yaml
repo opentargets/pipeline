@@ -133,4 +133,4 @@ jobs:
         run: ./scripts/check_tool_versions.py
       - uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
         with:
-          extra-args: --all-files --skip ty # we run ty during test
+          extra-args: --all-files --skip ty --skip vulture # we run ty during test; vulture only warns locally

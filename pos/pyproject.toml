@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff==0.16.10", "ty==0.0.85", "deptry>=0.23.0"]
+dev = ["ruff==0.16.10", "ty==0.0.85", "vulture==2.16", "deptry>=0.23.0"]
 test = ["pytest>=9.0.3", "pytest-mock>=3.14.1"]
 
 [tool.uv.sources]
@@ -43,7 +43,16 @@ testpaths = ["tests"]
 
 [tool.ruff]
 extend = "../ruff.toml"
+extend-exclude = ["vulture_whitelist.py"] # bare names that vulture reads as uses
+
+[tool.ty.src]
+exclude = ["vulture_whitelist.py"]
 
 [tool.deptry.per_rule_ignores]
 # python-box imports yaml for its from_yaml
 DEP002 = ["pyyaml"]
+
+[tool.vulture]
+paths = ["src", "vulture_whitelist.py"]
+min_confidence = 60
+ignore_names = ["model_config", "artifacts", "references", "repeated", "sub_fields"]

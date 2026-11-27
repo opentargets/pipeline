@@ -21,7 +21,7 @@ dependencies = [
 
 
 [dependency-groups]
-dev = ["graphviz>=0.21", "ruff==0.16.10", "ty==0.0.85"]
+dev = ["graphviz>=0.21", "ruff==0.16.10", "ty==0.0.85", "vulture==2.16"]
 test = ["pytest>=9.1.1"]
 
 [build-system]
@@ -37,9 +37,17 @@ filterwarnings = "ignore::DeprecationWarning"
 extend = "../ruff.toml"
 exclude = [
   "src/orchestration/assets/dataproc_pts_run.py", # this is the dataproc cluster entrypoint file
+  "vulture_whitelist.py", # bare names that vulture reads as uses
 ]
 
 [tool.ty.src]
 exclude = [
   "src/orchestration/assets/dataproc_pts_run.py", # this is the dataproc cluster entrypoint file
+  "vulture_whitelist.py", # bare names that vulture reads as uses
 ]
+
+[tool.vulture]
+paths = ["src", "vulture_whitelist.py"]
+min_confidence = 60
+ignore_decorators = ["@field_validator", "@model_validator"]
+ignore_names = ["model_config", "model_post_init", "execute_complete", "serialize", "pytest_*"]
