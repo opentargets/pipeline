@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "ot-datamodels"
-version = "26.12.0rc21"
+version = "26.12.0rc22"
 source = { editable = "." }
 dependencies = [
     { name = "polars" },
