@@ -259,13 +259,5 @@ def test_an_evidence_model_allows_only_its_own_datasource_and_datatype() -> None
         assert len(allowed) == 1, e
 
 
-def test_credible_set_study_type_takes_its_numbering_from_the_vocabulary() -> None:
-    assert NODES['credible_set.studyType'].clickhouse is None
-
-
-def test_vocabulary_fields_carry_no_clickhouse_type() -> None:
-    assert [p for p in FIELDS if NODES[p].clickhouse is not None] == []
-
-
 def test_homology_high_confidence_is_a_bool() -> None:
     assert NODES['homology.isHighConfidence'].dtype == pl.Boolean()

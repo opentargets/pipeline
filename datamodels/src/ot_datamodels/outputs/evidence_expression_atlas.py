@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -74,7 +74,7 @@ class EvidenceExpressionAtlas(DatasetModel):
     literature: list[Annotated[str, Field(pattern=DIGITS)]] | None = Field(
         description=('PubMed identifiers of the publications describing the Expression Atlas experiment')
     )
-    log2FoldChangePercentileRank: Annotated[int, ClickHouseType('Int32')] = Field(
+    log2FoldChangePercentileRank: int = Field(
         ge=0,
         le=2147483647,
         description=(
@@ -91,10 +91,10 @@ class EvidenceExpressionAtlas(DatasetModel):
     studyId: str = Field(min_length=1, description='Expression Atlas experiment accession (e.g. E-MTAB-1238)')
     studyOverview: str = Field(min_length=1, description='Title of the Expression Atlas experiment')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

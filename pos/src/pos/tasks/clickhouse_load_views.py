@@ -4,7 +4,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.clickhouse_ddl import served_entries
+from pos.clickhouse_ddl import served_views
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 
 
@@ -21,7 +21,6 @@ class ClickhouseLoadViewsSpec(Spec):
     clickhouse_database: str = 'ot'
     clickhouse_port: int = 8123
     data_dir_parent: str
-    dataset_config_path: str = 'config/datasets.yaml'
     product: str
     exclude: list[str] = []
     """Served views loaded elsewhere in the step."""
@@ -33,9 +32,9 @@ def view_loads(product: str, exclude: list[str]) -> list[str]:
     Raises:
         ClickhouseLoadViewsError: if `exclude` names a view that is not served.
     """
-    if unknown := sorted(set(exclude) - set(served_entries())):
+    if unknown := sorted(set(exclude) - set(served_views())):
         raise ClickhouseLoadViewsError(f'exclude names views that are not served: {unknown}')
-    return [name for name in served_entries(product) if name not in exclude]
+    return [name for name in served_views(product) if name not in exclude]
 
 
 def load_spec(spec: ClickhouseLoadViewsSpec, dataset: str) -> ClickhouseLoadSpec:

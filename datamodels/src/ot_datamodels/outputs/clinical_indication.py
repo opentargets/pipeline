@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import ClinicalStage
 
@@ -39,9 +39,9 @@ class ClinicalIndication(DatasetModel):
     clinicalReportIds: list[Annotated[Annotated[str, Reference('clinical_report', 'id')], Field(min_length=1)]] = Field(
         description='List of clinical report identifiers associated with this indication'
     )
-    drugId: Annotated[str, Reference('drug_molecule', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    drugId: Annotated[str, Reference('drug_molecule', 'id')] = Field(
         pattern=CHEMBL_ID, description='Open Targets molecule identifier'
     )
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )

@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import (
     CHEMBL_ID,
     DIGITS,
@@ -163,10 +163,10 @@ class EvidenceCancerBiomarkers(DatasetModel):
     )
     biomarkers: Biomarkers = Field(description='Genetic alterations and expression changes that define the biomarker')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

@@ -9,9 +9,8 @@ from typing import Annotated, Literal, get_args
 
 import polars as pl
 import pytest
-import yaml
-from ot_datamodels import Serving
-from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
+from ot_datamodels import ClickHouseDictionary, Serving
+from ot_datamodels.base import DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
@@ -64,31 +63,25 @@ from ot_datamodels.vocabularies import (
 from pos import clickhouse_ddl
 from pos.clickhouse_ddl import (
     CHType,
-    clickhouse_entries,
     column_type,
     columns,
     create_table,
-    ddl_for,
-    declarations,
-    declared_sql,
     dictionary_sql,
     drop_dictionary_sql,
-    entry_problems,
-    landing_columns,
-    members,
+    input_dir,
+    landing_ddl,
+    landing_table,
     model_type,
     parse_type,
     render,
     rocksdb_key,
-    served_entries,
+    served_sql,
+    served_views,
     table_sql,
-    union_columns,
     uniqueness_sql,
 )
-from pos.clickhouse_tables import ClickHouseDictionary, ClickHouseTable, entry_tables
 
 ROOT = Path(__file__).parents[1]
-DATASETS_YAML = ROOT / 'config' / 'datasets.yaml'
 
 
 class Foo(StructModel):
@@ -105,9 +98,14 @@ class Toy(DatasetModel):
     dataset_title = 'Toy'
     dataset_description = 'Toy.'
     example = {}
+    clickhouse = Serving(
+        engine='mergetree',
+        order_by=('marked',),
+        column_types={'marked': 'UInt32', 'marked_nullable': 'UInt32', 'low_cardinality': 'LowCardinality(String)'},
+    )
 
-    marked: Annotated[int, ClickHouseType('UInt32')]
-    marked_nullable: Annotated[int | None, ClickHouseType('UInt32')]
+    marked: int
+    marked_nullable: int | None
     literal: Literal['a', 'b']
     enum: Annotated[Literal['x', 'y'], PolarsDtype(pl.Enum)]
     flag: bool
@@ -118,13 +116,12 @@ class Toy(DatasetModel):
     nested: list[list[int]]
     struct: Foo
     nullable_struct: Foo | None
-    low_cardinality: Annotated[str | None, ClickHouseType('LowCardinality(String)')]
+    low_cardinality: str | None
     bars: list[Bar | None]
 
 
 def _rendered(name: str) -> str:
-    node = next(f.node for f in dataset_spec(Toy).fields if f.name == name)
-    return render(column_type(node))
+    return render(dict(columns(Toy))[name])
 
 
 @pytest.mark.parametrize(
@@ -172,76 +169,6 @@ class MemberA(DatasetModel):
     only_a: int
 
 
-class MemberB(DatasetModel):
-    dataset_name = 'member_b'
-    dataset_title = 'B'
-    dataset_description = 'B.'
-    example = {}
-
-    id: str
-    only_b: float | None
-
-
-class ClashA(DatasetModel):
-    dataset_name = 'clash_a'
-    dataset_title = 'A'
-    dataset_description = 'A.'
-    example = {}
-
-    x: int
-
-
-class ClashB(DatasetModel):
-    dataset_name = 'clash_b'
-    dataset_title = 'B'
-    dataset_description = 'B.'
-    example = {}
-
-    x: str
-
-
-def test_union_absent_struct_and_list():
-    union = {name: render(t) for name, t in union_columns([MemberA, MemberB])}
-    assert list(union) == ['id', 's', 'l', 'only_a', 'only_b']
-    assert union == {
-        'id': 'String',
-        's': 'Tuple(`a` Nullable(String))',
-        'l': 'Array(String)',
-        'only_a': 'Nullable(Int64)',
-        'only_b': 'Nullable(Float64)',
-    }
-
-
-def test_union_type_clash_raises():
-    with pytest.raises(ValueError, match=r'^column x:') as info:
-        union_columns([ClashA, ClashB])
-    assert 'clash_a' in str(info.value)
-    assert 'clash_b' in str(info.value)
-
-
-class NullableBar(DatasetModel):
-    dataset_name = 'nullable_bar'
-    dataset_title = 'N'
-    dataset_description = 'N.'
-    example = {}
-
-    s: Bar | None
-
-
-class PlainBar(DatasetModel):
-    dataset_name = 'plain_bar'
-    dataset_title = 'P'
-    dataset_description = 'P.'
-    example = {}
-
-    s: Bar
-
-
-def test_union_nested_field_nullability():
-    union = union_columns([PlainBar, NullableBar])
-    assert [(n, render(t)) for n, t in union] == [('s', 'Tuple(`a` Nullable(String))')]
-
-
 class Quoted(DatasetModel):
     dataset_name = 'quoted'
     dataset_title = 'Q'
@@ -279,50 +206,6 @@ def test_enum_too_large_names_the_path():
         columns(BigEnumDataset)
 
 
-class PppOnly(DatasetModel):
-    dataset_name = 'toy_ppp'
-    dataset_title = 'PPP'
-    dataset_description = 'PPP.'
-    products = ('ppp',)
-    example = {}
-
-    id: str
-
-
-def test_members_filters_product(monkeypatch):
-    models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
-    assert members('*_*', 'platform') == [MemberA, MemberB]
-    assert members('*_*', 'ppp') == [MemberA, MemberB, PppOnly]
-
-
-def test_landing_columns(monkeypatch):
-    models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
-    glob = {'input_dir': 'output', 'models': 'member_*'}
-    assert landing_columns(glob, 'platform') == union_columns([MemberA, MemberB])
-    assert landing_columns({'input_dir': 'output/x', 'model': 'toy_ppp'}, 'platform') == columns(PppOnly)
-    with pytest.raises(ValueError, match=r'^toy_log: has neither model nor models$'):
-        landing_columns({'table': 'toy_log', 'input_dir': 'output/toy'}, 'platform')
-
-
-def test_ddl_for(monkeypatch):
-    models = {m.dataset_name: m for m in (MemberB, MemberA, PppOnly, Toy)}
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: models)
-    one = {'table': 't_log', 'model': 'toy_ppp', 'engine': 'MergeTree ORDER BY id'}
-    assert ddl_for(one, 'platform') == [('t_log', create_table('t_log', columns(PppOnly), 'MergeTree ORDER BY id'))]
-    union = {'table': 'u_log', 'models': 'member_*'}
-    assert ddl_for(union, 'platform') == [
-        ('member_a_log', create_table('member_a_log', columns(MemberA))),
-        ('member_b_log', create_table('member_b_log', columns(MemberB))),
-        ('u_log', create_table('u_log', union_columns([MemberA, MemberB]))),
-    ]
-    with pytest.raises(ValueError, match=r'^v: has both model and models$'):
-        ddl_for({'table': 'v', 'model': 'toy_ppp', 'models': 'member_*'}, 'platform')
-    with pytest.raises(ValueError, match=r"^p_log: models 'toy_\*' matches no model for platform$"):
-        ddl_for({'table': 'p_log', 'models': 'toy_*'}, 'platform')
-
-
 def test_pos_ddl_prints_one_dataset(monkeypatch, capsys):
     monkeypatch.chdir(ROOT)
     monkeypatch.setattr('sys.argv', ['pos-ddl', 'disease_view'])
@@ -331,29 +214,19 @@ def test_pos_ddl_prints_one_dataset(monkeypatch, capsys):
     assert out.startswith('CREATE TABLE IF NOT EXISTS `disease_view_log` (')
 
 
-def test_pos_ddl_evidence_follows_the_product(monkeypatch, capsys):
-    monkeypatch.chdir(ROOT)
-    monkeypatch.setattr('sys.argv', ['pos-ddl', 'evidence', '--product', 'ppp'])
-    clickhouse_ddl.main()
-    ppp = capsys.readouterr().out
-    monkeypatch.setattr('sys.argv', ['pos-ddl', 'evidence'])
-    clickhouse_ddl.main()
-    platform = capsys.readouterr().out
-    assert '`assays`' in ppp
-    assert '`assays`' not in platform
-    assert '`evidence_europepmc_log`' in platform
-    assert platform.count('CREATE TABLE') == len(members('evidence_*', 'platform')) + 1
-
-
-def test_pos_ddl_all_prints_every_entry(monkeypatch, capsys):
+def test_pos_ddl_all_prints_every_served_view_of_the_product(monkeypatch, capsys):
     monkeypatch.chdir(ROOT)
     monkeypatch.setattr('sys.argv', ['pos-ddl', '--all'])
     clickhouse_ddl.main()
-    out = capsys.readouterr().out
-    assert '`disease_view_log`' in out
-    assert '`evidence_log`' in out
-    assert '`target_view_log`' in out
-    assert '`association_timeseries_view_log`' in out
+    platform = capsys.readouterr().out
+    monkeypatch.setattr('sys.argv', ['pos-ddl', '--all', '--product', 'ppp'])
+    clickhouse_ddl.main()
+    ppp = capsys.readouterr().out
+    assert platform.splitlines() == [f'{landing_ddl(m)};' for m in served_views('platform').values()]
+    assert ppp.splitlines() == [f'{landing_ddl(m)};' for m in served_views('ppp').values()]
+    assert '`evidence_eva_view_log`' in platform
+    assert '`evidence_encore_view_log`' not in platform
+    assert '`evidence_encore_view_log`' in ppp
 
 
 def test_create_table_quotes_identifiers():
@@ -362,29 +235,21 @@ def test_create_table_quotes_identifiers():
 
 
 def test_every_view_is_served():
-    assert set(served_entries()) == set(discover_datasets(VIEWS_PACKAGE))
-    assert set(served_entries()).isdisjoint(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse'])
+    assert set(served_views()) == set(discover_datasets(VIEWS_PACKAGE))
 
 
-def test_a_served_entry_is_derived_from_its_model():
-    entries = served_entries()
-    assert entries['disease_view'] == {
-        'table': 'disease_view_log',
-        'input_dir': 'view/disease_view',
-        'model': 'disease_view',
-        'tables': [{'name': 'disease_view', 'engine': 'rocksdb'}],
-        'dictionaries': [
-            {'name': 'disease_names', 'key': 'id', 'attributes': ['name'], 'source_columns': {}},
-        ],
-    }  # fmt: skip
-    assert entries['target_by_region_view'] == {
-        'table': 'target_by_region_view_log',
-        'input_dir': 'view/target_by_region_view',
-        'model': 'target_by_region_view',
-        'tables': [
-            {'name': 'target_by_region_view', 'engine': 'mergetree', 'order_by': ['chromosome', 'start', 'end']},
-        ],
-    }  # fmt: skip
+def test_a_served_view_lands_from_its_folder_and_builds_its_table_and_dictionaries():
+    assert (landing_table(DiseaseView), input_dir(DiseaseView)) == ('disease_view_log', 'view/disease_view')
+    statements = served_sql(DiseaseView)
+    assert statements[0] == 'DROP DICTIONARY IF EXISTS `disease_names` SYNC'
+    assert statements[1:4] == table_sql(DiseaseView)
+    assert statements[2].endswith('ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`')
+    assert statements[4].startswith('CREATE OR REPLACE DICTIONARY `disease_names` (`id` String, `name` String)')
+    assert statements[4].endswith("SOURCE(CLICKHOUSE(TABLE 'disease_view')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(0)")
+    assert statements[5:] == ['DROP TABLE `disease_view_log` SYNC']
+    by_region = table_sql(TargetByRegionView)
+    assert by_region[1].endswith('ENGINE = MergeTree() ORDER BY (`chromosome`, `start`, `end`)')
+    assert by_region[3] == 'OPTIMIZE TABLE `target_by_region_view` FINAL'
 
 
 class Typed(DatasetModel):
@@ -407,7 +272,6 @@ class Typed(DatasetModel):
     names: list[str]
     nested: Foo | None
     bars: list[Bar | None]
-    marked: Annotated[int, ClickHouseType('UInt32')]
 
 
 def test_column_types_set_the_view_s_primitive_types():
@@ -416,7 +280,6 @@ def test_column_types_set_the_view_s_primitive_types():
         ('names', 'Array(LowCardinality(String))'),
         ('nested', 'Tuple(`a` Nullable(String), `b` Nullable(UInt8))'),
         ('bars', 'Array(Tuple(`a` LowCardinality(Nullable(String))))'),
-        ('marked', 'UInt32'),
     ]
 
 
@@ -427,31 +290,21 @@ def test_a_column_types_path_that_is_no_primitive_fails(monkeypatch, path):
         columns(Typed)
 
 
-def test_an_output_declaring_clickhouse_fails_the_served_entries(monkeypatch):
+def test_an_output_declaring_clickhouse_fails_the_served_views(monkeypatch):
     served = SimpleNamespace(clickhouse=DiseaseView.clickhouse)
     monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: {'disease': served, 'target': Target})
     with pytest.raises(ValueError, match=r"output models \['disease'\] declare clickhouse"):
-        served_entries()
+        served_views()
 
 
-def test_served_entries_follow_the_product():
-    assert set(served_entries()) - set(served_entries('platform')) == {'association_timeseries_view', 'otar_view'}
-    assert set(served_entries('ppp')) == set(served_entries())
-
-
-def test_clickhouse_entries_merge_the_yaml_and_the_served_views():
-    entries = clickhouse_entries(DATASETS_YAML)
-    assert set(entries) == set(yaml.safe_load(DATASETS_YAML.read_text())['clickhouse']) | set(served_entries())
-    assert entries['target_view']['table'] == 'target_view_log'
-    assert entries['evidence']['table'] == 'evidence_log'
-    assert entries['biosample_view']['table'] == 'biosample_view_log'
-
-
-def test_a_yaml_entry_named_as_a_served_view_fails(tmp_path):
-    config = tmp_path / 'datasets.yaml'
-    config.write_text('clickhouse:\n  disease_view:\n    table: x_log\n    model: disease_view\n')
-    with pytest.raises(ValueError, match=r"entries \['disease_view'\] are served views"):
-        clickhouse_entries(config)
+def test_served_views_follow_the_product():
+    assert set(served_views()) - set(served_views('platform')) == {
+        'association_timeseries_view',
+        'otar_view',
+        *(f'evidence_{s}_{kind}view' for s in ('encore', 'ot_crispr', 'ot_crispr_validation')
+          for kind in ('', 'by_disease_and_target_')),
+    }  # fmt: skip
+    assert set(served_views('ppp')) == set(served_views())
 
 
 def _type_at(cols: Sequence[tuple[str, CHType]], path: str) -> CHType | None:
@@ -506,7 +359,7 @@ def test_disease_view_landing_is_the_served_disease():
 
 def _enum8(vocabulary) -> str:
     """The Enum8 pos generates for a vocabulary: its values numbered from 1 in order."""
-    return f"Enum8({', '.join(f"'{v}' = {i}" for i, v in enumerate(get_args(vocabulary), 1))})"
+    return f'Enum8({", ".join(f"'{v}' = {i}" for i, v in enumerate(get_args(vocabulary), 1))})'
 
 
 #: the columns of the served associations_otf_* tables as aotf.sql built them (read off system.columns), but
@@ -647,9 +500,7 @@ _STRAND = "Enum8('-1' = -1, '0' = 0, '1' = 1)"
 #: (read off system.columns): no LowCardinality survives groupArray, transcript flags are Nullable(String);
 #: targets_by_region.target is Tuple(id String) (David, 2026-11-24); biotype is the transcript's Enum8
 TARGET_GROUP_SERVED = {
-    TargetByRegionView: (
-        f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, target Tuple(id String)'
-    ),
+    TargetByRegionView: (f'chromosome {_enum8(Chromosome)}, start UInt32, end UInt32, target Tuple(id String)'),
     TranscriptView: (
         f'targetId String, transcripts Array(Tuple(transcriptId String, biotype {_enum8(TranscriptBiotype)}, '
         'proteinId Nullable(String), uniprotSwissprotIds Array(String), uniprotTremblIds Array(String), '
@@ -779,79 +630,98 @@ def test_genetics_c_views_land_the_served_columns(model):
     assert ', '.join(f'{n} {render(t, quote_fields=False)}' for n, t in columns(model)) == GENETICS_C_SERVED[model]
 
 
-# declared tables
+# served tables
 
 STR = CHType('String')
-LANDING = [
-    ('id', STR),
-    ('drugId', STR),
-    ('targetId', CHType('String', nullable=True)),
-    ('score', CHType('Float64', nullable=True)),
-    ('tags', CHType('Array', element=STR)),
-]
 
 
-def test_rocksdb_table_sql_keys_on_the_given_key():
-    table = ClickHouseTable('gene_ontology', 'rocksdb')
-    assert table_sql(table, [('id', STR), ('name', STR)], 'gene_ontology_log', key='id') == [
-        'DROP TABLE IF EXISTS `gene_ontology` SYNC',
-        (
-            'CREATE TABLE `gene_ontology` (`id` String, `name` String) '
-            'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`'
-        ),
-        'INSERT INTO `gene_ontology` SELECT `id`, `name` FROM `gene_ontology_log`',
+KEYED_NAMES = ClickHouseDictionary('keyed_names', key='id', attributes=('name',))
+
+
+class Keyed(DatasetModel):
+    dataset_name = 'keyed_view'
+    dataset_title = 'Keyed'
+    dataset_description = 'Keyed.'
+    example = {}
+    clickhouse = Serving(engine='rocksdb', dictionaries=(KEYED_NAMES,))
+
+    id: Annotated[str, PrimaryKey()]
+    name: str
+
+
+class Ordered(DatasetModel):
+    dataset_name = 'ordered_view'
+    dataset_title = 'Ordered'
+    dataset_description = 'Ordered.'
+    example = {}
+    clickhouse = Serving(engine='mergetree', order_by=('target', 'id'))
+
+    id: str
+    target: str | None
+    score: float
+
+
+class TwoKeys(DatasetModel):
+    dataset_name = 'two_keys_view'
+    dataset_title = 'Two keys'
+    dataset_description = 'Two keys.'
+    example = {}
+    clickhouse = Serving(engine='rocksdb')
+
+    a: Annotated[str, PrimaryKey()]
+    b: Annotated[str, PrimaryKey()]
+
+
+def test_rocksdb_table_sql_keys_on_the_primary_key():
+    assert table_sql(Keyed) == [
+        'DROP TABLE IF EXISTS `keyed_view` SYNC',
+        'CREATE TABLE `keyed_view` (`id` String, `name` String) ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`',
+        'INSERT INTO `keyed_view` SELECT `id`, `name` FROM `keyed_view_log`',
     ]
 
 
-def test_rocksdb_table_sql_needs_a_key():
-    with pytest.raises(ValueError, match='gene_ontology: rocksdb needs a key'):
-        table_sql(ClickHouseTable('gene_ontology', 'rocksdb'), [('id', STR)], 'l')
+def test_rocksdb_needs_one_primary_key_column():
+    assert rocksdb_key(Keyed) == 'id'
+    with pytest.raises(ValueError, match=r"two_keys_view: rocksdb needs one PrimaryKey column, found \('a', 'b'\)"):
+        table_sql(TwoKeys)
 
 
 def test_mergetree_nullable_order_by_allows_nullable_key_and_is_optimised():
-    table = ClickHouseTable('t', 'mergetree', order_by=('targetId', 'id'), columns=('id', 'targetId'))
-    assert table_sql(table, LANDING, 't_log') == [
-        'DROP TABLE IF EXISTS `t` SYNC',
+    assert table_sql(Ordered) == [
+        'DROP TABLE IF EXISTS `ordered_view` SYNC',
         (
-            'CREATE TABLE `t` (`id` String, `targetId` Nullable(String)) '
-            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
+            'CREATE TABLE `ordered_view` (`id` String, `target` Nullable(String), `score` Float64) '
+            'ENGINE = MergeTree() ORDER BY (`target`, `id`) SETTINGS allow_nullable_key = 1'
         ),
-        'INSERT INTO `t` SELECT `id`, `targetId` FROM `t_log`',
-        'OPTIMIZE TABLE `t` FINAL',
+        'INSERT INTO `ordered_view` SELECT `id`, `target`, `score` FROM `ordered_view_log`',
+        'OPTIMIZE TABLE `ordered_view` FINAL',
     ]
 
 
-def test_mergetree_without_a_nullable_order_by_has_no_settings():
-    table = ClickHouseTable('t', 'mergetree', order_by=('id',), columns=('id',))
-    assert table_sql(table, LANDING, 'l')[1] == 'CREATE TABLE `t` (`id` String) ENGINE = MergeTree() ORDER BY (`id`)'
+def test_mergetree_without_a_nullable_order_by_has_no_settings(monkeypatch):
+    monkeypatch.setattr(Ordered, 'clickhouse', Serving(engine='mergetree', order_by=('score', 'id')))
+    assert table_sql(Ordered)[1].endswith('ENGINE = MergeTree() ORDER BY (`score`, `id`)')
 
 
-def test_mergetree_where_and_columns_order():
-    table = ClickHouseTable(
-        'clinical_target',
-        'mergetree',
-        order_by=('targetId', 'id'),
-        columns=('targetId', 'drugId', 'id'),
-        where='targetId IS NOT NULL',
-    )
-    assert table_sql(table, LANDING, 'clinical_target_log') == [
-        'DROP TABLE IF EXISTS `clinical_target` SYNC',
-        (
-            'CREATE TABLE `clinical_target` (`targetId` Nullable(String), `drugId` String, `id` String) '
-            'ENGINE = MergeTree() ORDER BY (`targetId`, `id`) SETTINGS allow_nullable_key = 1'
-        ),
-        (
-            'INSERT INTO `clinical_target` SELECT `targetId`, `drugId`, `id` FROM `clinical_target_log` '
-            'WHERE targetId IS NOT NULL'
-        ),
-        'OPTIMIZE TABLE `clinical_target` FINAL',
+def test_a_model_without_serving_has_no_table():
+    with pytest.raises(ValueError, match='quoted is not a served view'):
+        table_sql(Quoted)
+
+
+def test_served_sql_rebuilds_the_dictionaries_over_the_table_then_drops_the_landing():
+    assert served_sql(Keyed) == [
+        'DROP DICTIONARY IF EXISTS `keyed_names` SYNC',
+        *table_sql(Keyed),
+        dictionary_sql(KEYED_NAMES, 'keyed_view', columns(Keyed)),
+        'DROP TABLE `keyed_view_log` SYNC',
     ]
+    assert served_sql(Ordered) == [*table_sql(Ordered), 'DROP TABLE `ordered_view_log` SYNC']
 
 
-def test_no_columns_keeps_every_landing_column():
-    table = ClickHouseTable('t', 'rocksdb')
-    assert table_sql(table, LANDING, 'l', key='id')[2] == (
-        'INSERT INTO `t` SELECT `id`, `drugId`, `targetId`, `score`, `tags` FROM `l`'
+def test_landing_ddl_is_a_log_table_of_the_columns():
+    assert landing_ddl(Ordered) == (
+        'CREATE TABLE IF NOT EXISTS `ordered_view_log` (`id` String, `target` Nullable(String), `score` Float64) '
+        'ENGINE = Log'
     )
 
 
@@ -891,166 +761,28 @@ def test_drop_dictionary_sql():
     assert drop_dictionary_sql(d) == 'DROP DICTIONARY IF EXISTS `biosample_names` SYNC'
 
 
-def test_uniqueness_sql_reads_the_key_through_the_filter():
-    table = ClickHouseTable('biosample', 'rocksdb', where='biosampleId != 3')
-    assert uniqueness_sql(table, 'biosampleId', 'biosample_log') == (
-        "SELECT throwIf(count() != uniqExact(tuple(`biosampleId`)), 'duplicate biosampleId in biosample') "
-        'FROM `biosample_log` WHERE biosampleId != 3'
+def test_uniqueness_sql_reads_the_key_in_the_landing_table():
+    assert uniqueness_sql(Keyed) == (
+        "SELECT throwIf(count() != uniqExact(tuple(`id`)), 'duplicate id in keyed_view') FROM `keyed_view_log`"
     )
-
-
-class Keyed(DatasetModel):
-    dataset_name = 'keyed'
-    dataset_title = 'Keyed'
-    dataset_description = 'Keyed.'
-    example = {}
-    products = ('platform', 'ppp')
-
-    id: Annotated[str, PrimaryKey()]
-
-
-class KeyedPppOnly(DatasetModel):
-    dataset_name = 'keyed_ppp_only'
-    dataset_title = 'PPP only'
-    dataset_description = 'PPP only.'
-    example = {}
-    products = ('ppp',)
-
-    id: Annotated[str, PrimaryKey()]
-
-
-class OtherKey(DatasetModel):
-    dataset_name = 'other_key'
-    dataset_title = 'Other key'
-    dataset_description = 'Other key.'
-    example = {}
-
-    gene: Annotated[str, PrimaryKey()]
-
-
-class TwoKeys(DatasetModel):
-    dataset_name = 'two_keys'
-    dataset_title = 'Two keys'
-    dataset_description = 'Two keys.'
-    example = {}
-
-    a: Annotated[str, PrimaryKey()]
-    b: Annotated[str, PrimaryKey()]
-
-
-KEYED = {
-    'table': 'keyed_log',
-    'model': 'keyed',
-    'tables': [{'name': 'keyed', 'engine': 'rocksdb'}],
-    'dictionaries': [{'name': 'keyed_names', 'key': 'id', 'attributes': ['id']}],
-}
-PPP_ONLY = {'table': 'ppp_only_log', 'model': 'keyed_ppp_only', 'tables': [{'name': 'ppp_only', 'engine': 'rocksdb'}]}
-
-
-def test_declarations_follow_the_model_products(monkeypatch):
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'keyed_ppp_only': KeyedPppOnly})
-    tables, dictionaries = declarations(KEYED, 'platform')
-    assert [t.name for t in tables] == ['keyed']
-    assert [d.name for d in dictionaries] == ['keyed_names']
-    assert declarations(PPP_ONLY, 'platform') == ([], [])
-    assert [t.name for t in declarations(PPP_ONLY, 'ppp')[0]] == ['ppp_only']
-
-
-def test_a_models_entry_declares_for_every_product():
-    entry = {'table': 'u_log', 'models': 'keyed*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
-    assert declarations(entry, 'platform') == declarations(entry, 'ppp') == ([ClickHouseTable('u', 'rocksdb')], [])
-
-
-def test_rocksdb_key_is_the_one_primary_key_the_models_share():
-    assert rocksdb_key([Keyed]) == 'id'
-    assert rocksdb_key([Keyed, KeyedPppOnly]) == 'id'
-    with pytest.raises(ValueError, match='disagree'):
-        rocksdb_key([Keyed, OtherKey])
-    with pytest.raises(ValueError, match='one PrimaryKey column'):
-        rocksdb_key([TwoKeys])
-
-
-def test_declared_sql_keys_rocksdb_on_the_model_primary_key(monkeypatch):
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed})
-    statements = declared_sql(KEYED, 'platform')
-    assert 'ENGINE = EmbeddedRocksDB() PRIMARY KEY `id`' in statements[2]
-    assert statements[0] == 'DROP DICTIONARY IF EXISTS `keyed_names` SYNC'
-    assert statements[-2].startswith('CREATE OR REPLACE DICTIONARY `keyed_names`')
-    assert statements[-1] == 'DROP TABLE `keyed_log` SYNC'
-
-
-def test_entry_tables_take_only_the_table_fields():
-    entry = {'table': 'e_log', 'tables': [{'name': 'e', 'engine': 'rocksdb', 'key': 'id'}]}
-    with pytest.raises(ValueError, match=r"unknown ClickHouseTable fields \['key'\]"):
-        entry_tables(entry)
-
-
-def test_entry_problems_check_a_yaml_declaration_against_its_members(monkeypatch):
-    monkeypatch.setattr(clickhouse_ddl, 'discover_models', lambda: {'keyed': Keyed, 'other_key': OtherKey})
-    good = {'table': 'u_log', 'models': 'keyed', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
-    assert entry_problems(good, 'platform') == []
-    bad = {
-        'table': 'u_log',
-        'models': '*',
-        'tables': [{'name': 'u', 'engine': 'mergetree', 'order_by': ['nope'], 'where': 'zip IS NULL'}],
-    }
-    assert entry_problems(bad, 'platform') == [
-        "u_log.u: where 'zip' is not a column of the model",
-        "u_log.u: order_by 'nope' is not a column of the table",
-    ]
-    disagree = {'table': 'u_log', 'models': '*', 'tables': [{'name': 'u', 'engine': 'rocksdb'}]}
-    assert entry_problems(disagree, 'platform') == [
-        "u_log: members disagree on PrimaryKey: keyed ('id',), other_key ('gene',)",
-        'u_log.u: rocksdb needs one PrimaryKey column on the model, it has none',
-    ]
-
-
-@pytest.mark.parametrize('product', ['platform', 'ppp'])
-def test_yaml_declarations_are_valid(product):
-    entries = clickhouse_entries(DATASETS_YAML)
-    declared = [e for e in entries.values() if 'tables' in e or 'dictionaries' in e]
-    assert declared
-    assert [p for e in declared for p in entry_problems(e, product)] == []
-
-
-def test_no_yaml_entry_is_optional():
-    entries = clickhouse_entries(DATASETS_YAML)
-    assert [name for name, e in entries.items() if 'optional' in e] == []
 
 
 def test_table_sql_rerun_keeps_one_copy_of_the_rows(clickhouse_database):
     client = clickhouse_database
-    table = ClickHouseTable('ddl_rerun', 'mergetree', order_by=('id',), where='id != 3')
-    cols = [('id', CHType('Int64')), ('name', STR)]
-    client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
-    client.command('CREATE TABLE ddl_rerun_log (id Int64, name String) ENGINE = Log')
-    client.command("INSERT INTO ddl_rerun_log VALUES (1, 'a'), (2, 'b'), (3, 'c')")
-    try:
-        for _ in range(2):
-            for statement in table_sql(table, cols, 'ddl_rerun_log'):
-                client.command(statement)
-        assert client.command('SELECT count() FROM ddl_rerun') == 2
-    finally:
-        client.command('DROP TABLE IF EXISTS ddl_rerun SYNC')
-        client.command('DROP TABLE IF EXISTS ddl_rerun_log SYNC')
+    client.command(landing_ddl(Ordered))
+    client.command("INSERT INTO ordered_view_log VALUES ('a', 't1', 1), ('b', NULL, 2)")
+    for _ in range(2):
+        for statement in table_sql(Ordered):
+            client.command(statement)
+    assert client.command('SELECT count() FROM ordered_view') == 2
 
 
-def test_dictionary_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
+def test_served_sql_rerun_reads_the_rebuilt_table(clickhouse_database):
     client = clickhouse_database
-    table = ClickHouseTable('ddl_dict_src', 'rocksdb')
-    cols = [('k', STR), ('v', STR)]
-    d = ClickHouseDictionary('ddl_dict', key='id', attributes=('name',), source_columns={'id': 'k', 'name': 'v'})
-    client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
-    client.command('CREATE TABLE ddl_dict_log (k String, v String) ENGINE = Log')
-    client.command("INSERT INTO ddl_dict_log VALUES ('x', 'nx')")
-    try:
-        for _ in range(2):
-            client.command(drop_dictionary_sql(d))
-            for statement in table_sql(table, cols, 'ddl_dict_log', key='k'):
-                client.command(statement)
-            client.command(dictionary_sql(d, 'ddl_dict_src', cols))
-        assert client.command("SELECT dictGet('ddl_dict', 'name', tuple('x'))") == 'nx'
-    finally:
-        client.command('DROP DICTIONARY IF EXISTS ddl_dict')
-        client.command('DROP TABLE IF EXISTS ddl_dict_src SYNC')
-        client.command('DROP TABLE IF EXISTS ddl_dict_log SYNC')
+    for name in ('nx', 'ny'):
+        client.command(landing_ddl(Keyed))
+        client.insert('keyed_view_log', [['x', name]])
+        for statement in served_sql(Keyed):
+            client.command(statement)
+        assert client.command("SELECT dictGet('keyed_names', 'name', tuple('x'))") == name
+    assert client.command('EXISTS TABLE keyed_view_log') == 0

@@ -6,7 +6,7 @@ import pytest
 from otter.scratchpad.model import Scratchpad
 from otter.task.model import TaskContext
 
-from pos.clickhouse_ddl import served_entries
+from pos.clickhouse_ddl import served_views
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 from pos.tasks.clickhouse_load_views import (
     ClickhouseLoadViews,
@@ -33,11 +33,10 @@ def test_one_load_per_served_view_of_the_product(product):
     ClickhouseLoadViews.run.__wrapped__(task)  # ty: ignore[unresolved-attribute]
     specs = [s for s in task.context.specs if isinstance(s, ClickhouseLoadSpec)]
     assert len(specs) == len(task.context.specs)
-    assert [s.dataset for s in specs] == [n for n in served_entries(product) if n != 'drug_view']
+    assert [s.dataset for s in specs] == [n for n in served_views(product) if n != 'drug_view']
     assert [s.name for s in specs] == [f'clickhouse_load clickhouse load {s.dataset}' for s in specs]
     for s in specs:
         assert (s.product, s.clickhouse_database, s.data_dir_parent) == (product, 'platform2612', 'release_data')
-        assert s.dataset_config_path == 'config/datasets.yaml'
         assert s.requires == []
 
 

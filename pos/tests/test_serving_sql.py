@@ -23,29 +23,14 @@ from clickhouse_connect.driver.tools import insert_file
 from ot_datamodels.discovery import discover_models
 from ot_datamodels.polars import to_polars_schema
 
-from pos.clickhouse_ddl import (
-    clickhouse_entries,
-    columns,
-    create_table,
-    ddl_for,
-    declarations,
-    declared_sql,
-    entry_key,
-    is_declared,
-    landing_columns,
-    member_table,
-    members,
-    render,
-    served_entries,
-)
-from pos.clickhouse_tables import entry_tables
+from pos.clickhouse_ddl import columns, landing_ddl, landing_table, render, served_sql, served_views
 from pos.services.clickhouse import connect
-from pos.tasks.clickhouse_load import INSERT_SETTINGS, ClickhouseLoad, ClickhouseLoadError, member_drops, union_inserts
+from pos.tasks.clickhouse_load import INSERT_SETTINGS, ClickhouseLoadError, build_served
 from pos.tasks.clickhouse_load_views import view_loads
 
 ROOT = Path(__file__).parents[1]
 STEP = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())['steps']['backend_clickhouse']
-DATASETS = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
+VIEWS = served_views()
 # read at import: the autouse fixture clears POS_* before each test
 SERVER = os.environ.get('POS_TEST_CLICKHOUSE', 'localhost:8123')
 REQUIRE = os.environ.get('POS_REQUIRE_CLICKHOUSE') == '1'
@@ -60,8 +45,8 @@ def _reachable(host: str, port: int) -> bool:
 
 
 def _tasks(product: str) -> list[dict]:
-    """The step's tasks for the product, explode and served-view children expanded, in `requires:` order;
-    requiring a generating task requires its children."""
+    """The step's tasks for the product, served-view children expanded, in `requires:` order; requiring the
+    generating task requires its children."""
     by_name: dict[str, dict] = {}
     children: dict[str, list[str]] = {}
     for task in STEP:
@@ -73,13 +58,6 @@ def _tasks(product: str) -> list[dict]:
                 name = f'clickhouse_load clickhouse load {view}'
                 by_name[name] = {'name': name, 'dataset': view, 'requires': task.get('requires', [])}
                 children[task['name']].append(name)
-        elif 'foreach' in task:
-            children[task['name']] = []
-            for each in task['foreach']:
-                for child in task['do']:
-                    expanded = yaml.safe_load(yaml.safe_dump(child).replace('${each}', each))
-                    by_name[expanded['name']] = expanded | {'requires': task.get('requires', [])}
-                    children[task['name']].append(expanded['name'])
         else:
             by_name[task['name']] = task
     graph = {}
@@ -94,15 +72,10 @@ def _tasks(product: str) -> list[dict]:
     return [by_name[n] for n in order]
 
 
-def _statements(dataset: str, product: str) -> list[tuple[str, str]]:
-    """(what, statement) a load of the dataset runs, tables empty."""
-    entry = DATASETS[dataset]
-    out = [('generated DDL', sql) for _, sql in ddl_for(entry, product)]
-    if 'models' in entry:
-        loaded = members(entry['models'], product)
-        out += [('member inserts', sql) for sql in union_inserts(entry['table'], loaded)]
-        out += [('member drops', sql) for sql in member_drops(loaded)]
-    return out + [('declared tables', sql) for sql in declared_sql(entry, product)]
+def _statements(dataset: str) -> list[tuple[str, str]]:
+    """(what, statement) a load of the view runs, tables empty."""
+    model = VIEWS[dataset]
+    return [('generated DDL', landing_ddl(model)), *(('served tables', sql) for sql in served_sql(model))]
 
 
 @contextmanager
@@ -128,7 +101,7 @@ def test_serving_sql(product):
         for task in _tasks(product):
             if 'dataset' not in task:
                 continue
-            for what, sql in _statements(task['dataset'], product):
+            for what, sql in _statements(task['dataset']):
                 try:
                     client.command(sql)
                 except ClickHouseError as e:
@@ -185,20 +158,19 @@ def _labels(value, dtype, path: str) -> Iterator[tuple[str, object]]:
 
 #: Models with an Enum at the top level, in a list and in a struct (target_view: and a Bool in a list of structs;
 #: interaction_view: in a list of structs; drug_mechanism_of_action_by_drug_view: a top-level list, and in a list
-#: of structs; disease_phenotype_by_disease_view: Nullable, in a list of structs in a list of structs), and the
-#: dataset each loads into.
-ENUM_MODELS = {
-    'clinical_report_view': 'clinical_report_view',
-    'colocalisation_by_credible_set_view': 'colocalisation_by_credible_set_view',
-    'variant_view': 'variant_view',
-    'interaction_view': 'interaction_view',
-    'evidence_gene_burden': 'evidence',
-    'target_by_region_view': 'target_by_region_view',
-    'target_view': 'target_view',
-    'drug_mechanism_of_action_by_drug_view': 'drug_mechanism_of_action_by_drug_view',
-    'disease_phenotype_by_disease_view': 'disease_phenotype_by_disease_view',
-    'transcript_view': 'transcript_view',
-}
+#: of structs; disease_phenotype_by_disease_view: Nullable, in a list of structs in a list of structs)).
+ENUM_MODELS = (
+    'clinical_report_view',
+    'colocalisation_by_credible_set_view',
+    'variant_view',
+    'interaction_view',
+    'evidence_gene_burden_view',
+    'target_by_region_view',
+    'target_view',
+    'drug_mechanism_of_action_by_drug_view',
+    'disease_phenotype_by_disease_view',
+    'transcript_view',
+)
 
 
 @pytest.mark.parametrize('model_name', sorted(ENUM_MODELS))
@@ -212,11 +184,7 @@ def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
     frame = strings.cast(dict(schema.items()), strict=True)  # what pts' conform does to an output
     file = tmp_path / 'part.parquet'
     frame.write_parquet(file)
-    entry = DATASETS[ENUM_MODELS[model_name]]
-    if 'models' in entry:
-        table, create = member_table(model), create_table(member_table(model), columns(model))
-    else:
-        ((table, create),) = ddl_for(entry, 'platform')
+    table, create = landing_table(model), landing_ddl(model)
     with _database() as client:
         client.command(create)
         insert_file(client, table, str(file), fmt='Parquet', settings=INSERT_SETTINGS)
@@ -228,45 +196,33 @@ def test_enum_parquet_loads_into_enum8(model_name, tmp_path):
             assert list(_labels(got[name], dtype, name)) == list(_labels(want[name], dtype, name)), name
 
 
-#: The explode every declared datasets.yaml entry loads in.
-DECLARED_LOADS = 'explode load declared datasets'
 #: The task that loads every served view but colocalisation.
 SERVED_LOADS = 'clickhouse_load_views load served views'
 COLOCALISATION = 'colocalisation_by_credible_set_view'
-#: Entries and tasks the declarations replaced.
+#: Entries and tasks the served views replaced.
 RETIRED = (
     'aotf', 'credible_set_variant', 'credible_sets_build_cleanup', 'protein_coding_coords',
     # served through their views
     'baseline_expression', 'biosample', 'clinical_report', 'enhancer_to_gene', 'go', 'hpo', 'interaction_evidence',
     'literature_entity_lut', 'otar_projects', 'pharmacogenomics', 'so', 'target_essentiality', 'w2v',
+    'evidence', 'evidence_by_variant', 'evidence_by_disease_and_target', 'clinical_indication', 'clinical_target',
+    'clinical_indication_drug', 'clinical_indication_disease',
 )  # fmt: skip
 
 
-def test_declared_datasets_load_in_the_declared_explode():
-    """The declared explode is the step's only one and the served views load in their own task; colocalisation
-    loads alone after both, its RocksDB insert being the step's memory peak; every other load waits only on what
-    they wait on."""
-    (explode,) = [t for t in STEP if t['name'] == DECLARED_LOADS]
+def test_the_served_views_load_in_their_task_and_colocalisation_after():
+    """Every load is a served view's: the served views load in their own task, and colocalisation loads alone after
+    it, its RocksDB insert being the step's memory peak."""
     (served,) = [t for t in STEP if t['name'] == SERVED_LOADS]
-    assert [t['name'] for t in STEP if 'foreach' in t] == [explode['name']]
-    assert all(is_declared(DATASETS[d]) for d in explode['foreach'])
-    assert set(explode['foreach']).isdisjoint(served_entries())
+    assert not [t['name'] for t in STEP if 'foreach' in t]
     assert served['exclude'] == [COLOCALISATION]
-    assert served['requires'] == explode['requires']
     loaded = [t['dataset'] for t in STEP if 'dataset' in t and t['name'].startswith('clickhouse_load')]
-    assert set(loaded).isdisjoint(explode['foreach'])
-    assert set(loaded) & set(served_entries()) == {COLOCALISATION}
+    assert loaded == [COLOCALISATION]
     (coloc,) = [t for t in STEP if t.get('dataset') == COLOCALISATION]
-    assert coloc['requires'] == [explode['name'], served['name']]
+    assert coloc['requires'] == [served['name']]
     assert 'products' not in coloc
-    assert set(RETIRED).isdisjoint(DATASETS)
-    assert set(RETIRED).isdisjoint(loaded)
-    for name, entry in served_entries().items():
-        assert entry['input_dir'] == f'view/{name}', name
-    assert not [t.name for e in DATASETS.values() for t in entry_tables(e) if t.name.endswith('_mergetree')]
-    loads = [t for t in STEP if t['name'].startswith('clickhouse_load') or 'foreach' in t]
-    allowed = {*explode['requires'], explode['name'], served['name']}
-    assert all(set(t.get('requires', [])) <= allowed for t in loads)
+    assert set(RETIRED).isdisjoint(VIEWS)
+    assert not [name for name in VIEWS if name.endswith('_mergetree')]
 
 
 #: Fixture rows per landing table; generateRandom makes a few percent of a Nullable column NULL.
@@ -293,31 +249,20 @@ def _fill(client, table: str, cols, seed: int) -> None:
     )
 
 
-def _land(client, dataset: str, product: str) -> None:
-    """The dataset's landing table, filled with fixture rows."""
-    entry = DATASETS[dataset]
-    for _, sql in ddl_for(entry, product):
-        client.command(sql)
-    _fill(client, entry['table'], landing_columns(entry, product), 1)
-
-
-def _build_declared(client, dataset: str, product: str) -> None:
-    """The dataset's declared tables from its filled landing table, as the loader builds them."""
-    entry = DATASETS[dataset]
-    for table in declarations(entry, product)[0]:
-        if table.engine == 'rocksdb':
-            ClickhouseLoad._check_unique(client, table, entry_key(entry, product), entry['table'])
-    for sql in declared_sql(entry, product):
-        client.command(sql)
+def _land(client, dataset: str) -> None:
+    """The view's landing table, filled with fixture rows."""
+    model = VIEWS[dataset]
+    client.command(landing_ddl(model))
+    _fill(client, landing_table(model), columns(model), 1)
 
 
 def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
     """A landing table with a repeated pharmacogenomicsId, or one loaded from a parquet without the column
     (ClickHouse fills 0), fails the load instead of collapsing the served table."""
     with _database() as repeated, _database() as missing:
-        _land(repeated, 'pharmacogenomics_view', 'platform')
+        _land(repeated, 'pharmacogenomics_view')
         repeated.command('INSERT INTO pharmacogenomics_view_log SELECT * FROM pharmacogenomics_view_log LIMIT 1')
-        _land(missing, 'pharmacogenomics_view', 'platform')
+        _land(missing, 'pharmacogenomics_view')
         sql = 'SELECT * EXCEPT (pharmacogenomicsId) FROM pharmacogenomics_view_log FORMAT Parquet'
         frame = pl.read_parquet(BytesIO(missing.raw_query(sql)))
         assert 'pharmacogenomicsId' not in frame.columns
@@ -327,5 +272,5 @@ def test_pharmacogenomics_load_rejects_repeated_ids(tmp_path):
         insert_file(missing, 'pharmacogenomics_view_log', str(file), fmt='Parquet', settings=INSERT_SETTINGS)
         for client in (repeated, missing):
             with pytest.raises(ClickhouseLoadError, match='duplicate pharmacogenomicsId in pharmacogenomics_view'):
-                _build_declared(client, 'pharmacogenomics_view', 'platform')
+                build_served(client, VIEWS['pharmacogenomics_view'])
             assert not client.command('EXISTS TABLE pharmacogenomics_view')

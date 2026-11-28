@@ -10,19 +10,7 @@ from otter.task.model import Spec, Task, TaskContext
 from otter.task.task_reporter import report
 from otter.util.errors import OtterError
 
-from pos.clickhouse_ddl import (
-    clickhouse_entries,
-    columns,
-    ddl_for,
-    declarations,
-    declared_sql,
-    entry_key,
-    is_declared,
-    member_table,
-    members,
-    source_problem,
-    uniqueness_sql,
-)
+from pos.clickhouse_ddl import input_dir, landing_ddl, landing_table, served_sql, served_views, uniqueness_sql
 from pos.services.clickhouse import connect
 
 # synchronous, so an insert returns once its data is written
@@ -37,69 +25,71 @@ class ClickhouseLoadSpec(Spec):
     """Configuration fields for the Load Clickhouse task."""
 
     dataset: str
+    """A served view."""
     clickhouse_host: str = 'localhost'
     clickhouse_username: str = 'default'
     clickhouse_password: str = ''
     clickhouse_database: str = 'ot'
     clickhouse_port: int = 8123
     data_dir_parent: str
-    dataset_config_path: str = 'config/datasets.yaml'
     product: str
 
 
-def union_inserts(table: str, loaded: list[type[DatasetModel]]) -> list[str]:
-    """An `INSERT ... SELECT` from each member table into the union table."""
-    inserts = []
-    for model in loaded:
-        cols = ', '.join(quote_identifier(name) for name, _ in columns(model))
-        source = quote_identifier(member_table(model))
-        inserts.append(f'INSERT INTO {quote_identifier(table)} ({cols}) SELECT {cols} FROM {source}')  # noqa: S608 quoted identifiers
-    return inserts
+def check_unique(client, model: type[DatasetModel]) -> None:
+    """Fail when the view's RocksDB key repeats in its landing table.
+
+    Raises:
+        ClickhouseLoadError: if it does.
+    """
+    try:
+        client.command(uniqueness_sql(model))
+    except ClickHouseError as e:
+        raise ClickhouseLoadError(f'loading {model.dataset_name} failed: {e}') from e
 
 
-def member_drops(loaded: list[type[DatasetModel]]) -> list[str]:
-    """A `DROP TABLE` for each member table."""
-    return [f'DROP TABLE {quote_identifier(member_table(model))}' for model in loaded]
+def build_served(client, model: type[DatasetModel]) -> None:
+    """The view's table and dictionaries from its filled landing table, which is then dropped."""
+    serving = model.clickhouse
+    assert serving is not None
+    if serving.engine == 'rocksdb':
+        check_unique(client, model)
+    for sql in served_sql(model):
+        logger.info(sql)
+        client.command(sql)
+    if serving.engine == 'mergetree':
+        _log_count(client, model.dataset_name)
+
+
+def _log_count(client, table: str) -> None:
+    count = client.command(f'SELECT count() FROM {quote_identifier(table)}')  # noqa: S608 quoted identifier
+    logger.info(f'{table}: {count} rows')
 
 
 class ClickhouseLoad(Task):
+    """Load a served view: its landing table from `view/<dataset_name>`, then its table and dictionaries."""
+
     def __init__(self, spec: ClickhouseLoadSpec, context: TaskContext) -> None:
         super().__init__(spec, context)
         self.spec: ClickhouseLoadSpec
         try:
-            self._entry = clickhouse_entries(self.spec.dataset_config_path)[self.spec.dataset]
+            self._model = served_views()[self.spec.dataset]
         except (KeyError, ValueError) as e:
             raise ClickhouseLoadError(f'unable to load config for {self.spec.dataset}: {e}') from e
-        self._table_name = self._entry['table']
-        self._input_dir = self._entry.get('input_dir')
-        self._models = self._entry.get('models')
-        self._optional_models = set(self._entry.get('optional_models', []))
+        if self.spec.product not in self._model.products:
+            raise ClickhouseLoadError(f'{self.spec.dataset}: is not served for {self.spec.product}')
+        self._table_name = landing_table(self._model)
         self._file: Path | None = None  # the file being inserted
-        if (problem := source_problem(self._entry)) is not None:
-            raise ClickhouseLoadError(f'{self.spec.dataset}: {problem}')
-        self._declared = is_declared(self._entry)
-        if self._declared and not declarations(self._entry, self.spec.product)[0]:
-            raise ClickhouseLoadError(f'{self.spec.dataset}: declares no ClickHouse table for {self.spec.product}')
 
     @report
     def run(self) -> Task:
-        if self._models is not None:
-            ddl = dict(ddl_for(self._entry, self.spec.product))
-            member_files = self._member_files()
-            client = self._connect()
-            if self._declared:
-                self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
-            self._load_members(client, ddl, member_files)
-        else:
-            files = self._files(self._get_parquet_path(), False, self.spec.dataset)
-            client = self._connect()
-            ((_, create),) = ddl_for(self._entry, self.spec.product)
-            if self._declared:
-                self._run_logged(client, [f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC'])
-            self._create(client, create)
-            self._load_named(client, self.spec.dataset, self._table_name, files, create)
-        if self._declared:
-            self._build_declared(client)
+        files = self._files(self._get_parquet_path(), self.spec.dataset)
+        client = self._connect()
+        create = landing_ddl(self._model)
+        client.command(f'DROP TABLE IF EXISTS {quote_identifier(self._table_name)} SYNC')
+        logger.info(create)
+        client.command(create)
+        self._load_named(client, self.spec.dataset, self._table_name, files, create)
+        build_served(client, self._model)
         return self
 
     def _connect(self):
@@ -112,77 +102,11 @@ class ClickhouseLoad(Task):
         )
 
     @staticmethod
-    def _files(path: Path, optional: bool, name: str) -> list[Path]:
+    def _files(path: Path, name: str) -> list[Path]:
         files = sorted(path.glob('*.parquet'))
         if not files:
-            where = f'{path}/*.parquet'
-            if not optional:
-                raise ClickhouseLoadError(f'no parquet files for dataset {name} in {where}')
-            logger.warning(f'no parquet files for optional dataset {name} in {where}, loading none')
+            raise ClickhouseLoadError(f'no parquet files for dataset {name} in {path}/*.parquet')
         return files
-
-    def _member_files(self) -> dict[str, list[Path]]:
-        """Each member's files for the product, before any table is created; optional members with none left out."""
-        found = {}
-        for model in members(self._models, self.spec.product):
-            name = model.dataset_name
-            files = self._files(self._get_parquet_path() / name, name in self._optional_models, name)
-            if files:
-                found[name] = files
-        return found
-
-    def _load_members(self, client, ddl: dict[str, str], member_files: dict[str, list[Path]]) -> None:
-        """Each member into its own table, then all of them into the union table; the member tables are dropped."""
-        loaded = [m for m in members(self._models, self.spec.product) if m.dataset_name in member_files]
-        for model in loaded:
-            table, create = member_table(model), ddl[member_table(model)]
-            self._create(client, create)
-            self._load_named(client, model.dataset_name, table, member_files[model.dataset_name], create)
-        self._create(client, ddl[self._table_name])
-        inserts = union_inserts(self._table_name, loaded)
-        try:
-            self._run_all(client, inserts)
-        except ClickHouseError as e:
-            logger.warning(f'loading {self._table_name} failed ({e}); truncating it and inserting every member again')
-            client.command(f'TRUNCATE TABLE {quote_identifier(self._table_name)}')
-            self._run_all(client, inserts)
-        self._log_count(client, self._table_name)
-        for sql in member_drops(loaded):
-            client.command(sql)
-
-    def _build_declared(self, client) -> None:
-        """The entry's tables and dictionaries for the product, from the landing table, which is then dropped."""
-        tables, _ = declarations(self._entry, self.spec.product)
-        for table in tables:
-            if table.engine == 'rocksdb':
-                self._check_unique(client, table, entry_key(self._entry, self.spec.product), self._table_name)
-        self._run_logged(client, declared_sql(self._entry, self.spec.product))
-        for table in tables:
-            if table.engine == 'mergetree':
-                self._log_count(client, table.name)
-
-    @staticmethod
-    def _check_unique(client, table, key: str, landing: str) -> None:
-        try:
-            client.command(uniqueness_sql(table, key, landing))
-        except ClickHouseError as e:
-            raise ClickhouseLoadError(f'loading {table.name} failed: {e}') from e
-
-    @staticmethod
-    def _run_logged(client, statements: list[str]) -> None:
-        for sql in statements:
-            logger.info(sql)
-            client.command(sql)
-
-    @staticmethod
-    def _run_all(client, statements: list[str]) -> None:
-        for sql in statements:
-            client.command(sql)
-
-    @staticmethod
-    def _create(client, sql: str) -> None:
-        logger.info(sql)
-        client.command(sql)
 
     def _load_named(self, client, name: str, table: str, files: list[Path], create: str) -> None:
         """`_load`; an error the retry does not clear names the dataset, the file and the generated table."""
@@ -200,12 +124,7 @@ class ClickhouseLoad(Task):
             logger.warning(f'loading {table} failed ({e}); truncating it and loading every file again')
             client.command(f'TRUNCATE TABLE {quote_identifier(table)}')
             self._insert(client, table, files)
-        self._log_count(client, table)
-
-    @staticmethod
-    def _log_count(client, table: str) -> None:
-        count = client.command(f'SELECT count() FROM {quote_identifier(table)}')  # noqa: S608 quoted identifier
-        logger.info(f'{table}: {count} rows')
+        _log_count(client, table)
 
     def _insert(self, client, table: str, files: list[Path]) -> None:
         for file in files:
@@ -214,4 +133,4 @@ class ClickhouseLoad(Task):
             insert_file(client, table, str(file), fmt='Parquet', settings=INSERT_SETTINGS)
 
     def _get_parquet_path(self) -> Path:
-        return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{self._input_dir}')
+        return Path(f'{self.context.config.work_path}/{self.spec.data_dir_parent}/{input_dir(self._model)}')

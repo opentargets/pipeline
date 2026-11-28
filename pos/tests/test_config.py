@@ -2,25 +2,15 @@
 
 import re
 import sys
-from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
 import yaml
 from loguru import logger
 from ot_datamodels.discovery import discover_models
-from otter.scratchpad.model import Scratchpad
-from otter.tasks.explode import ExplodeSpec
 
 from pos import core
-from pos.clickhouse_ddl import (
-    clickhouse_entries,
-    declarations,
-    entry_model,
-    is_declared,
-    served_entries,
-    source_problem,
-)
+from pos.clickhouse_ddl import input_dir, served_sql, served_views
 from pos.run import PRODUCTS, parse_release_uri
 from pos.tasks.clickhouse_load import ClickhouseLoadSpec
 from pos.tasks.clickhouse_load_views import ClickhouseLoadViewsError, ClickhouseLoadViewsSpec, load_spec, view_loads
@@ -35,8 +25,8 @@ BACKEND_GUARDS = {
     'backend_opensearch': 'open_search_prepare cluster settings',
 }
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
-#: the clickhouse entries: datasets.yaml's and the served views'
-CLICKHOUSE = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
+#: the served views
+CLICKHOUSE = served_views()
 SERVED_LOADS = 'clickhouse_load_views load served views'
 
 
@@ -125,7 +115,7 @@ def _loaded(step: str, task_type: str) -> set[str]:
     loaded = set()
     for task in CONFIG['steps'][step]:
         if task_type == 'clickhouse_load' and task['name'].split(' ')[0] == 'clickhouse_load_views':
-            loaded |= set(served_entries()) - set(task.get('exclude', []))
+            loaded |= set(served_views()) - set(task.get('exclude', []))
         for spec in [task, *task.get('do', [])]:
             if spec['name'].split(' ')[0] == task_type:
                 loaded |= set(task['foreach']) if spec['dataset'] == '${each}' else {spec['dataset']}
@@ -231,21 +221,15 @@ def test_every_clickhouse_load_passes_the_product():
 
 
 def _built_loads(runner) -> list[ClickhouseLoadSpec]:
-    """Every `clickhouse_load` spec of the step as the registry builds it, explode children as `explode` makes them."""
+    """Every `clickhouse_load` spec of the step as the registry builds it, served-view children as their task makes
+    them."""
     built = []
     for spec in runner.specs:
         top = runner.task_registry.build(spec).spec
         if isinstance(top, ClickhouseLoadViewsSpec):
             built += [runner.task_registry.build(load_spec(top, v)).spec for v in view_loads(top.product, top.exclude)]
-            continue
-        if not isinstance(top, ExplodeSpec):
+        else:
             built.append(top)
-            continue
-        for each in top.foreach:
-            for child in top.do:
-                pad = Scratchpad({})
-                pad.store(top.each_placeholder, each)
-                built.append(runner.task_registry.build(child.model_validate(pad.replace_dict(child.model_dump()))).spec)
     return [s for s in built if isinstance(s, ClickhouseLoadSpec)]
 
 
@@ -254,19 +238,17 @@ def test_every_clickhouse_load_builds_with_the_product(load):
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         loads = _built_loads(runner)
-        # the served views (Platform 37, PPP 39, colocalisation included) and the three datasets.yaml entries
-        assert len(loads) == {'platform': 37, 'ppp': 39}[product] + 3
+        # the served views, colocalisation included
+        assert len(loads) == {'platform': 83, 'ppp': 91}[product]
         assert {s.product for s in loads} == {product}
 
 
-@pytest.mark.parametrize('where', ['top', 'explode'])
+@pytest.mark.parametrize('where', ['top', 'served'])
 def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
     config = yaml.safe_load((ROOT / 'config' / 'config.yaml').read_text())
     tasks = config['steps']['backend_clickhouse']
-    if where == 'explode':
-        explode = next(t for t in tasks if t['name'].startswith('explode '))
-        tasks = explode['do']
-    first = next(t for t in tasks if t['name'].startswith('clickhouse_load '))
+    prefix = 'clickhouse_load ' if where == 'top' else 'clickhouse_load_views '
+    first = next(t for t in tasks if t['name'].startswith(prefix))
     del first['product']
     path = tmp_path / 'config.yaml'
     path.write_text(yaml.safe_dump(config, sort_keys=False))
@@ -276,24 +258,11 @@ def test_a_clickhouse_load_without_the_product_fails(load, tmp_path, where):
     assert any('product: Field required' in line for line in lines)
 
 
-def test_clickhouse_entries_have_one_of_model_and_models():
-    problems = {name: source_problem(entry) for name, entry in CLICKHOUSE.items()}
-    assert not {name: problem for name, problem in problems.items() if problem}
-
-
-def test_clickhouse_models_are_datasets():
+def test_every_served_view_loads_from_its_view_folder():
     models = discover_models()
-    for name, entry in CLICKHOUSE.items():
-        input_dir = entry.get('input_dir', '')
-        for prefix in ('output/', 'view/'):
-            if input_dir.startswith(prefix) and input_dir.removeprefix(prefix) in models:
-                assert entry.get('model') == input_dir.removeprefix(prefix), f'{name}: {input_dir} has a model'
-        if 'model' in entry:
-            assert entry['model'] in models, name
-        if 'models' in entry:
-            assert any(fnmatch(m, entry['models']) for m in models), name
-        for optional in entry.get('optional_models', []):
-            assert optional in models and fnmatch(optional, entry.get('models', '')), f'{name}: {optional}'
+    for name, model in CLICKHOUSE.items():
+        assert models[name] is model
+        assert input_dir(model) == f'view/{name}'
 
 
 def test_no_hand_written_clickhouse_sql():
@@ -301,58 +270,72 @@ def test_no_hand_written_clickhouse_sql():
     assert found == ['config.d', 'users.d']
 
 
-DECLARED_LOADS = 'explode load declared datasets'
-
-
-def test_undeclared_loads_wait_for_the_declared_ones():
-    """Every load of an undeclared dataset requires the declared explode and the served views' loads, directly or
-    through another task; a declared dataset outside them is product-gated or waits for both too."""
+def test_every_load_waits_for_the_served_views_or_is_their_task():
+    """Colocalisation, the one load outside the served views' task, requires it, so it loads alone after it."""
     tasks = {t['name']: t for t in CONFIG['steps']['backend_clickhouse']}
-    assert all(is_declared(CLICKHOUSE[d]) for d in tasks[DECLARED_LOADS]['foreach'])
-    assert set(tasks[SERVED_LOADS]['requires']) == set(tasks[DECLARED_LOADS]['requires'])
-
-    def waits(name: str, on: str) -> bool:
-        requires = tasks[name].get('requires', [])
-        return on in requires or any(waits(r, on) for r in requires if r in tasks)
-
+    assert not [name for name in tasks if name.startswith('explode ')]
     for name, task in tasks.items():
-        if name in {DECLARED_LOADS, SERVED_LOADS} or not name.startswith(('clickhouse_load', 'explode ')):
-            continue
-        both = waits(name, DECLARED_LOADS) and waits(name, SERVED_LOADS)
-        datasets = task.get('foreach', [task.get('dataset')])
-        if all(is_declared(CLICKHOUSE[d]) for d in datasets):
-            assert task.get('products') or both, f'{name}: a declared dataset outside {DECLARED_LOADS}'
-            continue
-        assert both, f'{name} does not wait for {DECLARED_LOADS} and {SERVED_LOADS}'
+        if name.startswith('clickhouse_load '):
+            assert task.get('requires') == [SERVED_LOADS], name
 
 
 #: The served views each product loads in the served views' task: every view of the product but colocalisation.
 VIEW_LOADS = [
     'association_otf_disease_view', 'association_otf_target_view', 'baseline_expression_view',
-    'biosample_view', 'clinical_report_view', 'coding_variant_by_target_view', 'coding_variant_by_variant_view',
-    'credible_set_locus_view', 'credible_set_view', 'disease_hpo_view', 'disease_phenotype_by_disease_view',
-    'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view', 'drug_warning_by_drug_view',
-    'enhancer_to_gene_view', 'go_view', 'interaction_evidence_view', 'interaction_view',
+    'biosample_view', 'clinical_indication_by_disease_view', 'clinical_indication_by_drug_view',
+    'clinical_report_view', 'clinical_target_by_target_view', 'coding_variant_by_target_view',
+    'coding_variant_by_variant_view', 'credible_set_locus_view', 'credible_set_view', 'disease_hpo_view',
+    'disease_phenotype_by_disease_view', 'disease_view', 'drug_mechanism_of_action_by_drug_view', 'drug_view',
+    'drug_warning_by_drug_view', 'enhancer_to_gene_view',
+    'evidence_cancer_biomarkers_by_disease_and_target_view', 'evidence_cancer_biomarkers_view',
+    'evidence_cancer_gene_census_by_disease_and_target_view', 'evidence_cancer_gene_census_view',
+    'evidence_clingen_by_disease_and_target_view', 'evidence_clingen_view',
+    'evidence_clinical_precedence_by_disease_and_target_view', 'evidence_clinical_precedence_view',
+    'evidence_crispr_by_disease_and_target_view', 'evidence_crispr_screen_by_disease_and_target_view',
+    'evidence_crispr_screen_view', 'evidence_crispr_view',
+    'evidence_europepmc_by_disease_and_target_view', 'evidence_europepmc_view',
+    'evidence_eva_by_disease_and_target_view', 'evidence_eva_by_variant_view',
+    'evidence_eva_somatic_by_disease_and_target_view', 'evidence_eva_somatic_by_variant_view',
+    'evidence_eva_somatic_view', 'evidence_eva_view',
+    'evidence_expression_atlas_by_disease_and_target_view', 'evidence_expression_atlas_view',
+    'evidence_gene2phenotype_by_disease_and_target_view', 'evidence_gene2phenotype_view',
+    'evidence_gene_burden_by_disease_and_target_view', 'evidence_gene_burden_view',
+    'evidence_genomics_england_by_disease_and_target_view', 'evidence_genomics_england_view',
+    'evidence_gwas_credible_sets_by_disease_and_target_view', 'evidence_gwas_credible_sets_view',
+    'evidence_impc_by_disease_and_target_view', 'evidence_impc_view',
+    'evidence_intogen_by_disease_and_target_view', 'evidence_intogen_view',
+    'evidence_orphanet_by_disease_and_target_view', 'evidence_orphanet_view',
+    'evidence_reactome_by_disease_and_target_view', 'evidence_reactome_view',
+    'evidence_uniprot_literature_by_disease_and_target_view', 'evidence_uniprot_literature_view',
+    'evidence_uniprot_variants_by_disease_and_target_view', 'evidence_uniprot_variants_by_variant_view',
+    'evidence_uniprot_variants_view',
+    'go_view', 'interaction_evidence_view', 'interaction_view',
     'l2g_prediction_by_credible_set_view', 'literature_entity_lut_view', 'literature_vector_view',
     'mouse_phenotype_by_target_view', 'pharmacogenomics_view', 'pharmacovigilance_by_drug_view', 'so_view',
     'study_credible_set_view', 'study_view', 'target_by_region_view', 'target_credible_set_view',
     'target_essentiality_view', 'target_prioritisation_view', 'target_view', 'transcript_view',
     'variant_credible_set_view', 'variant_view',
 ]  # fmt: skip
+#: The PPP-only views.
+PPP_ONLY = [
+    'association_timeseries_view', 'otar_view',
+    'evidence_encore_by_disease_and_target_view', 'evidence_encore_view',
+    'evidence_ot_crispr_by_disease_and_target_view', 'evidence_ot_crispr_view',
+    'evidence_ot_crispr_validation_by_disease_and_target_view', 'evidence_ot_crispr_validation_view',
+]  # fmt: skip
 
 
 def test_the_served_views_each_product_loads(load):
     _load, _ = load
-    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, 'association_timeseries_view', 'otar_view'])}
+    expected = {'platform': VIEW_LOADS, 'ppp': sorted([*VIEW_LOADS, *PPP_ONLY])}
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         runner, _ = _load('backend_clickhouse', run=run)
         (top,) = [s for s in (runner.task_registry.build(s).spec for s in runner.specs) if s.name == SERVED_LOADS]
         assert isinstance(top, ClickhouseLoadViewsSpec)
         assert view_loads(top.product, top.exclude) == expected[product]
-        assert len(served_entries(product)) == {'platform': 37, 'ppp': 39}[product]
+        assert len(served_views(product)) == {'platform': 83, 'ppp': 91}[product]
         loaded = {s.dataset for s in _built_loads(runner)}
-        assert set(served_entries(product)) <= loaded
-        assert not set(served_entries()) - set(served_entries(product)) & loaded
+        assert loaded == set(served_views(product))
 
 
 def test_served_loads_exclude_only_served_views():
@@ -360,25 +343,20 @@ def test_served_loads_exclude_only_served_views():
         view_loads('platform', ['nope'])
 
 
-def test_a_declared_model_loads_only_for_its_products(load):
-    """A declared model builds no table for a product it lacks, so its load runs only for its products."""
+def test_a_view_loads_only_for_its_products(load):
     _load, _ = load
     for run, product in (('platform-2612-3', 'platform'), ('ppp-2612-1', 'ppp')):
         loaded = {s.dataset for s in _built_loads(_load('backend_clickhouse', run=run)[0])}
         for name in loaded:
-            entry = CLICKHOUSE[name]
-            model = entry_model(entry)
-            if model is not None and is_declared(entry):
-                assert product in model.products, f'{name} loads for {product}, its model is {model.products}'
-        assert ('otar_view' in loaded) == (product == 'ppp')
-        assert ('association_timeseries_view' in loaded) == (product == 'ppp')
+            assert product in CLICKHOUSE[name].products, f'{name} loads for {product}'
+        assert all((name in loaded) == (product == 'ppp') for name in PPP_ONLY)
 
 
-@pytest.mark.parametrize('product', sorted(PRODUCTS))
-def test_declared_names_are_unique(product):
-    """A table or dictionary name declared twice would drop the first one's table at load time."""
+def test_served_table_and_dictionary_names_are_unique():
+    """A table or dictionary name served twice would drop the first one's table at load time."""
     names = []
-    for entry in CLICKHOUSE.values():
-        tables, dictionaries = declarations(entry, product)
-        names += [t.name for t in tables] + [d.name for d in dictionaries]
+    for name, model in CLICKHOUSE.items():
+        assert model.clickhouse is not None
+        names += [name] + [d.name for d in model.clickhouse.dictionaries]
+        assert served_sql(model)
     assert len(names) == len(set(names)), sorted(n for n in set(names) if names.count(n) > 1)

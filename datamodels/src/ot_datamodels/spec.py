@@ -16,7 +16,7 @@ Only a strict subset of Pydantic is supported, and anything outside it raises
   `min_length`/`max_length` on lists -- on a column, a struct field or a list element alike
   (`list[Annotated[str, Field(pattern=...)]]`);
 * markers: `PrimaryKey` and `Note` on a top-level column (`Note` on a struct field too),
-  `Reference`/`Bioregistry`/`PolarsDtype`/`ClickHouseType` on any primitive value;
+  `Reference`/`Bioregistry`/`PolarsDtype` on any primitive value;
 * a default on a top-level column, making it optional (the column may be absent).
 
 Everything Pydantic validates in code rather than declaratively -- validators, serializers,
@@ -40,7 +40,6 @@ from pydantic.fields import FieldInfo
 
 from ot_datamodels.base import (
     Bioregistry,
-    ClickHouseType,
     DatasetModel,
     Note,
     PolarsDtype,
@@ -132,7 +131,6 @@ class Node:
         fields: the fields of a struct.
         reference: the dataset/column the value resolves against, if any.
         bioregistry: the identifier registry the value belongs to, if any.
-        clickhouse: the ClickHouse type of the non-null value, if it is set explicitly.
     """
 
     kind: Literal['primitive', 'list', 'struct']
@@ -143,7 +141,6 @@ class Node:
     fields: tuple['FieldSpec', ...] = ()
     reference: Reference | None = None
     bioregistry: str | None = None
-    clickhouse: str | None = None
 
 
 @dataclass(frozen=True)
@@ -299,13 +296,11 @@ def _node(annotation: Any, metadata: list[Any], *, path: str, seen: tuple[type, 
         nullable = True
         annotation, metadata = _unwrap_annotated(non_null[0], metadata, path)
 
-    constraints, reference, bioregistry, dtype_override, clickhouse = _classify(metadata, path)
+    constraints, reference, bioregistry, dtype_override = _classify(metadata, path)
 
     if annotation is list or get_origin(annotation) is list:
-        if any(marker is not None for marker in (dtype_override, reference, bioregistry, clickhouse)):
-            raise SchemaDefinitionError(
-                f'{path}: put PolarsDtype/Reference/Bioregistry/ClickHouseType on the list element type'
-            )
+        if any(marker is not None for marker in (dtype_override, reference, bioregistry)):
+            raise SchemaDefinitionError(f'{path}: put PolarsDtype/Reference/Bioregistry on the list element type')
         _accept_only(constraints, _LIST_CONSTRAINTS, path, 'a list')
         element = _node(_single_arg(annotation, path), [], path=f'{path}[]', seen=seen)
         return Node('list', pl.List(element.dtype), nullable, constraints, element=element)
@@ -327,16 +322,13 @@ def _node(annotation: Any, metadata: list[Any], *, path: str, seen: tuple[type, 
             Constraints(allowed=values),
             reference=reference,
             bioregistry=bioregistry,
-            clickhouse=clickhouse,
         )
 
     if isinstance(annotation, type) and issubclass(annotation, StructModel):
         if annotation in seen:
             raise SchemaDefinitionError(f'{path}: {annotation.__name__} contains itself')
-        if any(marker is not None for marker in (dtype_override, reference, bioregistry, clickhouse)):
-            raise SchemaDefinitionError(
-                f'{path}: PolarsDtype/Reference/Bioregistry/ClickHouseType do not apply to a struct'
-            )
+        if any(marker is not None for marker in (dtype_override, reference, bioregistry)):
+            raise SchemaDefinitionError(f'{path}: PolarsDtype/Reference/Bioregistry do not apply to a struct')
         _accept_only(constraints, frozenset(), path, 'a struct')
         fields = _fields(annotation, prefix=f'{path}/', top_level=False, seen=(*seen, annotation))
         dtype = pl.Struct([pl.Field(f.name, f.node.dtype) for f in fields])
@@ -362,7 +354,6 @@ def _node(annotation: Any, metadata: list[Any], *, path: str, seen: tuple[type, 
             constraints,
             reference=reference,
             bioregistry=bioregistry,
-            clickhouse=clickhouse,
         )
 
     raise SchemaDefinitionError(f'{path}: unsupported type {annotation!r}')
@@ -385,13 +376,12 @@ def _unwrap_annotated(annotation: Any, metadata: list[Any], path: str) -> tuple[
 
 def _classify(
     metadata: list[Any], path: str
-) -> tuple[Constraints, Reference | None, str | None, pl.DataType | type[pl.DataType] | None, str | None]:
+) -> tuple[Constraints, Reference | None, str | None, pl.DataType | type[pl.DataType] | None]:
     """Sort one value's metadata into constraints and markers, rejecting anything unrecognised."""
     constraints: dict[str, Any] = {}
     reference: Reference | None = None
     bioregistry: str | None = None
     dtype: pl.DataType | type[pl.DataType] | None = None
-    clickhouse: str | None = None
 
     def put(name: str, value: Any) -> None:
         if name in constraints:
@@ -423,17 +413,13 @@ def _classify(
                 bioregistry = prefix
             case PolarsDtype(dtype=override) if dtype is None:
                 dtype = override
-            case ClickHouseType(type=name) if not name.strip():
-                raise SchemaDefinitionError(f'{path}: ClickHouseType must not be empty')
-            case ClickHouseType(type=name) if clickhouse is None:
-                clickhouse = name
-            case Reference() | Bioregistry() | PolarsDtype() | ClickHouseType():
+            case Reference() | Bioregistry() | PolarsDtype():
                 raise SchemaDefinitionError(f'{path}: {type(item).__name__} given more than once')
             case PrimaryKey() | Note():
                 raise SchemaDefinitionError(f'{path}: {type(item).__name__} must annotate the field itself')
             case _:
                 raise SchemaDefinitionError(f'{path}: unsupported annotation {item!r}')
-    return Constraints(**constraints), reference, bioregistry, dtype, clickhouse
+    return Constraints(**constraints), reference, bioregistry, dtype
 
 
 def _accept_only(constraints: Constraints, accepted: frozenset[str], path: str, what: str) -> None:

@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
@@ -19,13 +19,11 @@ class MutatedSamples(StructModel):
     functionalConsequenceId: Annotated[str, Reference('so', 'id')] | None = Field(
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
-    numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
+    numberMutatedSamples: int = Field(
         ge=0, le=4294967295, description='Number of samples of the IntOGen cohort in which the target is mutated'
     )
-    numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Number of samples of the IntOGen cohort tested'
-    )
-    numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] | None = Field(
+    numberSamplesTested: int = Field(ge=0, le=4294967295, description='Number of samples of the IntOGen cohort tested')
+    numberSamplesWithMutationType: int | None = Field(
         ge=0,
         le=4294967295,
         description=('Number of samples of the IntOGen cohort with a mutation of the given type in the target'),
@@ -72,7 +70,7 @@ class EvidenceIntogen(DatasetModel):
         'directionOnTarget': 'GoF',
     }
 
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
@@ -104,7 +102,7 @@ class EvidenceIntogen(DatasetModel):
         description='PubMed identifiers of the publications describing the cohort'
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
     publicationDate: str | None = Field(

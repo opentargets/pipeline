@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from pts_view_schemas import ASSOCIATION_TIMESERIES, TARGET_VIEW
 from test_copy_views import COPY_VIEWS
+from test_evidence_views import SPLIT_VIEWS
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -54,6 +55,7 @@ from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import MECHANISM_FIELDS, DrugMechanismOfActionByDrugView
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView
+from ot_datamodels.views.evidence_views import EVIDENCE_VIEWS
 from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
 from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView
@@ -769,7 +771,7 @@ def test_discover_models_is_the_outputs_and_the_views() -> None:
     outputs, models = discover_datasets(), discover_models()
 
     assert not set(outputs) & set(VIEWS)
-    assert models == outputs | VIEWS | COPY_VIEWS
+    assert models == outputs | VIEWS | COPY_VIEWS | SPLIT_VIEWS | {m.dataset_name: m for m in EVIDENCE_VIEWS}
 
 
 def test_pharmacogenomics_id_leads_and_keys_the_output() -> None:
@@ -976,7 +978,6 @@ def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[Dat
         'alternateAminoAcid',
     ):
         assert f'proteinCodingCoords[]/{path}' not in _types(model), path
-        assert nodes[f'proteinCodingCoords[]/{path}'].clickhouse is None, path
 
 
 #: the small compute views: (view, key, items column, items' output, output fields served in order)
@@ -1073,11 +1074,11 @@ def test_transcript_view_is_the_served_transcript() -> None:
     assert nodes['transcripts'].constraints.min_length == 1
     biotype = nodes['transcripts[]/biotype']
     assert biotype.dtype == pl.Enum(get_args(v.TranscriptBiotype))
-    assert (biotype.clickhouse, biotype.nullable) == (None, False)
+    assert not biotype.nullable
     assert 'transcripts[]/biotype' not in _types(TranscriptView)
     for field, vocabulary in (('label', v.TranscriptFlagLabel), ('value', v.TranscriptFlagValue)):
         node = nodes[f'transcripts[]/flags[]/{field}']
-        assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, True), field
+        assert (node.dtype, node.nullable) == (pl.String(), True), field
         assert f'transcripts[]/flags[]/{field}' not in _types(TranscriptView), field
         assert node.constraints.allowed == get_args(vocabulary), field
     assert discover_models()['transcript_view'] is TranscriptView
@@ -1110,7 +1111,7 @@ def test_target_prioritisation_view_items_are_strings() -> None:
     assert [f.name for f in dataset_spec(TargetPrioritisationView).fields] == ['targetId', 'items']
     assert [f.name for f in nodes['items[]'].fields] == ['key', 'value']
     key, value = nodes['items[]/key'], nodes['items[]/value']
-    assert (key.dtype, key.clickhouse, value.dtype, value.clickhouse) == (pl.String(), None, pl.String(), None)
+    assert (key.dtype, value.dtype) == (pl.String(), pl.String())
     assert not {'items[]/key', 'items[]/value'} & set(_types(TargetPrioritisationView))
     assert key.constraints.allowed == (*PRIORITISATION_ORDER, 'geneEssentiality')
     columns = {f.name for f in dataset_spec(TargetPrioritisation).fields} - {'targetId'}
@@ -1156,7 +1157,7 @@ def test_colocalisation_method_is_served_as_a_string() -> None:
     source = _nodes(Colocalisation)['colocalisationMethod']
     node = _nodes(ColocalisationByCredibleSetView)['colocalisation[]/colocalisationMethod']
     assert source.dtype == pl.Enum(list(get_args(v.ColocalisationMethod)))
-    assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, False)
+    assert (node.dtype, node.nullable) == (pl.String(), False)
     assert 'colocalisation[]/colocalisationMethod' not in _types(ColocalisationByCredibleSetView)
     assert node.constraints.allowed == get_args(v.ColocalisationMethod)
 
@@ -1226,7 +1227,7 @@ def test_locus_rows_are_credible_set_variants() -> None:
     assert [f.name for f in nodes['locus[]'].fields] == LOCUS_FIELDS
     assert nodes['locus'].constraints.min_length == 1
     element = nodes['locus[]/qualityControls[]']
-    assert (element.dtype, element.clickhouse) == (pl.Enum(get_args(v.VariantQualityControl)), None)
+    assert element.dtype == pl.Enum(get_args(v.VariantQualityControl))
     assert 'locus[]/qualityControls[]' not in _types(CredibleSetLocusView)
 
 
@@ -1252,5 +1253,6 @@ def test_a_view_is_named_view(name):
     """A view's `dataset_name` ends in `_view`, its module is named after it and its class ends in `View`."""
     model = discover_datasets(VIEWS_PACKAGE)[name]
     assert name.endswith('_view')
-    assert model.__module__ == f'{VIEWS_PACKAGE}.{name}'
+    module = 'evidence_views' if model in EVIDENCE_VIEWS else name
+    assert model.__module__ == f'{VIEWS_PACKAGE}.{module}'
     assert model.__name__.endswith('View')

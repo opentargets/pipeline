@@ -9,7 +9,6 @@ from pydantic import ConfigDict, Field, computed_field, create_model, field_vali
 from pydantic.fields import FieldInfo
 
 from ot_datamodels import (
-    ClickHouseType,
     DatasetModel,
     Note,
     PolarsDtype,
@@ -297,51 +296,11 @@ def test_constraints_as_dict_lists_only_what_is_set() -> None:
     assert _node(_Plain).constraints.as_dict() == {}
 
 
-def test_clickhouse_type_on_primitive() -> None:
-    node = _node(Annotated[int, ClickHouseType('UInt32')])
-
-    assert node.clickhouse == 'UInt32'
-    assert node.dtype == pl.Int64()
-    assert _node(int).clickhouse is None
-
-
-def test_clickhouse_type_on_a_literal() -> None:
-    node = _node(Annotated[Literal[-1, 0, 1], ClickHouseType("Enum8('-1' = -1, '0' = 0, '1' = 1)")])
-
-    assert node.clickhouse == "Enum8('-1' = -1, '0' = 0, '1' = 1)"
-
-
-def test_clickhouse_type_on_list_element() -> None:
-    node = _node(list[Annotated[str, ClickHouseType('LowCardinality(String)')]])
-
-    assert node.clickhouse is None
-    assert node.element is not None
-    assert node.element.clickhouse == 'LowCardinality(String)'
-
-
-def test_clickhouse_type_on_list_rejected() -> None:
-    with pytest.raises(SchemaDefinitionError, match='on the list element type'):
-        _node(Annotated[list[str], ClickHouseType('Array(String)')])
-
-
-def test_clickhouse_type_on_struct_rejected() -> None:
+def test_a_marker_on_a_struct_is_rejected() -> None:
     with pytest.raises(SchemaDefinitionError, match='do not apply to a struct'):
-        _node(Annotated[_Pair, ClickHouseType('Tuple(String, Int32)')])
+        _node(Annotated[_Pair, Reference('a', 'b')])
 
 
-def test_clickhouse_type_twice_rejected() -> None:
-    with pytest.raises(SchemaDefinitionError, match='ClickHouseType given more than once'):
-        _node(Annotated[int, ClickHouseType('UInt32'), ClickHouseType('UInt64')])
-
-
-@pytest.mark.parametrize('empty', ['', '  '])
-def test_clickhouse_type_empty_rejected(empty: str) -> None:
-    with pytest.raises(SchemaDefinitionError, match='ClickHouseType must not be empty'):
-        _node(Annotated[int, ClickHouseType(empty)])
-
-
-def test_clickhouse_type_with_polars_dtype() -> None:
-    node = _node(Annotated[int, PolarsDtype(pl.UInt32), ClickHouseType('UInt32')])
-
-    assert node.dtype == pl.UInt32()
-    assert node.clickhouse == 'UInt32'
+def test_a_marker_twice_is_rejected() -> None:
+    with pytest.raises(SchemaDefinitionError, match='PolarsDtype given more than once'):
+        _node(Annotated[int, PolarsDtype(pl.Int32), PolarsDtype(pl.Int16)])

@@ -79,9 +79,9 @@ INTEGER_RANGES = {
 
 
 def _clickhouse_type(model: type[DatasetModel], path: str, node: Node) -> str | None:
-    """A served view's `column_types` entry, else the node's marker."""
+    """A served view's `column_types` entry."""
     types = model.clickhouse.column_types if model.clickhouse is not None else {}
-    return types.get(path, node.clickhouse)
+    return types.get(path)
 
 
 INTEGER_MARKERS = [
