@@ -156,6 +156,30 @@ class TestAnnotateMolecules:
         )
         assert [x['source'] for x in out['CHEMBL1']['crossReferences']] == ['drugbank', 'UNII', 'NCIt']
 
+    def test_a_label_another_family_carries_is_not_added(self) -> None:
+        # CHEMBL9 is the named record of the INN; CHEMBL1 an unnamed record UNII matches by structure
+        out = self._annotate([
+            {'id': 'CHEMBL9', 'inchiKey': 'KEY-STEREO', 'name': 'DARAXONRASIB'},
+            {'id': 'CHEMBL1', 'inchiKey': 'KEY-DARA'},
+        ])
+        assert out['CHEMBL1']['name'] is None
+        assert out['CHEMBL1']['synonyms'] == _labels(('RMC-6236', 'UNII'))
+        assert [x['source'] for x in out['CHEMBL1']['crossReferences']] == ['UNII', 'NCIt']
+        assert out['CHEMBL9']['synonyms'] is None  # unmatched: unchanged
+
+    def test_a_label_in_the_molecules_own_family_is_still_added(self) -> None:
+        out = self._annotate([
+            {'id': 'CHEMBL9', 'name': 'DARAXONRASIB'},
+            {'id': 'CHEMBL1', 'inchiKey': 'KEY-DARA', 'parentId': 'CHEMBL9'},
+        ])
+        assert out['CHEMBL1']['name'] == 'DARAXONRASIB'
+
+    def test_a_label_unii_gives_two_families_is_not_added(self) -> None:
+        # two ChEMBL records share the structure, in different families
+        out = self._annotate([{'id': 'CHEMBL1', 'inchiKey': 'KEY-DARA'}, {'id': 'CHEMBL2', 'inchiKey': 'KEY-DARA'}])
+        assert out['CHEMBL1']['name'] is None and out['CHEMBL2']['name'] is None
+        assert out['CHEMBL1']['synonyms'] == [] and out['CHEMBL1']['tradeNames'] == []
+
     def test_a_molecule_without_a_match_is_unchanged(self) -> None:
         out = self._annotate([
             {'id': 'CHEMBL2', 'inchiKey': 'KEY-OTHER', 'synonyms': _labels(('x', 'ChEMBL'))},

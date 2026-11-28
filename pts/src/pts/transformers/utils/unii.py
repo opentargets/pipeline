@@ -6,7 +6,8 @@ that carry an INN in two ways:
 
 - :func:`annotate_molecules` matches them to molecules by standard InChIKey and adds the
   INN as the name of an unnamed molecule, the official names and codes as synonyms, the
-  brand names as trade names, and the UNII and NCIt ids as cross-references.
+  brand names as trade names, and the UNII and NCIt ids as cross-references. A label
+  another molecule family already carries is not added.
 - :func:`drop_foreign_inn_synonyms` removes a trial (AACT) synonym that is the INN of a
   substance another molecule family already carries.
 """
@@ -185,16 +186,38 @@ def _with_labels(molecules: pl.DataFrame, column: str, rows: pl.DataFrame) -> pl
     )
 
 
+def _blocked(molecules: pl.DataFrame, candidates: pl.DataFrame) -> pl.DataFrame:
+    """The (`id`, `key`) candidates that would give a label to a second molecule family.
+
+    A candidate is blocked when a molecule of another family already has the label (name,
+    synonym or trade name) or when another candidate gives it to another family.
+    """
+    families = molecules.select('id', family=pl.coalesce('parentId', 'id')).unique('id')
+    carried = pl.concat([
+        molecules.select('id', key=_norm(pl.col('name'))).drop_nulls('key'),
+        _labels(molecules, 'synonyms').select('id', 'key'),
+        _labels(molecules, 'tradeNames').select('id', 'key'),
+    ]).join(candidates.select('key').unique(), on='key', how='semi')
+    holders = pl.concat([carried, candidates.select('id', 'key')]).join(families, on='id').select('key', 'family')
+    shared = holders.unique().group_by('key').agg(pl.len().alias('n')).filter(pl.col('n') > 1).select('key')
+    return candidates.join(shared, on='key', how='semi').select('id', 'key').unique()
+
+
 def annotate_molecules(molecules: pl.DataFrame, annotations: pl.DataFrame) -> pl.DataFrame:
     """Add the UNII annotations of a molecule's InChIKey to it.
 
     A molecule without a ChEMBL name takes the INN, uppercased as ChEMBL names are.
     UNII labels a molecule already has (any source, case-insensitive) are not repeated;
-    the labels it has are kept as they are. A null `synonyms` or `tradeNames` comes
-    back empty.
+    the labels it has are kept as they are. The INN, a synonym or a trade name is not
+    added when that would put the label on two molecule families (the molecule, its
+    parent and the parent's other children): another family already carries it, or two
+    families match the substance; the merge of such duplicates is left to a later step.
+    The UNII and NCIt cross-references come from the structure match alone. A matched
+    molecule's null `synonyms` or `tradeNames` comes back empty; the other molecules
+    come back unchanged, after the matched ones.
 
     Args:
-        molecules: Molecules with id, inchiKey, name, synonyms, tradeNames and
+        molecules: Molecules with id, inchiKey, name, parentId, synonyms, tradeNames and
             crossReferences columns; `name` is null when ChEMBL has none.
         annotations: As returned by :func:`unii_annotations`.
 
@@ -204,21 +227,34 @@ def annotate_molecules(molecules: pl.DataFrame, annotations: pl.DataFrame) -> pl
     matched = (
         molecules.select('id', 'inchiKey').unique('id').join(annotations, on='inchiKey', how='inner', validate='m:1')
     )
+    candidates = (
+        pl
+        .concat([
+            matched.select('id', column=pl.lit('name'), label=pl.col('inn').str.to_uppercase()),
+            *(
+                matched.select('id', column=pl.lit(column), label=column).explode('label').drop_nulls('label')
+                for column in ('synonyms', 'tradeNames')
+            ),
+        ])
+        .with_columns(key=_norm(pl.col('label')))
+        .unique(['id', 'column', 'key'], keep='first', maintain_order=True)
+    )
+    candidates = candidates.join(_blocked(molecules, candidates), on=['id', 'key'], how='anti')
+
     columns = molecules.columns
-    out = molecules
+    # only the matched molecules' lists are rebuilt
+    is_matched = pl.col('id').is_in(matched['id'].implode())
+    out = molecules.filter(is_matched)
     for column in ('synonyms', 'tradeNames'):
         existing = _labels(out, column)
         new = (
-            matched
-            .select('id', label=column)
-            .explode('label')
-            .drop_nulls('label')
-            .with_columns(key=_norm(pl.col('label')))
-            .unique(['id', 'key'], keep='first', maintain_order=True)
+            candidates
+            .filter(pl.col('column') == column)
             .join(existing.select('id', 'key'), on=['id', 'key'], how='anti')
             .select('id', s=pl.struct('label', pl.lit(UNII_SOURCE).alias('source')))
         )
         out = _with_labels(out, column, pl.concat([existing.select('id', 's'), new]))
+    inn = candidates.filter(pl.col('column') == 'name').select('id', _inn='label').unique('id')
     xref = matched.select(
         'id',
         pl
@@ -231,10 +267,10 @@ def annotate_molecules(molecules: pl.DataFrame, annotations: pl.DataFrame) -> pl
         )
         .list.drop_nulls()
         .alias('_xref'),
-        pl.col('inn').str.to_uppercase().alias('_inn'),
     ).unique('id', maintain_order=True)
-    return (
+    out = (
         out
+        .join(inn, on='id', how='left', validate='m:1')
         .join(xref, on='id', how='left', validate='m:1')
         .with_columns(
             name=pl.coalesce('name', '_inn'),
@@ -245,6 +281,7 @@ def annotate_molecules(molecules: pl.DataFrame, annotations: pl.DataFrame) -> pl
         )
         .select(columns)
     )
+    return pl.concat([molecules.filter(~is_matched), out])
 
 
 def drop_foreign_inn_synonyms(molecules: pl.DataFrame, inns: pl.DataFrame) -> pl.DataFrame:
