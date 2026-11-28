@@ -1,29 +1,21 @@
-"""ClickHouse landing DDL generated from the `ot_datamodels` dataset models, and a parser for ClickHouse types."""
+"""The served views' ClickHouse SQL, generated from their `ot_datamodels` models, and a parser for ClickHouse types.
+
+A view model with `clickhouse = Serving(...)` is one table named after its `dataset_name`, built from the whole view:
+it lands in `<dataset_name>_log` from `view/<dataset_name>`, its table and dictionaries are built from the landing
+table, which is then dropped.
+"""
 
 import argparse
 import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from fnmatch import fnmatch
-from pathlib import Path
-from typing import Any
 
 import polars as pl
-import yaml
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import discover_datasets, discover_models
+from ot_datamodels.serving import ClickHouseDictionary, Serving
 from ot_datamodels.spec import Node, dataset_spec, walk
-
-from pos.clickhouse_tables import (
-    ClickHouseDictionary,
-    ClickHouseTable,
-    dictionary_problems,
-    entry_dictionaries,
-    entry_tables,
-    source_table,
-    table_problems,
-)
 
 ENUMS = frozenset({'Enum', 'Enum8', 'Enum16'})
 _POLARS_NAMES = {'Boolean': 'Bool'}
@@ -233,48 +225,6 @@ def columns(model: type[DatasetModel]) -> list[tuple[str, CHType]]:
     return [(f.name, _type(f.node, False, f.name, types)) for f in spec.fields]
 
 
-def _non_null(t: CHType) -> CHType:
-    element = _non_null(t.element) if t.element is not None else None
-    fields = tuple((n, _non_null(f)) for n, f in t.fields)
-    return replace(t, nullable=False, element=element, fields=fields)
-
-
-def _absent(t: CHType) -> CHType:
-    """The type of a column a member lacks: Nullable, all fields Nullable for a Tuple, unchanged for an Array."""
-    if t.name == 'Array':
-        return t
-    if t.name == 'Tuple':
-        return replace(t, fields=tuple((n, _absent(f)) for n, f in t.fields))
-    return replace(t, nullable=True)
-
-
-def _either_nullable(a: CHType, b: CHType) -> CHType:
-    """`a` (equal to `b` but for nullability), Nullable wherever either is."""
-    element = _either_nullable(a.element, b.element) if a.element is not None and b.element is not None else None
-    fields = tuple((n, _either_nullable(f, g)) for (n, f), (_, g) in zip(a.fields, b.fields, strict=True))
-    return replace(a, nullable=a.nullable or b.nullable, element=element, fields=fields)
-
-
-def union_columns(models: Sequence[type[DatasetModel]]) -> list[tuple[str, CHType]]:
-    """Every column of every model, first-seen order; Nullable where any model has it nullable or lacks it."""
-    per_model = [(m.dataset_name, dict(columns(m))) for m in models]
-    first: dict[str, tuple[str, CHType]] = {}
-    for name, cols in per_model:
-        for col, t in cols.items():
-            if col not in first:
-                first[col] = (name, t)
-                continue
-            seen_in, seen = first[col]
-            if _non_null(seen) != _non_null(t):
-                raise ValueError(f'column {col}: {seen_in} has {render(seen)}, {name} has {render(t)}')
-    out = []
-    for col, (_, t) in first.items():
-        for _, cols in per_model:
-            t = _either_nullable(t, cols.get(col) or _absent(t))
-        out.append((col, t))
-    return out
-
-
 def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = 'Log', *, replace: bool = False) -> str:
     """`CREATE TABLE IF NOT EXISTS` for the columns, identifiers backtick-quoted; plain `CREATE TABLE` for `replace`."""
     body = ', '.join(f'{_name(name)} {render(t)}' for name, t in cols)
@@ -282,62 +232,75 @@ def create_table(table: str, cols: Sequence[tuple[str, CHType]], engine: str = '
     return f'CREATE TABLE {exists}{_name(table)} ({body}) ENGINE = {engine}'
 
 
-def _primary_keys(models: Sequence[type[DatasetModel]]) -> dict[str, tuple[str, ...]]:
-    return {m.dataset_name: dataset_spec(m).primary_key for m in models}
+# served views
 
 
-def _disagreement(keys: Mapping[str, tuple[str, ...]]) -> str:
-    return 'members disagree on PrimaryKey: ' + ', '.join(f'{name} {key}' for name, key in sorted(keys.items()))
+def served_views(product: str | None = None) -> dict[str, type[DatasetModel]]:
+    """Every served view model (`clickhouse` set), by `dataset_name`; for `product`, only the views it loads.
+
+    Raises:
+        ValueError: if an output model declares `clickhouse`.
+    """
+    if outputs := sorted(name for name, model in discover_datasets().items() if model.clickhouse is not None):
+        raise ValueError(f'output models {outputs} declare clickhouse: only a view is served')
+    return {
+        name: model
+        for name, model in sorted(discover_models().items())
+        if model.clickhouse is not None and (product is None or product in model.products)
+    }
 
 
-def rocksdb_key(models: Sequence[type[DatasetModel]]) -> str:
-    """The RocksDB key of a table built from `models`: the one `PrimaryKey` column they all have."""
-    keys = _primary_keys(models)
-    shared = set(keys.values())
-    if len(shared) > 1:
-        raise ValueError(_disagreement(keys))
-    (key,) = shared or {()}
+def _serving(model: type[DatasetModel]) -> Serving:
+    if model.clickhouse is None:
+        raise ValueError(f'{model.dataset_name} is not a served view')
+    return model.clickhouse
+
+
+def landing_table(model: type[DatasetModel]) -> str:
+    """The landing table a view loads into: `<dataset_name>_log`."""
+    return f'{model.dataset_name}_log'
+
+
+def input_dir(model: type[DatasetModel]) -> str:
+    """The folder a view loads from, under the synced release data: `view/<dataset_name>`."""
+    return f'view/{model.dataset_name}'
+
+
+def landing_ddl(model: type[DatasetModel]) -> str:
+    """`CREATE TABLE` of the view's landing table, a Log table of its columns."""
+    return create_table(landing_table(model), columns(model))
+
+
+def rocksdb_key(model: type[DatasetModel]) -> str:
+    """The RocksDB key of a view's table: the model's one `PrimaryKey` column."""
+    key = dataset_spec(model).primary_key
     if len(key) != 1:
-        raise ValueError(f'{", ".join(sorted(keys))}: rocksdb needs one PrimaryKey column, found {key or "none"}')
+        raise ValueError(f'{model.dataset_name}: rocksdb needs one PrimaryKey column, found {key or "none"}')
     return key[0]
 
 
-def table_columns(table: ClickHouseTable, cols: Sequence[tuple[str, CHType]]) -> list[tuple[str, CHType]]:
-    """The table's columns from the dataset's `cols`: those in `columns` (all when None), in order."""
-    by_name = dict(cols)
-    return list(cols) if table.columns is None else [(name, by_name[name]) for name in table.columns]
+def table_sql(model: type[DatasetModel]) -> list[str]:
+    """The statements that rebuild a view's table, named `dataset_name`, from its landing table.
 
-
-def table_sql(
-    table: ClickHouseTable, cols: Sequence[tuple[str, CHType]], landing: str, key: str | None = None
-) -> list[str]:
-    """The statements that rebuild a declared table from its landing table; `cols` are the dataset's.
-
-    A RocksDB table is keyed on `key`. A MergeTree table's primary key is its sort key; it allows a nullable key
-    when an `order_by` column is nullable and is optimised after the insert. The statements drop the table first,
-    so a re-run leaves one copy of the rows.
+    A RocksDB table is keyed on the model's `PrimaryKey`. A MergeTree table's primary key is its sort key; it allows
+    a nullable key when an `order_by` column is nullable and is optimised after the insert. The statements drop the
+    table first, so a re-run leaves one copy of the rows.
     """
-    own = table_columns(table, cols)
-    types = dict(own)
-    if table.engine == 'rocksdb':
-        if key is None:
-            raise ValueError(f'{table.name}: rocksdb needs a key')
-        engine = f'EmbeddedRocksDB() PRIMARY KEY {_name(key)}'
+    serving, table, cols = _serving(model), model.dataset_name, columns(model)
+    if serving.engine == 'rocksdb':
+        engine = f'EmbeddedRocksDB() PRIMARY KEY {_name(rocksdb_key(model))}'
     else:
-        engine = f'MergeTree() ORDER BY ({_names(table.order_by)})'
-        if any(types[c].nullable for c in table.order_by):
+        engine = f'MergeTree() ORDER BY ({_names(serving.order_by)})'
+        if any(t.nullable for name, t in cols if name in serving.order_by):
             engine += ' SETTINGS allow_nullable_key = 1'
-    select = _names([name for name, _ in own])
-    insert = f'INSERT INTO {_name(table.name)} SELECT {select} FROM {_name(landing)}'  # noqa: S608 quoted identifiers
-    if table.where:
-        insert += f' WHERE {table.where}'
+    select = _names([name for name, _ in cols])
     statements = [
-        f'DROP TABLE IF EXISTS {_name(table.name)} SYNC',
-        create_table(table.name, own, engine, replace=True),
-        insert,
+        f'DROP TABLE IF EXISTS {_name(table)} SYNC',
+        create_table(table, cols, engine, replace=True),
+        f'INSERT INTO {_name(table)} SELECT {select} FROM {_name(landing_table(model))}',  # noqa: S608 quoted identifiers
     ]
-    if table.engine == 'mergetree':
-        statements.append(f'OPTIMIZE TABLE {_name(table.name)} FINAL')
+    if serving.engine == 'mergetree':
+        statements.append(f'OPTIMIZE TABLE {_name(table)} FINAL')
     return statements
 
 
@@ -363,16 +326,27 @@ def drop_dictionary_sql(d: ClickHouseDictionary) -> str:
     return f'DROP DICTIONARY IF EXISTS {_name(d.name)} SYNC'
 
 
-def uniqueness_sql(table: ClickHouseTable, key: str, landing: str) -> str:
-    """A query that throws when the RocksDB `key` repeats in the rows the table takes from `landing`.
+def served_sql(model: type[DatasetModel]) -> list[str]:
+    """The statements that build a view's table and dictionaries from its filled landing table, then drop it."""
+    dictionaries, cols = _serving(model).dictionaries, columns(model)
+    return [
+        *(drop_dictionary_sql(d) for d in dictionaries),
+        *table_sql(model),
+        *(dictionary_sql(d, model.dataset_name, cols) for d in dictionaries),
+        f'DROP TABLE {_name(landing_table(model))} SYNC',
+    ]
+
+
+def uniqueness_sql(model: type[DatasetModel]) -> str:
+    """A query that throws when the RocksDB key repeats in the view's landing table.
 
     It reads the landing table: RocksDB keeps the last row of a repeated key, so the table itself never repeats one.
     A NULL key counts as a value.
     """
-    where = f' WHERE {table.where}' if table.where else ''
+    key, table = rocksdb_key(model), model.dataset_name
     return (
-        f"SELECT throwIf(count() != uniqExact(tuple({_name(key)})), 'duplicate {key} in {table.name}') "  # noqa: S608 declared names
-        f'FROM {_name(landing)}{where}'
+        f"SELECT throwIf(count() != uniqExact(tuple({_name(key)})), 'duplicate {key} in {table}') "  # noqa: S608 declared names
+        f'FROM {_name(landing_table(model))}'
     )
 
 
@@ -380,183 +354,16 @@ def _names(names: Sequence[str]) -> str:
     return ', '.join(_name(n) for n in names)
 
 
-def members(pattern: str, product: str) -> list[type[DatasetModel]]:
-    """The models whose `dataset_name` matches the glob and that are loaded for `product`, by name."""
-    models = discover_models()
-    return [m for name, m in sorted(models.items()) if fnmatch(name, pattern) and product in m.products]
-
-
-def source_problem(entry: Mapping) -> str | None:
-    """Why an entry has no landing table: it needs exactly one of `model`, `models`; None if it has one."""
-    if 'model' in entry and 'models' in entry:
-        return 'has both model and models'
-    if 'model' not in entry and 'models' not in entry:
-        return 'has neither model nor models'
-    return None
-
-
-def landing_columns(entry: Mapping, product: str) -> list[tuple[str, CHType]]:
-    """The generated columns of a `datasets.yaml` clickhouse entry.
-
-    A `models` entry is the union of its members for `product`; a `model` entry is that model, whatever its
-    products (a product without the output loads an empty table).
-    """
-    if (problem := source_problem(entry)) is not None:
-        raise ValueError(f'{entry.get("table")}: {problem}')
-    if 'models' in entry:
-        return union_columns(members(entry['models'], product))
-    return columns(discover_models()[entry['model']])
-
-
-def entry_model(entry: Mapping) -> type[DatasetModel] | None:
-    """The model of a `model` entry of `datasets.yaml`; None for any other entry."""
-    return discover_models()[entry['model']] if 'model' in entry else None
-
-
-def _entry_models(entry: Mapping, product: str) -> list[type[DatasetModel]]:
-    """The models an entry loads for `product`: its members, or its one model."""
-    model = entry_model(entry)
-    return [model] if model is not None else members(entry['models'], product)
-
-
-def entry_key(entry: Mapping, product: str) -> str:
-    """The RocksDB key of an entry's tables: its model's one `PrimaryKey` column, or the one its members share."""
-    try:
-        return rocksdb_key(_entry_models(entry, product))
-    except ValueError as e:
-        raise ValueError(f'{entry["table"]}: {e}') from e
-
-
-def entry_problems(entry: Mapping, product: str) -> list[str]:
-    """The problems in the tables and dictionaries a `datasets.yaml` entry declares, checked against its members."""
-    tables = entry_tables(entry)
-    owner = entry['table']
-    if (problem := source_problem(entry)) is not None:
-        return [f'{owner}: {problem}']
-    if 'optional' in entry:
-        return [f'{owner}: optional is not supported, a dataset with no parquet fails its load']
-    keys = _primary_keys(_entry_models(entry, product))
-    shared = set(keys.values())
-    keyed = any(t.engine == 'rocksdb' for t in tables)
-    problems = [f'{owner}: {_disagreement(keys)}'] if keyed and len(shared) > 1 else []
-    key = next(iter(shared)) if len(shared) == 1 else ()
-    fields = [name for name, _ in landing_columns(entry, product)]
-    problems += [p for t in tables for p in table_problems(t, owner, fields, key)]
-    return problems + [p for d in entry_dictionaries(entry) for p in dictionary_problems(d, owner, tables, fields)]
-
-
-def is_declared(entry: Mapping) -> bool:
-    """Whether the entry declares tables under `tables`."""
-    return bool(entry.get('tables'))
-
-
-def declarations(entry: Mapping, product: str) -> tuple[list[ClickHouseTable], list[ClickHouseDictionary]]:
-    """The tables and dictionaries an entry declares, for `product`.
-
-    A `model` entry builds them only for its model's products; a `models` entry for any product.
-    """
-    model = entry_model(entry)
-    if model is not None and product not in model.products:
-        return [], []
-    return entry_tables(entry), entry_dictionaries(entry)
-
-
-def declared_sql(entry: Mapping, product: str) -> list[str]:
-    """The statements that build an entry's declared tables and dictionaries from its filled landing table.
-
-    They end by dropping the landing table. An undeclared entry has none.
-    """
-    tables, dictionaries = declarations(entry, product)
-    if not tables:
-        return []
-    cols = landing_columns(entry, product)
-    landing = entry['table']
-    key = entry_key(entry, product) if any(t.engine == 'rocksdb' for t in tables) else None
-    statements = [drop_dictionary_sql(d) for d in dictionaries]
-    for table in tables:
-        statements += table_sql(table, cols, landing, key)
-    for d in dictionaries:
-        source = source_table(d, tables)
-        statements.append(dictionary_sql(d, source.name, table_columns(source, cols)))
-    return [*statements, f'DROP TABLE {_name(landing)} SYNC']
-
-
-def member_table(model: type[DatasetModel]) -> str:
-    """The landing table of one member of a `models` entry."""
-    return f'{model.dataset_name}_log'
-
-
-def ddl_for(entry: Mapping, product: str) -> list[tuple[str, str]]:
-    """(table, CREATE TABLE) pairs a load of the entry runs: its one table, or each member then the union."""
-    cols = landing_columns(entry, product)
-    union = (entry['table'], create_table(entry['table'], cols, entry.get('engine', 'Log')))
-    if 'models' not in entry:
-        return [union]
-    found = members(entry['models'], product)
-    if not found:
-        raise ValueError(f'{entry["table"]}: models {entry["models"]!r} matches no model for {product}')
-    return [(member_table(m), create_table(member_table(m), columns(m))) for m in found] + [union]
-
-
-def served_entries(product: str | None = None) -> dict[str, dict]:
-    """The entry of every served view model (`clickhouse` set), by `dataset_name`; for `product`, only its views.
-
-    Each is shaped as a `datasets.yaml` entry: landing table `<name>_log` from `view/<name>`, one table named
-    `<name>` built from the whole view, and its dictionaries, reading that table.
-
-    Raises:
-        ValueError: if an output model declares `clickhouse`.
-    """
-    entries = {}
-    if outputs := sorted(name for name, model in discover_datasets().items() if model.clickhouse is not None):
-        raise ValueError(f'output models {outputs} declare clickhouse: only a view is served')
-    for name, model in sorted(discover_models().items()):
-        serving = model.clickhouse
-        if serving is None or (product is not None and product not in model.products):
-            continue
-        table: dict = {'name': name, 'engine': serving.engine}
-        if serving.order_by:
-            table['order_by'] = list(serving.order_by)
-        entry: dict = {'table': f'{name}_log', 'input_dir': f'view/{name}', 'model': name, 'tables': [table]}
-        if serving.dictionaries:
-            entry['dictionaries'] = [
-                {
-                    'name': d.name,
-                    'key': d.key,
-                    'attributes': list(d.attributes),
-                    'source_columns': dict(d.source_columns),
-                }
-                for d in serving.dictionaries
-            ]
-        entries[name] = entry
-    return entries
-
-
-def clickhouse_entries(config_path: str | Path = 'config/datasets.yaml') -> dict[str, Any]:
-    """The `clickhouse` entries of `datasets.yaml` and those of every product's served views (`served_entries`).
-
-    Raises:
-        ValueError: if a name is both a `datasets.yaml` entry and a served view.
-    """
-    declared = yaml.safe_load(Path(config_path).read_text()).get('clickhouse') or {}
-    served = served_entries()
-    if both := sorted(set(declared) & set(served)):
-        raise ValueError(f'{config_path}: entries {both} are served views, declared on their models')
-    return {**declared, **served}
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Print the generated ClickHouse landing DDL.')
-    parser.add_argument('dataset', nargs='?', help='a clickhouse entry of the datasets config')
-    parser.add_argument('--all', action='store_true', help='every entry')
+    parser = argparse.ArgumentParser(description='Print the generated ClickHouse landing DDL of the served views.')
+    parser.add_argument('dataset', nargs='?', help='a served view')
+    parser.add_argument('--all', action='store_true', help='every served view of the product')
     parser.add_argument('--product', default='platform', choices=('platform', 'ppp'))
-    parser.add_argument('--config', default='config/datasets.yaml', help='the datasets config (default: %(default)s)')
     args = parser.parse_args()
     if bool(args.dataset) == args.all:
         parser.error('give one dataset or --all')
-    entries = clickhouse_entries(args.config)
-    if args.dataset and args.dataset not in entries:
-        parser.error(f'no clickhouse entry {args.dataset}')
-    names = list(entries) if args.all else [args.dataset]
-    statements = [sql for name in names for _, sql in ddl_for(entries[name], args.product)]
-    sys.stdout.write(''.join(f'{sql};\n' for sql in statements))
+    views = served_views()
+    if args.dataset and args.dataset not in views:
+        parser.error(f'no served view {args.dataset}')
+    models = list(served_views(args.product).values()) if args.all else [views[args.dataset]]
+    sys.stdout.write(''.join(f'{landing_ddl(model)};\n' for model in models))

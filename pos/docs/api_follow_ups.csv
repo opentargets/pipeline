@@ -11,7 +11,10 @@ association_otf_target_view,,table associations_otf_target is now association_ot
 association_timeseries_view,,table association_time_series is now association_timeseries_view
 baseline_expression_view,,table baseline_expression is now baseline_expression_view
 biosample_view,,table biosample is now biosample_view
+clinical_indication_by_disease_view,,table clinical_indication_disease is now clinical_indication_by_disease_view
+clinical_indication_by_drug_view,,table clinical_indication_drug is now clinical_indication_by_drug_view
 clinical_report_view,,table clinical_report is now clinical_report_view
+clinical_target_by_target_view,,table clinical_target is now clinical_target_by_target_view
 coding_variant_by_target_view,,table protein_coding_coords_by_target is now coding_variant_by_target_view
 coding_variant_by_variant_view,,table protein_coding_coords_by_variant is now coding_variant_by_variant_view
 colocalisation_by_credible_set_view,,table colocalisation is now colocalisation_by_credible_set_view
@@ -24,6 +27,9 @@ drug_mechanism_of_action_by_drug_view,,table mechanism_of_action is now drug_mec
 drug_view,,table drug is now drug_view
 drug_warning_by_drug_view,,table drug_warnings is now drug_warning_by_drug_view
 enhancer_to_gene_view,,table enhancer_to_gene is now enhancer_to_gene_view
+evidence_<source>_view,,"table evidence is now one table per source, evidence_<source>_view for each of the 23 evidence_<source> outputs (encore, ot_crispr and ot_crispr_validation for PPP only): choose the tables from the datasource ids; a table has only its source's columns, non-null where the source's are (the union made a column Nullable where another source lacked it)"
+evidence_<source>_by_disease_and_target_view,,"table evidence_by_disease_and_target is now one table per source, evidence_<source>_by_disease_and_target_view; sort key (diseaseId, targetId, score), datasourceId no longer in it (the column stays)"
+evidence_<source>_by_variant_view,,"table evidence_by_variant is now evidence_eva_by_variant_view, evidence_eva_somatic_by_variant_view and evidence_uniprot_variants_by_variant_view; sort key (variantId, score), datasourceId no longer in it (the column stays); variantId is String, not Nullable(String)"
 go_view,,table gene_ontology is now go_view
 interaction_evidence_view,,table interaction_evidence_log is now interaction_evidence_view
 interaction_view,,table interaction is now interaction_view

@@ -1,11 +1,6 @@
 ---
-# input_dir is relative to the synced release data; croissant is written by ot_croissant.
-# The served views are not here: each view model declares its ClickHouse table (`clickhouse = Serving(...)`)
-# and pos derives its entry (pos.clickhouse_ddl.served_entries); an entry here may not share a view's name.
-# Every clickhouse entry has exactly one of `model:` and `models:` (a glob); its landing table comes from the
-# ot_datamodels model (`pos-ddl <dataset>` prints it); `engine:` defaults to Log.
-# `tables:` and `dictionaries:` declare what a load builds from the landing table, which it then drops
-# (pos.clickhouse_tables).
+# The OpenSearch indices. input_dir is relative to the synced release data; croissant is written by ot_croissant.
+# ClickHouse tables are declared on the served view models (`clickhouse = Serving(...)`, pos.clickhouse_ddl).
 opensearch:
   croissant:
     index: downloads
@@ -40,48 +35,3 @@ opensearch:
     index: search_variant
     input_dir: export/search_variant
     mappings: config/opensearch/search.json
-clickhouse:
-  evidence:
-    table: evidence_log
-    input_dir: output
-    models: 'evidence_*'
-    # each member gets its own table, then all load into evidence_log; list here the members allowed to have no output
-    optional_models: []
-    # built from evidence_log, the union
-    tables:
-      - {name: evidence, engine: rocksdb}
-      - name: evidence_by_variant
-        engine: mergetree
-        order_by: [datasourceId, variantId, score]
-        columns: [datasourceId, variantId, score, id]
-        where: variantId IS NOT NULL
-      - name: evidence_by_disease_and_target
-        engine: mergetree
-        order_by: [datasourceId, diseaseId, targetId, score]
-        columns: [datasourceId, diseaseId, targetId, score, id]
-        where: diseaseId IS NOT NULL AND targetId IS NOT NULL
-  clinical_indication:
-    table: clinical_indication_log
-    input_dir: output/clinical_indication
-    model: clinical_indication
-    tables:
-      - name: clinical_indication_drug
-        engine: mergetree
-        order_by: [drugId, id]
-        columns: [id, drugId, diseaseId, maxClinicalStage, clinicalReportIds]
-        where: drugId IS NOT NULL
-      - name: clinical_indication_disease
-        engine: mergetree
-        order_by: [diseaseId, id]
-        columns: [id, drugId, diseaseId, maxClinicalStage, clinicalReportIds]
-        where: diseaseId IS NOT NULL
-  clinical_target:
-    table: clinical_target_log
-    input_dir: output/clinical_target
-    model: clinical_target
-    tables:
-      - name: clinical_target
-        engine: mergetree
-        order_by: [targetId, id]
-        columns: [id, drugId, targetId, diseases, maxClinicalStage, clinicalReportIds]
-        where: targetId IS NOT NULL

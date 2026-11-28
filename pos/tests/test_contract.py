@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from pos.clickhouse_ddl import clickhouse_entries, members
+from pos.clickhouse_ddl import input_dir, served_views
 
 ROOT = Path(__file__).parents[1]
 DATASETS = yaml.safe_load((ROOT / 'config' / 'datasets.yaml').read_text())
-#: with the served views' entries, derived from their models
-DATASETS['clickhouse'] = clickhouse_entries(ROOT / 'config' / 'datasets.yaml')
+#: the ClickHouse loads: the served views, derived from their models
+CLICKHOUSE = {name: {'input_dir': input_dir(model)} for name, model in served_views().items()}
 PTS_PREFIXES = ('output', 'view', 'export')
 # written by pos itself: the croissant doc by ot_croissant
 POS_WRITTEN = ('croissant',)
@@ -48,13 +48,11 @@ PTS_DESTINATIONS = _destinations(yaml.safe_load((_repo_root() / 'pts/config.yaml
 
 
 def _inputs(*prefixes: str) -> list[tuple[str, str]]:
-    """The (section/dataset, input path) pairs read under the prefixes; a `models` glob joins input_dir."""
+    """The (section/dataset, input path) pairs read under the prefixes."""
     pairs = []
-    for section in ('opensearch', 'clickhouse'):
-        for name, entry in DATASETS[section].items():
+    for section, entries in (('opensearch', DATASETS['opensearch']), ('clickhouse', CLICKHOUSE)):
+        for name, entry in entries.items():
             path = entry['input_dir']
-            if path in PTS_PREFIXES:
-                path = f'{path}/{entry["models"]}'
             if path.split('/')[0] in prefixes:
                 pairs.append((f'{section}/{name}', path))
     return pairs
@@ -69,8 +67,8 @@ def test_destinations_found():
     assert 'output/disease' in PTS_DESTINATIONS
 
 
-def test_no_bigquery_or_export_sections():
-    assert set(DATASETS) == {'opensearch', 'clickhouse'}
+def test_datasets_yaml_holds_only_the_opensearch_indices():
+    assert set(DATASETS) == {'opensearch'}
 
 
 @pytest.mark.parametrize(('dataset', 'path'), _inputs('output', 'view'), ids=lambda v: v)
@@ -90,18 +88,14 @@ def test_search_indices_read_export():
 
 
 def test_every_input_is_accounted_for():
-    for section in ('opensearch', 'clickhouse'):
-        for name, entry in DATASETS[section].items():
+    for section, entries in (('opensearch', DATASETS['opensearch']), ('clickhouse', CLICKHOUSE)):
+        for name, entry in entries.items():
             path = entry['input_dir']
             assert path.split('/')[0] in PTS_PREFIXES or path.startswith(POS_WRITTEN), f'{section}/{name}: {path}'
 
 
-@pytest.mark.parametrize('name', [n for n, e in DATASETS['clickhouse'].items() if 'models' in e])
-def test_every_pts_member_output_has_a_model(name):
-    """Every pts output a `models` glob matches is a member, so a new one with no model fails, not skipped."""
-    entry = DATASETS['clickhouse'][name]
-    pattern = f'{entry["input_dir"]}/{entry["models"]}'
-    written = {d.split('/', 1)[1] for d in PTS_DESTINATIONS if '*' not in d and fnmatch(d, pattern)}
-    assert written, f'{name}: pts writes nothing matching {pattern}'
-    modelled = {m.dataset_name for m in members(entry['models'], 'ppp')}
-    assert not written - modelled, f'{name}: pts outputs with no model: {sorted(written - modelled)}'
+def test_every_pts_evidence_output_is_served_through_its_view():
+    """Every `evidence_*` output pts writes has a whole-copy view, so a new source with no view fails, not skipped."""
+    written = {d.split('/', 1)[1] for d in PTS_DESTINATIONS if fnmatch(d, 'output/evidence_*') and '*' not in d}
+    assert len(written) == 23
+    assert {f'{name}_view' for name in written} <= set(CLICKHOUSE)

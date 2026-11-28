@@ -27,22 +27,6 @@ steps:
     - name: clickhouse_create_database release database
       clickhouse_database: ${database_namespace}
       exist_ok: true
-    # tables declared in datasets.yaml
-    - name: explode load declared datasets
-      requires:
-        - sync_bucket etl output files
-        - sync_bucket etl view files
-        - clickhouse_create_database release database
-      foreach:
-        - clinical_indication
-        - clinical_target
-        - evidence
-      do:
-        - name: clickhouse_load clickhouse load ${each}
-          dataset: ${each}
-          clickhouse_database: ${database_namespace}
-          data_dir_parent: ${local_data}
-          product: ${product}
     # one load per served view of the product, declared on the view models
     - name: clickhouse_load_views load served views
       requires:
@@ -57,7 +41,6 @@ steps:
     # alone, after every other table: its RocksDB insert is the step's memory peak
     - name: clickhouse_load clickhouse load colocalisation_by_credible_set_view
       requires:
-        - explode load declared datasets
         - clickhouse_load_views load served views
       dataset: colocalisation_by_credible_set_view
       clickhouse_database: ${database_namespace}
