@@ -364,6 +364,58 @@ class TestMergeAndTwoSource:
         assert 'g-csf' in labels
         assert row['name'] == 'Filgrastim'  # AACT label never becomes name
 
+    def test_unii_names_anchor_trials_and_foreign_inns_are_dropped(self):
+        molecule_dictionary = pl.DataFrame(
+            [(1, 'CHEMBL1', None, 'Small molecule'), (2, 'CHEMBL2', 'Otherol', 'Small molecule')],
+            schema=tables()['molecule_dictionary'].schema,
+            orient='row',
+        )
+        compound_structures = pl.DataFrame(
+            [(1, 'C', 'KEY-DARA', None), (2, 'CC', 'KEY-OTHER', None)],
+            schema=tables()['compound_structures'].schema,
+            orient='row',
+        )
+        molecule_hierarchy = pl.DataFrame([(1, 1), (2, 2)], schema=['molregno', 'parent_molregno'], orient='row')
+        # ChEMBL has a code for CHEMBL1 but no name: the INN must win over it
+        molecule_synonyms = pl.DataFrame(
+            [(1, 1, 'RMC-6236', 'RESEARCH_CODE')],
+            schema=['molsyn_id', 'molregno', 'synonyms', 'syn_type'],
+            orient='row',
+        )
+        records = pl.DataFrame(
+            [('U_DARA', 'C188048', '12345', 'KEY-DARA')], schema=['UNII', 'NCIT', 'INN_ID', 'INCHIKEY'], orient='row'
+        )
+        names = pl.DataFrame(
+            [('daraxonrasib [INN]', 'cn', 'U_DARA'), ('RMC-6236', 'cd', 'U_DARA')],
+            schema=['NAME', 'TYPE', 'UNII'],
+            orient='row',
+        )
+        trial = {'links': [v2_link('daraxonrasib', 'pdac', synonyms=['rmx-9'])]}
+        comparator = {'links': [v2_link('Otherol', 'pdac', synonyms=['daraxonrasib'])]}
+        batch = v2_frame({'NCT1': trial, 'NCT2': trial, 'NCT3': comparator, 'NCT4': comparator})
+
+        result = rows_by_id(
+            process_molecules(
+                molecule_dictionary,
+                compound_structures,
+                molecule_hierarchy,
+                molecule_synonyms,
+                tables()['drugbank_lookup'],
+                NO_ALERTS,
+                batch,
+                (records, names),
+            )
+        )
+        dara, other = result['CHEMBL1'], result['CHEMBL2']
+        assert dara['name'] == 'DARAXONRASIB'
+        assert {'label': 'rmx-9', 'source': 'AACT'} in dara['synonyms']
+        assert {'label': 'daraxonrasib', 'source': 'UNII'} in dara['synonyms']
+        assert dara['crossReferences'] == [
+            {'source': 'UNII', 'ids': ['U_DARA']},
+            {'source': 'NCIt', 'ids': ['C188048']},
+        ]
+        assert 'daraxonrasib' not in {s['label'] for s in other['synonyms']}
+
     def test_process_molecules_without_aact_batch_still_works(self):
         """process_molecules without a batch arg behaves as before (no AACT)."""
         t = tables()
