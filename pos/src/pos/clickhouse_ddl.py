@@ -164,7 +164,7 @@ def _quote(label: str) -> str:
 
 
 def model_type(node: Node, path: str = '') -> CHType:
-    """The ClickHouse type derived from a node's polars dtype, ignoring any `ClickHouseType`."""
+    """The ClickHouse type derived from a node's polars dtype, ignoring any `column_types`."""
     if node.kind == 'list':
         assert node.element is not None
         return CHType('Array', element=model_type(node.element, f'{path}[]'))
@@ -174,11 +174,9 @@ def model_type(node: Node, path: str = '') -> CHType:
 
 
 def _primitive(node: Node, path: str, types: Mapping[str, str]) -> CHType:
-    """The non-null type of a primitive: its entry in `types` (a view's `column_types`), else its marker or dtype."""
+    """The non-null type of a primitive: its entry in `types` (a view's `column_types`), else its dtype's."""
     if path in types:
         return replace(parse_type(types[path]), nullable=False)
-    if node.clickhouse:
-        return replace(parse_type(node.clickhouse), nullable=False)
     return _dtype_type(node, path)
 
 
@@ -207,7 +205,7 @@ def _type(node: Node, force: bool, path: str, types: Mapping[str, str]) -> CHTyp
 
 
 def column_type(node: Node, in_nullable_struct: bool = False) -> CHType:
-    """The landing type of a node; every field of a nullable struct is Nullable, down to the next Array."""
+    """A node's landing type from its dtype; every field of a nullable struct is Nullable, down to the next Array."""
     return _type(node, in_nullable_struct, '', {})
 
 

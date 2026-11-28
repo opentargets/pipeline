@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, GeneBurdenSex, enum_of
 
@@ -80,7 +80,7 @@ class EvidenceGeneBurden(DatasetModel):
         'directionOnTarget': 'LoF',
     }
 
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
@@ -98,9 +98,7 @@ class EvidenceGeneBurden(DatasetModel):
     )
     diseaseFromSource: str = Field(min_length=1, description='Trait or phenotype label as reported by the burden study')
     pValueMantissa: float = Field(ge=0.0, description='Mantissa of the p-value of the burden test')
-    pValueExponent: Annotated[int, ClickHouseType('Int32')] = Field(
-        ge=-2147483648, le=2147483647, description='Exponent of the p-value of the burden test'
-    )
+    pValueExponent: int = Field(ge=-2147483648, le=2147483647, description='Exponent of the p-value of the burden test')
     beta: float | None = Field(description='Effect size of the gene burden on a quantitative trait')
     betaConfidenceIntervalLower: float | None = Field(
         description='Lower value of the confidence interval of the effect size'
@@ -159,13 +157,11 @@ class EvidenceGeneBurden(DatasetModel):
     releaseVersion: str | None = Field(
         min_length=1, description="Release version of the source data (e.g. FinnGen 'R12')"
     )
-    studySampleSize: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Total number of samples in the burden analysis'
-    )
-    studyCases: Annotated[int, ClickHouseType('UInt32')] | None = Field(
+    studySampleSize: int = Field(ge=0, le=4294967295, description='Total number of samples in the burden analysis')
+    studyCases: int | None = Field(
         ge=0, le=4294967295, description='Number of cases in the burden analysis of a binary trait'
     )
-    studyCasesWithQualifyingVariants: Annotated[int, ClickHouseType('UInt32')] | None = Field(
+    studyCasesWithQualifyingVariants: int | None = Field(
         ge=0, le=4294967295, description='Number of cases carrying at least one qualifying variant in the target'
     )
     statisticalMethod: str = Field(
@@ -193,7 +189,7 @@ class EvidenceGeneBurden(DatasetModel):
         ),
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
     publicationDate: str | None = Field(

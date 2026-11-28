@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, EuropePmcSection, enum_of
 
@@ -16,21 +16,13 @@ from ot_datamodels.vocabularies import Datasource, Datatype, EuropePmcSection, e
 class TextMiningSentences(StructModel):
     """`textMiningSentences[]`."""
 
-    dEnd: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='End position of the disease label in sentence'
-    )
-    dStart: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Start position of the disease label in the sentence'
-    )
+    dEnd: int = Field(ge=0, le=4294967295, description='End position of the disease label in sentence')
+    dStart: int = Field(ge=0, le=4294967295, description='Start position of the disease label in the sentence')
     section: Annotated[EuropePmcSection, PolarsDtype(pl.Enum)] = Field(
         description='Section of the publication the sentence was extracted from'
     )
-    tEnd: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='End position of the target label in the sentence'
-    )
-    tStart: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Start position of the target label in the sentence'
-    )
+    tEnd: int = Field(ge=0, le=4294967295, description='End position of the target label in the sentence')
+    tStart: int = Field(ge=0, le=4294967295, description='Start position of the target label in the sentence')
     text: str = Field(min_length=1, description='Text of the sentence with the disease/target relationship')
 
 
@@ -103,14 +95,12 @@ class EvidenceEuropepmc(DatasetModel):
     pmcIds: list[Annotated[str, Field(min_length=1)]] | None = Field(
         description='PubMed Central identifiers of the full text publication'
     )
-    publicationYear: Annotated[int, ClickHouseType('UInt16')] | None = Field(
-        ge=0, le=65535, description='Year of publication of the article'
-    )
+    publicationYear: int | None = Field(ge=0, le=65535, description='Year of publication of the article')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

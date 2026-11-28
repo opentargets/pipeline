@@ -128,11 +128,41 @@ def test_a_whole_copy_is_its_output(source):
     model.model_validate(model.example)
 
 
+#: the ClickHouse types main served each evidence output's values with, besides LowCardinality disease and target ids
+OUTPUT_TYPES = {
+    'evidence_cancer_gene_census': {
+        'mutatedSamples[]/numberMutatedSamples': 'UInt32',
+        'mutatedSamples[]/numberSamplesTested': 'UInt32',
+        'mutatedSamples[]/numberSamplesWithMutationType': 'UInt32',
+    },
+    'evidence_europepmc': {
+        'textMiningSentences[]/dEnd': 'UInt32',
+        'textMiningSentences[]/dStart': 'UInt32',
+        'textMiningSentences[]/tEnd': 'UInt32',
+        'textMiningSentences[]/tStart': 'UInt32',
+        'publicationYear': 'UInt16',
+    },
+    'evidence_expression_atlas': {'log2FoldChangePercentileRank': 'Int32'},
+    'evidence_gene_burden': {
+        'pValueExponent': 'Int32',
+        'studySampleSize': 'UInt32',
+        'studyCases': 'UInt32',
+        'studyCasesWithQualifyingVariants': 'UInt32',
+    },
+    'evidence_intogen': {
+        'mutatedSamples[]/numberMutatedSamples': 'UInt32',
+        'mutatedSamples[]/numberSamplesTested': 'UInt32',
+        'mutatedSamples[]/numberSamplesWithMutationType': 'UInt32',
+    },
+}
+ID_TYPES = {'diseaseId': 'LowCardinality(String)', 'targetId': 'LowCardinality(String)'}
+
+
 @pytest.mark.parametrize('source', SOURCES)
 def test_a_whole_copy_serves_its_outputs_clickhouse_types(source):
-    model, output = BY_NAME[f'evidence_{source}_view'], EVIDENCE[f'evidence_{source}']
+    model = BY_NAME[f'evidence_{source}_view']
     assert model.clickhouse is not None
-    assert dict(model.clickhouse.column_types) == {p: n.clickhouse for p, n in _nodes(output).items() if n.clickhouse}
+    assert dict(model.clickhouse.column_types) == {**OUTPUT_TYPES.get(f'evidence_{source}', {}), **ID_TYPES}
 
 
 INDEX_VIEWS = sorted(n for n in BY_NAME if n.endswith(('_by_disease_and_target_view', '_by_variant_view')))
@@ -174,5 +204,7 @@ def test_a_clinical_split_is_its_columns_with_a_non_null_key(name):
     serving = model.clickhouse
     assert serving is not None
     assert (serving.engine, serving.order_by) == ('mergetree', order_by)
-    assert dict(serving.column_types) == {p: n.clickhouse for p, n in source.items() if n.clickhouse and p in nodes}
+    assert dict(serving.column_types) == {
+        c: 'LowCardinality(String)' for c in ('drugId', 'diseaseId', 'targetId') if c in nodes
+    }
     model.model_validate(model.example)

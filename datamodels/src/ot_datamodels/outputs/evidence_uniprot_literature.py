@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -57,10 +57,10 @@ class EvidenceUniprotLiterature(DatasetModel):
         min_length=1, description=("Effect of the disease on the target; 'up_or_down' as UniProt does not specify it")
     )
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     publicationDate: str | None = Field(

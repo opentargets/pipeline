@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID, DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import (
     ClinicalStage,
@@ -55,7 +55,7 @@ class EvidenceClinicalPrecedence(DatasetModel):
         'directionOnTarget': 'LoF',
     }
 
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
@@ -91,7 +91,7 @@ class EvidenceClinicalPrecedence(DatasetModel):
     )
     datatypeId: Annotated[Literal['clinical'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
     publicationDate: str | None = Field(pattern=ISO_DATE, description='Publication date of the literature reference')

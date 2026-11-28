@@ -8,7 +8,6 @@ from pydantic import Field, create_model
 
 from ot_datamodels import (
     Bioregistry,
-    ClickHouseType,
     DatasetModel,
     Note,
     PrimaryKey,
@@ -39,11 +38,10 @@ class _Out(DatasetModel):
         PrimaryKey(),
         Reference('target', 'id'),
         Bioregistry('ensembl'),
-        ClickHouseType('LowCardinality(String)'),
     ] = Field(pattern=r'^ENSG\d{11}$', description='a target id')
     datasource_id: Annotated[Literal['eva'], enum_of(Datasource)] = Field(description='a datasource')
     score: float = Field(ge=0, le=1, description='a score')
-    count: Annotated[int, ClickHouseType('UInt32')] = Field(ge=0, le=2**32 - 1, description='a count')
+    count: int = Field(ge=0, le=2**32 - 1, description='a count')
     label: Annotated[str | None, Note('free text')] = Field(min_length=1, description='a label')
     tags: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1, description='some tags')
     pair: _Pair | None = Field(description='a pair')
@@ -115,7 +113,6 @@ def test_from_output_keeps_spec_metadata(view_column: str, out_column: str) -> N
 
 def test_from_output_keeps_the_markers_it_copies() -> None:
     node = _field(_View, 'id').node
-    assert node.clickhouse == 'LowCardinality(String)'
     assert node.reference == Reference('target', 'id')
     assert node.bioregistry == 'ensembl'
     assert node.constraints.pattern == r'^ENSG\d{11}$'

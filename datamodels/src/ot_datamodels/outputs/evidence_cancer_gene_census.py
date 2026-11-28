@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, DirectionOnTarget, DirectionOnTrait, enum_of
 
@@ -19,17 +19,17 @@ class MutatedSamples(StructModel):
     functionalConsequenceId: Annotated[str, Reference('so', 'id')] = Field(
         pattern=ONTOLOGY_ID, description=('Sequence ontology (SO) identifier of the mutation type the counts refer to')
     )
-    numberMutatedSamples: Annotated[int, ClickHouseType('UInt32')] = Field(
+    numberMutatedSamples: int = Field(
         ge=0,
         le=4294967295,
         description=('Number of COSMIC samples of the disease with a mutation of any type in the target'),
     )
-    numberSamplesTested: Annotated[int, ClickHouseType('UInt32')] = Field(
+    numberSamplesTested: int = Field(
         ge=0,
         le=4294967295,
         description=('Number of COSMIC samples of the disease screened for mutations in the target'),
     )
-    numberSamplesWithMutationType: Annotated[int, ClickHouseType('UInt32')] = Field(
+    numberSamplesWithMutationType: int = Field(
         ge=0,
         le=4294967295,
         description=('Number of COSMIC samples of the disease with a mutation of the given type in the target'),
@@ -71,7 +71,7 @@ class EvidenceCancerGeneCensus(DatasetModel):
         'directionOnTarget': 'GoF',
     }
 
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')
@@ -97,7 +97,7 @@ class EvidenceCancerGeneCensus(DatasetModel):
     )
     diseaseFromSourceId: str | None = Field(description='Disease identifier as reported by COSMIC')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
     publicationDate: str | None = Field(

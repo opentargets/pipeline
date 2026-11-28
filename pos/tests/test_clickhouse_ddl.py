@@ -10,7 +10,7 @@ from typing import Annotated, Literal, get_args
 import polars as pl
 import pytest
 from ot_datamodels import ClickHouseDictionary, Serving
-from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
+from ot_datamodels.base import DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.outputs.study import Study
 from ot_datamodels.outputs.target import Target
@@ -98,9 +98,14 @@ class Toy(DatasetModel):
     dataset_title = 'Toy'
     dataset_description = 'Toy.'
     example = {}
+    clickhouse = Serving(
+        engine='mergetree',
+        order_by=('marked',),
+        column_types={'marked': 'UInt32', 'marked_nullable': 'UInt32', 'low_cardinality': 'LowCardinality(String)'},
+    )
 
-    marked: Annotated[int, ClickHouseType('UInt32')]
-    marked_nullable: Annotated[int | None, ClickHouseType('UInt32')]
+    marked: int
+    marked_nullable: int | None
     literal: Literal['a', 'b']
     enum: Annotated[Literal['x', 'y'], PolarsDtype(pl.Enum)]
     flag: bool
@@ -111,13 +116,12 @@ class Toy(DatasetModel):
     nested: list[list[int]]
     struct: Foo
     nullable_struct: Foo | None
-    low_cardinality: Annotated[str | None, ClickHouseType('LowCardinality(String)')]
+    low_cardinality: str | None
     bars: list[Bar | None]
 
 
 def _rendered(name: str) -> str:
-    node = next(f.node for f in dataset_spec(Toy).fields if f.name == name)
-    return render(column_type(node))
+    return render(dict(columns(Toy))[name])
 
 
 @pytest.mark.parametrize(
@@ -268,7 +272,6 @@ class Typed(DatasetModel):
     names: list[str]
     nested: Foo | None
     bars: list[Bar | None]
-    marked: Annotated[int, ClickHouseType('UInt32')]
 
 
 def test_column_types_set_the_view_s_primitive_types():
@@ -277,7 +280,6 @@ def test_column_types_set_the_view_s_primitive_types():
         ('names', 'Array(LowCardinality(String))'),
         ('nested', 'Tuple(`a` Nullable(String), `b` Nullable(UInt8))'),
         ('bars', 'Array(Tuple(`a` LowCardinality(Nullable(String))))'),
-        ('marked', 'UInt32'),
     ]
 
 
@@ -702,8 +704,8 @@ def test_mergetree_without_a_nullable_order_by_has_no_settings(monkeypatch):
 
 
 def test_a_model_without_serving_has_no_table():
-    with pytest.raises(ValueError, match='toy is not a served view'):
-        table_sql(Toy)
+    with pytest.raises(ValueError, match='quoted is not a served view'):
+        table_sql(Quoted)
 
 
 def test_served_sql_rebuilds_the_dictionaries_over_the_table_then_drops_the_landing():

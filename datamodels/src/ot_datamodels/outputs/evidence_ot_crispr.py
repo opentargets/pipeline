@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID, SHA1_HEX
 from ot_datamodels.vocabularies import Datasource, Datatype, enum_of
 
@@ -72,9 +72,7 @@ class EvidenceOtCrispr(DatasetModel):
     cellType: str = Field(min_length=1, description='The studied cell type. Preferably the cell line ontology label')
     cellLineBackground: str | None = Field(min_length=1, description='Background of the derived cell lines')
     log2FoldChangeValue: float | None = Field(
-        description=(
-            'Log 2 fold expression change in contrast experiment; the phenotype score for PhIReWORK studies'
-        )
+        description=('Log 2 fold expression change in contrast experiment; the phenotype score for PhIReWORK studies')
     )
     resourceScore: float = Field(
         description=('Score provided by datasource indicating strength of target-disease association'),
@@ -90,10 +88,10 @@ class EvidenceOtCrispr(DatasetModel):
     )
     datatypeId: Annotated[Literal['ot_partner'], enum_of(Datatype)] = Field(description='Type of the evidence')
     qualityControls: list[str] = Field(max_length=0, description='Evidence quality flags')
-    diseaseId: Annotated[str, Reference('disease', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    diseaseId: Annotated[str, Reference('disease', 'id')] = Field(
         pattern=ONTOLOGY_ID, description='Open Targets disease identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     id: Annotated[str, PrimaryKey()] = Field(pattern=SHA1_HEX, description='Identifer of the disease/target evidence')

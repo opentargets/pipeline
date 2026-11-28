@@ -37,12 +37,10 @@ Only a strict subset of Pydantic is supported (`spec`); anything outside it rais
   recorded but not enforced), `Bioregistry` and `Note` (documentation only),
   `PolarsDtype` (a narrower dtype such as `Int32`, or `pl.Enum` for a stored Enum
   whose categories are the `Literal`'s values in order, or `pl.Enum([...])` for the Enum of a
-  whole vocabulary holding the `Literal`'s values in the same order), `ClickHouseType` (the
-  ClickHouse type of the non-null value, where it differs from the dtype), only on the outputs pos
-  still loads from `datasets.yaml` (`evidence_*`, `clinical_indication`, `clinical_target`;
-  `tests/test_serving.py` forbids it elsewhere). A served view declares its types in
-  `Serving.column_types` (Views, below). pos's DDL generation reads both, pts neither; `LowCardinality`
-  on a nullable value is emitted as `LowCardinality(Nullable(..))`.
+  whole vocabulary holding the `Literal`'s values in the same order). A ClickHouse type is not a
+  marker: a served view declares its types in `Serving.column_types` (Views, below), which pos's DDL
+  generation reads and pts does not; `LowCardinality` on a nullable value is emitted as
+  `LowCardinality(Nullable(..))`.
 - **Row checks:** rules across columns of one row go in `row_checks`, as `RowCheck`s.
   Rules across datasets cannot be in a model, since a model sees only its own dataset.
 - **Closed vocabularies:** a `Literal` only where the list holds by construction (an
@@ -62,7 +60,7 @@ natural limits (`[0, 1]`, `>= 0`), never at the observed min/max.
 
 `products` (default `('platform', 'ppp')`) names the products a dataset is loaded for; set
 `('ppp',)` on a PPP-only dataset so pos keeps it out of the Platform schema. An integer
-ClickHouse type (a `column_types` entry or a `ClickHouseType`) narrower than the dtype, or unsigned,
+ClickHouse type (a `column_types` entry) narrower than the dtype, or unsigned,
 needs `ge`/`le` inside its range, so a value that would wrap in ClickHouse fails pts validation.
 
 ## Adding a dataset

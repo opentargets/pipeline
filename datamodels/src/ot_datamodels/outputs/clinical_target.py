@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.common import MappedDisease
 from ot_datamodels.outputs.patterns import CHEMBL_ID, ENSEMBL_GENE_ID
 from ot_datamodels.vocabularies import ClinicalStage
@@ -37,10 +37,10 @@ class ClinicalTarget(DatasetModel):
     id: Annotated[str, PrimaryKey()] = Field(
         min_length=1, description='Unique identifier for the clinical target-drug association'
     )
-    drugId: Annotated[str, Reference('drug_molecule', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    drugId: Annotated[str, Reference('drug_molecule', 'id')] = Field(
         pattern=CHEMBL_ID, description='Open Targets molecule identifier'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Open Targets target identifier'
     )
     diseases: list[MappedDisease | None] = Field(description='Diseases associated with this target-drug clinical pair')
