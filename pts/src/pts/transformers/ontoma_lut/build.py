@@ -192,10 +192,10 @@ def target_label_lut(target: pl.DataFrame) -> pl.DataFrame:
     return _label_lut(entities, 'GP')
 
 
-def _synonyms(source: str) -> pl.Expr:
-    """The labels of the drug synonyms from `source`."""
+def _synonyms(*sources: str) -> pl.Expr:
+    """The labels of the drug synonyms from any of `sources`."""
     synonym = pl.element().struct
-    return pl.col('synonyms').list.eval(synonym.field('label').filter(synonym.field('source') == source))
+    return pl.col('synonyms').list.eval(synonym.field('label').filter(synonym.field('source').is_in(sources)))
 
 
 def _combination_product(label: pl.Expr) -> pl.Expr:
@@ -238,7 +238,7 @@ def drug_label_lut(drug: pl.DataFrame) -> pl.DataFrame:
         'name',
         'crossReferences',
         pl.col('tradeNames').list.eval(pl.element().struct.field('label')),
-        _synonyms('ChEMBL').alias('synonymsCurated'),
+        _synonyms('ChEMBL', 'UNII').alias('synonymsCurated'),
         _synonyms('AACT').alias('synonymsInferred'),
     ).filter(
         ~pl.col('name').str.to_lowercase().str.starts_with('chembl')

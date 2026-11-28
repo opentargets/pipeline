@@ -1115,6 +1115,8 @@ steps:
         chembl: input/chembl/chembl.tar.gz
         drugbank: input/drug/drugbank.csv.gz
         aact_trial_extraction: input/clinical_report/aact_trial_extraction_v2
+        unii_records: input/drug/unii/UNII_Data.zip
+        unii_names: input/drug/unii/UNIIs.zip
       destination: intermediate/chembl_molecule
   ##################################################################################################
 

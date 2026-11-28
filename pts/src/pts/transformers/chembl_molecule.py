@@ -1,9 +1,10 @@
 """ChEMBL Molecule processing.
 
 Builds the Open Targets molecule format from the raw ChEMBL tables. Synonyms and trade
-names come from ``molecule_synonyms``, cross-references from DrugBank, and clinical-trial
-synonyms from :mod:`pts.transformers.utils.aact_synonyms`. PAINS structural alerts are added
-for every molecule with a structure; ``drug_molecule`` does not read them.
+names come from ``molecule_synonyms``, cross-references from DrugBank, INN names, codes,
+brands and UNII/NCIt ids from the FDA UNII lists (:mod:`pts.transformers.utils.unii`), and
+clinical-trial synonyms from :mod:`pts.transformers.utils.aact_synonyms`. PAINS structural
+alerts are added for every molecule with a structure; ``drug_molecule`` does not read them.
 """
 
 from pathlib import Path
@@ -19,6 +20,15 @@ from pts.transformers.clinical_mira.staged_outputs import EXTRACTION_V2
 from pts.transformers.clinical_mira.trial_links import drug_synonym_entries
 from pts.transformers.utils.aact_synonyms import merge_aact_synonyms, mine_aact_synonyms, parse_aact_entries
 from pts.transformers.utils.dataset import scan_dataset, write_dataset
+from pts.transformers.utils.unii import (
+    NAMES_MEMBER,
+    RECORDS_MEMBER,
+    annotate_molecules,
+    drop_foreign_inn_synonyms,
+    inn_substances,
+    read_unii,
+    unii_annotations,
+)
 
 SCHEMA_NAME = 'public'
 
@@ -54,6 +64,10 @@ def chembl_molecule(
             - aact_trial_extraction: (optional) the v2 AACT trial extraction snapshot,
               for clinical-trial synonym mining; when present, AACT synonyms are
               appended to the molecules.
+            - unii_records, unii_names: (optional, together) the FDA UNII lists
+              (``UNII_Data.zip``, ``UNIIs.zip``); when present, molecules are annotated
+              from the INN substances matching their InChIKey, and AACT synonyms that are
+              another molecule's INN are dropped.
         destination: Path to write the output parquet file.
         _settings: Custom settings (not used).
         config: Config object, for ``work_path``.
@@ -62,6 +76,14 @@ def chembl_molecule(
     if 'aact_trial_extraction' in source:
         logger.info(f'Reading AACT extraction from {source["aact_trial_extraction"]}')
         aact_batch = EXTRACTION_V2.read(str(source['aact_trial_extraction']))
+
+    unii = None
+    if 'unii_records' in source or 'unii_names' in source:
+        logger.info(f'Reading UNII lists from {source["unii_records"]} and {source["unii_names"]}')
+        unii = (
+            read_unii(str(source['unii_records']), RECORDS_MEMBER),
+            read_unii(str(source['unii_names']), NAMES_MEMBER),
+        )
 
     logger.info(f'Restoring {list(TABLES)} from {source["chembl"]}')
     tables = read_dump_tables(str(source['chembl']), TABLES, schema_name=SCHEMA_NAME, scratch_root=config.work_path)
@@ -80,6 +102,7 @@ def chembl_molecule(
             tables['compound_structural_alerts'], tables['structural_alerts'], tables['structural_alert_sets']
         ),
         aact_batch,
+        unii,
     )
 
     logger.info(f'Writing molecules to {destination}')
@@ -94,6 +117,7 @@ def process_molecules(
     drugbank_lookup: pl.DataFrame,
     structural_alerts: pl.DataFrame,
     aact_batch: pl.DataFrame | None = None,
+    unii: tuple[pl.DataFrame, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
     """Build ChEMBL molecules by joining raw ChEMBL tables.
 
@@ -109,6 +133,9 @@ def process_molecules(
             When provided, AACT synonyms are appended (deduped case-insensitively vs
             existing ChEMBL labels) before the final name-coalesce so that AACT labels
             never become the molecule name.
+        unii: (optional) the UNII records and names lists. When provided, molecules are
+            annotated before AACT mining, so UNII names anchor trial drug names, and
+            AACT synonyms that are another molecule family's INN are dropped after it.
 
     Returns:
         Processed molecule DataFrame with the columns of
@@ -141,6 +168,12 @@ def process_molecules(
         .join(structural_alerts, on='molregno', how='left', validate='m:1')
     )
 
+    inns = None
+    if unii is not None:
+        records, names = unii
+        inns = inn_substances(records, names)
+        mol_combined = annotate_molecules(mol_combined, unii_annotations(records, names))
+
     # Optionally mine and merge AACT synonyms BEFORE the name-coalesce so that
     # AACT labels are never selected as the molecule name.
     if aact_batch is not None:
@@ -158,6 +191,8 @@ def process_molecules(
         )
         aact_df = mine_aact_synonyms(mol_for_index, entries)
         mol_combined = merge_aact_synonyms(mol_combined, aact_df)
+        if inns is not None:
+            mol_combined = drop_foreign_inn_synonyms(mol_combined, inns)
 
     # Final processing -- ensure name is populated and deduplicate
     return (

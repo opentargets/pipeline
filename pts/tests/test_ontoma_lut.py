@@ -52,6 +52,16 @@ def test_target_label_lut_matches_goldens() -> None:
     assert not {row for row in TARGET_LABEL if row[0] in {'ENSG02', 'ENSG03'}}
 
 
+def test_drug_label_lut_reads_unii_synonyms_as_curated() -> None:
+    drug = pl.DataFrame(
+        [('CHEMBL9', 'DARAXONRASIB', [{'label': 'RMC-6236', 'source': 'UNII'}], [], None)],
+        schema=DRUG.schema,
+        orient='row',
+    )
+    rows = drug_label_lut(drug).select('entityId', 'entityLabel', 'entitySource').rows()
+    assert ('CHEMBL9', 'RMC-6236', 'synonym') in rows
+
+
 def test_drug_label_lut_matches_goldens() -> None:
     assert drug_label_lut(DRUG).rows() == DRUG_LABEL
     labels = {(entity_id, label) for entity_id, label, *_ in DRUG_LABEL}

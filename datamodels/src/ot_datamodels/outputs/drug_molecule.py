@@ -17,8 +17,11 @@ class Synonyms(StructModel):
     """`synonyms[]`."""
 
     label: str = Field(min_length=1, description='The alternative name (synonym) for the drug')
-    source: Literal['AACT', 'ChEMBL'] = Field(
-        description=('Source of the synonym (e.g. ChEMBL, or AACT for names mined from clinical trials)')
+    source: Literal['AACT', 'ChEMBL', 'UNII'] = Field(
+        description=(
+            'Source of the synonym (e.g. ChEMBL, UNII for INN names and codes from the FDA UNII lists, '
+            'or AACT for names mined from clinical trials)'
+        )
     )
 
 
@@ -26,13 +29,13 @@ class TradeNames(StructModel):
     """`tradeNames[]`."""
 
     label: str = Field(min_length=1, description='The brand (trade) name for the drug')
-    source: Literal['ChEMBL'] = Field(description='Source of the trade name (e.g. ChEMBL)')
+    source: Literal['ChEMBL', 'UNII'] = Field(description='Source of the trade name (e.g. ChEMBL, or UNII)')
 
 
 class CrossReferences(StructModel):
     """`crossReferences[]`."""
 
-    source: Literal['Probes&Drugs', 'drugbank'] = Field(description='Database source name')
+    source: Literal['NCIt', 'Probes&Drugs', 'UNII', 'drugbank'] = Field(description='Database source name')
     ids: list[Annotated[str, Field(min_length=1)]] = Field(description='List of identifiers in other databases')
 
 
