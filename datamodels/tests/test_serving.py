@@ -16,7 +16,7 @@ def _columns(name: str) -> list[str]:
 
 
 def test_there_are_views():
-    assert len(VIEWS) == 39
+    assert len(VIEWS) == 91
 
 
 @pytest.mark.parametrize('name', sorted(VIEWS))

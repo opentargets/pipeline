@@ -81,7 +81,9 @@ No generator exists; write the model by hand.
 
 A view's `dataset_name` ends in `_view`, its module is named after it and its class ends in `View`
 (`TargetView` in `views/target_view.py`); pts writes it to `view/<dataset_name>`. pts step names are
-not renamed with it (they are DAG task ids).
+not renamed with it (they are DAG task ids). The one exception is `views/evidence_views.py`, which generates
+the per-source evidence views from the `evidence_*` outputs (`evidence_<source>_view`, a whole copy, and its
+index views `_by_disease_and_target_view` and, for an output with `variantId`, `_by_variant_view`).
 
 Every view declares how pos serves it, on the class:
 

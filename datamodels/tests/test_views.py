@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from pts_view_schemas import ASSOCIATION_TIMESERIES, TARGET_VIEW
 from test_copy_views import COPY_VIEWS
+from test_evidence_views import SPLIT_VIEWS
 
 from ot_datamodels import DatasetModel, to_polars_schema
 from ot_datamodels import vocabularies as v
@@ -54,6 +55,7 @@ from ot_datamodels.views.disease_view import DiseaseView
 from ot_datamodels.views.drug_mechanism_of_action_by_drug_view import MECHANISM_FIELDS, DrugMechanismOfActionByDrugView
 from ot_datamodels.views.drug_view import DrugView
 from ot_datamodels.views.drug_warning_by_drug_view import DrugWarningByDrugView
+from ot_datamodels.views.evidence_views import EVIDENCE_VIEWS
 from ot_datamodels.views.interaction_view import InteractionView
 from ot_datamodels.views.l2g_prediction_by_credible_set_view import L2gPredictionByCredibleSetView
 from ot_datamodels.views.mouse_phenotype_by_target_view import MousePhenotypeByTargetView
@@ -769,7 +771,7 @@ def test_discover_models_is_the_outputs_and_the_views() -> None:
     outputs, models = discover_datasets(), discover_models()
 
     assert not set(outputs) & set(VIEWS)
-    assert models == outputs | VIEWS | COPY_VIEWS
+    assert models == outputs | VIEWS | COPY_VIEWS | SPLIT_VIEWS | {m.dataset_name: m for m in EVIDENCE_VIEWS}
 
 
 def test_pharmacogenomics_id_leads_and_keys_the_output() -> None:
@@ -1252,5 +1254,6 @@ def test_a_view_is_named_view(name):
     """A view's `dataset_name` ends in `_view`, its module is named after it and its class ends in `View`."""
     model = discover_datasets(VIEWS_PACKAGE)[name]
     assert name.endswith('_view')
-    assert model.__module__ == f'{VIEWS_PACKAGE}.{name}'
+    module = 'evidence_views' if model in EVIDENCE_VIEWS else name
+    assert model.__module__ == f'{VIEWS_PACKAGE}.{module}'
     assert model.__name__.endswith('View')
