@@ -774,6 +774,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/crispr
         evidence: output/evidence_crispr
+
+    - name: transform evidence_crispr_view
+      transformer: copy_view
+      source: output/evidence_crispr
+      destination: view/evidence_crispr_view
+      requires:
+        - transform evidence.project_score
+
+    - name: transform evidence_crispr_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_crispr
+      destination: view/evidence_crispr_by_disease_and_target_view
+      requires:
+        - transform evidence.project_score
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_GENE_BURDEN STEP :####################################################################
@@ -806,6 +822,22 @@ steps:
         finngen_release: R12
         schema_release: '2026-07-15'
         bipex_release: '2026-08-07'
+
+    - name: transform evidence_gene_burden_view
+      transformer: copy_view
+      source: output/evidence_gene_burden
+      destination: view/evidence_gene_burden_view
+      requires:
+        - transform evidence.gene_burden
+
+    - name: transform evidence_gene_burden_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_gene_burden
+      destination: view/evidence_gene_burden_by_disease_and_target_view
+      requires:
+        - transform evidence.gene_burden
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_CLINICAL_PRECEDENCE STEP :############################################################
@@ -827,6 +859,22 @@ steps:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
           - OBSERVATIONAL_STUDY
+
+    - name: transform evidence_clinical_precedence_view
+      transformer: copy_view
+      source: output/evidence_clinical_precedence
+      destination: view/evidence_clinical_precedence_view
+      requires:
+        - transform evidence.clinical_precedence
+
+    - name: transform evidence_clinical_precedence_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_clinical_precedence
+      destination: view/evidence_clinical_precedence_by_disease_and_target_view
+      requires:
+        - transform evidence.clinical_precedence
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_CANCER_BIOMARKERS STEP :################################################################
@@ -844,6 +892,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/cancer_biomarkers
         evidence: output/evidence_cancer_biomarkers
+
+    - name: transform evidence_cancer_biomarkers_view
+      transformer: copy_view
+      source: output/evidence_cancer_biomarkers
+      destination: view/evidence_cancer_biomarkers_view
+      requires:
+        - transform evidence.cancer_biomarkers
+
+    - name: transform evidence_cancer_biomarkers_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_cancer_biomarkers
+      destination: view/evidence_cancer_biomarkers_by_disease_and_target_view
+      requires:
+        - transform evidence.cancer_biomarkers
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_ORPHANET STEP :#######################################################################
@@ -860,6 +924,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/orphanet
         evidence: output/evidence_orphanet
+
+    - name: transform evidence_orphanet_view
+      transformer: copy_view
+      source: output/evidence_orphanet
+      destination: view/evidence_orphanet_view
+      requires:
+        - transform evidence.orphanet
+
+    - name: transform evidence_orphanet_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_orphanet
+      destination: view/evidence_orphanet_by_disease_and_target_view
+      requires:
+        - transform evidence.orphanet
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_CLINGEN STEP :#######################################################################
@@ -875,6 +955,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/clingen
         evidence: output/evidence_clingen
+
+    - name: transform evidence_clingen_view
+      transformer: copy_view
+      source: output/evidence_clingen
+      destination: view/evidence_clingen_view
+      requires:
+        - transform evidence.clingen
+
+    - name: transform evidence_clingen_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_clingen
+      destination: view/evidence_clingen_by_disease_and_target_view
+      requires:
+        - transform evidence.clingen
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_IMPC STEP :###########################################################################
@@ -901,6 +997,22 @@ steps:
         evidence: output/evidence_impc
       settings:
         score_cutoff: 41
+
+    - name: transform evidence_impc_view
+      transformer: copy_view
+      source: output/evidence_impc
+      destination: view/evidence_impc_view
+      requires:
+        - transform evidence.impc
+
+    - name: transform evidence_impc_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_impc
+      destination: view/evidence_impc_by_disease_and_target_view
+      requires:
+        - transform evidence.impc
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE PANEL APP STEP :#######################################################################
@@ -918,6 +1030,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/panel_app
         evidence: output/evidence_genomics_england
+
+    - name: transform evidence_genomics_england_view
+      transformer: copy_view
+      source: output/evidence_genomics_england
+      destination: view/evidence_genomics_england_view
+      requires:
+        - transform evidence.panel_app
+
+    - name: transform evidence_genomics_england_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_genomics_england
+      destination: view/evidence_genomics_england_by_disease_and_target_view
+      requires:
+        - transform evidence.panel_app
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_CRISPR_SCREENS STEP :#################################################################
@@ -934,6 +1062,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/crispr_screen
         evidence: output/evidence_crispr_screen
+
+    - name: transform evidence_crispr_screen_view
+      transformer: copy_view
+      source: output/evidence_crispr_screen
+      destination: view/evidence_crispr_screen_view
+      requires:
+        - transform evidence.crispr_screens
+
+    - name: transform evidence_crispr_screen_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_crispr_screen
+      destination: view/evidence_crispr_screen_by_disease_and_target_view
+      requires:
+        - transform evidence.crispr_screens
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_GENE2PHENOTYPE STEP :#################################################################
@@ -956,6 +1100,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/gene2phenotype
         evidence: output/evidence_gene2phenotype
+
+    - name: transform evidence_gene2phenotype_view
+      transformer: copy_view
+      source: output/evidence_gene2phenotype
+      destination: view/evidence_gene2phenotype_view
+      requires:
+        - transform evidence.gene2phenotype
+
+    - name: transform evidence_gene2phenotype_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_gene2phenotype
+      destination: view/evidence_gene2phenotype_by_disease_and_target_view
+      requires:
+        - transform evidence.gene2phenotype
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE_INTOGEN STEP :#######################################################################
@@ -972,6 +1132,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/intogen
         evidence: output/evidence_intogen
+
+    - name: transform evidence_intogen_view
+      transformer: copy_view
+      source: output/evidence_intogen
+      destination: view/evidence_intogen_view
+      requires:
+        - transform evidence.intogen
+
+    - name: transform evidence_intogen_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_intogen
+      destination: view/evidence_intogen_by_disease_and_target_view
+      requires:
+        - transform evidence.intogen
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: EVIDENCE PPP STEP :############################################################################
@@ -986,6 +1162,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/ot_crispr
         evidence: output/evidence_ot_crispr
+
+    - name: transform evidence_ot_crispr_view
+      transformer: copy_view
+      source: output/evidence_ot_crispr
+      destination: view/evidence_ot_crispr_view
+      requires:
+        - transform evidence.ot_crispr
+
+    - name: transform evidence_ot_crispr_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_ot_crispr
+      destination: view/evidence_ot_crispr_by_disease_and_target_view
+      requires:
+        - transform evidence.ot_crispr
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: ENHANCER_TO_GENE MIGRATION
@@ -1301,6 +1493,24 @@ steps:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
           - OBSERVATIONAL_STUDY
+
+    - name: transform clinical_indication_by_drug_view
+      transformer: copy_view
+      source: output/clinical_indication
+      destination: view/clinical_indication_by_drug_view
+      requires:
+        - transform clinical_indication
+      settings:
+        drop_nulls: true
+
+    - name: transform clinical_indication_by_disease_view
+      transformer: copy_view
+      source: output/clinical_indication
+      destination: view/clinical_indication_by_disease_view
+      requires:
+        - transform clinical_indication
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: CLINICAL_TARGET STEP :#########################################################################
@@ -1318,6 +1528,15 @@ steps:
           - PHASE_IV_NOT_APPROVED
           - INDIRECT_PRIMARY_PURPOSE
           - OBSERVATIONAL_STUDY
+
+    - name: transform clinical_target_by_target_view
+      transformer: copy_view
+      source: output/clinical_target
+      destination: view/clinical_target_by_target_view
+      requires:
+        - transform clinical_target
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: TARGET_PRIORITISATION STEP :###################################################################
@@ -1478,6 +1697,22 @@ steps:
         failed_evidence: excluded/evidence/expression_atlas
         evidence: output/evidence_expression_atlas
 
+    - name: transform evidence_expression_atlas_view
+      transformer: copy_view
+      source: output/evidence_expression_atlas
+      destination: view/evidence_expression_atlas_view
+      requires:
+        - transform evidence.expression_atlas
+
+    - name: transform evidence_expression_atlas_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_expression_atlas
+      destination: view/evidence_expression_atlas_by_disease_and_target_view
+      requires:
+        - transform evidence.expression_atlas
+      settings:
+        drop_nulls: true
+
   evidence_clinvar:
     - name: transform evidence.clinvar
       transformer: evidence.clinvar
@@ -1489,6 +1724,31 @@ steps:
       destination:
         failed_evidence: excluded/evidence/eva
         evidence: output/evidence_eva
+
+    - name: transform evidence_eva_view
+      transformer: copy_view
+      source: output/evidence_eva
+      destination: view/evidence_eva_view
+      requires:
+        - transform evidence.clinvar
+
+    - name: transform evidence_eva_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_eva
+      destination: view/evidence_eva_by_disease_and_target_view
+      requires:
+        - transform evidence.clinvar
+      settings:
+        drop_nulls: true
+
+    - name: transform evidence_eva_by_variant_view
+      transformer: copy_view
+      source: output/evidence_eva
+      destination: view/evidence_eva_by_variant_view
+      requires:
+        - transform evidence.clinvar
+      settings:
+        drop_nulls: true
 
   evidence_clinvar_somatic:
     - name: transform evidence.clinvar_somatic
@@ -1502,6 +1762,31 @@ steps:
         failed_evidence: excluded/evidence/eva_somatic
         evidence: output/evidence_eva_somatic
 
+    - name: transform evidence_eva_somatic_view
+      transformer: copy_view
+      source: output/evidence_eva_somatic
+      destination: view/evidence_eva_somatic_view
+      requires:
+        - transform evidence.clinvar_somatic
+
+    - name: transform evidence_eva_somatic_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_eva_somatic
+      destination: view/evidence_eva_somatic_by_disease_and_target_view
+      requires:
+        - transform evidence.clinvar_somatic
+      settings:
+        drop_nulls: true
+
+    - name: transform evidence_eva_somatic_by_variant_view
+      transformer: copy_view
+      source: output/evidence_eva_somatic
+      destination: view/evidence_eva_somatic_by_variant_view
+      requires:
+        - transform evidence.clinvar_somatic
+      settings:
+        drop_nulls: true
+
   evidence_uniprot_variants:
     - name: transform evidence.uniprot_variants
       transformer: evidence.uniprot_variants
@@ -1513,6 +1798,31 @@ steps:
       destination:
         failed_evidence: excluded/evidence/uniprot_variants
         evidence: output/evidence_uniprot_variants
+
+    - name: transform evidence_uniprot_variants_view
+      transformer: copy_view
+      source: output/evidence_uniprot_variants
+      destination: view/evidence_uniprot_variants_view
+      requires:
+        - transform evidence.uniprot_variants
+
+    - name: transform evidence_uniprot_variants_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_uniprot_variants
+      destination: view/evidence_uniprot_variants_by_disease_and_target_view
+      requires:
+        - transform evidence.uniprot_variants
+      settings:
+        drop_nulls: true
+
+    - name: transform evidence_uniprot_variants_by_variant_view
+      transformer: copy_view
+      source: output/evidence_uniprot_variants
+      destination: view/evidence_uniprot_variants_by_variant_view
+      requires:
+        - transform evidence.uniprot_variants
+      settings:
+        drop_nulls: true
 
   evidence_uniprot_literature:
     - name: transform evidence.uniprot_literature
@@ -1526,6 +1836,22 @@ steps:
         failed_evidence: excluded/evidence/uniprot_literature
         evidence: output/evidence_uniprot_literature
 
+    - name: transform evidence_uniprot_literature_view
+      transformer: copy_view
+      source: output/evidence_uniprot_literature
+      destination: view/evidence_uniprot_literature_view
+      requires:
+        - transform evidence.uniprot_literature
+
+    - name: transform evidence_uniprot_literature_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_uniprot_literature
+      destination: view/evidence_uniprot_literature_by_disease_and_target_view
+      requires:
+        - transform evidence.uniprot_literature
+      settings:
+        drop_nulls: true
+
   evidence_reactome:
     - name: transform evidence.reactome
       transformer: evidence.reactome
@@ -1537,6 +1863,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/reactome
         evidence: output/evidence_reactome
+
+    - name: transform evidence_reactome_view
+      transformer: copy_view
+      source: output/evidence_reactome
+      destination: view/evidence_reactome_view
+      requires:
+        - transform evidence.reactome
+
+    - name: transform evidence_reactome_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_reactome
+      destination: view/evidence_reactome_by_disease_and_target_view
+      requires:
+        - transform evidence.reactome
+      settings:
+        drop_nulls: true
 
   evidence_europepmc:
     - name: transform evidence.europepmc
@@ -1550,6 +1892,22 @@ steps:
         failed_evidence: excluded/evidence/europepmc
         evidence: output/evidence_europepmc
 
+    - name: transform evidence_europepmc_view
+      transformer: copy_view
+      source: output/evidence_europepmc
+      destination: view/evidence_europepmc_view
+      requires:
+        - transform evidence.europepmc
+
+    - name: transform evidence_europepmc_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_europepmc
+      destination: view/evidence_europepmc_by_disease_and_target_view
+      requires:
+        - transform evidence.europepmc
+      settings:
+        drop_nulls: true
+
   evidence_cosmic:
     - name: transform evidence.cosmic
       transformer: evidence.cosmic
@@ -1562,6 +1920,22 @@ steps:
         failed_evidence: excluded/evidence/cancer_gene_census
         evidence: output/evidence_cancer_gene_census
 
+    - name: transform evidence_cancer_gene_census_view
+      transformer: copy_view
+      source: output/evidence_cancer_gene_census
+      destination: view/evidence_cancer_gene_census_view
+      requires:
+        - transform evidence.cosmic
+
+    - name: transform evidence_cancer_gene_census_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_cancer_gene_census
+      destination: view/evidence_cancer_gene_census_by_disease_and_target_view
+      requires:
+        - transform evidence.cosmic
+      settings:
+        drop_nulls: true
+
   evidence_encore:
     - name: transform evidence.encore
       transformer: evidence.encore
@@ -1573,6 +1947,22 @@ steps:
         failed_evidence: excluded/evidence/encore
         evidence: output/evidence_encore
 
+    - name: transform evidence_encore_view
+      transformer: copy_view
+      source: output/evidence_encore
+      destination: view/evidence_encore_view
+      requires:
+        - transform evidence.encore
+
+    - name: transform evidence_encore_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_encore
+      destination: view/evidence_encore_by_disease_and_target_view
+      requires:
+        - transform evidence.encore
+      settings:
+        drop_nulls: true
+
   evidence_validation_lab:
     - name: transform evidence.validation_lab
       transformer: evidence.validation_lab
@@ -1583,6 +1973,22 @@ steps:
       destination:
         failed_evidence: excluded/evidence/ot_crispr_validation
         evidence: output/evidence_ot_crispr_validation
+
+    - name: transform evidence_ot_crispr_validation_view
+      transformer: copy_view
+      source: output/evidence_ot_crispr_validation
+      destination: view/evidence_ot_crispr_validation_view
+      requires:
+        - transform evidence.validation_lab
+
+    - name: transform evidence_ot_crispr_validation_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_ot_crispr_validation
+      destination: view/evidence_ot_crispr_validation_by_disease_and_target_view
+      requires:
+        - transform evidence.validation_lab
+      settings:
+        drop_nulls: true
   ##################################################################################################
 
   #: ASSOCIATION_OTF STEP :#########################################################################
@@ -1707,6 +2113,22 @@ steps:
         evidence: output/evidence_gwas_credible_sets
       settings:
         locus_to_gene_threshold: *l2g_threshold
+
+    - name: transform evidence_gwas_credible_sets_view
+      transformer: copy_view
+      source: output/evidence_gwas_credible_sets
+      destination: view/evidence_gwas_credible_sets_view
+      requires:
+        - transform evidence.gwas_credible_sets
+
+    - name: transform evidence_gwas_credible_sets_by_disease_and_target_view
+      transformer: copy_view
+      source: output/evidence_gwas_credible_sets
+      destination: view/evidence_gwas_credible_sets_by_disease_and_target_view
+      requires:
+        - transform evidence.gwas_credible_sets
+      settings:
+        drop_nulls: true
 
   #: BIOSAMPLE_ENRICHMENT STEP :####################################################################
   biosample_enrichment:

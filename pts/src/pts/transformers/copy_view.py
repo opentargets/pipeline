@@ -1,6 +1,7 @@
 """Copy a served output into its view: the columns of the view model, in model order, selected from the output.
 
 The view is the model whose `dataset_name` is the destination's basename, as pos names a view's `input_dir`.
+With the setting `drop_nulls: true`, a source row null in a column the view declares non-nullable is left out.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from google.cloud import storage
 from loguru import logger
 from ot_datamodels.base import DatasetModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_models
+from ot_datamodels.spec import dataset_spec
 from otter.config.model import Config
 
 from pts.schemas.dataset.validate import validate_dataset
@@ -56,12 +58,16 @@ def copy_view(
     Args:
         source: the output dataset the view copies.
         destination: the view directory; its basename is the view's dataset name.
-        settings: unused.
+        settings: `drop_nulls` (default false): leave out the rows null in a non-nullable column of the view.
         config: unused.
 
     Raises:
+        TypeError: if `drop_nulls` is not a bool.
         ValueError: if the destination names no view model, or the source lacks a view column.
     """
+    drop_nulls = (settings or {}).get('drop_nulls', False)
+    if not isinstance(drop_nulls, bool):
+        raise TypeError(f'drop_nulls must be true or false, got {drop_nulls!r}')
     model = view_model(destination)
     columns = list(model.model_fields)
     frame = scan_dataset(str(source))
@@ -69,9 +75,14 @@ def copy_view(
     missing = [column for column in columns if column not in names]
     if missing:
         raise ValueError(f'{source} lacks the columns {missing} of {model.__name__}')
+    frame = frame.select(columns)
+    if drop_nulls:
+        required = [f.name for f in dataset_spec(model).fields if not f.node.nullable]
+        logger.info(f'dropping the rows null in any of {required}')
+        frame = frame.drop_nulls(required)
     logger.info(f'copying {source} into {destination} as {model.__name__}')
     clear_destination(str(destination))
-    write_dataset(frame.select(columns), str(destination))
+    write_dataset(frame, str(destination))
 
 
 def validate(

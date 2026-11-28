@@ -8,6 +8,7 @@ import pytest
 from ot_datamodels import DatasetModel, PrimaryKey
 from ot_datamodels.base import StructModel
 from ot_datamodels.discovery import discover_datasets, discover_models
+from ot_datamodels.views.evidence_views import EVIDENCE_VIEWS
 
 from pts.schemas.dataset.profile import _write as upload
 from pts.schemas.dataset.profile import field_profile, profile_run, run_folder
@@ -206,7 +207,12 @@ def test_run_folder_of_the_discovered_models() -> None:
         'transcript_view',
         'variant_credible_set_view',
         'variant_view',
+        'clinical_indication_by_disease_view',
+        'clinical_indication_by_drug_view',
+        'clinical_target_by_target_view',
+        *(m.dataset_name for m in EVIDENCE_VIEWS),
     }
+    assert len(EVIDENCE_VIEWS) == 49
     assert run_folder(models['target_view']) == 'view'
     assert run_folder(models['target']) == 'output'
 
