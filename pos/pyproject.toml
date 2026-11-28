@@ -1,6 +1,6 @@
 [project]
 name = "pos"
-version = "26.12.0rc36"
+version = "26.12.0rc37"
 description = "Open Targets Pipeline Output Stage"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
