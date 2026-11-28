@@ -79,7 +79,10 @@ class CredibleSetLocusView(DatasetModel):
     dataset_title: ClassVar[str] = 'Credible set locus'
     dataset_description: ClassVar[str] = 'The variants of each credible set, most probable first'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={'locus[]/sampleSize': 'UInt32'},
+    )
     example: ClassVar[dict] = {
         'credibleSetId': _EXAMPLE['credibleSetId'],
         'locus': [{k: _EXAMPLE[k] for k in LOCUS_FIELDS}],

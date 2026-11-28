@@ -26,7 +26,13 @@ class CodingVariantByTargetView(DatasetModel):
         'therapeutic areas and datasources behind each variant, as served by target'
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'proteinCodingCoords[]/variantEffect': 'Float64',
+            'proteinCodingCoords[]/datasources[]/datasourceCount': 'UInt32',
+        },
+    )
     example: ClassVar[dict] = {'targetId': 'ENSG00000141510', 'proteinCodingCoords': [COORD_EXAMPLE]}
 
     targetId: TargetKey

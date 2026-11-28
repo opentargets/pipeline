@@ -10,7 +10,6 @@ from pydantic import Field
 
 from ot_datamodels import (
     Bioregistry,
-    ClickHouseType,
     DatasetModel,
     PolarsDtype,
     PrimaryKey,
@@ -50,15 +49,10 @@ class VariantAnnotation(StructModel):
 class Drugs(StructModel):
     """`drugs[]`."""
 
-    drugFromSource: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='List of drug identifiers from the original data source'
+    drugFromSource: str = Field(min_length=1, description='List of drug identifiers from the original data source')
+    drugId: Annotated[str, Bioregistry('chembl'), Reference('drug_molecule', 'id')] | None = Field(
+        pattern=CHEMBL_ID, description='List of Open Targets drug identifiers'
     )
-    drugId: (
-        Annotated[
-            str, Bioregistry('chembl'), Reference('drug_molecule', 'id'), ClickHouseType('LowCardinality(String)')
-        ]
-        | None
-    ) = Field(pattern=CHEMBL_ID, description='List of Open Targets drug identifiers')
 
 
 class Pharmacogenomics(DatasetModel):
@@ -118,7 +112,7 @@ class Pharmacogenomics(DatasetModel):
         'drugs': [{'drugFromSource': 'risperidone', 'drugId': 'CHEMBL85'}],
     }
 
-    pharmacogenomicsId: Annotated[int, PrimaryKey(), ClickHouseType('UInt64')] = Field(
+    pharmacogenomicsId: Annotated[int, PrimaryKey()] = Field(
         ge=0, description='Identifier of the record, unique within a release; not stable across releases'
     )
     datasourceId: Annotated[PharmacogenomicsDatasource, PolarsDtype(pl.Enum)] = Field(

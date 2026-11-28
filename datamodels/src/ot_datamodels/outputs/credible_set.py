@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PolarsDtype, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import MD5_HEX, VARIANT_ID
 from ot_datamodels.vocabularies import Chromosome, CredibleSetQualityControl, FineMappingMethod, StudyType
 
@@ -49,10 +49,10 @@ class CredibleSet(DatasetModel):
         ),
     )
     chromosome: Annotated[Chromosome, PolarsDtype(pl.Enum)] = Field(description='Chromosome of the credible set')
-    locusStart: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
+    locusStart: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         ge=0, description='Start of the fine-mapped region of the credible set'
     )
-    locusEnd: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
+    locusEnd: Annotated[int, PolarsDtype(pl.Int32)] = Field(
         ge=0, description='End of the fine-mapped region of the credible set'
     )
     studyId: Annotated[str, Reference('study', 'studyId')] = Field(
@@ -68,7 +68,7 @@ class CredibleSet(DatasetModel):
         description='Method used for fine-mapping of the credible set (PICS, SuSiE or SuSiE-inf)'
     )
     logBayesFactor: float | None = Field(ge=0.0, description='Log Bayes factor of the entire credible set')
-    confidence: Annotated[int, PolarsDtype(pl.Int8), ClickHouseType('UInt8')] = Field(
+    confidence: Annotated[int, PolarsDtype(pl.Int8)] = Field(
         ge=0,
         description=(
             'Confidence class of the credible set, from its fine-mapping method '

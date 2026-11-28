@@ -18,4 +18,5 @@ class SoView(So):
     clickhouse: ClassVar[Serving] = Serving(
         engine='rocksdb',
         dictionaries=(ClickHouseDictionary('sequence_ontology', key='id', attributes=('label',)),),
+        column_types={'id': 'LowCardinality(String)', 'label': 'LowCardinality(String)'},
     )

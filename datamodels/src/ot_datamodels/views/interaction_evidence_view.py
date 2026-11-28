@@ -15,4 +15,8 @@ class InteractionEvidenceView(InteractionEvidence):
     dataset_name: ClassVar[str] = 'interaction_evidence_view'
     dataset_title: ClassVar[str] = 'Molecular interactions evidence view'
     dataset_description: ClassVar[str] = InteractionEvidence.dataset_description
-    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('interactionId',))
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree',
+        order_by=('interactionId',),
+        column_types={'interactionResources/databaseVersion': 'LowCardinality(String)', 'interactionId': 'UInt64'},
+    )

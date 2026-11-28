@@ -8,14 +8,14 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, Reference, StructModel
 from ot_datamodels.vocabularies import InteractionSource
 
 
 class InteractionResources(StructModel):
     """`interactionResources`."""
 
-    databaseVersion: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
+    databaseVersion: str = Field(
         min_length=1, description='Version of the source database providing interaction evidence'
     )
     sourceDatabase: Annotated[InteractionSource, PolarsDtype(pl.Enum)] = Field(
@@ -103,7 +103,7 @@ class InteractionEvidence(DatasetModel):
     pubmedId: str | None = Field(
         min_length=1, description='PubMed ID of the publication supporting the interaction evidence'
     )
-    interactionId: Annotated[int, Reference('interaction', 'interactionId'), ClickHouseType('UInt64')] = Field(
+    interactionId: Annotated[int, Reference('interaction', 'interactionId')] = Field(
         ge=0, description='Identifier of the molecular interaction this evidence supports'
     )
     expansionMethodMiIdentifier: Annotated[str, Bioregistry('mi')] | None = Field(

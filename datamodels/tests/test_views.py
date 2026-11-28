@@ -1,6 +1,7 @@
 """Tests for the view models: their shape against pts's schemas, and the columns derived from outputs."""
 
 import dataclasses
+from collections.abc import Mapping
 from typing import get_args
 
 import polars as pl
@@ -167,6 +168,12 @@ EVIDENCE = sorted(
 
 def _nodes(model: type[DatasetModel]) -> dict[str, Node]:
     return dict(walk(dataset_spec(model)))
+
+
+def _types(model: type[DatasetModel]) -> Mapping[str, str]:
+    """The view's ClickHouse column types."""
+    assert model.clickhouse is not None
+    return model.clickhouse.column_types
 
 
 #: the credible-set views' copies of credible_set columns: (view, column)
@@ -579,7 +586,7 @@ def test_coding_variant_datasource_holds_every_source_the_view_reads() -> None:
     assert sources <= set(get_args(v.CodingVariantDatasource))
 
 
-#: the ClickHouseType markers declared on view columns, from the hand-written landing SQL before piece 3
+#: the ClickHouse column types of view values the view declares, from the hand-written landing SQL before piece 3
 MARKERS = {
     ('interaction_view', 'interactions[]/speciesB/taxonId'): 'UInt32',
     ('interaction_view', 'interactions[]/evidences[]/hostOrganismTaxId'): 'UInt32',
@@ -750,11 +757,10 @@ def test_every_view_value_is_derived_or_declared(name: str) -> None:
 
 def test_declared_markers() -> None:
     declared = {
-        (name, path): node.clickhouse
+        (name, path): clickhouse
         for name, model in VIEWS.items()
-        for path, node in walk(dataset_spec(model))
-        if node.clickhouse is not None
-        and not any(path == p or path.startswith((f'{p}/', f'{p}[]')) for n, p in DERIVED if n == name)
+        for path, clickhouse in _types(model).items()
+        if not any(path == p or path.startswith((f'{p}/', f'{p}[]')) for n, p in DERIVED if n == name)
     }
     assert declared == MARKERS
 
@@ -819,8 +825,8 @@ def test_association_otf_views_types() -> None:
     disease, target = _nodes(AssociationOtfDiseaseView), _nodes(AssociationOtfTargetView)
     assert disease['indirect'].dtype == pl.List(pl.String())
     assert target['indirect'].dtype == pl.List(pl.String())
-    assert target['indirect[]'].clickhouse == 'LowCardinality(String)'
-    assert disease['indirect[]'].clickhouse is None
+    assert _types(AssociationOtfTargetView)['indirect[]'] == 'LowCardinality(String)'
+    assert 'indirect[]' not in _types(AssociationOtfDiseaseView)
     assert target['isMeasurement'].dtype == pl.Boolean()
     assert not target['isMeasurement'].nullable
     for nodes in (disease, target):
@@ -902,15 +908,16 @@ def test_interaction_view_declared_values_are_their_output_s_as_served(path: str
     UInt32, IntAct's negative pseudo-taxids wrapped (David, 2026-11-24)."""
     output, output_path = INTERACTION_SERVED_AS[path]
     source = _nodes(output)[output_path]
-    expected = dataclasses.replace(source, clickhouse=None)
+    expected = source
     if isinstance(source.dtype, pl.Enum):
         expected = dataclasses.replace(expected, dtype=pl.String())
+    served = None
     if path.endswith(('/taxonId', '/hostOrganismTaxId')):
-        expected = dataclasses.replace(
-            expected, nullable=True, constraints=Constraints(ge=0, le=2**32 - 1), clickhouse='UInt32'
-        )
+        expected = dataclasses.replace(expected, nullable=True, constraints=Constraints(ge=0, le=2**32 - 1))
+        served = 'UInt32'
 
     assert _nodes(InteractionView)[path] == expected
+    assert _types(InteractionView).get(path) == served
 
 
 def test_interaction_view_source_database_stays_the_enum() -> None:
@@ -961,9 +968,14 @@ def test_coding_variant_datasource_is_a_string_of_its_vocabulary(model: type[Dat
     nodes = _nodes(model)
     node = nodes['proteinCodingCoords[]/datasources[]/datasourceId']
     assert node.dtype == pl.String()
-    assert node.clickhouse is None
     assert set(node.constraints.allowed or ()) == set(get_args(v.CodingVariantDatasource))
-    for path in ('datasources[]/datasourceNiceName', 'referenceAminoAcid', 'alternateAminoAcid'):
+    for path in (
+        'datasources[]/datasourceId',
+        'datasources[]/datasourceNiceName',
+        'referenceAminoAcid',
+        'alternateAminoAcid',
+    ):
+        assert f'proteinCodingCoords[]/{path}' not in _types(model), path
         assert nodes[f'proteinCodingCoords[]/{path}'].clickhouse is None, path
 
 
@@ -1026,9 +1038,9 @@ def test_pharmacovigilance_by_drug_is_the_served_shape() -> None:
 def test_pharmacovigilance_declared_values_are_their_output_s_without_low_cardinality(path, output_path) -> None:
     """groupArray stripped LowCardinality, and the served type keeps none (decision 4 changes no LowCardinality)."""
     source = _nodes(Pharmacovigilance)[output_path]
-    assert source.clickhouse == 'LowCardinality(String)'
     derived = _nodes(PharmacovigilanceByDrugView)[f'adverse_events[]/{path}']
-    assert derived == dataclasses.replace(source, clickhouse=None)
+    assert derived == source
+    assert f'adverse_events[]/{path}' not in _types(PharmacovigilanceByDrugView)
 
 
 def test_target_view_ends_with_the_served_id_lists() -> None:
@@ -1037,7 +1049,7 @@ def test_target_view_ends_with_the_served_id_lists() -> None:
     for column in ('credibleSetIds', 'pharmacogenomicsIds'):
         assert not nodes[column].nullable, column
         assert not nodes[f'{column}[]'].nullable, column
-    assert nodes['pharmacogenomicsIds[]'].clickhouse == 'UInt64'
+    assert _types(TargetView)['pharmacogenomicsIds[]'] == 'UInt64'
 
 
 def test_target_by_region_is_the_location_and_the_id() -> None:
@@ -1062,9 +1074,11 @@ def test_transcript_view_is_the_served_transcript() -> None:
     biotype = nodes['transcripts[]/biotype']
     assert biotype.dtype == pl.Enum(get_args(v.TranscriptBiotype))
     assert (biotype.clickhouse, biotype.nullable) == (None, False)
+    assert 'transcripts[]/biotype' not in _types(TranscriptView)
     for field, vocabulary in (('label', v.TranscriptFlagLabel), ('value', v.TranscriptFlagValue)):
         node = nodes[f'transcripts[]/flags[]/{field}']
         assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, True), field
+        assert f'transcripts[]/flags[]/{field}' not in _types(TranscriptView), field
         assert node.constraints.allowed == get_args(vocabulary), field
     assert discover_models()['transcript_view'] is TranscriptView
 
@@ -1097,6 +1111,7 @@ def test_target_prioritisation_view_items_are_strings() -> None:
     assert [f.name for f in nodes['items[]'].fields] == ['key', 'value']
     key, value = nodes['items[]/key'], nodes['items[]/value']
     assert (key.dtype, key.clickhouse, value.dtype, value.clickhouse) == (pl.String(), None, pl.String(), None)
+    assert not {'items[]/key', 'items[]/value'} & set(_types(TargetPrioritisationView))
     assert key.constraints.allowed == (*PRIORITISATION_ORDER, 'geneEssentiality')
     columns = {f.name for f in dataset_spec(TargetPrioritisation).fields} - {'targetId'}
     assert set(PRIORITISATION_ORDER) == columns
@@ -1142,6 +1157,7 @@ def test_colocalisation_method_is_served_as_a_string() -> None:
     node = _nodes(ColocalisationByCredibleSetView)['colocalisation[]/colocalisationMethod']
     assert source.dtype == pl.Enum(list(get_args(v.ColocalisationMethod)))
     assert (node.dtype, node.clickhouse, node.nullable) == (pl.String(), None, False)
+    assert 'colocalisation[]/colocalisationMethod' not in _types(ColocalisationByCredibleSetView)
     assert node.constraints.allowed == get_args(v.ColocalisationMethod)
 
 
@@ -1156,9 +1172,9 @@ def test_l2g_prediction_by_credible_set_is_the_served_shape() -> None:
 
 def test_l2g_feature_name_is_the_output_s_without_low_cardinality() -> None:
     source = _nodes(L2gPrediction)['features[]/name']
-    assert source.clickhouse == 'LowCardinality(String)'
     node = _nodes(L2gPredictionByCredibleSetView)['l2g_predictions[]/features[]/name']
-    assert node == dataclasses.replace(source, clickhouse=None)
+    assert node == source
+    assert 'l2g_predictions[]/features[]/name' not in _types(L2gPredictionByCredibleSetView)
 
 
 #: the served columns of the credible-set views, in served order (design "Served DDL"; the API decodes the read
@@ -1211,6 +1227,7 @@ def test_locus_rows_are_credible_set_variants() -> None:
     assert nodes['locus'].constraints.min_length == 1
     element = nodes['locus[]/qualityControls[]']
     assert (element.dtype, element.clickhouse) == (pl.Enum(get_args(v.VariantQualityControl)), None)
+    assert 'locus[]/qualityControls[]' not in _types(CredibleSetLocusView)
 
 
 def test_read_model_defaults_and_low_cardinality() -> None:
@@ -1223,7 +1240,8 @@ def test_read_model_defaults_and_low_cardinality() -> None:
             assert (nodes[allele].nullable, nodes[allele].constraints.pattern) == (False, None), allele
     assert (target['biosampleName'].nullable, target['biosampleName'].constraints.min_length) == (False, None)
     assert variant['biosampleName'].nullable
-    assert (target['condition'].clickhouse, variant['condition'].clickhouse) == ('LowCardinality(String)', None)
+    assert _types(TargetCredibleSetView)['condition'] == 'LowCardinality(String)'
+    assert 'condition' not in _types(VariantCredibleSetView)
     assert not variant['traitFromSource'].nullable
     for nodes in (study, variant):
         assert all(nodes[c].nullable for c in ('topL2GGeneId', 'topL2GApprovedSymbol', 'topL2GScore'))

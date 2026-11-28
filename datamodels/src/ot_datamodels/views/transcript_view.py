@@ -64,7 +64,18 @@ class TranscriptView(DatasetModel):
     dataset_name: ClassVar[str] = 'transcript_view'
     dataset_title: ClassVar[str] = 'Transcript view'
     dataset_description: ClassVar[str] = 'The transcripts of each target, by transcriptId'
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'transcripts[]/start': 'UInt32',
+            'transcripts[]/end': 'UInt32',
+            'transcripts[]/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+            'transcripts[]/transcriptionStartSite': 'UInt32',
+            'transcripts[]/exons[]/start': 'UInt32',
+            'transcripts[]/exons[]/end': 'UInt32',
+            'transcripts[]/exons[]/strand': "Enum8('-1' = -1, '0' = 0, '1' = 1)",
+        },
+    )
     example: ClassVar[dict] = {
         'targetId': Transcript.example['targetId'],
         'transcripts': [{k: v for k, v in Transcript.example.items() if k != 'targetId'}],

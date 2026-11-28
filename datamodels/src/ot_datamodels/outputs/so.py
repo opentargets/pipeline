@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PrimaryKey
+from ot_datamodels import Bioregistry, DatasetModel, PrimaryKey
 
 
 class So(DatasetModel):
@@ -19,9 +19,7 @@ class So(DatasetModel):
     dataset_tags: ClassVar[tuple[str, ...]] = ('Ontology',)
     example: ClassVar[dict] = {'id': 'SO:0005854', 'label': 'gene_cassette_array'}
 
-    id: Annotated[str, Bioregistry('so'), PrimaryKey(), ClickHouseType('LowCardinality(String)')] = Field(
+    id: Annotated[str, Bioregistry('so'), PrimaryKey()] = Field(
         min_length=1, description='Sequence ontology term identifier'
     )
-    label: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Sequence ontology term label'
-    )
+    label: str = Field(min_length=1, description='Sequence ontology term label')

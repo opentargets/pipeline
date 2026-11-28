@@ -1,6 +1,7 @@
 """pos.clickhouse_ddl: ClickHouse landing DDL generated from the dataset models."""
 
 import datetime
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from typing import Annotated, Literal, get_args
 import polars as pl
 import pytest
 import yaml
+from ot_datamodels import Serving
 from ot_datamodels.base import ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, StructModel
 from ot_datamodels.discovery import VIEWS_PACKAGE, discover_datasets
 from ot_datamodels.outputs.study import Study
@@ -385,6 +387,46 @@ def test_a_served_entry_is_derived_from_its_model():
     }  # fmt: skip
 
 
+class Typed(DatasetModel):
+    dataset_name = 'typed_view'
+    dataset_title = 'Typed'
+    dataset_description = 'Typed.'
+    example = {}
+    clickhouse = Serving(
+        engine='mergetree',
+        order_by=('count',),
+        column_types={
+            'count': 'UInt32',
+            'names[]': 'LowCardinality(String)',
+            'nested/b': 'UInt8',
+            'bars[]/a': 'LowCardinality(String)',
+        },
+    )
+
+    count: int
+    names: list[str]
+    nested: Foo | None
+    bars: list[Bar | None]
+    marked: Annotated[int, ClickHouseType('UInt32')]
+
+
+def test_column_types_set_the_view_s_primitive_types():
+    assert [(name, render(t)) for name, t in columns(Typed)] == [
+        ('count', 'UInt32'),
+        ('names', 'Array(LowCardinality(String))'),
+        ('nested', 'Tuple(`a` Nullable(String), `b` Nullable(UInt8))'),
+        ('bars', 'Array(Tuple(`a` LowCardinality(Nullable(String))))'),
+        ('marked', 'UInt32'),
+    ]
+
+
+@pytest.mark.parametrize('path', ['missing', 'names', 'nested', 'bars[]', 'nested/c'])
+def test_a_column_types_path_that_is_no_primitive_fails(monkeypatch, path):
+    monkeypatch.setattr(Typed, 'clickhouse', Serving(engine='rocksdb', column_types={path: 'UInt8'}))
+    with pytest.raises(ValueError, match=rf"typed_view: column_types paths \['{re.escape(path)}'\] are not primitive"):
+        columns(Typed)
+
+
 def test_an_output_declaring_clickhouse_fails_the_served_entries(monkeypatch):
     served = SimpleNamespace(clickhouse=DiseaseView.clickhouse)
     monkeypatch.setattr(clickhouse_ddl, 'discover_datasets', lambda: {'disease': served, 'target': Target})
@@ -645,9 +687,14 @@ def test_target_view_lands_target_then_the_id_lists():
 )
 def test_genetics_b_views_land_the_output_then_the_id_lists(view, output, lists):
     """`studies` and `variants`: the output's landing columns, then the lists studies.sql and variants.sql joined
-    on; `studies` without `credible_sets_by_study.studyId` (David, 2026-11-25)."""
+    on; `studies` without `credible_sets_by_study.studyId` (David, 2026-11-25). The output's columns take the
+    view's `column_types`."""
     landed = [(n, render(t, quote_fields=False)) for n, t in columns(view)]
-    base = [(n, render(t, quote_fields=False)) for n, t in columns(output)]
+    types = view.clickhouse.column_types
+    base = [
+        (f.name, render(clickhouse_ddl._type(f.node, False, f.name, types), quote_fields=False))
+        for f in dataset_spec(output).fields
+    ]
     assert landed == [*base, *lists]
 
 

@@ -53,6 +53,11 @@ class DiseaseView(DatasetModel):
     clickhouse: ClassVar[Serving] = Serving(
         engine='rocksdb',
         dictionaries=(ClickHouseDictionary('disease_names', key='id', attributes=('name',)),),
+        column_types={
+            'therapeuticAreas[]': 'LowCardinality(String)',
+            'parents[]': 'LowCardinality(String)',
+            'ancestors[]': 'LowCardinality(String)',
+        },
     )
     example: ClassVar[dict] = {
         **{

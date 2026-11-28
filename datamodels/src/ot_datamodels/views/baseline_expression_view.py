@@ -16,5 +16,7 @@ class BaselineExpressionView(BaselineExpression):
     dataset_title: ClassVar[str] = 'Baseline expression view'
     dataset_description: ClassVar[str] = BaselineExpression.dataset_description
     clickhouse: ClassVar[Serving] = Serving(
-        engine='mergetree', order_by=('targetId', 'tissueBiosampleId', 'celltypeBiosampleId')
+        engine='mergetree',
+        order_by=('targetId', 'tissueBiosampleId', 'celltypeBiosampleId'),
+        column_types={'targetId': 'LowCardinality(String)'},
     )

@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PolarsDtype
+from ot_datamodels import DatasetModel, PolarsDtype
 from ot_datamodels.vocabularies import LiteratureKeywordType
 
 
@@ -35,15 +35,9 @@ class LiteratureEntityLut(DatasetModel):
     pmid: str = Field(min_length=1, description='Europe PubMed Central identifier (EPMCID) of the literature entry')
     pmcid: str | None = Field(min_length=1, description='PubMed Central ID (PMCID) of the literature entry')
     date: datetime.date | None = Field(description='Date of publication in YYYY-MM-DD format')
-    year: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt16')] | None = Field(
-        ge=0, le=65535, description='Year of publication'
-    )
-    month: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, le=255, description='Month of publication'
-    )
-    day: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt8')] | None = Field(
-        ge=0, le=255, description='Day of publication'
-    )
+    year: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, le=65535, description='Year of publication')
+    month: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, le=255, description='Month of publication')
+    day: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, le=255, description='Day of publication')
     keywordId: str = Field(
         min_length=1, description='Unique identifier for the keyword associated with the literature entry'
     )

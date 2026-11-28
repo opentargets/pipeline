@@ -26,7 +26,11 @@ class LiteratureEntityLutView(DatasetModel):
     dataset_description: ClassVar[str] = (
         'Unique list of entities identified for each literature entry, without the day and the keyword type'
     )
-    clickhouse: ClassVar[Serving] = Serving(engine='mergetree', order_by=('keywordId', 'year', 'month', 'relevance'))
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='mergetree',
+        order_by=('keywordId', 'year', 'month', 'relevance'),
+        column_types={'year': 'UInt16', 'month': 'UInt8'},
+    )
     example: ClassVar[dict] = {k: v for k, v in LiteratureEntityLut.example.items() if k not in ('day', 'keywordType')}
 
     pmid: Pmid

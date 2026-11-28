@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, PrimaryKey, Reference, StructModel
 from ot_datamodels.outputs.patterns import DIGITS, ENSEMBL_GENE_ID, ISO_DATE, ONTOLOGY_ID
 from ot_datamodels.vocabularies import LdPopulation, StudyType
 
@@ -25,32 +25,22 @@ class LdPopulationStructure(StructModel):
 class DiscoverySamples(StructModel):
     """`discoverySamples[]`."""
 
-    sampleSize: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] = Field(
-        ge=0, description='Discovery sample size'
-    )
-    ancestry: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Discovery sample ancestry name'
-    )
+    sampleSize: Annotated[int, PolarsDtype(pl.Int32)] = Field(ge=0, description='Discovery sample size')
+    ancestry: str = Field(min_length=1, description='Discovery sample ancestry name')
 
 
 class ReplicationSamples(StructModel):
     """`replicationSamples[]`."""
 
-    sampleSize: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
-        ge=0, description='Replication sample size'
-    )
-    ancestry: Annotated[str, ClickHouseType('LowCardinality(String)')] = Field(
-        min_length=1, description='Replication sample ancestry name'
-    )
+    sampleSize: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(ge=0, description='Replication sample size')
+    ancestry: str = Field(min_length=1, description='Replication sample ancestry name')
 
 
 class SumstatQCValues(StructModel):
     """`sumstatQCValues[]`."""
 
     QCCheckName: str = Field(min_length=1, description='Quality control metric identifier')
-    QCCheckValue: Annotated[float, PolarsDtype(pl.Float32), ClickHouseType('Float64')] = Field(
-        description='Quality control metric value'
-    )
+    QCCheckValue: Annotated[float, PolarsDtype(pl.Float32)] = Field(description='Quality control metric value')
 
 
 class Study(DatasetModel):
@@ -148,7 +138,7 @@ class Study(DatasetModel):
     publicationDate: str | None = Field(
         pattern=ISO_DATE, description='Date of the publication that references the study'
     )
-    publicationJournal: Annotated[str, ClickHouseType('LowCardinality(String)')] | None = Field(
+    publicationJournal: str | None = Field(
         min_length=1, description=('Abbreviated journal name where the publication referencing study was published')
     )
     backgroundTraitFromSourceMappedIds: list[Annotated[str, Field(pattern=ONTOLOGY_ID)]] | None = Field(
@@ -158,13 +148,13 @@ class Study(DatasetModel):
         description='Any background disease(s) shared by all individuals in the study'
     )
     initialSampleSize: str | None = Field(min_length=1, description='Study initial sample size')
-    nCases: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
+    nCases: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='The number of cases in this broad ancestry group'
     )
-    nControls: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
+    nControls: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='The number of controls in this broad ancestry group'
     )
-    nSamples: Annotated[int, PolarsDtype(pl.Int32), ClickHouseType('UInt32')] | None = Field(
+    nSamples: Annotated[int, PolarsDtype(pl.Int32)] | None = Field(
         ge=0, description='The number of samples tested in GWAS analysis'
     )
     cohorts: list[str] | None = Field(description='List of cohort(s) represented in the discovery sample')
@@ -206,7 +196,5 @@ class Study(DatasetModel):
         min_length=1, description='Path to the source study summary statistics (if exists at the source)'
     )
     hasSumstats: bool | None = Field(description='Indication whether the summary statistics exist in the source')
-    condition: Annotated[str, ClickHouseType('LowCardinality(String)')] | None = Field(
-        min_length=1, description='Reported sample conditions'
-    )
+    condition: str | None = Field(min_length=1, description='Reported sample conditions')
     sumstatQCValues: list[SumstatQCValues] | None = Field(description='Mapping of quality control flags')

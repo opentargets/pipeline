@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import polars as pl
 from pydantic import Field
 
-from ot_datamodels import Bioregistry, ClickHouseType, DatasetModel, PolarsDtype, Reference
+from ot_datamodels import Bioregistry, DatasetModel, PolarsDtype, Reference
 from ot_datamodels.outputs.patterns import ENSEMBL_GENE_ID, ONTOLOGY_ID
 from ot_datamodels.vocabularies import ExpressionDatasource, ExpressionDatatype
 
@@ -50,7 +50,7 @@ class BaselineExpression(DatasetModel):
     tissueBiosampleId: Annotated[str, Bioregistry('uberon'), Reference('biosample', 'biosampleId')] | None = Field(
         pattern=ONTOLOGY_ID, description='Tissue identifier that maps to the tissue reported by study'
     )
-    targetId: Annotated[str, Reference('target', 'id'), ClickHouseType('LowCardinality(String)')] = Field(
+    targetId: Annotated[str, Reference('target', 'id')] = Field(
         pattern=ENSEMBL_GENE_ID, description='Unique identifier for the target'
     )
     datasourceId: Annotated[ExpressionDatasource, PolarsDtype(pl.Enum)] = Field(description='Origin of expression data')

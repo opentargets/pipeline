@@ -23,7 +23,10 @@ class DrugWarningByDrugView(DatasetModel):
     dataset_title: ClassVar[str] = 'Drug warnings by drug'
     dataset_description: ClassVar[str] = 'Blackbox and withdrawn warnings of each drug molecule, as served by molecule'
     dataset_tags: ClassVar[tuple[str, ...]] = ('Drug',)
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={'drugWarnings[]/id': 'UInt32', 'drugWarnings[]/year': 'UInt16'},
+    )
     example: ClassVar[dict] = {'chemblId': DrugWarning.example['chemblIds'][0], 'drugWarnings': [DrugWarning.example]}
 
     chemblId: Annotated[str, Reference('drug_molecule', 'id'), PrimaryKey()] = Field(

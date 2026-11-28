@@ -15,4 +15,11 @@ class PharmacogenomicsView(Pharmacogenomics):
     dataset_name: ClassVar[str] = 'pharmacogenomics_view'
     dataset_title: ClassVar[str] = 'Drug/Target - pharmacogenetics view'
     dataset_description: ClassVar[str] = Pharmacogenomics.dataset_description
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'pharmacogenomicsId': 'UInt64',
+            'drugs[]/drugFromSource': 'LowCardinality(String)',
+            'drugs[]/drugId': 'LowCardinality(String)',
+        },
+    )

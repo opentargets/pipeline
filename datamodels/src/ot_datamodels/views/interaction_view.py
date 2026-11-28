@@ -4,11 +4,11 @@ One row per `targetA`: its interactions in `interaction` order, each with its ev
 `interaction_evidence` order, in the served column order and types.
 """
 
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, StructModel
+from ot_datamodels import DatasetModel, StructModel
 from ot_datamodels.derive import from_output
 from ot_datamodels.outputs.interaction import Interaction, SpeciesA, SpeciesB
 from ot_datamodels.outputs.interaction_evidence import InteractionEvidence, InteractionResources
@@ -16,7 +16,7 @@ from ot_datamodels.serving import Serving
 from ot_datamodels.vocabularies import InteractionSource, SpeciesMnemonic, SpeciesScientificName
 
 # IntAct's negative pseudo-taxids (-1 in vitro ... -4 in vivo) are served wrapped, x mod 2^32
-_TaxonId = Annotated[int, ClickHouseType('UInt32')]
+_TaxonId = int
 _UINT32_MAX = 4294967295
 
 TargetA = from_output(Interaction, 'targetA', primary_key=True)
@@ -123,7 +123,15 @@ class InteractionView(DatasetModel):
     dataset_description: ClassVar[str] = (
         'Molecular interactions as served, one row per target A with its interactions and their evidence nested in'
     )
-    clickhouse: ClassVar[Serving] = Serving(engine='rocksdb')
+    clickhouse: ClassVar[Serving] = Serving(
+        engine='rocksdb',
+        column_types={
+            'interactions[]/count': 'UInt8',
+            'interactions[]/speciesA/taxonId': 'UInt32',
+            'interactions[]/speciesB/taxonId': 'UInt32',
+            'interactions[]/evidences[]/hostOrganismTaxId': 'UInt32',
+        },
+    )
     example: ClassVar[dict] = {
         'targetA': _INTERACTION['targetA'],
         'interactions': [

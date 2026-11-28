@@ -40,7 +40,9 @@ class StudyCredibleSetView(DatasetModel):
     )
     dataset_tags: ClassVar[tuple[str, ...]] = ('Genetics',)
     clickhouse: ClassVar[Serving] = Serving(
-        engine='mergetree', order_by=('studyId', 'pValueExponent', 'pValueMantissa', 'credibleSetId')
+        engine='mergetree',
+        order_by=('studyId', 'pValueExponent', 'pValueMantissa', 'credibleSetId'),
+        column_types={'confidence': 'UInt8', 'topL2GApprovedSymbol': 'LowCardinality(String)'},
     )
     example: ClassVar[dict] = {
         'studyId': _SET['studyId'],

@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from ot_datamodels import ClickHouseType, DatasetModel, PrimaryKey, Reference
+from ot_datamodels import DatasetModel, PrimaryKey, Reference
 from ot_datamodels.outputs.patterns import CHEMBL_ID
 
 
@@ -37,12 +37,10 @@ class Pharmacovigilance(DatasetModel):
     chembl_id: Annotated[str, Reference('drug_molecule', 'id'), PrimaryKey()] = Field(
         pattern=CHEMBL_ID, description='Unique identifier for the drug or clinical candidate'
     )
-    event: Annotated[str, PrimaryKey(), ClickHouseType('LowCardinality(String)')] = Field(
+    event: Annotated[str, PrimaryKey()] = Field(
         min_length=1, description='Reported adverse drug reaction associated with the drug'
     )
-    count: Annotated[int, ClickHouseType('UInt32')] = Field(
-        ge=0, le=4294967295, description='Number of occurrences of the adverse event in the dataset'
-    )
+    count: int = Field(ge=0, le=4294967295, description='Number of occurrences of the adverse event in the dataset')
     llr: float = Field(
         ge=0.0,
         description=(
@@ -53,6 +51,6 @@ class Pharmacovigilance(DatasetModel):
     critval: float = Field(
         ge=0.0, description=('Critical value used to determine statistical significance of the association')
     )
-    meddraCode: Annotated[Literal[''], ClickHouseType('LowCardinality(String)')] = Field(
+    meddraCode: Literal[''] = Field(
         description=('Medical Dictionary for Regulatory Activities (MedDRA) code for the adverse drug reaction')
     )
